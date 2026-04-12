@@ -54,13 +54,6 @@ impl EventStore {
         Ok(Self { pool })
     }
 
-    /// Run database migrations (creates tables, indexes, triggers).
-    pub async fn migrate(&self) -> Result<(), sqlx::Error> {
-        let migration_sql = include_str!("../../../migrations/001_initial.sql");
-        sqlx::raw_sql(migration_sql).execute(&self.pool).await?;
-        Ok(())
-    }
-
     /// Append a core event to the event stream.
     /// Returns the assigned event id.
     pub async fn append(

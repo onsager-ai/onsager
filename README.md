@@ -1,101 +1,91 @@
 # Onsager
 
-The AI Factory — event-stream-based orchestration for AI agent sessions with quality control, traceability, and continuous improvement.
+Client library for the Onsager event spine — shared PostgreSQL event stream coordination for the [onsager-ai](https://github.com/onsager-ai) polyrepo.
 
-## Overview
+Onsager is a **library**, not a service. It publishes a single Rust crate that sibling repos (`stiglab`, `synodic`, `ising`, `telegramable`) depend on to coordinate via a shared PostgreSQL `events` / `events_ext` table and the `onsager_events` pg_notify channel.
 
-Onsager is a factory for AI production. It organizes AI agent work through a shared PostgreSQL event stream, providing standardized production units, quality control, traceability, and continuous improvement.
+## Installation
 
-### Core Level 1
+Pre-publication — install via git dependency:
 
-This is the Core Level 1 implementation: a single-binary CLI that can:
-
-- **Run** an AI agent session end-to-end with full event recording
-- **Enforce** governance policies (observational mode — logs violations as audit events)
-- **Replay** the complete event stream for any session
-- **Browse** sessions, events, and policy rules
-
-## Architecture
-
-```
-┌────────────────────────────────────────────┐
-│              PostgreSQL                    │
-│  ┌──────────┐  ┌────────────────────────┐  │
-│  │ events   │  │ events_ext             │  │
-│  │ (core)   │  │ (extension, namespaced)│  │
-│  └──────────┘  └────────────────────────┘  │
-└──────────┬──────────────┬──────────────────┘
-           │  pg_notify   │
-    ┌──────┼──────────────┼──────┐
-    ▼      ▼              ▼      ▼
-┌────────┐ ┌──────────┐ ┌──────────────────┐
-│Executor│ │ Synodic  │ │  Replay Engine   │
-│(Claude)│ │ (Policy) │ │  (Materialize)   │
-└────────┘ └──────────┘ └──────────────────┘
+```toml
+onsager = { git = "https://github.com/onsager-ai/onsager", branch = "main" }
 ```
 
-**Four crates:**
+## Concepts
 
-- `onsager-events` — PostgreSQL event store (append-only events + extension events + pg_notify)
-- `onsager-core` — Domain types (Session, Task, Node), session executor, replay engine
-- `onsager-synodic` — Policy enforcement layer (5 default intercept rules)
-- `onsager-cli` — CLI binary
+| Type | Role | Description |
+|------|------|-------------|
+| `EventStore` | Producer + Consumer | Read/write access to `events` and `events_ext` tables, plus real-time `pg_notify` subscription. |
+| `Listener` | Consumer | High-level consumer that filters notifications by `Namespace` and dispatches them to an `EventHandler`. |
+| `EventHandler` | Consumer | Trait implemented by code that reacts to events. |
+| `Namespace` | Both | Validated newtype that partitions the `events_ext` table between components. |
 
-## Quick Start
+## Schema
 
-```bash
-# Start PostgreSQL
-docker compose up -d
+This library does **not** create or migrate database tables. The schema contract lives in [`migrations/001_initial.sql`](migrations/001_initial.sql) and downstream services apply it themselves (e.g. via `sqlx migrate`, a CI step, or manual execution).
 
-# Initialize the database
-export DATABASE_URL=postgres://onsager:onsager@localhost:5432/onsager
-cargo run -- init
+Schema changes are coordinated by adding a new `00X_*.sql` file and bumping the crate version.
 
-# Run an agent session
-cargo run -- run "Create a hello world Python script" -w /tmp/test
+### Why two tables?
 
-# List sessions
-cargo run -- sessions list
+- **`events`** — strong-schema core spine. Every event has a `stream_id`, `stream_type`, `event_type`, typed `data` JSONB, `sequence` number, and `metadata`. This is the append-only event log that all components share.
+- **`events_ext`** — wide JSON extension table namespaced by component. Each component owns a `namespace` (e.g. `"stiglab"`, `"synodic"`) and can publish arbitrary extension events without changing the core schema.
 
-# Replay a session's event stream
-cargo run -- replay <session-id> --include-ext
+Both tables fire `pg_notify` on insert via the `onsager_events` channel, enabling real-time subscription.
 
-# Test a policy rule
-cargo run -- policies test Bash '{"command": "git push --force origin main"}'
+## Usage
+
+### Producer
+
+```rust
+use onsager::{CoreEvent, EventMetadata, EventStore};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let store = EventStore::connect(&std::env::var("DATABASE_URL")?).await?;
+
+    let event = CoreEvent::SessionCreated {
+        session_id: "stiglab:session:demo-1".into(),
+        task_id: "stiglab:task:1".into(),
+        node_id: "node-1".into(),
+    };
+    let metadata = EventMetadata {
+        actor: "my-service".into(),
+        ..Default::default()
+    };
+
+    let id = store.append(&event, &metadata).await?;
+    println!("appended event {id}");
+    Ok(())
+}
 ```
 
-## CLI Commands
+### Consumer
 
-| Command | Description |
-|---------|-------------|
-| `onsager init` | Initialize database schema |
-| `onsager run <prompt>` | Run an agent session end-to-end |
-| `onsager replay <session-id>` | Replay the event stream for a session |
-| `onsager sessions list` | List all sessions |
-| `onsager sessions show <id>` | Show session details |
-| `onsager events` | Browse raw events |
-| `onsager policies list` | Show active governance rules |
-| `onsager policies test <tool> <json>` | Test a tool call against policies |
+```rust
+use onsager::{EventHandler, EventNotification, Listener, Namespace, EventStore};
+use async_trait::async_trait;
 
-## Governance Rules
+struct MyHandler;
 
-Five default rules ported from [Synodic](https://github.com/onsager-ai/synodic):
+#[async_trait]
+impl EventHandler for MyHandler {
+    async fn handle(&self, event: EventNotification) -> anyhow::Result<()> {
+        println!("received: {} ({})", event.stream_id, event.event_type);
+        Ok(())
+    }
+}
 
-| Rule | Blocks |
-|------|--------|
-| `destructive_git` | `git push --force`, `git reset --hard`, `git clean -fd` |
-| `secrets_in_args` | Tool calls containing `password=`, `secret=`, `token=`, `api_key=` |
-| `etc_writes` | File writes to `/etc/**` |
-| `usr_writes` | File writes to `/usr/**` |
-| `dangerous_rm` | `rm -rf /`, `rm -rf ~`, `rm -rf $HOME` |
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let store = EventStore::connect(&std::env::var("DATABASE_URL")?).await?;
 
-## Development
-
-```bash
-cargo build              # Build all crates
-cargo test               # Run all tests (21 unit tests)
-cargo clippy -- -D warnings  # Lint
-cargo fmt --check        # Format check
+    Listener::new(store)
+        .subscribe(Namespace::stiglab())
+        .run(MyHandler)
+        .await
+}
 ```
 
 ## License
