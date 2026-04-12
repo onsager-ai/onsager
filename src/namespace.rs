@@ -36,15 +36,16 @@ impl Namespace {
     /// - Only `[a-z0-9_]` allowed
     pub fn new(name: impl Into<String>) -> Result<Self, NamespaceError> {
         let name = name.into();
-        let len = name.len();
+        let len = name.chars().count();
         if !(1..=32).contains(&len) {
             return Err(NamespaceError::InvalidLength(len));
         }
-        let first = name.chars().next().unwrap();
+        let mut chars = name.chars();
+        let first = chars.next().unwrap();
         if !first.is_ascii_lowercase() {
             return Err(NamespaceError::InvalidStart);
         }
-        for ch in name.chars() {
+        for ch in chars {
             if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && ch != '_' {
                 return Err(NamespaceError::InvalidChar(ch));
             }
