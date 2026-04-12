@@ -1,0 +1,18 @@
+[package]
+name = "onsager-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+onsager-events = { path = "../onsager-events" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+hostname = "0.4"
+async-trait = "0.1"
