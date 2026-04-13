@@ -1,0 +1,391 @@
+//! Artifact data model — the core value object of the Onsager factory.
+//!
+//! See `specs/artifact-model-v0.1.md` for the full specification. This module
+//! provides the Rust types that all four subsystems share when talking about
+//! artifacts.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::fmt;
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+/// Globally unique, stable artifact identifier. Format: `art_<hex>`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ArtifactId(String);
+
+impl ArtifactId {
+    /// Create from a raw string. Caller is responsible for uniqueness.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    /// Generate a new random artifact ID.
+    pub fn generate() -> Self {
+        let hex = &uuid::Uuid::new_v4().to_string()[..8];
+        Self(format!("art_{hex}"))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ArtifactId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Kind
+// ---------------------------------------------------------------------------
+
+/// Artifact type tag. Typed but not closed — users may register custom kinds.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Kind {
+    Code,
+    Document,
+    Report,
+    Dataset,
+    Config,
+    ApiCall,
+    /// User-defined kind not in the built-in set.
+    Custom(String),
+}
+
+impl fmt::Display for Kind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Kind::Code => write!(f, "code"),
+            Kind::Document => write!(f, "document"),
+            Kind::Report => write!(f, "report"),
+            Kind::Dataset => write!(f, "dataset"),
+            Kind::Config => write!(f, "config"),
+            Kind::ApiCall => write!(f, "api_call"),
+            Kind::Custom(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle state
+// ---------------------------------------------------------------------------
+
+/// Artifact lifecycle state machine.
+///
+/// ```text
+/// draft -> in_progress -> under_review -> released -> archived
+///                ^                           |
+///                +---------- revise ---------+
+/// ```
+///
+/// Any state may transition directly to `archived` (early termination).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactState {
+    Draft,
+    InProgress,
+    UnderReview,
+    Released,
+    Archived,
+}
+
+impl ArtifactState {
+    /// Check whether a transition from `self` to `target` is valid.
+    pub fn can_transition_to(self, target: ArtifactState) -> bool {
+        use ArtifactState::*;
+        // Any state -> Archived is always valid (early termination).
+        if target == Archived {
+            return true;
+        }
+        matches!(
+            (self, target),
+            (Draft, InProgress)
+                | (InProgress, UnderReview)
+                | (UnderReview, Released)
+                | (Released, InProgress) // revise cycle
+        )
+    }
+}
+
+impl fmt::Display for ArtifactState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ArtifactState::Draft => "draft",
+            ArtifactState::InProgress => "in_progress",
+            ArtifactState::UnderReview => "under_review",
+            ArtifactState::Released => "released",
+            ArtifactState::Archived => "archived",
+        };
+        f.write_str(s)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Version
+// ---------------------------------------------------------------------------
+
+/// A concrete snapshot in an artifact's lifecycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactVersion {
+    /// Monotonically increasing version number. Never reused.
+    pub version: u32,
+    pub created_at: DateTime<Utc>,
+    /// The session that shaped this version.
+    pub created_by_session: String,
+    /// Pointer to external storage (URI + optional checksum).
+    pub content_ref: ContentRef,
+    /// Semantic summary of what changed from the previous version.
+    pub change_summary: String,
+    /// Usually `version - 1`. Branching reserved for future use.
+    pub parent_version: Option<u32>,
+}
+
+/// URI + optional checksum pointing to external content storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentRef {
+    /// URI to the content (git ref, S3 key, Notion page, etc.).
+    pub uri: String,
+    /// Optional content checksum for integrity verification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Lineage
+// ---------------------------------------------------------------------------
+
+/// Vertical lineage entry — which session shaped which version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerticalLineage {
+    pub session_id: String,
+    pub version: u32,
+    pub recorded_at: DateTime<Utc>,
+}
+
+/// Horizontal lineage entry — which other artifact was used as input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HorizontalLineage {
+    /// The artifact that was used as input.
+    pub source_artifact_id: ArtifactId,
+    /// The version of the source artifact that was referenced.
+    pub source_version: u32,
+    /// The role this input played (e.g., "reference", "template", "dependency").
+    pub role: String,
+    pub recorded_at: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------
+// Quality signals
+// ---------------------------------------------------------------------------
+
+/// A single append-only record about artifact quality.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualitySignal {
+    /// Signal origin.
+    pub source: QualitySource,
+    /// Dimension name (correctness, completeness, safety, readability, ...).
+    pub dimension: String,
+    /// Scalar score or discrete label.
+    pub value: QualityValue,
+    pub recorded_at: DateTime<Utc>,
+    /// The entity that produced this signal.
+    pub recorded_by: String,
+}
+
+/// Where a quality signal came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualitySource {
+    AutomatedTest,
+    Lint,
+    HumanReview,
+    IsingInference,
+    SynodicCheck,
+    External,
+}
+
+/// Quality signal value — either a numeric score or a discrete label.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum QualityValue {
+    Score(f64),
+    Label(String),
+}
+
+// ---------------------------------------------------------------------------
+// Ownership
+// ---------------------------------------------------------------------------
+
+/// A declared consumer of an artifact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Consumer {
+    /// Consumer identifier (user ID, team ID, system name, endpoint URL).
+    pub id: String,
+    /// Consumer type for routing.
+    #[serde(rename = "type")]
+    pub consumer_type: ConsumerType,
+}
+
+/// The kind of consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsumerType {
+    User,
+    Team,
+    System,
+    ExternalEndpoint,
+}
+
+// ---------------------------------------------------------------------------
+// The artifact itself
+// ---------------------------------------------------------------------------
+
+/// The top-level artifact entity.
+///
+/// This is the metadata record that Onsager holds. Content lives externally,
+/// pointed to by `content_ref` in each version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Artifact {
+    pub artifact_id: ArtifactId,
+    pub kind: Kind,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub created_by: String,
+
+    // Ownership
+    pub owner: String,
+    pub consumers: Vec<Consumer>,
+
+    // State
+    pub state: ArtifactState,
+    pub current_version: u32,
+
+    // History (loaded on demand in practice, but modeled here for completeness)
+    pub versions: Vec<ArtifactVersion>,
+    pub vertical_lineage: Vec<VerticalLineage>,
+    pub horizontal_lineage: Vec<HorizontalLineage>,
+    pub quality_signals: Vec<QualitySignal>,
+}
+
+impl Artifact {
+    /// Create a new artifact in `Draft` state with no versions yet.
+    pub fn new(
+        kind: Kind,
+        name: impl Into<String>,
+        owner: impl Into<String>,
+        created_by: impl Into<String>,
+        consumers: Vec<Consumer>,
+    ) -> Self {
+        Self {
+            artifact_id: ArtifactId::generate(),
+            kind,
+            name: name.into(),
+            created_at: Utc::now(),
+            created_by: created_by.into(),
+            owner: owner.into(),
+            consumers,
+            state: ArtifactState::Draft,
+            current_version: 0,
+            versions: Vec::new(),
+            vertical_lineage: Vec::new(),
+            horizontal_lineage: Vec::new(),
+            quality_signals: Vec::new(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artifact_id_format() {
+        let id = ArtifactId::generate();
+        assert!(id.as_str().starts_with("art_"));
+        assert_eq!(id.as_str().len(), 12); // "art_" + 8 hex chars
+    }
+
+    #[test]
+    fn state_transitions_valid() {
+        use ArtifactState::*;
+        assert!(Draft.can_transition_to(InProgress));
+        assert!(InProgress.can_transition_to(UnderReview));
+        assert!(UnderReview.can_transition_to(Released));
+        assert!(Released.can_transition_to(InProgress)); // revise
+    }
+
+    #[test]
+    fn state_transitions_invalid() {
+        use ArtifactState::*;
+        assert!(!Draft.can_transition_to(Released));
+        assert!(!Draft.can_transition_to(UnderReview));
+        assert!(!InProgress.can_transition_to(Draft));
+        assert!(!Released.can_transition_to(Draft));
+        assert!(!Released.can_transition_to(UnderReview));
+    }
+
+    #[test]
+    fn any_state_can_archive() {
+        use ArtifactState::*;
+        for state in [Draft, InProgress, UnderReview, Released] {
+            assert!(state.can_transition_to(Archived));
+        }
+    }
+
+    #[test]
+    fn archived_is_terminal() {
+        use ArtifactState::*;
+        for target in [Draft, InProgress, UnderReview, Released] {
+            assert!(!Archived.can_transition_to(target));
+        }
+    }
+
+    #[test]
+    fn kind_serialization() {
+        let kind = Kind::Code;
+        let json = serde_json::to_string(&kind).unwrap();
+        assert_eq!(json, r#""code""#);
+
+        let custom = Kind::Custom("test_execution_report".into());
+        let json = serde_json::to_string(&custom).unwrap();
+        assert!(json.contains("test_execution_report"));
+    }
+
+    #[test]
+    fn new_artifact_defaults() {
+        let art = Artifact::new(
+            Kind::Report,
+            "Q1 Analysis",
+            "marvin",
+            "system",
+            vec![Consumer {
+                id: "analytics-team".into(),
+                consumer_type: ConsumerType::Team,
+            }],
+        );
+        assert_eq!(art.state, ArtifactState::Draft);
+        assert_eq!(art.current_version, 0);
+        assert!(art.versions.is_empty());
+        assert!(!art.consumers.is_empty());
+    }
+
+    #[test]
+    fn quality_value_serde() {
+        let score = QualityValue::Score(0.95);
+        let json = serde_json::to_string(&score).unwrap();
+        assert_eq!(json, "0.95");
+
+        let label = QualityValue::Label("pass".into());
+        let json = serde_json::to_string(&label).unwrap();
+        assert_eq!(json, r#""pass""#);
+    }
+}

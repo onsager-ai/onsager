@@ -1,0 +1,457 @@
+//! Factory events — the authoritative event types emitted to the factory event
+//! spine by each subsystem.
+//!
+//! See `specs/forge-v0.1.md §9` for the Forge event contract. Additional event
+//! types from Stiglab, Synodic, and Ising are included here so that the spine
+//! library provides a single typed vocabulary.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::artifact::{ArtifactId, ArtifactState, Kind, QualitySignal};
+
+// ---------------------------------------------------------------------------
+// Factory event envelope
+// ---------------------------------------------------------------------------
+
+/// A factory event as written to the event spine.
+///
+/// All subsystems write events through this envelope. The `event` field carries
+/// the typed payload; the wrapper carries tracing metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactoryEvent {
+    /// The typed event payload.
+    pub event: FactoryEventKind,
+    /// Correlation ID for tracing a causal chain of events.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+    /// ID of the event that caused this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<i64>,
+    /// The subsystem or actor that produced this event.
+    pub actor: String,
+    /// Timestamp (usually DB-assigned, but included for serialization).
+    pub timestamp: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------
+// Typed event payloads
+// ---------------------------------------------------------------------------
+
+/// All factory event types across all subsystems.
+///
+/// ## Forge events (authoritative per forge-v0.1 §9)
+///
+/// ## Stiglab events (session lifecycle upgrades)
+///
+/// ## Synodic events (rule and escalation outcomes)
+///
+/// ## Ising events (insight records)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FactoryEventKind {
+    // -- Artifact lifecycle (Forge) -----------------------------------------
+    /// New artifact accepted and ID assigned.
+    ArtifactRegistered {
+        artifact_id: ArtifactId,
+        kind: Kind,
+        name: String,
+        owner: String,
+    },
+
+    /// Artifact transitioned between lifecycle states.
+    ArtifactStateChanged {
+        artifact_id: ArtifactId,
+        from_state: ArtifactState,
+        to_state: ArtifactState,
+    },
+
+    /// New version committed for an artifact.
+    ArtifactVersionCreated {
+        artifact_id: ArtifactId,
+        version: u32,
+        content_ref_uri: String,
+        change_summary: String,
+        session_id: String,
+    },
+
+    /// New vertical or horizontal lineage entry recorded.
+    ArtifactLineageExtended {
+        artifact_id: ArtifactId,
+        lineage_type: LineageType,
+        detail: serde_json::Value,
+    },
+
+    /// New quality signal appended.
+    ArtifactQualityRecorded {
+        artifact_id: ArtifactId,
+        signal: QualitySignal,
+    },
+
+    /// Released artifact dispatched to a consumer sink.
+    ArtifactRouted {
+        artifact_id: ArtifactId,
+        consumer_id: String,
+        sink: String,
+    },
+
+    /// Artifact reached terminal state (archived).
+    ArtifactArchived {
+        artifact_id: ArtifactId,
+        reason: String,
+    },
+
+    // -- Forge process events -----------------------------------------------
+    /// ShapingRequest sent to Stiglab.
+    ForgeShapingDispatched {
+        request_id: String,
+        artifact_id: ArtifactId,
+        target_version: u32,
+    },
+
+    /// ShapingResult received from Stiglab.
+    ForgeShapingReturned {
+        request_id: String,
+        artifact_id: ArtifactId,
+        outcome: ShapingOutcome,
+    },
+
+    /// GateRequest sent to Synodic.
+    ForgeGateRequested {
+        artifact_id: ArtifactId,
+        gate_point: GatePoint,
+    },
+
+    /// GateVerdict received from Synodic.
+    ForgeGateVerdict {
+        artifact_id: ArtifactId,
+        gate_point: GatePoint,
+        verdict: VerdictSummary,
+    },
+
+    /// Insight forwarded to the scheduling kernel.
+    ForgeInsightObserved {
+        insight_id: String,
+        insight_kind: InsightKind,
+        scope: InsightScope,
+    },
+
+    /// Scheduling kernel produced a ShapingDecision.
+    ForgeDecisionMade {
+        artifact_id: ArtifactId,
+        target_version: u32,
+        priority: i32,
+    },
+
+    /// Scheduling kernel returned None (idle, emitted at reduced frequency).
+    ForgeIdleTick,
+
+    /// Forge process state machine transitioned.
+    ForgeStateChanged {
+        from_state: ForgeProcessState,
+        to_state: ForgeProcessState,
+    },
+
+    // -- Stiglab events (session lifecycle upgrades) -------------------------
+    /// A shaping session started.
+    SessionStarted {
+        session_id: String,
+        request_id: String,
+        node_id: String,
+    },
+
+    /// A shaping session completed successfully.
+    SessionCompleted {
+        session_id: String,
+        request_id: String,
+        duration_ms: u64,
+    },
+
+    /// A shaping session failed.
+    SessionFailed {
+        session_id: String,
+        request_id: String,
+        error: String,
+    },
+
+    /// A session-internal event was upgraded to a factory event (e.g., policy
+    /// escalation triggered inside a session).
+    SessionEventUpgraded {
+        session_id: String,
+        original_event_type: String,
+        reason: String,
+    },
+
+    // -- Synodic events (governance) ----------------------------------------
+    /// A governance rule was created or updated.
+    RuleChanged {
+        rule_id: String,
+        action: RuleAction,
+        description: String,
+    },
+
+    /// An escalation was resolved (by human or timeout).
+    EscalationResolved {
+        escalation_id: String,
+        artifact_id: ArtifactId,
+        resolution: EscalationResolution,
+    },
+
+    // -- Ising events (observation) -----------------------------------------
+    /// An insight was generated and recorded.
+    InsightRecorded {
+        insight_id: String,
+        kind: InsightKind,
+        scope: InsightScope,
+        observation: String,
+        confidence: f64,
+    },
+
+    /// An insight was proposed as a Synodic rule candidate.
+    RuleProposed {
+        insight_id: String,
+        proposed_rule_description: String,
+    },
+}
+
+impl FactoryEventKind {
+    /// Returns the dot-separated event type string (e.g., "artifact.registered").
+    pub fn event_type(&self) -> &'static str {
+        match self {
+            Self::ArtifactRegistered { .. } => "artifact.registered",
+            Self::ArtifactStateChanged { .. } => "artifact.state_changed",
+            Self::ArtifactVersionCreated { .. } => "artifact.version_created",
+            Self::ArtifactLineageExtended { .. } => "artifact.lineage_extended",
+            Self::ArtifactQualityRecorded { .. } => "artifact.quality_recorded",
+            Self::ArtifactRouted { .. } => "artifact.routed",
+            Self::ArtifactArchived { .. } => "artifact.archived",
+            Self::ForgeShapingDispatched { .. } => "forge.shaping_dispatched",
+            Self::ForgeShapingReturned { .. } => "forge.shaping_returned",
+            Self::ForgeGateRequested { .. } => "forge.gate_requested",
+            Self::ForgeGateVerdict { .. } => "forge.gate_verdict",
+            Self::ForgeInsightObserved { .. } => "forge.insight_observed",
+            Self::ForgeDecisionMade { .. } => "forge.decision_made",
+            Self::ForgeIdleTick => "forge.idle_tick",
+            Self::ForgeStateChanged { .. } => "forge.state_changed",
+            Self::SessionStarted { .. } => "session.started",
+            Self::SessionCompleted { .. } => "session.completed",
+            Self::SessionFailed { .. } => "session.failed",
+            Self::SessionEventUpgraded { .. } => "session.event_upgraded",
+            Self::RuleChanged { .. } => "synodic.rule_changed",
+            Self::EscalationResolved { .. } => "synodic.escalation_resolved",
+            Self::InsightRecorded { .. } => "ising.insight_recorded",
+            Self::RuleProposed { .. } => "ising.rule_proposed",
+        }
+    }
+
+    /// Returns the stream_type for this event.
+    pub fn stream_type(&self) -> &'static str {
+        match self {
+            Self::ArtifactRegistered { .. }
+            | Self::ArtifactStateChanged { .. }
+            | Self::ArtifactVersionCreated { .. }
+            | Self::ArtifactLineageExtended { .. }
+            | Self::ArtifactQualityRecorded { .. }
+            | Self::ArtifactRouted { .. }
+            | Self::ArtifactArchived { .. } => "artifact",
+            Self::ForgeShapingDispatched { .. }
+            | Self::ForgeShapingReturned { .. }
+            | Self::ForgeGateRequested { .. }
+            | Self::ForgeGateVerdict { .. }
+            | Self::ForgeInsightObserved { .. }
+            | Self::ForgeDecisionMade { .. }
+            | Self::ForgeIdleTick
+            | Self::ForgeStateChanged { .. } => "forge",
+            Self::SessionStarted { .. }
+            | Self::SessionCompleted { .. }
+            | Self::SessionFailed { .. }
+            | Self::SessionEventUpgraded { .. } => "session",
+            Self::RuleChanged { .. } | Self::EscalationResolved { .. } => "synodic",
+            Self::InsightRecorded { .. } | Self::RuleProposed { .. } => "ising",
+        }
+    }
+
+    /// Returns the primary entity ID this event relates to.
+    pub fn stream_id(&self) -> String {
+        match self {
+            Self::ArtifactRegistered { artifact_id, .. }
+            | Self::ArtifactStateChanged { artifact_id, .. }
+            | Self::ArtifactVersionCreated { artifact_id, .. }
+            | Self::ArtifactLineageExtended { artifact_id, .. }
+            | Self::ArtifactQualityRecorded { artifact_id, .. }
+            | Self::ArtifactRouted { artifact_id, .. }
+            | Self::ArtifactArchived { artifact_id, .. } => artifact_id.to_string(),
+            Self::ForgeShapingDispatched { request_id, .. } => request_id.clone(),
+            Self::ForgeShapingReturned { request_id, .. } => request_id.clone(),
+            Self::ForgeGateRequested { artifact_id, .. } => artifact_id.to_string(),
+            Self::ForgeGateVerdict { artifact_id, .. } => artifact_id.to_string(),
+            Self::ForgeInsightObserved { insight_id, .. } => insight_id.clone(),
+            Self::ForgeDecisionMade { artifact_id, .. } => artifact_id.to_string(),
+            Self::ForgeIdleTick => "forge".to_string(),
+            Self::ForgeStateChanged { .. } => "forge".to_string(),
+            Self::SessionStarted { session_id, .. }
+            | Self::SessionCompleted { session_id, .. }
+            | Self::SessionFailed { session_id, .. }
+            | Self::SessionEventUpgraded { session_id, .. } => session_id.clone(),
+            Self::RuleChanged { rule_id, .. } => rule_id.clone(),
+            Self::EscalationResolved { escalation_id, .. } => escalation_id.clone(),
+            Self::InsightRecorded { insight_id, .. } => insight_id.clone(),
+            Self::RuleProposed { insight_id, .. } => insight_id.clone(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Supporting enums
+// ---------------------------------------------------------------------------
+
+/// Whether a lineage entry is vertical (session→version) or horizontal
+/// (artifact→artifact).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LineageType {
+    Vertical,
+    Horizontal,
+}
+
+/// Outcome of a shaping request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShapingOutcome {
+    Completed,
+    Failed,
+    Partial,
+    Aborted,
+}
+
+/// Gate points where Synodic is consulted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GatePoint {
+    PreDispatch,
+    StateTransition,
+    ConsumerRouting,
+    ToolLevel,
+}
+
+/// Summary of a Synodic verdict (for event spine recording).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerdictSummary {
+    Allow,
+    Deny,
+    Modify,
+    Escalate,
+}
+
+/// Forge process states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForgeProcessState {
+    Running,
+    Paused,
+    Draining,
+    Stopped,
+}
+
+/// Insight categories from Ising.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InsightKind {
+    Failure,
+    Waste,
+    Win,
+    Anomaly,
+}
+
+/// Scope of an insight.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InsightScope {
+    ArtifactKind(String),
+    SpecificArtifact(ArtifactId),
+    Global,
+}
+
+/// What happened to a governance rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleAction {
+    Created,
+    Updated,
+    Deprecated,
+}
+
+/// How an escalation was resolved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EscalationResolution {
+    Approved,
+    Denied,
+    TimedOut,
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn factory_event_type_strings() {
+        let event = FactoryEventKind::ArtifactRegistered {
+            artifact_id: ArtifactId::new("art_test1234"),
+            kind: Kind::Code,
+            name: "my-service".into(),
+            owner: "marvin".into(),
+        };
+        assert_eq!(event.event_type(), "artifact.registered");
+        assert_eq!(event.stream_type(), "artifact");
+        assert_eq!(event.stream_id(), "art_test1234");
+    }
+
+    #[test]
+    fn forge_event_types() {
+        assert_eq!(
+            FactoryEventKind::ForgeIdleTick.event_type(),
+            "forge.idle_tick"
+        );
+        assert_eq!(FactoryEventKind::ForgeIdleTick.stream_type(), "forge");
+    }
+
+    #[test]
+    fn serialization_roundtrip() {
+        let event = FactoryEventKind::ArtifactStateChanged {
+            artifact_id: ArtifactId::new("art_abcd1234"),
+            from_state: ArtifactState::Draft,
+            to_state: ArtifactState::InProgress,
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "artifact_state_changed");
+        assert_eq!(json["from_state"], "draft");
+        assert_eq!(json["to_state"], "in_progress");
+
+        let deserialized: FactoryEventKind = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.event_type(), "artifact.state_changed");
+    }
+
+    #[test]
+    fn shaping_outcome_serde() {
+        let outcome = ShapingOutcome::Completed;
+        let json = serde_json::to_string(&outcome).unwrap();
+        assert_eq!(json, r#""completed""#);
+    }
+
+    #[test]
+    fn insight_scope_variants() {
+        let global = InsightScope::Global;
+        let json = serde_json::to_string(&global).unwrap();
+        assert!(json.contains("global"));
+
+        let specific = InsightScope::SpecificArtifact(ArtifactId::new("art_12345678"));
+        let json = serde_json::to_string(&specific).unwrap();
+        assert!(json.contains("art_12345678"));
+    }
+}

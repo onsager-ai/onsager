@@ -17,14 +17,25 @@
 //! This library does **not** manage database schema. The contract lives in
 //! `migrations/001_initial.sql`; downstream services apply it themselves.
 
+pub mod artifact;
 pub mod core_event;
 pub mod extension_event;
+pub mod factory_event;
 pub mod listener;
 pub mod namespace;
+pub mod protocol;
 pub mod store;
 
+pub use artifact::{
+    Artifact, ArtifactId, ArtifactState, ArtifactVersion, Consumer, ConsumerType, ContentRef,
+    HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue, VerticalLineage,
+};
 pub use core_event::CoreEvent;
 pub use extension_event::ExtensionEventRecord;
+pub use factory_event::{FactoryEvent, FactoryEventKind};
 pub use listener::{EventHandler, Listener};
 pub use namespace::{Namespace, NamespaceError};
+pub use protocol::{
+    GateRequest, GateVerdict, Insight, ShapingDecision, ShapingRequest, ShapingResult,
+};
 pub use store::{EventMetadata, EventNotification, EventRecord, EventStore};
