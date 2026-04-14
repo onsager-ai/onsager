@@ -493,9 +493,7 @@ The following invariants must be maintained by all producers and consumers. Viol
 
 ## 13. Open questions
 
-1. **Session-internal event demotion** — The current `CoreEvent` enum includes `session.waiting_input`, `session.output`, and `session.tool_use`. These are session-internal in character and may generate high traffic. Should they be demoted to extension events under the `stiglab` namespace, or removed from the factory spine entirely? The risk of keeping them is spine noise; the risk of removing them is losing observability for Ising.
-
-2. **Per-namespace notification channels** — Should `pg_notify` use per-namespace channels (e.g., `onsager_events.stiglab`) to reduce filtering overhead? The current single-channel approach is simple but requires every consumer to filter. As namespace count and event volume grow, per-namespace channels may be needed.
+1. **Per-namespace notification channels** — Should `pg_notify` use per-namespace channels (e.g., `onsager_events.stiglab`) to reduce filtering overhead? The current single-channel approach is simple but requires every consumer to filter. As namespace count and event volume grow, per-namespace channels may be needed.
 
 3. **Sequence assignment under concurrency** — The current `SELECT MAX(sequence) + 1` approach works but may serialize writes to the same stream. Under high write rates to a single artifact stream, this could become a bottleneck. Alternatives: advisory locks, sequence objects per stream, or accepting gaps by using the `id` column as a loose sequence proxy.
 
@@ -520,7 +518,7 @@ The event spine has a working implementation in the `onsager` Rust crate. This s
 | Core event envelope | `EventRecord` struct | `src/store.rs` |
 | Extension event envelope | `ExtensionEventRecord` struct | `src/extension_event.rs` |
 | Event metadata | `EventMetadata` struct | `src/store.rs` |
-| Core event types | `CoreEvent` enum | `src/core_event.rs` |
+| Factory event types | `FactoryEventKind` enum | `src/factory_event.rs` |
 | Event store (read/write) | `EventStore` struct | `src/store.rs` |
 | pg_notify subscription | `EventStore::subscribe()` | `src/store.rs` |
 | Namespace validation | `Namespace` newtype | `src/namespace.rs` |
@@ -541,7 +539,6 @@ The event spine has a working implementation in the `onsager` Rust crate. This s
 
 ### 14.2 What needs to evolve
 
-- **The `CoreEvent` enum reflects a pre-Forge vocabulary.** The current enum has `TaskCreated`, session lifecycle events, and node events — inherited from the earlier Stiglab-centric design. It needs to be updated to include the Forge events from §8.1 (`artifact.*`, `forge.*`).
 - **Transactional write helpers are missing.** The `EventStore` exposes `pool()` for manual transaction management, but there is no helper that enforces the "state change + event in one transaction" pattern. A `TransactionalWriter` or similar abstraction would reduce the risk of producers accidentally writing events outside a transaction.
 - **Backfill-on-reconnect is not implemented.** The `Listener` subscribes to `pg_notify` but does not backfill from the table on startup or reconnection. A production-grade consumer needs the streaming pattern from §7.2.
 - **No consumer cursor tracking.** Consumers have no built-in way to persist their last-seen event ID or sequence. Each consumer must implement this independently.
@@ -577,4 +574,4 @@ The event spine has a working implementation in the `onsager` Rust crate. This s
 | 2026-04-13 | No global ordering guarantee | Per-stream ordering is sufficient for factory semantics; global ordering would require serialization that harms throughput |
 | 2026-04-13 | Schema backward compatibility via additive-only JSONB changes | Standard event evolution strategy; avoids breaking existing consumers |
 | 2026-04-13 | Namespace ownership is convention, not database-enforced | v0.1 simplicity; database-level enforcement (row-level security or check constraints) is a future option |
-| 2026-04-13 | `CoreEvent` enum needs Forge-era update | Current enum predates the Forge spec; tracked as implementation evolution, not a spec change |
+| 2026-04-14 | Replaced `CoreEvent` with `FactoryEventKind` | Old enum predated the Forge spec; deleted and replaced with the unified factory event vocabulary |

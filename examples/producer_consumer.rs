@@ -11,8 +11,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use onsager::{
-    CoreEvent, EventHandler, EventMetadata, EventNotification, EventStore, Listener, Namespace,
+    EventHandler, EventMetadata, EventNotification, EventStore, FactoryEvent, FactoryEventKind,
+    Listener, Namespace,
 };
 
 /// A simple handler that prints events and counts them.
@@ -58,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Spawn the listener in the background, subscribed to stiglab events.
+    // The listener matches events whose stream_id starts with "stiglab:".
     let listener_store = store.clone();
     let listener_handle = tokio::spawn(async move {
         Listener::new(listener_store)
@@ -69,7 +72,8 @@ async fn main() -> anyhow::Result<()> {
     // Give the listener a moment to connect to pg_notify.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    // Produce a few events with stream_ids prefixed by the stiglab namespace.
+    // Produce a few stiglab.session_created events.
+    // Stream IDs use the "stiglab:<rest>" prefix so the listener picks them up.
     let metadata = EventMetadata {
         actor: "example-producer".into(),
         ..Default::default()
@@ -77,12 +81,18 @@ async fn main() -> anyhow::Result<()> {
 
     println!("producing {expected} events...");
     for i in 1..=expected {
-        let event = CoreEvent::SessionCreated {
-            session_id: format!("stiglab:session:demo-{i}"),
-            task_id: format!("stiglab:task:{i}"),
-            node_id: "example-node".into(),
+        let event = FactoryEvent {
+            event: FactoryEventKind::StiglabSessionCreated {
+                session_id: format!("stiglab:session:demo-{i}"),
+                request_id: format!("stiglab:request:{i}"),
+                node_id: "example-node".into(),
+            },
+            correlation_id: None,
+            causation_id: None,
+            actor: "example-producer".into(),
+            timestamp: Utc::now(),
         };
-        let id = store.append(&event, &metadata).await?;
+        let id = store.append_factory_event(&event, &metadata).await?;
         println!("  appended event {id}");
     }
 

@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::postgres::{PgListener, PgPool, PgPoolOptions};
 use tokio::sync::mpsc;
 
-use crate::core_event::CoreEvent;
 use crate::extension_event::ExtensionEventRecord;
+use crate::factory_event::FactoryEvent;
 
 /// An event record as stored in the `events` table.
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -54,18 +54,18 @@ impl EventStore {
         Ok(Self { pool })
     }
 
-    /// Append a core event to the event stream.
+    /// Append a factory event to the event spine.
     /// Returns the assigned event id.
-    pub async fn append(
+    pub async fn append_factory_event(
         &self,
-        event: &CoreEvent,
+        event: &FactoryEvent,
         metadata: &EventMetadata,
     ) -> Result<i64, sqlx::Error> {
-        let stream_id = event.stream_id();
-        let stream_type = event.stream_type();
-        let event_type = event.event_type();
-        let data = serde_json::to_value(event).unwrap_or_default();
-        let meta = serde_json::to_value(metadata).unwrap_or_default();
+        let stream_id = event.event.stream_id();
+        let stream_type = event.event.stream_type();
+        let event_type = event.event.event_type();
+        let data = serde_json::to_value(event).expect("FactoryEvent must be serializable");
+        let meta = serde_json::to_value(metadata).expect("EventMetadata must be serializable");
 
         let row: (i64,) = sqlx::query_as(
             r#"
@@ -75,7 +75,7 @@ impl EventStore {
             RETURNING id
             "#,
         )
-        .bind(stream_id)
+        .bind(&stream_id)
         .bind(stream_type)
         .bind(event_type)
         .bind(&data)

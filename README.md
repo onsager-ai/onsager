@@ -39,23 +39,31 @@ Both tables fire `pg_notify` on insert via the `onsager_events` channel, enablin
 ### Producer
 
 ```rust
-use onsager::{CoreEvent, EventMetadata, EventStore};
+use chrono::Utc;
+use onsager::{ArtifactId, EventMetadata, EventStore, FactoryEvent, FactoryEventKind, Kind};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let store = EventStore::connect(&std::env::var("DATABASE_URL")?).await?;
 
-    let event = CoreEvent::SessionCreated {
-        session_id: "stiglab:session:demo-1".into(),
-        task_id: "stiglab:task:1".into(),
-        node_id: "node-1".into(),
+    let event = FactoryEvent {
+        event: FactoryEventKind::ArtifactRegistered {
+            artifact_id: ArtifactId::generate(),
+            kind: Kind::Document,
+            name: "My report".into(),
+            owner: "my-service".into(),
+        },
+        correlation_id: None,
+        causation_id: None,
+        actor: "my-service".into(),
+        timestamp: Utc::now(),
     };
     let metadata = EventMetadata {
         actor: "my-service".into(),
         ..Default::default()
     };
 
-    let id = store.append(&event, &metadata).await?;
+    let id = store.append_factory_event(&event, &metadata).await?;
     println!("appended event {id}");
     Ok(())
 }
@@ -64,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
 ### Consumer
 
 ```rust
-use onsager::{EventHandler, EventNotification, Listener, Namespace, EventStore};
+use onsager::{EventHandler, EventNotification, EventStore, Listener, Namespace};
 use async_trait::async_trait;
 
 struct MyHandler;
