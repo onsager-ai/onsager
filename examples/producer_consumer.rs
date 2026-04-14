@@ -59,27 +59,15 @@ async fn main() -> anyhow::Result<()> {
         notify: Arc::clone(&notify),
     };
 
-    // Spawn the listener in the background, subscribed to stiglab events.
-    // The listener matches events whose stream_id starts with "stiglab:".
-    let listener_store = store.clone();
-    let listener_handle = tokio::spawn(async move {
-        Listener::new(listener_store)
-            .subscribe(Namespace::stiglab())
-            .run(handler)
-            .await
-    });
-
-    // Give the listener a moment to connect to pg_notify.
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    // Produce a few stiglab.session_created events.
-    // Stream IDs use the "stiglab:<rest>" prefix so the listener picks them up.
     let metadata = EventMetadata {
         actor: "example-producer".into(),
         ..Default::default()
     };
 
-    println!("producing {expected} events...");
+    // Produce events BEFORE the listener starts so that they are recovered
+    // via backfill rather than pg_notify.
+    println!("producing {expected} events before listener starts (will be backfilled)...");
+    let mut first_id: Option<i64> = None;
     for i in 1..=expected {
         let event = FactoryEvent {
             event: FactoryEventKind::StiglabSessionCreated {
@@ -94,7 +82,22 @@ async fn main() -> anyhow::Result<()> {
         };
         let id = store.append_factory_event(&event, &metadata).await?;
         println!("  appended event {id}");
+        if first_id.is_none() {
+            first_id = Some(id);
+        }
     }
+
+    // Start the listener with a backfill cursor that picks up all pre-existing
+    // events. The listener matches events whose stream_id starts with "stiglab:".
+    let cursor = first_id.map(|id| id - 1); // replay from just before the first event
+    let listener_store = store.clone();
+    let listener_handle = tokio::spawn(async move {
+        Listener::new(listener_store)
+            .subscribe(Namespace::stiglab())
+            .with_since(cursor)
+            .run(handler)
+            .await
+    });
 
     // Wait for the handler to receive all events.
     notify.notified().await;
