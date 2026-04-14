@@ -36,4 +36,6 @@ pub use namespace::{Namespace, NamespaceError};
 pub use protocol::{
     GateRequest, GateVerdict, Insight, ShapingDecision, ShapingRequest, ShapingResult,
 };
-pub use store::{EventMetadata, EventNotification, EventRecord, EventStore};
+pub use store::{
+    append_factory_event_tx, EventMetadata, EventNotification, EventRecord, EventStore,
+};

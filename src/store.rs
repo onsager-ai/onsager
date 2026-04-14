@@ -261,9 +261,180 @@ impl EventStore {
         Ok(rx)
     }
 
+    /// Run a closure inside a single PostgreSQL transaction.
+    ///
+    /// The transaction is committed if the closure returns `Ok`, and rolled back
+    /// if it returns `Err` or if the future is dropped before completion.
+    /// Use [`append_factory_event_tx`] inside the closure to append events within
+    /// the same transaction as state mutations.
+    pub async fn transaction<F, R>(&self, f: F) -> Result<R, sqlx::Error>
+    where
+        F: for<'c> FnOnce(
+            &'c mut sqlx::Transaction<'_, sqlx::Postgres>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<R, sqlx::Error>> + Send + 'c>,
+        >,
+    {
+        let mut tx = self.pool.begin().await?;
+        let result = f(&mut tx).await?;
+        tx.commit().await?;
+        Ok(result)
+    }
+
     /// Get the underlying pool (for advanced queries).
     pub fn pool(&self) -> &PgPool {
         &self.pool
+    }
+}
+
+/// Append a factory event inside an existing transaction.
+///
+/// Use this inside [`EventStore::transaction`] to append events atomically with
+/// state mutations.
+pub async fn append_factory_event_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event: &FactoryEvent,
+    metadata: &EventMetadata,
+) -> Result<i64, sqlx::Error> {
+    let stream_id = event.event.stream_id();
+    let stream_type = event.event.stream_type();
+    let event_type = event.event.event_type();
+    let data = serde_json::to_value(event).expect("FactoryEvent must be serializable");
+    let meta = serde_json::to_value(metadata).expect("EventMetadata must be serializable");
+
+    let row: (i64,) = sqlx::query_as(
+        r#"
+        INSERT INTO events (stream_id, stream_type, event_type, data, metadata, sequence)
+        VALUES ($1, $2, $3, $4, $5,
+                COALESCE((SELECT MAX(sequence) + 1 FROM events WHERE stream_id = $1), 1))
+        RETURNING id
+        "#,
+    )
+    .bind(&stream_id)
+    .bind(stream_type)
+    .bind(event_type)
+    .bind(&data)
+    .bind(&meta)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(row.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::*;
+    use crate::artifact::{ArtifactId, Kind};
+    use crate::factory_event::{FactoryEvent, FactoryEventKind};
+
+    fn db_url() -> String {
+        std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must be set to run store integration tests")
+    }
+
+    fn test_event(stream_suffix: &str) -> FactoryEvent {
+        FactoryEvent {
+            event: FactoryEventKind::ArtifactRegistered {
+                artifact_id: ArtifactId::new(&format!("art_tx_test_{stream_suffix}")),
+                kind: Kind::Document,
+                name: "tx test".into(),
+                owner: "test".into(),
+            },
+            correlation_id: None,
+            causation_id: None,
+            actor: "test".into(),
+            timestamp: Utc::now(),
+        }
+    }
+
+    fn test_metadata() -> EventMetadata {
+        EventMetadata {
+            actor: "test".into(),
+            ..Default::default()
+        }
+    }
+
+    /// Committed transaction: event lands in the database.
+    #[tokio::test]
+    async fn transaction_commit_persists_event() {
+        let store = EventStore::connect(&db_url()).await.unwrap();
+        let event = test_event("commit");
+        let stream_id = event.event.stream_id();
+        let meta = test_metadata();
+
+        let id = store
+            .transaction(|tx| {
+                Box::pin(async move { append_factory_event_tx(tx, &event, &meta).await })
+            })
+            .await
+            .unwrap();
+
+        // Verify the row is present after commit.
+        let rows = store.query_stream(&stream_id, 1).await.unwrap();
+        assert!(
+            rows.iter().any(|r| r.id == id),
+            "event {id} not found after commit"
+        );
+
+        // Clean up.
+        sqlx::query("DELETE FROM events WHERE id = $1")
+            .bind(id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+
+    /// Rolled-back transaction: event is not visible after rollback.
+    #[tokio::test]
+    async fn transaction_rollback_discards_event() {
+        let store = EventStore::connect(&db_url()).await.unwrap();
+        let event = test_event("rollback");
+        let stream_id = event.event.stream_id();
+        let meta = test_metadata();
+
+        let result: Result<i64, sqlx::Error> = store
+            .transaction(|tx| {
+                Box::pin(async move {
+                    let _id = append_factory_event_tx(tx, &event, &meta).await?;
+                    Err(sqlx::Error::RowNotFound) // trigger rollback
+                })
+            })
+            .await;
+
+        assert!(result.is_err());
+        // Verify no rows landed.
+        let rows = store.query_stream(&stream_id, 1).await.unwrap();
+        assert!(
+            rows.is_empty(),
+            "found unexpected rows after rollback: {rows:?}"
+        );
+    }
+
+    /// Dropped transaction (simulating panic path): event does not persist.
+    #[tokio::test]
+    async fn transaction_drop_rolls_back() {
+        let store = EventStore::connect(&db_url()).await.unwrap();
+        let event = test_event("drop");
+        let stream_id = event.event.stream_id();
+        let meta = test_metadata();
+
+        // Manually begin a transaction, append, then drop without committing.
+        {
+            let mut tx = store.pool().begin().await.unwrap();
+            let _ = append_factory_event_tx(&mut tx, &event, &meta)
+                .await
+                .unwrap();
+            // tx dropped here — no commit
+        }
+
+        // Verify no rows landed.
+        let rows = store.query_stream(&stream_id, 1).await.unwrap();
+        assert!(
+            rows.is_empty(),
+            "found unexpected rows after drop (no commit): {rows:?}"
+        );
     }
 }
 
