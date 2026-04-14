@@ -2,7 +2,7 @@
 
 Client library for the Onsager event spine — shared PostgreSQL event stream coordination for the [onsager-ai](https://github.com/onsager-ai) polyrepo.
 
-Onsager is a **library**, not a service. It publishes a single Rust crate that sibling repos (`stiglab`, `synodic`, `ising`, `telegramable`) depend on to coordinate via a shared PostgreSQL `events` / `events_ext` table and the `onsager_events` pg_notify channel.
+Onsager is a **library**, not a service. It publishes a single Rust crate that subsystem repos (`stiglab`, `synodic`, `ising`) and adapter repos (`telegramable`, and future consumers) depend on to coordinate via a shared PostgreSQL `events` / `events_ext` table and the `onsager_events` pg_notify channel.
 
 ## Installation
 

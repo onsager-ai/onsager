@@ -14,14 +14,17 @@ The library does **not** manage schema. The SQL contract lives in `migrations/00
 
 ## Polyrepo
 
-Sibling repos under `onsager-ai/` are the consumers:
+**Subsystem repos** (each has a spec in `specs/`) under `onsager-ai/`:
 
 - `stiglab` — AI agent orchestration
 - `synodic` — policy enforcement
 - `ising` — evaluation framework
-- `telegramable` — Telegram integration
 
-Each lives in its own repo with its own specs, CI, and codebase.
+**Adapter repos** (no subsystem spec; hold a reserved namespace in `events_ext`):
+
+- `telegramable` — Telegram-first human interface
+
+Each lives in its own repo with its own CI and codebase.
 
 ## Build & Test
 
