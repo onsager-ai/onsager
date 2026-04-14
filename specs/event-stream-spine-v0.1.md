@@ -341,11 +341,16 @@ Written to `events_ext` under the `synodic` namespace.
 
 | Event type | When emitted |
 |---|---|
-| `rule.created` | New governance rule crystallized |
-| `rule.updated` | Existing rule modified |
-| `rule.archived` | Rule deactivated |
-| `escalation.opened` | Human escalation requested |
-| `escalation.resolved` | Human escalation resolved |
+| `synodic.gate_evaluated` | A gate request was evaluated and a verdict issued |
+| `synodic.gate_denied` | A gate request was denied (subset of gate_evaluated, for easy filtering) |
+| `synodic.gate_modified` | A gate request verdict was Modify (subset of gate_evaluated) |
+| `synodic.escalation_started` | An escalation was initiated |
+| `synodic.escalation_resolved` | An escalation was resolved (by human, delegate, or timeout) |
+| `synodic.escalation_timed_out` | An escalation timed out and the default verdict was applied |
+| `synodic.rule_proposed` | A crystallization candidate was created |
+| `synodic.rule_approved` | A proposed rule was approved and entered the active set |
+| `synodic.rule_disabled` | A rule was disabled |
+| `synodic.rule_version_created` | A rule was modified, producing a new version |
 
 ### 8.4 Ising events (extension)
 

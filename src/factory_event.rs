@@ -183,19 +183,59 @@ pub enum FactoryEventKind {
     },
 
     // -- Synodic events (governance) ----------------------------------------
-    /// A governance rule was created or updated.
-    RuleChanged {
-        rule_id: String,
-        action: RuleAction,
-        description: String,
+    /// A gate request was evaluated and a verdict issued.
+    SynodicGateEvaluated {
+        gate_id: String,
+        artifact_id: ArtifactId,
+        verdict: VerdictSummary,
     },
 
-    /// An escalation was resolved (by human or timeout).
-    EscalationResolved {
+    /// A gate request was denied (subset of gate_evaluated, for easy filtering).
+    SynodicGateDenied {
+        gate_id: String,
+        artifact_id: ArtifactId,
+        reason: String,
+    },
+
+    /// A gate request verdict was Modify (subset of gate_evaluated).
+    SynodicGateModified {
+        gate_id: String,
+        artifact_id: ArtifactId,
+    },
+
+    /// An escalation was initiated.
+    SynodicEscalationStarted {
+        escalation_id: String,
+        artifact_id: ArtifactId,
+    },
+
+    /// An escalation was resolved (by human, delegate, or timeout).
+    SynodicEscalationResolved {
         escalation_id: String,
         artifact_id: ArtifactId,
         resolution: EscalationResolution,
     },
+
+    /// An escalation timed out and the default verdict was applied.
+    SynodicEscalationTimedOut {
+        escalation_id: String,
+        artifact_id: ArtifactId,
+    },
+
+    /// A crystallization candidate rule was created.
+    SynodicRuleProposed {
+        rule_id: String,
+        description: String,
+    },
+
+    /// A proposed rule was approved and entered the active set.
+    SynodicRuleApproved { rule_id: String },
+
+    /// A rule was disabled.
+    SynodicRuleDisabled { rule_id: String, reason: String },
+
+    /// A rule was modified, producing a new version.
+    SynodicRuleVersionCreated { rule_id: String, version: u32 },
 
     // -- Ising events (observation) -----------------------------------------
     /// An insight was generated and recorded.
@@ -237,8 +277,16 @@ impl FactoryEventKind {
             Self::SessionCompleted { .. } => "session.completed",
             Self::SessionFailed { .. } => "session.failed",
             Self::SessionEventUpgraded { .. } => "session.event_upgraded",
-            Self::RuleChanged { .. } => "synodic.rule_changed",
-            Self::EscalationResolved { .. } => "synodic.escalation_resolved",
+            Self::SynodicGateEvaluated { .. } => "synodic.gate_evaluated",
+            Self::SynodicGateDenied { .. } => "synodic.gate_denied",
+            Self::SynodicGateModified { .. } => "synodic.gate_modified",
+            Self::SynodicEscalationStarted { .. } => "synodic.escalation_started",
+            Self::SynodicEscalationResolved { .. } => "synodic.escalation_resolved",
+            Self::SynodicEscalationTimedOut { .. } => "synodic.escalation_timed_out",
+            Self::SynodicRuleProposed { .. } => "synodic.rule_proposed",
+            Self::SynodicRuleApproved { .. } => "synodic.rule_approved",
+            Self::SynodicRuleDisabled { .. } => "synodic.rule_disabled",
+            Self::SynodicRuleVersionCreated { .. } => "synodic.rule_version_created",
             Self::InsightRecorded { .. } => "ising.insight_recorded",
             Self::RuleProposed { .. } => "ising.rule_proposed",
         }
@@ -266,7 +314,16 @@ impl FactoryEventKind {
             | Self::SessionCompleted { .. }
             | Self::SessionFailed { .. }
             | Self::SessionEventUpgraded { .. } => "session",
-            Self::RuleChanged { .. } | Self::EscalationResolved { .. } => "synodic",
+            Self::SynodicGateEvaluated { .. }
+            | Self::SynodicGateDenied { .. }
+            | Self::SynodicGateModified { .. }
+            | Self::SynodicEscalationStarted { .. }
+            | Self::SynodicEscalationResolved { .. }
+            | Self::SynodicEscalationTimedOut { .. }
+            | Self::SynodicRuleProposed { .. }
+            | Self::SynodicRuleApproved { .. }
+            | Self::SynodicRuleDisabled { .. }
+            | Self::SynodicRuleVersionCreated { .. } => "synodic",
             Self::InsightRecorded { .. } | Self::RuleProposed { .. } => "ising",
         }
     }
@@ -293,8 +350,16 @@ impl FactoryEventKind {
             | Self::SessionCompleted { session_id, .. }
             | Self::SessionFailed { session_id, .. }
             | Self::SessionEventUpgraded { session_id, .. } => session_id.clone(),
-            Self::RuleChanged { rule_id, .. } => rule_id.clone(),
-            Self::EscalationResolved { escalation_id, .. } => escalation_id.clone(),
+            Self::SynodicGateEvaluated { gate_id, .. } => gate_id.clone(),
+            Self::SynodicGateDenied { gate_id, .. } => gate_id.clone(),
+            Self::SynodicGateModified { gate_id, .. } => gate_id.clone(),
+            Self::SynodicEscalationStarted { escalation_id, .. } => escalation_id.clone(),
+            Self::SynodicEscalationResolved { escalation_id, .. } => escalation_id.clone(),
+            Self::SynodicEscalationTimedOut { escalation_id, .. } => escalation_id.clone(),
+            Self::SynodicRuleProposed { rule_id, .. } => rule_id.clone(),
+            Self::SynodicRuleApproved { rule_id, .. } => rule_id.clone(),
+            Self::SynodicRuleDisabled { rule_id, .. } => rule_id.clone(),
+            Self::SynodicRuleVersionCreated { rule_id, .. } => rule_id.clone(),
             Self::InsightRecorded { insight_id, .. } => insight_id.clone(),
             Self::RuleProposed { insight_id, .. } => insight_id.clone(),
         }
@@ -371,15 +436,6 @@ pub enum InsightScope {
     ArtifactKind(String),
     SpecificArtifact(ArtifactId),
     Global,
-}
-
-/// What happened to a governance rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RuleAction {
-    Created,
-    Updated,
-    Deprecated,
 }
 
 /// How an escalation was resolved.
