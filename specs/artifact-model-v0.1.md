@@ -4,7 +4,7 @@
 **Owner**: Marvin
 **Last updated**: 2026-04-13
 **Supersedes**: N/A
-**Related**: `onsager-vision-v0.1.md` (pending revision), `forge-v0.1.md` (forthcoming)
+**Related**: `onsager-vision-v0.1.md`, `forge-v0.1.md`
 
 ---
 

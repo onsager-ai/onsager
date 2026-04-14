@@ -4,7 +4,7 @@
 **Owner**: Marvin
 **Last updated**: 2026-04-13
 **Depends on**: `artifact-model-v0.1.md`
-**Related**: `stiglab-*`, `synodic-*`, `ising-*` (forthcoming alignment)
+**Related**: `stiglab-v0.1.md`, `synodic-v0.1.md`, `ising-v0.1.md`
 
 ---
 
