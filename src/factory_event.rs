@@ -152,35 +152,56 @@ pub enum FactoryEventKind {
         to_state: ForgeProcessState,
     },
 
-    // -- Stiglab events (session lifecycle upgrades) -------------------------
-    /// A shaping session started.
-    SessionStarted {
+    // -- Stiglab events (session and node lifecycle) -------------------------
+    /// A new session was allocated for a shaping request.
+    StiglabSessionCreated {
         session_id: String,
         request_id: String,
         node_id: String,
     },
 
-    /// A shaping session completed successfully.
-    SessionCompleted {
+    /// A session was dispatched to a Stiglab node.
+    StiglabSessionDispatched { session_id: String, node_id: String },
+
+    /// A session began active execution.
+    StiglabSessionRunning { session_id: String },
+
+    /// A session finished successfully.
+    StiglabSessionCompleted {
         session_id: String,
         request_id: String,
         duration_ms: u64,
     },
 
-    /// A shaping session failed.
-    SessionFailed {
+    /// A session terminated with an error.
+    StiglabSessionFailed {
         session_id: String,
         request_id: String,
         error: String,
     },
 
-    /// A session-internal event was upgraded to a factory event (e.g., policy
-    /// escalation triggered inside a session).
-    SessionEventUpgraded {
+    /// A session was aborted (e.g. node lost, deadline exceeded).
+    StiglabSessionAborted { session_id: String, reason: String },
+
+    /// A session-internal event was promoted to a factory event.
+    StiglabEventUpgraded {
         session_id: String,
         original_event_type: String,
         reason: String,
     },
+
+    /// A new Stiglab node joined the pool.
+    StiglabNodeRegistered {
+        node_id: String,
+        name: String,
+        hostname: String,
+    },
+
+    /// A Stiglab node left the pool.
+    StiglabNodeDeregistered { node_id: String, reason: String },
+
+    /// A node missed its expected heartbeat.
+    StiglabNodeHeartbeatMissed { node_id: String },
 
     // -- Synodic events (governance) ----------------------------------------
     /// A gate request was evaluated and a verdict issued.
@@ -273,10 +294,16 @@ impl FactoryEventKind {
             Self::ForgeDecisionMade { .. } => "forge.decision_made",
             Self::ForgeIdleTick => "forge.idle_tick",
             Self::ForgeStateChanged { .. } => "forge.state_changed",
-            Self::SessionStarted { .. } => "session.started",
-            Self::SessionCompleted { .. } => "session.completed",
-            Self::SessionFailed { .. } => "session.failed",
-            Self::SessionEventUpgraded { .. } => "session.event_upgraded",
+            Self::StiglabSessionCreated { .. } => "stiglab.session_created",
+            Self::StiglabSessionDispatched { .. } => "stiglab.session_dispatched",
+            Self::StiglabSessionRunning { .. } => "stiglab.session_running",
+            Self::StiglabSessionCompleted { .. } => "stiglab.session_completed",
+            Self::StiglabSessionFailed { .. } => "stiglab.session_failed",
+            Self::StiglabSessionAborted { .. } => "stiglab.session_aborted",
+            Self::StiglabEventUpgraded { .. } => "stiglab.event_upgraded",
+            Self::StiglabNodeRegistered { .. } => "stiglab.node_registered",
+            Self::StiglabNodeDeregistered { .. } => "stiglab.node_deregistered",
+            Self::StiglabNodeHeartbeatMissed { .. } => "stiglab.node_heartbeat_missed",
             Self::SynodicGateEvaluated { .. } => "synodic.gate_evaluated",
             Self::SynodicGateDenied { .. } => "synodic.gate_denied",
             Self::SynodicGateModified { .. } => "synodic.gate_modified",
@@ -310,10 +337,16 @@ impl FactoryEventKind {
             | Self::ForgeDecisionMade { .. }
             | Self::ForgeIdleTick
             | Self::ForgeStateChanged { .. } => "forge",
-            Self::SessionStarted { .. }
-            | Self::SessionCompleted { .. }
-            | Self::SessionFailed { .. }
-            | Self::SessionEventUpgraded { .. } => "session",
+            Self::StiglabSessionCreated { .. }
+            | Self::StiglabSessionDispatched { .. }
+            | Self::StiglabSessionRunning { .. }
+            | Self::StiglabSessionCompleted { .. }
+            | Self::StiglabSessionFailed { .. }
+            | Self::StiglabSessionAborted { .. }
+            | Self::StiglabEventUpgraded { .. }
+            | Self::StiglabNodeRegistered { .. }
+            | Self::StiglabNodeDeregistered { .. }
+            | Self::StiglabNodeHeartbeatMissed { .. } => "stiglab",
             Self::SynodicGateEvaluated { .. }
             | Self::SynodicGateDenied { .. }
             | Self::SynodicGateModified { .. }
@@ -346,10 +379,16 @@ impl FactoryEventKind {
             Self::ForgeDecisionMade { artifact_id, .. } => artifact_id.to_string(),
             Self::ForgeIdleTick => "forge".to_string(),
             Self::ForgeStateChanged { .. } => "forge".to_string(),
-            Self::SessionStarted { session_id, .. }
-            | Self::SessionCompleted { session_id, .. }
-            | Self::SessionFailed { session_id, .. }
-            | Self::SessionEventUpgraded { session_id, .. } => session_id.clone(),
+            Self::StiglabSessionCreated { session_id, .. }
+            | Self::StiglabSessionDispatched { session_id, .. }
+            | Self::StiglabSessionRunning { session_id, .. }
+            | Self::StiglabSessionCompleted { session_id, .. }
+            | Self::StiglabSessionFailed { session_id, .. }
+            | Self::StiglabSessionAborted { session_id, .. }
+            | Self::StiglabEventUpgraded { session_id, .. } => session_id.clone(),
+            Self::StiglabNodeRegistered { node_id, .. }
+            | Self::StiglabNodeDeregistered { node_id, .. }
+            | Self::StiglabNodeHeartbeatMissed { node_id, .. } => node_id.clone(),
             Self::SynodicGateEvaluated { gate_id, .. } => gate_id.clone(),
             Self::SynodicGateDenied { gate_id, .. } => gate_id.clone(),
             Self::SynodicGateModified { gate_id, .. } => gate_id.clone(),

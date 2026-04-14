@@ -321,19 +321,22 @@ From `forge-v0.1 §9`. These are the primary factory events and constitute the m
 | `forge.idle_tick` | `forge` | Scheduling kernel returned None (emitted at reduced frequency) |
 | `forge.state_changed` | `forge` | Forge process state machine transitioned |
 
-### 8.2 Stiglab events (core)
+### 8.2 Stiglab events (extension)
 
-Session lifecycle events that Stiglab upgrades from internal events to factory events. These are the factory-visible subset of session activity.
+Session and node lifecycle events written by Stiglab to `events_ext` under the `stiglab` namespace. These are the factory-visible subset of session and node activity; session-internal events (`waiting_input`, `output`, `tool_use`) are not emitted to the spine.
 
-| Event type | Stream type | When emitted |
-|---|---|---|
-| `session.created` | `session` | New session allocated for a shaping request |
-| `session.dispatched` | `session` | Session dispatched to a Stiglab node |
-| `session.running` | `session` | Session began active execution |
-| `session.completed` | `session` | Session finished successfully |
-| `session.failed` | `session` | Session terminated with an error |
-
-Note: `session.waiting_input`, `session.output`, and `session.tool_use` exist in the current `CoreEvent` enum but are session-internal in character. Whether these should be factory events or remain internal is an open question (see §13). The conservative position for v0.1 is that they are factory events because they are currently defined in the core enum — but a future version may demote them to extension events or remove them from the spine entirely.
+| Event type | When emitted |
+|---|---|
+| `stiglab.session_created` | New session allocated for a shaping request |
+| `stiglab.session_dispatched` | Session dispatched to a Stiglab node |
+| `stiglab.session_running` | Session began active execution |
+| `stiglab.session_completed` | Session finished successfully |
+| `stiglab.session_failed` | Session terminated with an error |
+| `stiglab.session_aborted` | Session was aborted (e.g. node lost, deadline exceeded) |
+| `stiglab.event_upgraded` | A session-internal event was promoted to a factory event |
+| `stiglab.node_registered` | A new Stiglab node joined the pool |
+| `stiglab.node_deregistered` | A Stiglab node left the pool |
+| `stiglab.node_heartbeat_missed` | A node missed its expected heartbeat |
 
 ### 8.3 Synodic events (extension)
 
