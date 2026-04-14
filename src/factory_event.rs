@@ -47,7 +47,9 @@ pub struct FactoryEvent {
 /// ## Synodic events (rule and escalation outcomes)
 ///
 /// ## Ising events (insight records)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `f64` fields (confidence) block `Eq`; only `PartialEq` is derived.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FactoryEventKind {
     // -- Artifact lifecycle (Forge) -----------------------------------------

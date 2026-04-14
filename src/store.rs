@@ -97,7 +97,7 @@ impl EventStore {
         metadata: &EventMetadata,
         ref_event_id: Option<i64>,
     ) -> Result<i64, sqlx::Error> {
-        let meta = serde_json::to_value(metadata).unwrap_or_default();
+        let meta = serde_json::to_value(metadata).expect("EventMetadata must be serializable");
 
         let row: (i64,) = sqlx::query_as(
             r#"
@@ -229,7 +229,11 @@ impl EventStore {
     }
 
     /// Subscribe to real-time event notifications via pg_notify.
-    /// Returns a receiver that yields EventNotification as events are inserted.
+    /// Returns a receiver that yields [`EventNotification`] as events are inserted.
+    ///
+    /// **Warning**: this uses an unbounded channel. A slow consumer can cause
+    /// unbounded memory growth. Prefer [`EventStore::subscribe_bounded`] when
+    /// backpressure is required.
     pub async fn subscribe(
         &self,
     ) -> Result<mpsc::UnboundedReceiver<EventNotification>, sqlx::Error> {
@@ -246,6 +250,47 @@ impl EventStore {
                             serde_json::from_str::<EventNotification>(notification.payload())
                         {
                             if tx.send(parsed).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("pg_notify listener error: {e}");
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(rx)
+    }
+
+    /// Subscribe to real-time event notifications with a bounded channel.
+    ///
+    /// Unlike [`EventStore::subscribe`], this applies backpressure: the sender
+    /// task blocks when the channel is full. Use this when the consumer may be
+    /// slower than the event rate and unbounded memory growth is unacceptable.
+    ///
+    /// `capacity` is the maximum number of buffered notifications. Choose a
+    /// value large enough to absorb bursts without causing the sender to block
+    /// excessively.
+    pub async fn subscribe_bounded(
+        &self,
+        capacity: usize,
+    ) -> Result<mpsc::Receiver<EventNotification>, sqlx::Error> {
+        let mut listener = PgListener::connect_with(&self.pool).await?;
+        listener.listen("onsager_events").await?;
+
+        let (tx, rx) = mpsc::channel(capacity);
+
+        tokio::spawn(async move {
+            loop {
+                match listener.recv().await {
+                    Ok(notification) => {
+                        if let Ok(parsed) =
+                            serde_json::from_str::<EventNotification>(notification.payload())
+                        {
+                            if tx.send(parsed).await.is_err() {
                                 break;
                             }
                         }

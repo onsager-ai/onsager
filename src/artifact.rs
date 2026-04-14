@@ -190,7 +190,7 @@ pub struct HorizontalLineage {
 // ---------------------------------------------------------------------------
 
 /// A single append-only record about artifact quality.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QualitySignal {
     /// Signal origin.
     pub source: QualitySource,
@@ -216,7 +216,9 @@ pub enum QualitySource {
 }
 
 /// Quality signal value — either a numeric score or a discrete label.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `f64` blocks `Eq`; only `PartialEq` is derived.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum QualityValue {
     Score(f64),
