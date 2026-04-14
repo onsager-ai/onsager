@@ -259,8 +259,8 @@ pub enum FactoryEventKind {
     SynodicRuleVersionCreated { rule_id: String, version: u32 },
 
     // -- Ising events (observation) -----------------------------------------
-    /// An insight was generated and recorded.
-    InsightRecorded {
+    /// An insight passed validation and was recorded on the spine.
+    IsingInsightDetected {
         insight_id: String,
         kind: InsightKind,
         scope: InsightScope,
@@ -268,11 +268,20 @@ pub enum FactoryEventKind {
         confidence: f64,
     },
 
-    /// An insight was proposed as a Synodic rule candidate.
-    RuleProposed {
+    /// An insight was deduplicated or fell below confidence threshold (audit trail).
+    IsingInsightSuppressed { insight_id: String, reason: String },
+
+    /// An insight was packaged as a rule proposal for Synodic.
+    IsingRuleProposed {
         insight_id: String,
         proposed_rule_description: String,
     },
+
+    /// An analyzer encountered an error during its run.
+    IsingAnalyzerError { analyzer: String, error: String },
+
+    /// Ising finished catching up from a lag position.
+    IsingCatchupCompleted { events_processed: u64 },
 }
 
 impl FactoryEventKind {
@@ -314,8 +323,11 @@ impl FactoryEventKind {
             Self::SynodicRuleApproved { .. } => "synodic.rule_approved",
             Self::SynodicRuleDisabled { .. } => "synodic.rule_disabled",
             Self::SynodicRuleVersionCreated { .. } => "synodic.rule_version_created",
-            Self::InsightRecorded { .. } => "ising.insight_recorded",
-            Self::RuleProposed { .. } => "ising.rule_proposed",
+            Self::IsingInsightDetected { .. } => "ising.insight_detected",
+            Self::IsingInsightSuppressed { .. } => "ising.insight_suppressed",
+            Self::IsingRuleProposed { .. } => "ising.rule_proposed",
+            Self::IsingAnalyzerError { .. } => "ising.analyzer_error",
+            Self::IsingCatchupCompleted { .. } => "ising.catchup_completed",
         }
     }
 
@@ -357,7 +369,11 @@ impl FactoryEventKind {
             | Self::SynodicRuleApproved { .. }
             | Self::SynodicRuleDisabled { .. }
             | Self::SynodicRuleVersionCreated { .. } => "synodic",
-            Self::InsightRecorded { .. } | Self::RuleProposed { .. } => "ising",
+            Self::IsingInsightDetected { .. }
+            | Self::IsingInsightSuppressed { .. }
+            | Self::IsingRuleProposed { .. }
+            | Self::IsingAnalyzerError { .. }
+            | Self::IsingCatchupCompleted { .. } => "ising",
         }
     }
 
@@ -399,8 +415,11 @@ impl FactoryEventKind {
             Self::SynodicRuleApproved { rule_id, .. } => rule_id.clone(),
             Self::SynodicRuleDisabled { rule_id, .. } => rule_id.clone(),
             Self::SynodicRuleVersionCreated { rule_id, .. } => rule_id.clone(),
-            Self::InsightRecorded { insight_id, .. } => insight_id.clone(),
-            Self::RuleProposed { insight_id, .. } => insight_id.clone(),
+            Self::IsingInsightDetected { insight_id, .. } => insight_id.clone(),
+            Self::IsingInsightSuppressed { insight_id, .. } => insight_id.clone(),
+            Self::IsingRuleProposed { insight_id, .. } => insight_id.clone(),
+            Self::IsingAnalyzerError { analyzer, .. } => analyzer.clone(),
+            Self::IsingCatchupCompleted { .. } => "ising".to_string(),
         }
     }
 }

@@ -361,9 +361,11 @@ Written to `events_ext` under the `ising` namespace.
 
 | Event type | When emitted |
 |---|---|
-| `insight.created` | New insight generated from factory observation |
-| `insight.forwarded` | Insight forwarded to Forge's scheduling kernel |
-| `insight.crystallized` | Insight promoted into a Synodic rule proposal |
+| `ising.insight_detected` | Insight passed validation and was recorded on the spine |
+| `ising.insight_suppressed` | Insight was deduplicated or below confidence threshold (audit trail) |
+| `ising.rule_proposed` | Insight packaged as a rule proposal for Synodic |
+| `ising.analyzer_error` | An analyzer encountered an error during its run |
+| `ising.catchup_completed` | Ising finished catching up from a lag position |
 
 ### 8.5 Node events (core)
 
