@@ -12,7 +12,11 @@ use std::fmt;
 // Identity
 // ---------------------------------------------------------------------------
 
-/// Globally unique, stable artifact identifier. Format: `art_<hex>`.
+/// Globally unique, stable artifact identifier.
+///
+/// Format: `art_<26-char-ulid>`, e.g. `art_01HXYZABC123DEFGHJKMNPQRST`.
+/// ULIDs are 128-bit time-sortable identifiers: lexicographic order matches
+/// creation order, and collision probability is negligible at any realistic scale.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ArtifactId(String);
 
@@ -22,10 +26,12 @@ impl ArtifactId {
         Self(id.into())
     }
 
-    /// Generate a new random artifact ID.
+    /// Generate a new unique artifact ID using ULID.
+    ///
+    /// Returns a string of the form `art_<26-char-ulid>`.
     pub fn generate() -> Self {
-        let hex = &uuid::Uuid::new_v4().to_string()[..8];
-        Self(format!("art_{hex}"))
+        let ulid = ulid::Ulid::new().to_string();
+        Self(format!("art_{ulid}"))
     }
 
     pub fn as_str(&self) -> &str {
@@ -311,7 +317,7 @@ mod tests {
     fn artifact_id_format() {
         let id = ArtifactId::generate();
         assert!(id.as_str().starts_with("art_"));
-        assert_eq!(id.as_str().len(), 12); // "art_" + 8 hex chars
+        assert_eq!(id.as_str().len(), 30); // "art_" + 26-char ULID
     }
 
     #[test]
@@ -387,5 +393,42 @@ mod tests {
         let label = QualityValue::Label("pass".into());
         let json = serde_json::to_string(&label).unwrap();
         assert_eq!(json, r#""pass""#);
+    }
+
+    #[test]
+    fn artifact_id_generate_uniqueness() {
+        use std::collections::HashSet;
+        let ids: HashSet<String> = (0..10_000)
+            .map(|_| ArtifactId::generate().as_str().to_owned())
+            .collect();
+        assert_eq!(
+            ids.len(),
+            10_000,
+            "expected 10 000 unique IDs, got duplicates"
+        );
+    }
+
+    #[test]
+    fn artifact_id_generate_lexicographic_order() {
+        // ULID is time-sortable: IDs generated in an earlier millisecond
+        // always sort before IDs generated in a later millisecond.
+        // Two batches separated by a 2ms sleep land in different milliseconds,
+        // so every ID in batch_b must sort after every ID in batch_a.
+        let batch_a: Vec<String> = (0..5)
+            .map(|_| ArtifactId::generate().as_str().to_owned())
+            .collect();
+
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        let batch_b: Vec<String> = (0..5)
+            .map(|_| ArtifactId::generate().as_str().to_owned())
+            .collect();
+
+        let max_a = batch_a.iter().max().unwrap();
+        let min_b = batch_b.iter().min().unwrap();
+        assert!(
+            min_b > max_a,
+            "later batch should sort after earlier batch: max_a={max_a}, min_b={min_b}"
+        );
     }
 }
