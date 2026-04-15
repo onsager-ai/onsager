@@ -32,8 +32,8 @@ services:
       PGPASSWORD: onsager
     entrypoint: >
       sh -c "
-        psql -h db -U onsager -d onsager -f /migrations/001_initial.sql &&
-        psql -h db -U onsager -d onsager -f /migrations/002_artifacts.sql
+        psql -X -v ON_ERROR_STOP=1 -h db -U onsager -d onsager -f /migrations/001_initial.sql &&
+        psql -X -v ON_ERROR_STOP=1 -h db -U onsager -d onsager -f /migrations/002_artifacts.sql
       "
 
 volumes:

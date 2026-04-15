@@ -39,7 +39,7 @@ lint-ui:
 dev: dev-infra
     #!/usr/bin/env bash
     set -euo pipefail
-    trap 'kill $(jobs -p) 2>/dev/null' EXIT
+    trap 'pids=$(jobs -p); [ -n "$pids" ] && kill $pids 2>/dev/null || true' EXIT
 
     echo "==> Starting stiglab on :3000..."
     ONSAGER_DATABASE_URL="postgres://onsager:onsager@localhost:5432/onsager" \
@@ -68,7 +68,7 @@ dev-infra:
     echo "==> Starting Postgres..."
     docker compose up db -d --wait
     echo "==> Running spine migrations..."
-    docker compose up migrate --exit-code-from migrate
+    docker compose run --rm migrate
     echo "==> Infrastructure ready."
 
 # Stop infrastructure

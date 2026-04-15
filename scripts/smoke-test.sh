@@ -45,12 +45,24 @@ check "html"     "$DASHBOARD_URL"             '<'
 
 echo ""
 echo "-- Spine (Postgres) --"
-if psql "$SPINE_URL" -c "SELECT 1 FROM events LIMIT 0;" > /dev/null 2>&1; then
-    echo "  PASS  events table accessible"
-    PASS=$((PASS + 1))
+if command -v psql > /dev/null 2>&1; then
+    if psql "$SPINE_URL" -c "SELECT 1 FROM events LIMIT 0;" > /dev/null 2>&1; then
+        echo "  PASS  events table accessible"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL  events table  (db unreachable via local psql)"
+        FAIL=$((FAIL + 1))
+    fi
+elif command -v docker > /dev/null 2>&1 && docker compose version > /dev/null 2>&1; then
+    if docker compose exec -T db psql -U onsager -d onsager -c "SELECT 1 FROM events LIMIT 0;" > /dev/null 2>&1; then
+        echo "  PASS  events table accessible"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL  events table  (db unreachable via docker compose)"
+        FAIL=$((FAIL + 1))
+    fi
 else
-    echo "  FAIL  events table  (psql not available or db unreachable)"
-    FAIL=$((FAIL + 1))
+    echo "  SKIP  events table  (no psql or docker compose available)"
 fi
 
 echo ""

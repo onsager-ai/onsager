@@ -39,9 +39,8 @@ apps/
 Prerequisites: Docker, Rust toolchain (via rustup), pnpm.
 
 ```bash
-cp .env.example .env            # configure environment
-just dev-infra                  # start Postgres + run migrations
-just dev                        # start stiglab + synodic + dashboard
+cp .env.example .env            # configure environment (reference for docker-compose)
+just dev                        # start Postgres, run migrations, and launch services
 just smoke-test                 # verify everything works (in another terminal)
 ```
 
