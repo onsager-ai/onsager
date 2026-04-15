@@ -277,8 +277,10 @@ mod tests {
         use std::sync::atomic::{AtomicI64, Ordering};
         use tokio::sync::Semaphore;
 
-        let db_url = std::env::var("DATABASE_URL")
-            .expect("DATABASE_URL must be set to run listener integration tests");
+        let Some(db_url) = std::env::var("DATABASE_URL").ok() else {
+            eprintln!("skipping: DATABASE_URL not set");
+            return;
+        };
 
         let store = EventStore::connect(&db_url).await.unwrap();
         let tag = format!("backfill_test_{}", ulid::Ulid::new());
