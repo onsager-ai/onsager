@@ -11,13 +11,14 @@ direct calls.
 
 ```
          onsager-spine (event bus lib)
-        /              \
-   stiglab           synodic        <- do NOT depend on each other
+        /       |        |        \
+   forge    stiglab   synodic    ising    <- do NOT depend on each other
 ```
 
-**Architectural invariant**: `stiglab` and `synodic` must NOT import each other,
-and must NOT be statically linked into the same binary. The `onsager` dispatcher
-has zero business dependencies -- it discovers subsystem binaries on PATH.
+**Architectural invariant**: subsystems (`forge`, `stiglab`, `synodic`, `ising`)
+must NOT import each other, and must NOT be statically linked into the same
+binary. The `onsager` dispatcher has zero business dependencies -- it discovers
+subsystem binaries on PATH.
 
 ## Workspace layout
 
@@ -25,6 +26,8 @@ has zero business dependencies -- it discovers subsystem binaries on PATH.
 crates/
   onsager-spine/   <- event bus client library
   onsager/         <- dispatcher CLI (~100 LOC, no business deps)
+  forge/           <- production line — drives artifacts through their lifecycle (lib + bin)
+  ising/           <- continuous improvement engine — observes and surfaces insights (lib + bin)
   stiglab/         <- distributed AI agent session orchestration (lib + bin)
   synodic/         <- AI agent governance (lib + bin)
 apps/
