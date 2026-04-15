@@ -1,0 +1,119 @@
+# Onsager production stack.
+#
+# Usage:
+#   cp .env.example .env          # fill in secrets
+#   docker compose build           # build images
+#   docker compose up -d           # start everything
+#   docker compose logs -f         # tail logs
+#   docker compose down            # stop
+#
+# The stack:
+#   db       — PostgreSQL 16 (shared event spine + stiglab + synodic)
+#   migrate  — runs spine + synodic Postgres migrations, then exits
+#   stiglab  — sessions, agents, dashboard UI (port 3000)
+#   synodic  — governance API (port 3001)
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-onsager}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-onsager}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - onsager-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-onsager}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../crates/onsager-spine/migrations:/spine-migrations:ro
+      - ../crates/synodic/migrations/pg:/synodic-migrations:ro
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    entrypoint: >
+      sh -c "
+        echo '==> Running spine migrations...' &&
+        psql -X -v ON_ERROR_STOP=1
+          -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
+          -f /spine-migrations/001_initial.sql &&
+        psql -X -v ON_ERROR_STOP=1
+          -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
+          -f /spine-migrations/002_artifacts.sql &&
+        echo '==> Running synodic migrations...' &&
+        psql -X -v ON_ERROR_STOP=1
+          -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
+          -f /synodic-migrations/001_initial_schema.sql &&
+        psql -X -v ON_ERROR_STOP=1
+          -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
+          -f /synodic-migrations/002_seed_data.sql &&
+        psql -X -v ON_ERROR_STOP=1
+          -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
+          -f /synodic-migrations/003_pipeline_runs.sql &&
+        psql -X -v ON_ERROR_STOP=1
+          -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
+          -f /synodic-migrations/004_governance_events.sql &&
+        echo '==> Migrations complete.'
+      "
+
+  stiglab:
+    build:
+      context: ..
+      dockerfile: crates/stiglab/deploy/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${STIGLAB_PORT:-3000}:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      STIGLAB_HOST: "0.0.0.0"
+      STIGLAB_PORT: "3000"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-onsager}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onsager}"
+      ONSAGER_DATABASE_URL: "postgres://${POSTGRES_USER:-onsager}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onsager}"
+      STIGLAB_NODE_NAME: "${STIGLAB_NODE_NAME:-main}"
+      STIGLAB_MAX_SESSIONS: "${STIGLAB_MAX_SESSIONS:-4}"
+      # GitHub OAuth (optional — auth disabled when unset)
+      GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
+      GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
+      STIGLAB_CREDENTIAL_KEY: "${STIGLAB_CREDENTIAL_KEY:-}"
+      STIGLAB_PUBLIC_URL: "${STIGLAB_PUBLIC_URL:-}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  synodic:
+    build:
+      context: ..
+      dockerfile: deploy/synodic.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${SYNODIC_PORT:-3001}:3001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: "3001"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-onsager}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onsager}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3001/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  onsager-db:

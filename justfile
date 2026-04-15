@@ -110,6 +110,36 @@ test-all: test-spine test-rust test-ui
 smoke-test:
     bash scripts/smoke-test.sh
 
+# ── Deploy (production) ──────────────────────────────────────────────
+
+# Build production Docker images
+deploy-build:
+    docker compose -f deploy/docker-compose.yml build
+
+# Start the production stack (Postgres + migrations + stiglab + synodic)
+deploy-up:
+    docker compose -f deploy/docker-compose.yml up -d
+
+# Stop the production stack
+deploy-down:
+    docker compose -f deploy/docker-compose.yml down
+
+# Tail production logs
+deploy-logs:
+    docker compose -f deploy/docker-compose.yml logs -f
+
+# Full deploy: build images then start everything
+deploy: deploy-build deploy-up
+    #!/usr/bin/env bash
+    echo ""
+    echo "=== Onsager production stack running ==="
+    echo "  Dashboard:  http://localhost:${STIGLAB_PORT:-3000}"
+    echo "  Stiglab:    http://localhost:${STIGLAB_PORT:-3000}/api/health"
+    echo "  Synodic:    http://localhost:${SYNODIC_PORT:-3001}/api/health"
+    echo ""
+    echo "Logs:  just deploy-logs"
+    echo "Stop:  just deploy-down"
+
 # ── Install from source ──────────────────────────────────────────────
 install:
     cargo install --path crates/onsager
