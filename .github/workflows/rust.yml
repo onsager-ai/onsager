@@ -74,6 +74,9 @@ jobs:
           psql "$DATABASE_URL" -f crates/onsager-spine/migrations/002_artifacts.sql
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-      - run: cargo test --workspace
+      - name: Test onsager-spine (serial — shares DB)
+        run: cargo test -p onsager-spine -- --test-threads=1
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      - name: Test remaining crates
+        run: cargo test --workspace --exclude onsager-spine
