@@ -217,6 +217,57 @@ mod tests {
     }
 
     #[test]
+    fn test_task_to_session() {
+        let task = Task {
+            id: "task_001".to_string(),
+            prompt: "Implement feature X".to_string(),
+            node_id: None,
+            working_dir: Some("/home/user/project".to_string()),
+            allowed_tools: None,
+            max_turns: Some(10),
+            model: Some("claude-sonnet-4-20250514".to_string()),
+            system_prompt: None,
+            permission_mode: None,
+            created_at: Utc::now(),
+        };
+
+        let session = task_to_session(&task, "node_42");
+
+        assert_eq!(session.task_id, "task_001");
+        assert_eq!(session.node_id, "node_42");
+        assert_eq!(session.state, SessionState::Pending);
+        assert_eq!(session.prompt, "Implement feature X");
+        assert_eq!(session.working_dir.as_deref(), Some("/home/user/project"));
+        assert!(session.output.is_none());
+        // Session ID should be a valid UUID
+        assert!(uuid::Uuid::parse_str(&session.id).is_ok());
+    }
+
+    #[test]
+    fn test_session_to_shaping_result_partial() {
+        let req = sample_request();
+        let session = Session {
+            id: "sess_003".to_string(),
+            task_id: "req_001".to_string(),
+            node_id: "node_1".to_string(),
+            state: SessionState::Running,
+            prompt: "Fix the login bug".to_string(),
+            output: Some("Partial progress".to_string()),
+            working_dir: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let result = session_to_shaping_result(&req, &session, 10000);
+
+        assert_eq!(
+            result.outcome,
+            onsager_spine::factory_event::ShapingOutcome::Partial
+        );
+        assert!(result.error.is_none());
+    }
+
+    #[test]
     fn test_session_to_shaping_result_failed() {
         let req = sample_request();
         let session = Session {
