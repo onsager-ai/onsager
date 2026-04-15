@@ -4,18 +4,14 @@
 ///
 /// In production, this connects to the event spine, instantiates the analyzer
 /// registry, and runs the core observation loop. For v0.1, this is a skeleton.
-pub fn run(database_url: &str, tick_ms: u64) {
+pub fn run(_database_url: &str, tick_ms: u64) {
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async move {
         tracing_subscriber::fmt()
             .with_env_filter("ising=info")
             .init();
 
-        tracing::info!(
-            database_url = database_url,
-            tick_ms = tick_ms,
-            "ising: starting observation loop"
-        );
+        tracing::info!(tick_ms = tick_ms, "ising: starting observation loop");
 
         // In production this would:
         // 1. Connect to the event spine (EventStore)

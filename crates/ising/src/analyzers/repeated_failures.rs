@@ -53,6 +53,10 @@ impl Analyzer for RepeatedFailuresAnalyzer {
     }
 
     fn run(&self, model: &FactoryModel) -> Vec<Insight> {
+        if self.config.window_size == 0 {
+            return Vec::new();
+        }
+
         let mut insights = Vec::new();
 
         for tracked in model.artifacts.values() {
@@ -65,9 +69,8 @@ impl Analyzer for RepeatedFailuresAnalyzer {
                     .iter()
                     .rev()
                     .take(self.config.window_size)
-                    .enumerate()
-                    .map(|(i, _)| FactoryEventRef {
-                        event_id: (i + 1) as i64,
+                    .map(|record| FactoryEventRef {
+                        event_id: record.event_id,
                         event_type: "forge.shaping_returned".into(),
                     })
                     .collect();
