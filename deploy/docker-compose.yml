@@ -10,8 +10,14 @@
 # The stack:
 #   db       — PostgreSQL 16 (shared event spine + stiglab + synodic)
 #   migrate  — runs spine + synodic Postgres migrations, then exits
-#   stiglab  — sessions, agents, dashboard UI (port 3000)
+#   stiglab  — sessions, agents, dashboard UI + Claude Code CLI (port 3000)
 #   synodic  — governance API (port 3001)
+#
+# Agent sessions:
+#   Stiglab's built-in runner spawns `claude` (Claude Code CLI) as a subprocess.
+#   The AGENT_WORKSPACE_DIR host directory is bind-mounted into the container
+#   so agents can clone repos and make changes that persist across restarts.
+#   Credentials (CLAUDE_CODE_OAUTH_TOKEN) are added via Dashboard > Settings.
 
 services:
   db:
@@ -76,6 +82,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    volumes:
+      - ${AGENT_WORKSPACE_DIR:-./workspace}:/workspace
     environment:
       STIGLAB_HOST: "0.0.0.0"
       STIGLAB_PORT: "3000"
@@ -83,6 +91,7 @@ services:
       ONSAGER_DATABASE_URL: "postgres://${POSTGRES_USER:-onsager}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onsager}"
       STIGLAB_NODE_NAME: "${STIGLAB_NODE_NAME:-main}"
       STIGLAB_MAX_SESSIONS: "${STIGLAB_MAX_SESSIONS:-4}"
+      STIGLAB_AGENT_COMMAND: "${STIGLAB_AGENT_COMMAND:-claude}"
       # GitHub OAuth (optional — auth disabled when unset)
       GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"

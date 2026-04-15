@@ -28,11 +28,24 @@ RUN mkdir -p crates/onsager-spine/src crates/stiglab/src \
 COPY crates/ crates/
 RUN find crates -name "*.rs" | xargs touch && cargo build --release -p stiglab
 
-# ---- Stage 3: Runtime ----
+# ---- Stage 3: Node.js for runtime (glibc-compatible) ----
+FROM node:20-bookworm-slim AS node-runtime
+RUN npm install -g @anthropic-ai/claude-code
+
+# ---- Stage 4: Runtime ----
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates libssl3 libsqlite3-0 libgcc-s1 libstdc++6 \
+      curl git \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy Node.js + Claude Code CLI from the glibc-based node image
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/bin/npm /usr/local/bin/npm
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+# Claude Code CLI installed globally via npm
+COPY --from=node-runtime /usr/local/bin/claude /usr/local/bin/claude
+
 WORKDIR /app
 COPY --from=rust-builder /app/target/release/stiglab /app/stiglab
 COPY --from=ui-builder /app/apps/dashboard/dist /app/static
