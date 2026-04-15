@@ -18,6 +18,8 @@ use onsager_spine::factory_event::{FactoryEventKind, ShapingOutcome};
 /// A tracked shaping attempt.
 #[derive(Debug, Clone)]
 pub struct ShapingRecord {
+    /// The spine event ID that produced this record (for traceable evidence).
+    pub event_id: i64,
     pub request_id: String,
     pub artifact_id: ArtifactId,
     pub outcome: ShapingOutcome,
@@ -119,6 +121,7 @@ impl FactoryModel {
                 }
 
                 self.shaping_records.push(ShapingRecord {
+                    event_id,
                     request_id: request_id.clone(),
                     artifact_id: artifact_id.clone(),
                     outcome: *outcome,

@@ -49,6 +49,10 @@ impl Analyzer for StuckArtifactsAnalyzer {
     }
 
     fn run(&self, model: &FactoryModel) -> Vec<Insight> {
+        if self.config.max_shapings == 0 {
+            return Vec::new();
+        }
+
         let mut insights = Vec::new();
 
         for tracked in model.artifacts.values() {
@@ -61,10 +65,21 @@ impl Analyzer for StuckArtifactsAnalyzer {
             }
 
             if tracked.shaping_count > self.config.max_shapings {
-                let evidence = vec![FactoryEventRef {
-                    event_id: model.last_event_id.unwrap_or(0),
-                    event_type: "forge.shaping_returned".into(),
-                }];
+                // Use real event IDs from shaping history for traceable evidence.
+                let history = model.shaping_history(&tracked.artifact_id);
+                let evidence: Vec<FactoryEventRef> = history
+                    .iter()
+                    .rev()
+                    .take(3)
+                    .map(|record| FactoryEventRef {
+                        event_id: record.event_id,
+                        event_type: "forge.shaping_returned".into(),
+                    })
+                    .collect();
+
+                if evidence.is_empty() {
+                    continue;
+                }
 
                 // Confidence increases with how far over the threshold we are.
                 let over_ratio = tracked.shaping_count as f64 / self.config.max_shapings as f64;

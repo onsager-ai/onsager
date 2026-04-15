@@ -13,7 +13,7 @@
 //! ```
 
 use onsager_spine::artifact::ArtifactState;
-use onsager_spine::factory_event::{GatePoint, VerdictSummary};
+use onsager_spine::factory_event::{GatePoint, ShapingOutcome, VerdictSummary};
 use onsager_spine::protocol::{
     GateContext, GateRequest, GateVerdict, ProposedAction, ShapingDecision, ShapingRequest,
     ShapingResult,
@@ -84,7 +84,6 @@ pub struct ForgePipeline<S: StiglabDispatcher, G: SynodicGate> {
     pub state: ForgeState,
     stiglab: S,
     synodic: G,
-    request_counter: u64,
 }
 
 impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
@@ -94,7 +93,6 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
             state: ForgeState::new(),
             stiglab,
             synodic,
-            request_counter: 0,
         }
     }
 
@@ -190,8 +188,7 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
         }
 
         // Dispatch to Stiglab.
-        self.request_counter += 1;
-        let request_id = format!("req_{:08x}", self.request_counter);
+        let request_id = ulid::Ulid::new().to_string();
         let shaping_request = ShapingRequest {
             request_id: request_id.clone(),
             artifact_id: decision.artifact_id.clone(),
@@ -216,6 +213,19 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
             outcome: format!("{:?}", result.outcome),
         });
 
+        // Short-circuit on unsuccessful outcomes — don't advance state
+        // (forge-v0.1 §5.4: Failed/Aborted → artifact stays in previous state).
+        if matches!(
+            result.outcome,
+            ShapingOutcome::Failed | ShapingOutcome::Aborted
+        ) {
+            output.events.push(PipelineEvent::Error(format!(
+                "shaping {:?} for {}: not advancing state",
+                result.outcome, decision.artifact_id
+            )));
+            return output;
+        }
+
         // Gate check: state transition.
         let transition_gate = GateRequest {
             context: GateContext {
@@ -231,7 +241,7 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
                     "advance {} from {} to {}",
                     decision.artifact_id, artifact.state, decision.target_state
                 ),
-                payload: serde_json::to_value(&result).unwrap_or_default(),
+                payload: serde_json::to_value(&result).expect("ShapingResult must be serializable"),
             },
         };
 
@@ -433,5 +443,40 @@ mod tests {
             .events
             .iter()
             .any(|e| matches!(e, PipelineEvent::IdleTick)));
+    }
+
+    #[test]
+    fn tick_does_not_advance_on_failed_shaping() {
+        /// Mock Stiglab that always fails.
+        struct MockStiglabFail;
+        impl StiglabDispatcher for MockStiglabFail {
+            fn dispatch(&self, req: &ShapingRequest) -> ShapingResult {
+                ShapingResult {
+                    request_id: req.request_id.clone(),
+                    outcome: ShapingOutcome::Failed,
+                    content_ref: None,
+                    change_summary: "shaping failed".into(),
+                    quality_signals: vec![],
+                    session_id: "mock_session".into(),
+                    duration_ms: 100,
+                    error: Some(onsager_spine::protocol::ErrorDetail {
+                        code: "test_failure".into(),
+                        message: "mock failure".into(),
+                        retriable: Some(true),
+                    }),
+                }
+            }
+        }
+
+        let mut pipeline = ForgePipeline::new(MockStiglabFail, MockSynodicAllow);
+        let id = pipeline.store.register(Kind::Code, "test-art", "marvin");
+
+        let kernel = BaselineKernel::new();
+        pipeline.tick(&kernel);
+
+        // Artifact should remain in Draft — not advanced
+        let art = pipeline.store.get(&id).unwrap();
+        assert_eq!(art.state, ArtifactState::Draft);
+        assert_eq!(art.current_version, 0);
     }
 }
