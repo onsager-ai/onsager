@@ -45,6 +45,9 @@ just dev                        # start stiglab + synodic + dashboard
 just smoke-test                 # verify everything works (in another terminal)
 ```
 
+To run agent sessions, add your `CLAUDE_CODE_OAUTH_TOKEN` via
+Dashboard > Settings > Credentials (encrypted at rest, passed to agents as env vars).
+
 Services:
 - **Dashboard**: http://localhost:5173 (Vite dev server with HMR)
 - **Stiglab API**: http://localhost:3000 (sessions, nodes, WebSocket)
