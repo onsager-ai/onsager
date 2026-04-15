@@ -1,4 +1,5 @@
 /target
+.env
 **/*.rs.bak
 /node_modules
 **/node_modules

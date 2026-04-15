@@ -1,0 +1,40 @@
+# Onsager dev infrastructure.
+# Usage:
+#   just dev-infra          # start Postgres + run migrations
+#   just dev-down           # tear down
+#   docker compose up db -d # Postgres only (manual migration)
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: onsager
+      POSTGRES_PASSWORD: onsager
+      POSTGRES_DB: onsager
+    ports:
+      - "5432:5432"
+    volumes:
+      - onsager-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onsager"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  migrate:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./crates/onsager-spine/migrations:/migrations:ro
+    environment:
+      PGPASSWORD: onsager
+    entrypoint: >
+      sh -c "
+        psql -h db -U onsager -d onsager -f /migrations/001_initial.sql &&
+        psql -h db -U onsager -d onsager -f /migrations/002_artifacts.sql
+      "
+
+volumes:
+  onsager-db:
