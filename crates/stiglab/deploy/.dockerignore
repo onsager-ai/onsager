@@ -1,0 +1,14 @@
+target/
+node_modules/
+**/node_modules
+.git/
+*.md
+.github/
+.vscode/
+.idea/
+docker-compose.yml
+
+# Avoid leaking secrets in build context
+.env
+.env.*
+.env.local

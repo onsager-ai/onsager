@@ -1,0 +1,67 @@
+name: swarm
+description: "Speculative swarm — divergent exploration with convergence detection"
+config:
+  max_forks: 3
+  convergence_threshold: 0.8
+  max_checkpoints: 3
+
+steps:
+  - name: strategize
+    type: agent
+    prompt: skills/swarm/prompts/strategize.md
+    tools: [Read, Glob, Grep, Bash]
+    max_turns: 20
+    output_schema: schemas/strategy-set.json
+    context:
+      spec_path: ${spec.path}
+
+  - name: explore
+    type: fan
+    mode: parallel
+    over: strategies
+    step:
+      name: branch-solve
+      type: agent
+      prompt: skills/swarm/prompts/branch-solve.md
+      tools: [Read, Edit, Write, Bash, Glob, Grep]
+      max_turns: 50
+      isolation: worktree
+      output_schema: schemas/branch-report.json
+
+  - name: checkpoint-loop
+    type: fan
+    mode: loop
+    max_iterations: 3
+    termination:
+      consecutive_clean: 2
+    steps:
+      - name: checkpoint
+        type: run
+        command: orchestra swarm checkpoint
+
+      - name: prune
+        type: run
+        command: orchestra swarm prune
+
+  - name: merge
+    type: agent
+    prompt: skills/swarm/prompts/merge.md
+    tools: [Read, Edit, Write, Bash, Glob, Grep]
+    max_turns: 30
+    isolation: worktree
+    output_schema: schemas/merge-report.json
+    context:
+      branches: ${steps.explore.output}
+
+  - name: merge-gate
+    type: run
+    check: [preflight]
+    match: ["*.rs", "*.ts", "*.py"]
+    retry: 1
+    on_fail: rework(merge)
+
+  - name: create-pr
+    type: run
+    command: |
+      git push -u origin HEAD &&
+      gh pr create --title "swarm: ${spec.path}" --body "Automated swarm pipeline output"

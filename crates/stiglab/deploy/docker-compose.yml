@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: stiglab
+      POSTGRES_PASSWORD: stiglab
+      POSTGRES_DB: stiglab
+    ports:
+      - "5432:5432"
+    volumes:
+      - stiglab-db:/var/lib/postgresql/data
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["server"]
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+    environment:
+      STIGLAB_HOST: "0.0.0.0"
+      STIGLAB_PORT: "3000"
+      DATABASE_URL: "postgres://stiglab:stiglab@db:5432/stiglab"
+      # Built-in runner is enabled by default; set STIGLAB_NO_RUNNER=true to disable
+      STIGLAB_NODE_NAME: "main"
+      STIGLAB_MAX_SESSIONS: "4"
+
+  # Optional: additional agent nodes for horizontal scaling
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["agent"]
+    depends_on:
+      - server
+    environment:
+      STIGLAB_SERVER_URL: "ws://server:3000/agent/ws"
+      STIGLAB_NODE_NAME: "agent-1"
+      STIGLAB_MAX_SESSIONS: "4"
+    profiles:
+      - scale  # Only start with: docker compose --profile scale up
+
+volumes:
+  stiglab-db:

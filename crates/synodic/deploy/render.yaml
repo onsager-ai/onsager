@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: synodic
+    runtime: docker
+    dockerfilePath: ../docker/Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        value: /data/synodic.db
+    disk:
+      name: synodic-data
+      mountPath: /data
+      sizeGB: 1

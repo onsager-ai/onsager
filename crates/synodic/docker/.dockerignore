@@ -1,0 +1,6 @@
+rust/target
+packages/ui/node_modules
+packages/ui/dist
+.git
+.harness/.runs
+*.db

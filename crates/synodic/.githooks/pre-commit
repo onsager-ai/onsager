@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# pre-commit — L1 fast gate: formatting check before commit.
+#
+# Catches formatting issues instantly (<1s) so they never enter git history.
+# Runs only when .rs files are staged.
+set -euo pipefail
+
+# Check if any Rust files are staged
+STAGED_RS=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
+if [ -z "$STAGED_RS" ]; then
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+echo "pre-commit: checking cargo fmt..."
+if ! (cd "$REPO_ROOT/rust" && cargo fmt --all -- --check 2>&1); then
+  echo ""
+  echo "ERROR: Rust code is not formatted."
+  echo "Fix:   cd rust && cargo fmt --all"
+  echo ""
+  exit 1
+fi

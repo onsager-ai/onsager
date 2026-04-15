@@ -1,0 +1,16 @@
+language: rust
+
+checks:
+  - name: format
+    run: "cd rust && cargo fmt --all -- --check"
+    fix: "cd rust && cargo fmt --all"
+    stage: commit
+  - name: lint
+    run: "cd rust && cargo clippy --all-targets -- -D warnings"
+    stage: push
+  - name: test
+    run: "cd rust && cargo test"
+
+pipeline:
+  max_rework: 3
+  auto_merge: false
