@@ -46,6 +46,16 @@ COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 # Claude Code CLI installed globally via npm
 COPY --from=node-runtime /usr/local/bin/claude /usr/local/bin/claude
 
+# Git credential helper — reads GITHUB_TOKEN from env at push time.
+# Users add GITHUB_TOKEN as a credential in Dashboard > Settings; stiglab
+# injects it as an env var into the claude subprocess, and this helper
+# feeds it to git for HTTPS auth.
+RUN printf '#!/bin/sh\necho "username=x-access-token\npassword=${GITHUB_TOKEN}"\n' \
+      > /usr/local/bin/git-credential-env \
+    && chmod +x /usr/local/bin/git-credential-env \
+    && git config --system credential.helper /usr/local/bin/git-credential-env \
+    && git config --system --add safe.directory '*'
+
 WORKDIR /app
 COPY --from=rust-builder /app/target/release/stiglab /app/stiglab
 COPY --from=ui-builder /app/apps/dashboard/dist /app/static
