@@ -1,22 +1,55 @@
-[package]
-name = "onsager"
+[workspace]
+resolver = "2"
+members = [
+    "crates/onsager-spine",
+    "crates/onsager",
+    "crates/stiglab",
+    "crates/synodic",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0"
-description = "Client library for the Onsager event spine — shared PostgreSQL event stream coordination for the onsager-ai polyrepo."
+repository = "https://github.com/onsager-ai/onsager"
 
-[dependencies]
+[workspace.dependencies]
+# Core async
 tokio = { version = "1", features = ["full"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "json", "uuid"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "serde"] }
-ulid = { version = "1", features = ["serde"] }
-thiserror = "2"
-anyhow = "1"
-tracing = "0.1"
 async-trait = "0.1"
 
-[dev-dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Time and IDs
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Tracing
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "any", "postgres", "sqlite", "chrono", "json", "uuid"] }
+
+# HTTP / Web
+axum = { version = "0.8", features = ["ws"] }
+axum-extra = { version = "0.10", features = ["cookie"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+reqwest = { version = "0.12", features = ["json"] }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util = "0.3"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Crypto / encoding
+rand = "0.8"
+base64 = "0.22"
+ring = "0.17"
+hex = "0.4"

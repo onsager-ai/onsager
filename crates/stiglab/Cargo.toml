@@ -1,0 +1,45 @@
+[package]
+name = "stiglab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Distributed AI agent session orchestration — part of the Onsager factory stack"
+
+[lib]
+name = "stiglab"
+path = "src/lib.rs"
+
+[[bin]]
+name = "stiglab"
+path = "src/main.rs"
+
+[dependencies]
+onsager-spine = { path = "../onsager-spine" }
+
+# From stiglab-core
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+
+# From stiglab-server
+tokio = { workspace = true }
+axum = { workspace = true }
+sqlx = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+tower-http = { workspace = true }
+futures-util = { workspace = true }
+reqwest = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
+ring = { workspace = true }
+hex = { workspace = true }
+axum-extra = { workspace = true }
+
+# From stiglab-agent
+tokio-tungstenite = { workspace = true }
+clap = { workspace = true }
+hostname = "0.4"

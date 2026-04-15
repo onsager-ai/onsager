@@ -1,0 +1,48 @@
+{
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["PASS", "FAIL"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "pages_tested": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "route": { "type": "string" },
+          "status": { "type": "string", "enum": ["PASS", "FAIL", "SKIP"] },
+          "notes": { "type": "string" },
+          "viewports": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "enum": ["desktop", "mobile"] },
+                "status": { "type": "string", "enum": ["PASS", "FAIL", "SKIP"] },
+                "screenshot": { "type": "string", "description": "Path to screenshot file" },
+                "notes": { "type": "string" }
+              },
+              "required": ["name", "status", "screenshot"]
+            }
+          }
+        },
+        "required": ["route", "status", "notes", "viewports"]
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "crystallized": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["verdict", "summary", "pages_tested", "issues", "crystallized"]
+}

@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# pre-push — L1 full gate: lint + test before push.
+#
+# Last line of defense before code leaves the local machine.
+# Runs clippy and tests when .rs files have changed since the remote.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Read push info from stdin (required by git pre-push protocol)
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Skip delete pushes
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  # Determine base to diff against
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    # New branch — diff against main
+    BASE="origin/main"
+  else
+    BASE="$remote_sha"
+  fi
+
+  # Check if any Rust files changed
+  CHANGED_RS=$(git diff --name-only "$BASE".."$local_sha" 2>/dev/null | grep '\.rs$' || true)
+  if [ -z "$CHANGED_RS" ]; then
+    continue
+  fi
+
+  echo "pre-push: Rust files changed — running L1 checks..."
+
+  # L1: cargo fmt
+  echo "  ▸ cargo fmt --check"
+  if ! (cd "$REPO_ROOT/rust" && cargo fmt --all -- --check >/dev/null 2>&1); then
+    echo "    FAIL — run: cd rust && cargo fmt --all"
+    exit 1
+  fi
+  echo "    PASS"
+
+  # L1: cargo clippy
+  echo "  ▸ cargo clippy"
+  if ! (cd "$REPO_ROOT/rust" && cargo clippy --all-targets -- -D warnings 2>&1 | tail -5); then
+    echo "    FAIL"
+    exit 1
+  fi
+  echo "    PASS"
+
+  # L1: cargo test
+  echo "  ▸ cargo test"
+  if ! (cd "$REPO_ROOT/rust" && cargo test 2>&1 | tail -10); then
+    echo "    FAIL"
+    exit 1
+  fi
+  echo "    PASS"
+
+  echo "pre-push: all L1 checks passed."
+done

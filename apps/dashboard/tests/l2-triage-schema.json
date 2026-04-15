@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "failed_tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "test": { "type": "string" },
+          "expected": { "type": "string" },
+          "actual": { "type": "string" },
+          "diagnosis": { "type": "string", "enum": ["regression", "flaky", "environment"] }
+        },
+        "required": ["test", "expected", "actual", "diagnosis"]
+      }
+    },
+    "root_cause": {
+      "type": "string"
+    },
+    "suggested_fix": {
+      "type": "string"
+    }
+  },
+  "required": ["failed_tests", "root_cause", "suggested_fix"]
+}

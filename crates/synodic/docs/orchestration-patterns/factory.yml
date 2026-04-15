@@ -1,0 +1,47 @@
+name: factory
+description: "Linear BUILD → INSPECT pipeline for spec-driven development"
+config:
+  max_rework: 3
+  static_rework_cap: 2
+
+steps:
+  - name: build
+    type: agent
+    prompt: skills/factory/prompts/build.md
+    tools: [Read, Edit, Write, Bash, Glob, Grep]
+    max_turns: 50
+    isolation: worktree
+    output_schema: schemas/build-report.json
+    context:
+      spec_path: ${spec.path}
+
+  - name: static-gate
+    type: run
+    check: [preflight]
+    match: ["*.rs", "*.ts", "*.py"]
+    retry: 2
+    on_fail: rework(build)
+
+  - name: inspect
+    type: agent
+    prompt: skills/factory/prompts/inspect.md
+    tools: [Read, Glob, Grep, Bash]
+    max_turns: 20
+    output_schema: schemas/inspect-verdict.json
+    context:
+      build_diff: ${steps.build.output}
+      spec_path: ${spec.path}
+
+  - name: route
+    type: branch
+    input: steps.inspect.output
+    approve: create-pr
+    rework: build
+    max_iterations: 3
+    exhaust: escalate
+
+  - name: create-pr
+    type: run
+    command: |
+      git push -u origin HEAD &&
+      gh pr create --title "factory: ${spec.path}" --body "Automated factory pipeline output"

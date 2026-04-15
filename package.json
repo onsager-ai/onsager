@@ -1,0 +1,12 @@
+{
+  "name": "onsager-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter dashboard dev",
+    "build": "pnpm --filter dashboard build",
+    "lint": "pnpm --filter dashboard lint",
+    "test": "pnpm --filter dashboard test"
+  },
+  "packageManager": "pnpm@9.15.9"
+}

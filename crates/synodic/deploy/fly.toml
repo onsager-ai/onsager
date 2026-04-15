@@ -1,0 +1,22 @@
+app = "synodic"
+primary_region = "iad"
+
+[build]
+  dockerfile = "../docker/Dockerfile"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+
+  [[http_service.checks]]
+    path = "/api/health"
+    interval = 30000
+    timeout = 5000
+    grace_period = "10s"
+
+[mounts]
+  source = "synodic_data"
+  destination = "/data"
+
+[env]
+  DATABASE_URL = "/data/synodic.db"

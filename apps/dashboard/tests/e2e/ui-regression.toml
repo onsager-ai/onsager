@@ -1,0 +1,86 @@
+# Web UI Route Contract — L1 E2E Regression
+#
+# Defines what each route must render. The deterministic e2e tests
+# verify these assertions via agent-browser. When L2 validates new
+# behavior on a PR, it crystallizes findings here + in test files.
+#
+# Sections:
+#   [route.*]     — page-level content assertions
+#   [flow.*]      — multi-step interaction sequences
+#   [invariant.*] — properties that must hold across all routes
+
+# ─── Routes ────────────────────────────────────────────────────
+
+[route.dashboard]
+path = "/"
+must_contain = ["Nodes Online", "Active Sessions", "Waiting Input", "Completed", "Recent Sessions"]
+must_not_contain = ["undefined", "NaN", "Error"]
+
+[route.sessions]
+path = "/sessions"
+must_contain = ["Sessions", "All Sessions"]
+must_not_contain = ["undefined", "NaN"]
+
+[route.session_detail]
+path = "/sessions/test-id"
+must_contain_any = ["not found", "Not found", "Loading", "Session Details"]
+must_not_contain = ["Cannot read properties", "Uncaught", "undefined"]
+
+[route.nodes]
+path = "/nodes"
+must_contain = ["Nodes", "Registered Nodes"]
+must_not_contain = ["undefined", "NaN"]
+
+[route.settings]
+path = "/settings"
+must_contain = ["Settings", "Credentials", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "Custom credential"]
+must_not_contain = ["undefined", "NaN"]
+
+# ─── Flows ─────────────────────────────────────────────────────
+
+[flow.sidebar_navigation]
+description = "Navigate between all pages using sidebar links"
+steps = [
+  "Open /",
+  "Verify Dashboard content loads",
+  "Click Sessions link in sidebar",
+  "Verify URL changed to /sessions",
+  "Click Nodes link in sidebar",
+  "Verify URL changed to /nodes",
+  "Click Dashboard link in sidebar",
+  "Verify URL changed to /",
+]
+
+[flow.theme_toggle]
+description = "Toggle between light and dark themes"
+steps = [
+  "Open /",
+  "Find and click theme toggle button",
+  "Verify theme changed (class or attribute on html/body)",
+  "Click theme toggle again",
+  "Verify theme reverted",
+]
+
+[flow.session_click_through]
+description = "Click a session row to view its detail page"
+steps = [
+  "Open /sessions",
+  "If sessions exist, click the first session link",
+  "Verify navigation to /sessions/:id",
+  "Verify session detail content renders",
+  "If no sessions, verify empty state message",
+]
+
+# ─── Invariants ────────────────────────────────────────────────
+
+[invariant.no_console_errors]
+description = "No uncaught errors or unhandled rejections on any page"
+check = "Visit each route and verify no JavaScript errors in console"
+
+[invariant.no_broken_layout]
+description = "All pages render without layout breakage"
+check = "Each route should have the sidebar/nav and main content area"
+
+[invariant.graceful_api_failure]
+description = "UI degrades gracefully when API is unreachable"
+check = "Pages should show loading or empty states, not crash"

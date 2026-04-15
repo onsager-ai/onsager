@@ -1,0 +1,79 @@
+name: rust
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      onsager-spine: ${{ steps.filter.outputs.onsager-spine }}
+      stiglab: ${{ steps.filter.outputs.stiglab }}
+      synodic: ${{ steps.filter.outputs.synodic }}
+      onsager: ${{ steps.filter.outputs.onsager }}
+      workspace: ${{ steps.filter.outputs.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            workspace:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+            onsager-spine:
+              - 'crates/onsager-spine/**'
+            stiglab:
+              - 'crates/stiglab/**'
+              - 'crates/onsager-spine/**'
+            synodic:
+              - 'crates/synodic/**'
+              - 'crates/onsager-spine/**'
+            onsager:
+              - 'crates/onsager/**'
+
+  check:
+    needs: changes
+    if: |
+      needs.changes.outputs.workspace == 'true' ||
+      needs.changes.outputs.onsager-spine == 'true' ||
+      needs.changes.outputs.stiglab == 'true' ||
+      needs.changes.outputs.synodic == 'true' ||
+      needs.changes.outputs.onsager == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo build --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Apply database migrations
+        run: |
+          psql "$DATABASE_URL" -f crates/onsager-spine/migrations/001_initial.sql
+          psql "$DATABASE_URL" -f crates/onsager-spine/migrations/002_artifacts.sql
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      - run: cargo test --workspace
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres

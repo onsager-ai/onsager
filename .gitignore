@@ -1,6 +1,12 @@
 /target
-Cargo.lock
-*.swp
-*.swo
-.env
+**/*.rs.bak
+/node_modules
+**/node_modules
 .DS_Store
+*.swp
+/.idea
+/.vscode/settings.json
+/Cargo.lock
+**/dist
+**/.turbo
+**/.next

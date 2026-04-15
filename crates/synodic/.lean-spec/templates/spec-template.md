@@ -1,0 +1,32 @@
+---
+status: planned
+created: '{date}'
+tags: []
+priority: medium
+---
+
+# {name}
+
+> **Status**: {status} · **Priority**: {priority} · **Created**: {date}
+
+## Overview
+<!-- What are we solving? Why now? -->
+
+## Design
+<!-- Technical approach, architecture decisions -->
+
+## Plan
+<!-- Break down implementation into steps -->
+
+- [ ] Task 1
+- [ ] Task 2
+- [ ] Task 3
+
+## Test
+<!-- How will we verify this works? -->
+
+- [ ] Test criteria 1
+- [ ] Test criteria 2
+
+## Notes
+<!-- Optional: Research findings, alternatives considered, open questions -->

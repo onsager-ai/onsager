@@ -1,0 +1,43 @@
+[package]
+name = "synodic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AI agent governance — L1 git hooks + L2 Claude Code hooks + event spine integration"
+
+[lib]
+name = "synodic"
+path = "src/lib.rs"
+
+[[bin]]
+name = "synodic"
+path = "src/main.rs"
+
+[features]
+default = ["sqlite"]
+postgres = ["sqlx/postgres"]
+sqlite = ["sqlx/sqlite"]
+
+[dependencies]
+onsager-spine = { path = "../onsager-spine" }
+
+# Merged from harness-core and harness-cli
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+anyhow = { workspace = true }
+regex = "1"
+sqlx = { workspace = true, features = ["runtime-tokio", "chrono", "uuid", "json"] }
+tokio = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+async-trait = "0.1"
+indicatif = "0.17"
+console = "0.15"
+reqwest = { workspace = true }
+clap = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true, features = ["fs", "cors"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

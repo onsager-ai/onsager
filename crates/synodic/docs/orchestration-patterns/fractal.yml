@@ -1,0 +1,77 @@
+name: fractal
+description: "Recursive DECOMPOSE → SOLVE → REUNIFY tree for complex tasks"
+config:
+  max_depth: 3
+  max_total_nodes: 20
+  complexity_threshold: 30
+  solve_mode: lightweight
+
+steps:
+  - name: complexity-check
+    type: run
+    command: orchestra fractal complexity -i ${spec.path}
+
+  - name: decompose
+    type: fan
+    mode: loop
+    max_iterations: 3
+    until: all_leaves
+    steps:
+      - name: decompose-agent
+        type: agent
+        prompt: skills/fractal/prompts/decompose.md
+        tools: [Read, Glob, Grep, Bash]
+        max_turns: 30
+        output_schema: schemas/decompose-verdict.json
+        context:
+          spec_path: ${spec.path}
+
+      - name: decompose-gate
+        type: run
+        command: orchestra fractal gate
+
+  - name: schedule
+    type: run
+    command: orchestra fractal schedule
+
+  - name: solve
+    type: fan
+    mode: parallel
+    over: pending_nodes
+    step:
+      name: solve-leaf
+      type: agent
+      prompt: skills/fractal/prompts/solve.md
+      tools: [Read, Edit, Write, Bash, Glob, Grep]
+      max_turns: 50
+      isolation: worktree
+      output_schema: schemas/solve-report.json
+
+  - name: solve-gate
+    type: run
+    check: [preflight]
+    match: ["*.rs", "*.ts", "*.py"]
+    retry: 1
+
+  - name: reunify
+    type: run
+    command: orchestra fractal reunify
+
+  - name: reunify-resolve
+    type: agent
+    prompt: skills/fractal/prompts/reunify.md
+    tools: [Read, Edit, Write, Bash, Glob, Grep]
+    max_turns: 30
+    condition: steps.reunify.status
+    context:
+      conflicts: ${steps.reunify.output}
+
+  - name: prune
+    type: run
+    command: orchestra fractal prune
+
+  - name: create-pr
+    type: run
+    command: |
+      git push -u origin HEAD &&
+      gh pr create --title "fractal: ${spec.path}" --body "Automated fractal pipeline output"
