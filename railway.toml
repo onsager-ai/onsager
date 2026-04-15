@@ -1,0 +1,64 @@
+# Onsager — Railway config-as-code.
+#
+# This monorepo deploys as a Railway project with multiple services:
+#
+#   Service       | Description                          | Port
+#   ------------- | ------------------------------------ | ----
+#   stiglab       | Sessions, agents, dashboard, API     | 3000
+#   synodic       | Governance API                       | 3001
+#   PostgreSQL    | Shared event spine (Railway plugin)  | 5432
+#
+# Quick start:
+#   1. Create a Railway project and connect this repo
+#   2. Add a PostgreSQL plugin (auto-provides DATABASE_URL)
+#   3. Default service → stiglab (uses this config)
+#   4. Add a second service from this repo for synodic:
+#        - Override build: dockerfilePath = "deploy/synodic.Dockerfile"
+#        - Set variable: PORT = 3001
+#        - Set variable: DATABASE_URL = ${{Postgres.DATABASE_URL}}
+#   5. Set required variables for stiglab (see [deploy] section below)
+#
+# Migrations:
+#   Stiglab's entrypoint auto-applies onsager-spine migrations on startup
+#   when ONSAGER_DATABASE_URL is set. Synodic migrations must be applied
+#   manually or via a one-off Railway service — see deploy/docker-compose.yml
+#   migrate service for the full migration list.
+
+# =============================================================================
+# Stiglab — primary service (sessions + dashboard + agent runner)
+# =============================================================================
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "crates/stiglab/deploy/Dockerfile"
+watchPatterns = [
+    "crates/onsager-spine/**",
+    "crates/stiglab/**",
+    "apps/dashboard/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "pnpm-lock.yaml",
+]
+
+[deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+numReplicas = 1
+
+# Required environment variables (set in Railway dashboard):
+#
+#   DATABASE_URL              — auto-injected by Railway Postgres plugin
+#   ONSAGER_DATABASE_URL      — set to ${{Postgres.DATABASE_URL}} (spine migrations + event bus)
+#   STIGLAB_CREDENTIAL_KEY    — 32-byte hex AES-256-GCM key (openssl rand -hex 32)
+#   PORT                      — auto-injected by Railway (stiglab reads STIGLAB_PORT)
+#
+# Optional:
+#
+#   STIGLAB_NODE_NAME         — runner node identifier (default: main)
+#   STIGLAB_MAX_SESSIONS      — max concurrent agent sessions (default: 4)
+#   STIGLAB_AGENT_COMMAND     — CLI binary for agents (default: claude)
+#   STIGLAB_PUBLIC_URL        — public URL for OAuth callbacks (e.g. https://<app>.up.railway.app)
+#   GITHUB_CLIENT_ID          — GitHub OAuth app client ID
+#   GITHUB_CLIENT_SECRET      — GitHub OAuth app client secret
