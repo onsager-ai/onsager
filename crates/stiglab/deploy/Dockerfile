@@ -11,15 +11,38 @@ RUN pnpm --filter dashboard build
 # ---- Stage 2: Build Rust ----
 FROM rust:1.94-bookworm AS rust-builder
 WORKDIR /app
-# Cache dependencies: copy manifests first
+# Cache dependencies: copy ALL workspace member manifests first.
+# Cargo requires every member listed in [workspace.members] to have a
+# Cargo.toml before it can resolve the workspace — missing manifests cause
+# "no such file or directory" errors even when building a single crate (-p).
 COPY Cargo.toml Cargo.lock ./
 COPY crates/onsager-spine/Cargo.toml crates/onsager-spine/Cargo.toml
-COPY crates/stiglab/Cargo.toml crates/stiglab/Cargo.toml
-# Create dummy source files for dependency caching
-RUN mkdir -p crates/onsager-spine/src crates/stiglab/src \
-    && echo "fn main() {}" > crates/stiglab/src/main.rs \
-    && touch crates/onsager-spine/src/lib.rs \
-    && touch crates/stiglab/src/lib.rs \
+COPY crates/onsager/Cargo.toml       crates/onsager/Cargo.toml
+COPY crates/forge/Cargo.toml         crates/forge/Cargo.toml
+COPY crates/ising/Cargo.toml         crates/ising/Cargo.toml
+COPY crates/stiglab/Cargo.toml       crates/stiglab/Cargo.toml
+COPY crates/synodic/Cargo.toml       crates/synodic/Cargo.toml
+# Create dummy source files so Cargo can compile each crate stub.
+# Crates with [lib] need src/lib.rs; crates with [[bin]] need src/main.rs.
+RUN mkdir -p \
+      crates/onsager-spine/src \
+      crates/onsager/src \
+      crates/forge/src \
+      crates/ising/src \
+      crates/stiglab/src \
+      crates/synodic/src \
+    && touch \
+      crates/onsager-spine/src/lib.rs \
+      crates/forge/src/lib.rs \
+      crates/ising/src/lib.rs \
+      crates/stiglab/src/lib.rs \
+      crates/synodic/src/lib.rs \
+    && echo "fn main() {}" | tee \
+      crates/onsager/src/main.rs \
+      crates/forge/src/main.rs \
+      crates/ising/src/main.rs \
+      crates/stiglab/src/main.rs \
+      crates/synodic/src/main.rs \
     && cargo build --release -p stiglab 2>/dev/null || true
 # Copy actual source and rebuild.
 # Touch all .rs files so their mtime is newer than the dummy-build artifacts —
