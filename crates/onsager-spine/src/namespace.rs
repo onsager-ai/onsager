@@ -1,6 +1,6 @@
 //! Namespace partitioning for the `events_ext` table.
 //!
-//! Each component in the onsager-ai polyrepo owns a namespace that scopes its
+//! Each subsystem in the Onsager monorepo owns a namespace that scopes its
 //! extension events. Adding a new component means adding a well-known constant
 //! to [`Namespace`].
 
@@ -59,8 +59,13 @@ impl Namespace {
     }
 
     // -- Well-known constants ---------------------------------------------------
-    // These are the soft contract for namespace ownership across the polyrepo.
+    // These are the soft contract for namespace ownership across the monorepo.
     // Adding a new component means adding a constant here.
+
+    /// Namespace for the forge component.
+    pub fn forge() -> Self {
+        Self::new("forge").unwrap()
+    }
 
     /// Namespace for the stiglab component.
     pub fn stiglab() -> Self {
@@ -148,6 +153,7 @@ mod tests {
 
     #[test]
     fn well_known_constants() {
+        assert_eq!(Namespace::forge().as_str(), "forge");
         assert_eq!(Namespace::stiglab().as_str(), "stiglab");
         assert_eq!(Namespace::synodic().as_str(), "synodic");
         assert_eq!(Namespace::ising().as_str(), "ising");

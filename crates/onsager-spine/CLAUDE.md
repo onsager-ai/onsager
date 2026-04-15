@@ -12,19 +12,17 @@ This is a **library crate** (no binaries). The public surface is:
 
 The library does **not** manage schema. The SQL contract lives in `migrations/001_initial.sql`; downstream services apply it themselves.
 
-## Polyrepo
+## Monorepo
 
-**Subsystem repos** (each has a spec in `specs/`) under `onsager-ai/`:
+All subsystems live under `crates/` in the workspace root:
 
-- `stiglab` — AI agent orchestration
-- `synodic` — policy enforcement
-- `ising` — evaluation framework
+- `forge` — production line (artifact lifecycle, scheduling kernel)
+- `stiglab` — AI agent session orchestration
+- `synodic` — AI agent governance
+- `ising` — continuous improvement engine (factory observation)
 
-**Adapter repos** (no subsystem spec; hold a reserved namespace in `events_ext`):
-
-- `telegramable` — Telegram-first human interface
-
-Each lives in its own repo with its own CI and codebase.
+Each depends on `onsager-spine` via `path = "../onsager-spine"`.
+Subsystems must NOT import each other.
 
 ## Build & Test
 
