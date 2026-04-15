@@ -48,3 +48,46 @@ impl ServerConfig {
         self.github_client_id.is_some() && self.github_client_secret.is_some()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_config(client_id: Option<&str>, client_secret: Option<&str>) -> ServerConfig {
+        ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 3000,
+            database_url: "sqlite://test.db".to_string(),
+            static_dir: None,
+            cors_origin: None,
+            github_client_id: client_id.map(|s| s.to_string()),
+            github_client_secret: client_secret.map(|s| s.to_string()),
+            credential_key: None,
+            public_url: None,
+        }
+    }
+
+    #[test]
+    fn auth_enabled_when_both_set() {
+        let config = make_config(Some("id"), Some("secret"));
+        assert!(config.auth_enabled());
+    }
+
+    #[test]
+    fn auth_disabled_when_id_missing() {
+        let config = make_config(None, Some("secret"));
+        assert!(!config.auth_enabled());
+    }
+
+    #[test]
+    fn auth_disabled_when_secret_missing() {
+        let config = make_config(Some("id"), None);
+        assert!(!config.auth_enabled());
+    }
+
+    #[test]
+    fn auth_disabled_when_both_missing() {
+        let config = make_config(None, None);
+        assert!(!config.auth_enabled());
+    }
+}

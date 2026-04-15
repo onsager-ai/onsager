@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/onsager-spine",
     "crates/onsager",
+    "crates/forge",
+    "crates/ising",
     "crates/stiglab",
     "crates/synodic",
 ]

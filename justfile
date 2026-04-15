@@ -37,6 +37,12 @@ lint-ui:
 dev-dashboard:
     pnpm --filter dashboard dev
 
+dev-forge:
+    cargo run -p forge -- serve --database-url "${DATABASE_URL}"
+
+dev-ising:
+    cargo run -p ising -- serve --database-url "${DATABASE_URL}"
+
 dev-stiglab:
     cargo run -p stiglab -- serve
 
@@ -51,5 +57,7 @@ db-migrate:
 # ── Install from source ──────────────────────────────────────────────
 install:
     cargo install --path crates/onsager
+    cargo install --path crates/forge
+    cargo install --path crates/ising
     cargo install --path crates/stiglab
     cargo install --path crates/synodic

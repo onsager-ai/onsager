@@ -267,4 +267,81 @@ mod tests {
         );
         assert_eq!(parse_cookie("theme=dark", "stiglab_session"), None);
     }
+
+    #[test]
+    fn test_parse_cookie_empty() {
+        assert_eq!(parse_cookie("", "stiglab_session"), None);
+    }
+
+    #[test]
+    fn test_parse_cookie_no_value() {
+        assert_eq!(
+            parse_cookie("stiglab_session; theme=dark", "stiglab_session"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_parse_cookie_whitespace() {
+        assert_eq!(
+            parse_cookie("  stiglab_session = abc123 ; theme=dark", "stiglab_session"),
+            Some("abc123")
+        );
+    }
+
+    #[test]
+    fn test_generate_session_token_uniqueness() {
+        let t1 = generate_session_token();
+        let t2 = generate_session_token();
+        assert_ne!(t1, t2);
+        assert_eq!(t1.len(), 64); // 32 bytes hex-encoded
+    }
+
+    #[test]
+    fn test_generate_state_uniqueness() {
+        let s1 = generate_state();
+        let s2 = generate_state();
+        assert_ne!(s1, s2);
+        assert_eq!(s1.len(), 32); // 16 bytes hex-encoded
+    }
+
+    #[test]
+    fn test_generate_credential_key_length() {
+        let key = generate_credential_key();
+        assert_eq!(key.len(), 64); // 32 bytes hex-encoded
+                                   // Should be valid hex
+        assert!(hex::decode(&key).is_ok());
+    }
+
+    #[test]
+    fn test_decrypt_with_wrong_key_fails() {
+        let key1 = generate_credential_key();
+        let key2 = generate_credential_key();
+        let encrypted = encrypt_credential(&key1, "secret").unwrap();
+        assert!(decrypt_credential(&key2, &encrypted).is_err());
+    }
+
+    #[test]
+    fn test_decrypt_invalid_data() {
+        let key = generate_credential_key();
+        assert!(decrypt_credential(&key, "tooshort").is_err());
+        assert!(decrypt_credential(&key, "not-hex!").is_err());
+    }
+
+    #[test]
+    fn test_github_authorize_url() {
+        let url = github_authorize_url("client123", "https://example.com/callback", "state456");
+        assert!(url.contains("client_id=client123"));
+        assert!(url.contains("state=state456"));
+        assert!(url.contains("scope=read%3Auser"));
+        assert!(url.starts_with("https://github.com/login/oauth/authorize"));
+    }
+
+    #[test]
+    fn test_auth_user_anonymous() {
+        let user = AuthUser::anonymous();
+        assert_eq!(user.user_id, "anonymous");
+        assert_eq!(user.github_login, "anonymous");
+        assert!(user.github_name.is_none());
+    }
 }
