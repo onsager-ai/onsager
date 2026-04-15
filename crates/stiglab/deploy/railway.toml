@@ -1,5 +1,8 @@
+# Stiglab Railway service config.
+# In Railway dashboard, set root directory to "/" (repo root).
+
 [build]
-dockerfilePath = "Dockerfile"
+dockerfilePath = "crates/stiglab/deploy/Dockerfile"
 
 [deploy]
 healthcheckPath = "/api/health"
