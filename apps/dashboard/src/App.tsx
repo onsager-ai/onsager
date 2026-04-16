@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ThemeProvider } from "@/components/providers/ThemeProvider"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { AppLayout } from "@/components/layout/AppLayout"
-import { DashboardPage } from "@/pages/DashboardPage"
+import { FactoryOverviewPage } from "@/pages/FactoryOverviewPage"
+import { ArtifactDetailPage } from "@/pages/ArtifactDetailPage"
 import { NodesPage } from "@/pages/NodesPage"
 import { SessionsPage } from "@/pages/SessionsPage"
 import { SessionDetailPage } from "@/pages/SessionDetailPage"
@@ -73,13 +74,14 @@ function AppRoutes() {
           <ProtectedRoute>
             <AppLayout>
               <Routes>
-                <Route path="/" element={<DashboardPage />} />
-                <Route path="/nodes" element={<NodesPage />} />
+                <Route path="/" element={<FactoryOverviewPage />} />
+                <Route path="/artifacts" element={<ArtifactsPage />} />
+                <Route path="/artifacts/:id" element={<ArtifactDetailPage />} />
+                <Route path="/spine" element={<SpinePage />} />
+                <Route path="/governance" element={<GovernancePage />} />
                 <Route path="/sessions" element={<SessionsPage />} />
                 <Route path="/sessions/:id" element={<SessionDetailPage />} />
-                <Route path="/governance" element={<GovernancePage />} />
-                <Route path="/artifacts" element={<ArtifactsPage />} />
-                <Route path="/spine" element={<SpinePage />} />
+                <Route path="/nodes" element={<NodesPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             </AppLayout>

@@ -39,6 +39,33 @@ impl SpineEmitter {
         self.store.pool()
     }
 
+    /// Emit a raw event to the extension event table under a given namespace.
+    /// Used for events that don't map to a `FactoryEventKind` variant (e.g.,
+    /// artifact registration from the dashboard).
+    pub async fn emit_raw(
+        &self,
+        stream_id: &str,
+        namespace: &str,
+        event_type: &str,
+        data: &serde_json::Value,
+    ) -> Result<i64, sqlx::Error> {
+        let metadata = EventMetadata {
+            correlation_id: None,
+            causation_id: None,
+            actor: namespace.to_string(),
+        };
+        self.store
+            .append_ext(
+                stream_id,
+                namespace,
+                event_type,
+                data.clone(),
+                &metadata,
+                None,
+            )
+            .await
+    }
+
     /// Emit a session-started event.
     pub async fn emit_session_started(
         &self,

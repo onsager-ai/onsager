@@ -1,4 +1,4 @@
-import { LayoutDashboard, Plus, Server, Terminal, Settings, LogOut, Shield, Package, Activity } from "lucide-react"
+import { Factory, Plus, Server, Terminal, Settings, LogOut, Shield, Package, Activity } from "lucide-react"
 import { OnsagerLogo } from "./OnsagerLogo"
 import { Link, useLocation } from "react-router-dom"
 import {
@@ -15,21 +15,16 @@ import {
 } from "@/components/ui/sidebar"
 import { ThemeToggle } from "./ThemeToggle"
 import { useAuth } from "@/lib/auth"
-import { CreateSessionSheet } from "@/components/sessions/CreateSessionSheet"
+import { CreateArtifactSheet } from "@/components/factory/CreateArtifactSheet"
 import { Button } from "@/components/ui/button"
 
 const navSections = [
   {
-    label: "Overview",
+    label: "Factory",
     items: [
-      { title: "Dashboard", icon: LayoutDashboard, path: "/" },
-    ],
-  },
-  {
-    label: "Agents",
-    items: [
-      { title: "Sessions", icon: Terminal, path: "/sessions" },
-      { title: "Nodes", icon: Server, path: "/nodes" },
+      { title: "Overview", icon: Factory, path: "/" },
+      { title: "Artifacts", icon: Package, path: "/artifacts" },
+      { title: "Event Spine", icon: Activity, path: "/spine" },
     ],
   },
   {
@@ -39,10 +34,10 @@ const navSections = [
     ],
   },
   {
-    label: "Factory",
+    label: "Infrastructure",
     items: [
-      { title: "Artifacts", icon: Package, path: "/artifacts" },
-      { title: "Event Spine", icon: Activity, path: "/spine" },
+      { title: "Sessions", icon: Terminal, path: "/sessions" },
+      { title: "Nodes", icon: Server, path: "/nodes" },
     ],
   },
   {
@@ -92,12 +87,12 @@ export function AppSidebar() {
         ))}
         <SidebarGroup>
           <SidebarGroupContent>
-            <CreateSessionSheet>
+            <CreateArtifactSheet>
               <Button variant="outline" className="w-full justify-start gap-2">
                 <Plus className="h-4 w-4" />
-                <span>New Session</span>
+                <span>Register Artifact</span>
               </Button>
-            </CreateSessionSheet>
+            </CreateArtifactSheet>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
