@@ -1,0 +1,118 @@
+name: e2e
+
+# Live E2E tests — runs real Claude sessions against the full Onsager stack.
+# These verify the product works end-to-end, not just that the code compiles.
+#
+# Requires secrets:
+#   CLAUDE_CODE_OAUTH_TOKEN — Claude Code credentials for the agent
+#
+# Runs: nightly + manual trigger + on main merges
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      onsager_url:
+        description: "Target Onsager URL (leave empty for local stack)"
+        required: false
+        type: string
+  push:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: onsager
+          POSTGRES_PASSWORD: onsager
+          POSTGRES_DB: onsager
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Rust build ──────────────────────────────────────────
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build stiglab + synodic
+        run: cargo build -p stiglab -p synodic --release
+
+      # ── Database setup ──────────────────────────────────────
+      - name: Run spine migrations
+        run: |
+          psql "$DATABASE_URL" -f crates/onsager-spine/migrations/001_initial.sql
+          psql "$DATABASE_URL" -f crates/onsager-spine/migrations/002_artifacts.sql
+        env:
+          DATABASE_URL: postgres://onsager:onsager@localhost:5432/onsager
+
+      # ── Node.js setup ───────────────────────────────────────
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: pnpm install
+
+      # ── Start services ──────────────────────────────────────
+      - name: Start Onsager stack
+        run: |
+          # Start synodic
+          PORT=3001 ./target/release/synodic serve &
+          SYNODIC_PID=$!
+          echo "SYNODIC_PID=$SYNODIC_PID" >> "$GITHUB_ENV"
+
+          # Start stiglab (with built-in runner)
+          ONSAGER_DATABASE_URL="$DATABASE_URL" \
+          STIGLAB_PORT=3000 \
+          STIGLAB_MAX_SESSIONS=4 \
+          STIGLAB_CREDENTIAL_KEY="$(openssl rand -hex 32)" \
+          CLAUDE_CODE_OAUTH_TOKEN="${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}" \
+            ./target/release/stiglab server &
+          STIGLAB_PID=$!
+          echo "STIGLAB_PID=$STIGLAB_PID" >> "$GITHUB_ENV"
+
+          # Wait for services to be ready
+          echo "Waiting for services..."
+          timeout 30 bash -c 'until curl -sf http://localhost:3000/api/health > /dev/null 2>&1; do sleep 1; done'
+          echo "Stiglab ready"
+          timeout 30 bash -c 'until curl -sf http://localhost:3001/api/health > /dev/null 2>&1; do sleep 1; done'
+          echo "Synodic ready"
+
+          # Wait for built-in runner to register
+          sleep 3
+          echo "Stack is up"
+        env:
+          DATABASE_URL: postgres://onsager:onsager@localhost:5432/onsager
+
+      # ── Run E2E tests ───────────────────────────────────────
+      - name: Run E2E tests
+        run: pnpm --filter onsager-e2e test
+        env:
+          ONSAGER_URL: ${{ inputs.onsager_url || 'http://localhost:3000' }}
+
+      # ── Cleanup ─────────────────────────────────────────────
+      - name: Stop services
+        if: always()
+        run: |
+          kill $STIGLAB_PID $SYNODIC_PID 2>/dev/null || true

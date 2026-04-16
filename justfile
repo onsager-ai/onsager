@@ -110,6 +110,20 @@ test-all: test-spine test-rust test-ui
 smoke-test:
     bash scripts/smoke-test.sh
 
+# ── E2E (product tests — real agent sessions) ───────────────────────
+
+# Run live E2E tests against a running Onsager stack (requires just dev + credentials)
+test-e2e:
+    pnpm --filter onsager-e2e test
+
+# Run a single E2E test file (e.g. just test-e2e-file session-lifecycle)
+test-e2e-file name:
+    pnpm --filter onsager-e2e exec vitest run "product/{{name}}.test.ts"
+
+# Run E2E tests against a remote Onsager instance
+test-e2e-remote url:
+    ONSAGER_URL="{{url}}" pnpm --filter onsager-e2e test
+
 # ── Deploy (production) ──────────────────────────────────────────────
 
 # Build production Docker images
