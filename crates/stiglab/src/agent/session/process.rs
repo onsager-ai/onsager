@@ -48,7 +48,7 @@ struct StreamEventInner {
 
 #[derive(Debug, Deserialize)]
 struct DeltaPayload {
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default)]
     delta_type: String,
     #[serde(default)]
     text: Option<String>,
@@ -189,6 +189,7 @@ impl SessionProcess {
                             let _ = tx.send(AgentMessage::SessionOutput {
                                 session_id: sid.clone(),
                                 chunk: format!("{line}\n"),
+                                stream: "stdout".to_string(),
                             });
                             continue;
                         }
@@ -205,6 +206,7 @@ impl SessionProcess {
                                                 let _ = tx.send(AgentMessage::SessionOutput {
                                                     session_id: sid.clone(),
                                                     chunk: text.clone(),
+                                                    stream: "stdout".to_string(),
                                                 });
                                             }
                                         }
@@ -218,6 +220,7 @@ impl SessionProcess {
                                             let _ = tx.send(AgentMessage::SessionOutput {
                                                 session_id: sid.clone(),
                                                 chunk: format!("[tool_use: {tool_name}]\n"),
+                                                stream: "stdout".to_string(),
                                             });
                                         }
                                     }
@@ -278,9 +281,14 @@ impl SessionProcess {
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
+                    // Skip known noisy warnings that aren't useful to users
+                    if line.contains("no stdin data received") {
+                        continue;
+                    }
                     let _ = tx.send(AgentMessage::SessionOutput {
                         session_id: sid.clone(),
-                        chunk: format!("[stderr] {line}\n"),
+                        chunk: format!("{line}\n"),
+                        stream: "stderr".to_string(),
                     });
                 }
             });

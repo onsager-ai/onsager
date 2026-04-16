@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 
-interface SSEChunk {
+export interface LogChunk {
+  text: string;
+  stream: 'stdout' | 'stderr';
+}
+
+interface SSERawChunk {
   chunk: string;
   stream: string;
 }
 
 interface SSEData {
   state: string;
-  chunks: SSEChunk[];
+  chunks: SSERawChunk[];
 }
 
 export function useSessionLogs(sessionId: string | undefined) {
-  const [logs, setLogs] = useState<string>('');
+  const [chunks, setChunks] = useState<LogChunk[]>([]);
   const [state, setState] = useState<string>('');
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -28,8 +33,11 @@ export function useSessionLogs(sessionId: string | undefined) {
           setState(data.state);
         }
         if (data.chunks && data.chunks.length > 0) {
-          const newText = data.chunks.map((c) => c.chunk).join('');
-          setLogs((prev) => prev + newText);
+          const newChunks: LogChunk[] = data.chunks.map((c) => ({
+            text: c.chunk,
+            stream: c.stream === 'stderr' ? 'stderr' : 'stdout',
+          }));
+          setChunks((prev) => [...prev, ...newChunks]);
         }
       } catch {
         // ignore parse errors
@@ -45,5 +53,5 @@ export function useSessionLogs(sessionId: string | undefined) {
     };
   }, [sessionId]);
 
-  return { logs, state };
+  return { chunks, state };
 }
