@@ -1,0 +1,56 @@
+name: deploy-ready
+
+# Catches dev/prod divergence before it reaches Railway.
+# These are lessons learned from deployment incidents — each check
+# maps to a real failure. When ising/synodic are online, these
+# checks become crystallized governance rules instead.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  deploy-ready:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Lockfiles must be committed — Railway builds from git, not local fs.
+      # Incident: Cargo.lock in .gitignore → Docker COPY failed on Railway.
+      - name: Lockfiles are tracked
+        run: |
+          git ls-files --error-unmatch Cargo.lock
+          git ls-files --error-unmatch pnpm-lock.yaml
+
+      # .gitignore must not exclude files that Dockerfiles COPY.
+      # Incident: Cargo.lock was gitignored but referenced in Dockerfile line 18.
+      - name: Dockerfiles do not COPY gitignored files
+        run: |
+          set -euo pipefail
+          status=0
+          for dockerfile in crates/stiglab/deploy/Dockerfile deploy/synodic.Dockerfile; do
+            [ -f "$dockerfile" ] || continue
+            # Extract local COPY sources (skip --from= stage references and directories)
+            grep -P '^\s*COPY\s' "$dockerfile" \
+              | grep -v -- '--from=' \
+              | sed 's/^\s*COPY\s\+//' \
+              | awk '{for(i=1;i<NF;i++) print $i}' \
+              | while read -r src; do
+                  # Skip glob patterns and variables
+                  case "$src" in *\**|*\$*) continue;; esac
+                  # Check if the file exists in git (directories are fine)
+                  if [ -f "$src" ] && ! git ls-files --error-unmatch "$src" > /dev/null 2>&1; then
+                    echo "::error file=$dockerfile::COPY source '$src' exists locally but is not tracked by git"
+                    echo "FAIL" >> /tmp/deploy-ready-failures
+                  fi
+                done
+          done
+          [ ! -f /tmp/deploy-ready-failures ] || exit 1
+
+      # Spine migrations must be valid SQL.
+      - name: Migrations are not empty
+        run: |
+          for f in crates/onsager-spine/migrations/*.sql; do
+            [ -s "$f" ] || { echo "::error file=$f::Empty migration file"; exit 1; }
+          done

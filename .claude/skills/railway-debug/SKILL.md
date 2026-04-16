@@ -34,6 +34,37 @@ Config files:
 - `crates/stiglab/deploy/entrypoint.sh` — auto-migrating entrypoint
 - `deploy/synodic.Dockerfile` — synodic build
 
+## Preflight Check
+
+**Run this before any deploy or when triaging a failure.** It catches the known
+classes of dev/prod divergence that have burned us before.
+
+```bash
+# 1. Lockfiles tracked in git (build context comes from git, not local fs)
+git ls-files --error-unmatch Cargo.lock pnpm-lock.yaml
+
+# 2. Dockerfiles don't COPY files that are gitignored
+#    (parse COPY sources from Dockerfiles, verify each is tracked)
+for f in crates/stiglab/deploy/Dockerfile deploy/synodic.Dockerfile; do
+  grep -oP '^\s*COPY\s+\K\S+' "$f" | grep -v -- '--from=' | while read src; do
+    [ -f "$src" ] && git ls-files --error-unmatch "$src" 2>/dev/null || true
+  done
+done
+
+# 3. Railway vars don't contain localhost (dev values leaked to prod)
+RAILWAY_TOKEN="$ONSAGER_RAILWAY_TOKEN" railway variable list --service onsager 2>&1 \
+  | grep -i localhost && echo "WARN: localhost found in Railway vars" || echo "OK: no localhost refs"
+
+# 4. Database URLs reference Railway plugin, not hardcoded
+RAILWAY_TOKEN="$ONSAGER_RAILWAY_TOKEN" railway variable list --service onsager 2>&1 \
+  | grep -E 'DATABASE_URL.*railway\.internal' > /dev/null \
+  && echo "OK: DATABASE_URL points to Railway Postgres" \
+  || echo "WARN: DATABASE_URL may not reference Railway Postgres plugin"
+```
+
+If any check fails, fix it before deploying. See "Common Failure Modes" below for
+specific fixes.
+
 ## Debugging Workflow
 
 ### 1. Check Service Status
