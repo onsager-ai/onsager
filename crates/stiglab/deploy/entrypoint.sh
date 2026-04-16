@@ -13,4 +13,6 @@ if [ -n "$ONSAGER_DATABASE_URL" ] && [ -d /app/spine-migrations ]; then
     echo "Spine migrations complete."
 fi
 
-exec /app/stiglab "$@"
+# Drop from root to unprivileged user.
+# Claude Code CLI refuses --permission-mode bypassPermissions under root.
+exec gosu onsager /app/stiglab "$@"

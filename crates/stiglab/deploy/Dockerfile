@@ -59,7 +59,7 @@ RUN npm install -g @anthropic-ai/claude-code
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates libssl3 libsqlite3-0 libgcc-s1 libstdc++6 \
-      curl git postgresql-client \
+      curl git postgresql-client gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Node.js + Claude Code CLI from the glibc-based node image
@@ -79,6 +79,8 @@ RUN printf '#!/bin/sh\necho "username=x-access-token\npassword=${GITHUB_TOKEN}"\
     && git config --system credential.helper /usr/local/bin/git-credential-env \
     && git config --system --add safe.directory '*'
 
+RUN useradd -m -s /bin/bash onsager
+
 WORKDIR /app
 COPY --from=rust-builder /app/target/release/stiglab /app/stiglab
 COPY --from=ui-builder /app/apps/dashboard/dist /app/static
@@ -86,6 +88,9 @@ COPY --from=ui-builder /app/apps/dashboard/dist /app/static
 COPY crates/onsager-spine/migrations/ /app/spine-migrations/
 COPY crates/stiglab/deploy/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
+
+RUN chown -R onsager:onsager /home/onsager
+
 ENV STIGLAB_STATIC_DIR=/app/static
 ENV STIGLAB_HOST=0.0.0.0
 ENTRYPOINT ["/app/entrypoint.sh"]
