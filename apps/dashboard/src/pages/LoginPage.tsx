@@ -1,4 +1,4 @@
-import { Terminal } from "lucide-react"
+import { OnsagerLogo } from "@/components/layout/OnsagerLogo"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { buttonVariants } from "@/components/ui/button"
 
@@ -7,10 +7,10 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-blue-500/10">
-            <Terminal className="h-6 w-6 text-blue-500" />
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+            <OnsagerLogo size={24} className="text-primary" />
           </div>
-          <CardTitle className="text-xl">Stiglab</CardTitle>
+          <CardTitle className="text-xl">Onsager</CardTitle>
           <CardDescription>
             Sign in to manage your distributed agent sessions.
           </CardDescription>

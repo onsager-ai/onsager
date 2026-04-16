@@ -1,4 +1,5 @@
 import { LayoutDashboard, Plus, Server, Terminal, Settings, LogOut } from "lucide-react"
+import { OnsagerLogo } from "./OnsagerLogo"
 import { Link, useLocation } from "react-router-dom"
 import {
   Sidebar,
@@ -32,8 +33,8 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="border-b px-6 py-4">
         <Link to="/" className="flex items-center gap-2">
-          <Terminal className="h-6 w-6 text-blue-500" />
-          <span className="text-lg font-semibold">Stiglab</span>
+          <OnsagerLogo size={24} />
+          <span className="text-lg font-semibold">Onsager</span>
         </Link>
       </SidebarHeader>
       <SidebarContent>

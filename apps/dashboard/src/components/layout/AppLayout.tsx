@@ -4,7 +4,8 @@ import { AppSidebar } from "./AppSidebar"
 import { BottomNav } from "./BottomNav"
 import { Separator } from "@/components/ui/separator"
 import { ThemeToggle } from "./ThemeToggle"
-import { Terminal, Plus } from "lucide-react"
+import { Plus } from "lucide-react"
+import { OnsagerLogo } from "./OnsagerLogo"
 import { Link } from "react-router-dom"
 import { CreateSessionSheet } from "@/components/sessions/CreateSessionSheet"
 import { Button } from "@/components/ui/button"
@@ -17,8 +18,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         {/* Mobile header */}
         <header className="flex h-12 items-center justify-between border-b px-4 md:hidden">
           <Link to="/" className="flex items-center gap-2">
-            <Terminal className="h-5 w-5 text-blue-500" />
-            <span className="text-base font-semibold">Stiglab</span>
+            <OnsagerLogo size={20} />
+            <span className="text-base font-semibold">Onsager</span>
           </Link>
           <div className="flex items-center gap-1">
             <CreateSessionSheet>
