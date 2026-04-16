@@ -1,0 +1,57 @@
+# Base seed catalog — the minimum set of registry entries required to
+# bootstrap the factory. See GitHub issue #14 for the design rationale.
+#
+# Bootstrap termination: this seed is applied at most once per workspace,
+# with actor="seed" on every emitted event. After the first boot, every
+# registry change goes through the normal propose/approve flow like any
+# other artifact. The seed is the base case; the recursion terminates.
+#
+# What goes here: the *recursive* base — the types/evaluators/profiles that
+# are referenced by the registry machinery itself. Everything else (the
+# engineering pipeline's `Spec`, `PullRequest`, `CiGreen`, etc.) goes through
+# the registry proper.
+name: base
+
+types:
+  - type_id: TypeDefinition
+    description: "An artifact type — the registry's self-describing meta-type."
+    adapter_id: registry.local
+    gate_ids: [HumanApproval]
+    producer_profile_id: Human
+    config:
+      managed_by: registry
+
+  - type_id: GateEvaluator
+    description: "A gate evaluator config entry (allow/deny state transitions)."
+    adapter_id: registry.local
+    gate_ids: [HumanApproval]
+    producer_profile_id: Human
+    config:
+      managed_by: registry
+
+  - type_id: AgentProfile
+    description: "An agent profile bundle (role, system prompt, tools, model)."
+    adapter_id: registry.local
+    gate_ids: [HumanApproval]
+    producer_profile_id: Human
+    config:
+      managed_by: registry
+
+adapters:
+  - adapter_id: registry.local
+    config:
+      kind: local
+      description: "In-process adapter for registry artifacts; no external ref."
+
+evaluators:
+  - evaluator_id: HumanApproval
+    config:
+      description: "Require an explicit human approval before the transition."
+      escalate_by_default: true
+
+profiles:
+  - profile_id: Human
+    role: human
+    tool_ids: []
+    config:
+      description: "Non-AI profile used when a human drives the artifact."

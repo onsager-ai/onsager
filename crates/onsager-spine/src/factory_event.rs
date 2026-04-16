@@ -284,6 +284,70 @@ pub enum FactoryEventKind {
 
     /// Ising finished catching up from a lag position.
     IsingCatchupCompleted { events_processed: u64 },
+
+    // -- Registry events (factory pipeline foundations, issue #14) ----------
+    /// A new artifact type was proposed (not yet active).
+    TypeProposed {
+        type_id: String,
+        workspace_id: String,
+        revision: i32,
+    },
+
+    /// A proposed type was approved and entered the active catalog.
+    TypeApproved {
+        type_id: String,
+        workspace_id: String,
+        revision: i32,
+    },
+
+    /// A type was deprecated (retained for audit, not used for new artifacts).
+    TypeDeprecated {
+        type_id: String,
+        workspace_id: String,
+        reason: String,
+    },
+
+    /// An adapter implementation was registered in the catalog.
+    AdapterRegistered {
+        adapter_id: String,
+        workspace_id: String,
+        revision: i32,
+    },
+
+    /// An adapter was deprecated.
+    AdapterDeprecated {
+        adapter_id: String,
+        workspace_id: String,
+        reason: String,
+    },
+
+    /// A gate evaluator was registered.
+    GateRegistered {
+        evaluator_id: String,
+        workspace_id: String,
+        revision: i32,
+    },
+
+    /// A gate evaluator was deprecated.
+    GateDeprecated {
+        evaluator_id: String,
+        workspace_id: String,
+        reason: String,
+    },
+
+    /// An agent profile was registered.
+    ProfileRegistered {
+        profile_id: String,
+        workspace_id: String,
+        revision: i32,
+    },
+
+    /// An agent profile was deprecated.
+    ProfileDeprecated {
+        profile_id: String,
+        workspace_id: String,
+        reason: String,
+    },
 }
 
 impl FactoryEventKind {
@@ -330,6 +394,15 @@ impl FactoryEventKind {
             Self::IsingRuleProposed { .. } => "ising.rule_proposed",
             Self::IsingAnalyzerError { .. } => "ising.analyzer_error",
             Self::IsingCatchupCompleted { .. } => "ising.catchup_completed",
+            Self::TypeProposed { .. } => "registry.type_proposed",
+            Self::TypeApproved { .. } => "registry.type_approved",
+            Self::TypeDeprecated { .. } => "registry.type_deprecated",
+            Self::AdapterRegistered { .. } => "registry.adapter_registered",
+            Self::AdapterDeprecated { .. } => "registry.adapter_deprecated",
+            Self::GateRegistered { .. } => "registry.gate_registered",
+            Self::GateDeprecated { .. } => "registry.gate_deprecated",
+            Self::ProfileRegistered { .. } => "registry.profile_registered",
+            Self::ProfileDeprecated { .. } => "registry.profile_deprecated",
         }
     }
 
@@ -376,6 +449,15 @@ impl FactoryEventKind {
             | Self::IsingRuleProposed { .. }
             | Self::IsingAnalyzerError { .. }
             | Self::IsingCatchupCompleted { .. } => "ising",
+            Self::TypeProposed { .. }
+            | Self::TypeApproved { .. }
+            | Self::TypeDeprecated { .. }
+            | Self::AdapterRegistered { .. }
+            | Self::AdapterDeprecated { .. }
+            | Self::GateRegistered { .. }
+            | Self::GateDeprecated { .. }
+            | Self::ProfileRegistered { .. }
+            | Self::ProfileDeprecated { .. } => "registry",
         }
     }
 
@@ -422,6 +504,15 @@ impl FactoryEventKind {
             Self::IsingRuleProposed { insight_id, .. } => insight_id.clone(),
             Self::IsingAnalyzerError { analyzer, .. } => analyzer.clone(),
             Self::IsingCatchupCompleted { .. } => "ising".to_string(),
+            Self::TypeProposed { type_id, .. }
+            | Self::TypeApproved { type_id, .. }
+            | Self::TypeDeprecated { type_id, .. } => format!("type:{type_id}"),
+            Self::AdapterRegistered { adapter_id, .. }
+            | Self::AdapterDeprecated { adapter_id, .. } => format!("adapter:{adapter_id}"),
+            Self::GateRegistered { evaluator_id, .. }
+            | Self::GateDeprecated { evaluator_id, .. } => format!("gate:{evaluator_id}"),
+            Self::ProfileRegistered { profile_id, .. }
+            | Self::ProfileDeprecated { profile_id, .. } => format!("profile:{profile_id}"),
         }
     }
 }

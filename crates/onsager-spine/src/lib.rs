@@ -23,6 +23,8 @@ pub mod factory_event;
 pub mod listener;
 pub mod namespace;
 pub mod protocol;
+pub mod registry;
+pub mod seed;
 pub mod store;
 
 pub use artifact::{
@@ -33,9 +35,13 @@ pub use extension_event::ExtensionEventRecord;
 pub use factory_event::{FactoryEvent, FactoryEventKind};
 pub use listener::{EventHandler, Listener};
 pub use namespace::{Namespace, NamespaceError};
-pub use protocol::{
-    GateRequest, GateVerdict, Insight, ShapingDecision, ShapingRequest, ShapingResult,
+pub use protocol::{GateRequest, Insight, ShapingDecision, ShapingRequest, ShapingResult};
+pub use registry::{
+    AdapterMaterial, AdapterResult, AgentProfile, ArtifactAdapter, CompositeGate, ExternalRef,
+    GateContext, GateEvaluator, GateVerdict, RegisteredType, RegistryId, RegistryStatus,
+    TypeDefinition, DEFAULT_WORKSPACE, SEED_ACTOR,
 };
+pub use seed::{apply_seed, SeedCatalog, SeedOutcome};
 pub use store::{
     append_factory_event_tx, EventMetadata, EventNotification, EventRecord, EventStore,
 };
