@@ -103,6 +103,46 @@ pub enum FactoryEventKind {
         reason: String,
     },
 
+    // -- Git lifecycle events -------------------------------------------------
+    GitBranchCreated {
+        artifact_id: ArtifactId,
+        repo: String,
+        branch: String,
+    },
+    GitCommitPushed {
+        artifact_id: ArtifactId,
+        sha: String,
+        message: String,
+        session_id: String,
+    },
+    GitPrOpened {
+        artifact_id: ArtifactId,
+        repo: String,
+        pr_number: u64,
+        url: String,
+    },
+    GitPrReviewReceived {
+        artifact_id: ArtifactId,
+        pr_number: u64,
+        reviewer: String,
+        state: String,
+    },
+    GitCiCompleted {
+        artifact_id: ArtifactId,
+        pr_number: u64,
+        check_name: String,
+        conclusion: String,
+    },
+    GitPrMerged {
+        artifact_id: ArtifactId,
+        pr_number: u64,
+        merge_sha: String,
+    },
+    GitPrClosed {
+        artifact_id: ArtifactId,
+        pr_number: u64,
+    },
+
     // -- Forge process events -----------------------------------------------
     /// ShapingRequest sent to Stiglab.
     ForgeShapingDispatched {
@@ -297,6 +337,13 @@ impl FactoryEventKind {
             Self::ArtifactQualityRecorded { .. } => "artifact.quality_recorded",
             Self::ArtifactRouted { .. } => "artifact.routed",
             Self::ArtifactArchived { .. } => "artifact.archived",
+            Self::GitBranchCreated { .. } => "git.branch_created",
+            Self::GitCommitPushed { .. } => "git.commit_pushed",
+            Self::GitPrOpened { .. } => "git.pr_opened",
+            Self::GitPrReviewReceived { .. } => "git.pr_review_received",
+            Self::GitCiCompleted { .. } => "git.ci_completed",
+            Self::GitPrMerged { .. } => "git.pr_merged",
+            Self::GitPrClosed { .. } => "git.pr_closed",
             Self::ForgeShapingDispatched { .. } => "forge.shaping_dispatched",
             Self::ForgeShapingReturned { .. } => "forge.shaping_returned",
             Self::ForgeGateRequested { .. } => "forge.gate_requested",
@@ -343,6 +390,13 @@ impl FactoryEventKind {
             | Self::ArtifactQualityRecorded { .. }
             | Self::ArtifactRouted { .. }
             | Self::ArtifactArchived { .. } => "artifact",
+            Self::GitBranchCreated { .. }
+            | Self::GitCommitPushed { .. }
+            | Self::GitPrOpened { .. }
+            | Self::GitPrReviewReceived { .. }
+            | Self::GitCiCompleted { .. }
+            | Self::GitPrMerged { .. }
+            | Self::GitPrClosed { .. } => "git",
             Self::ForgeShapingDispatched { .. }
             | Self::ForgeShapingReturned { .. }
             | Self::ForgeGateRequested { .. }
@@ -389,6 +443,13 @@ impl FactoryEventKind {
             | Self::ArtifactQualityRecorded { artifact_id, .. }
             | Self::ArtifactRouted { artifact_id, .. }
             | Self::ArtifactArchived { artifact_id, .. } => artifact_id.to_string(),
+            Self::GitBranchCreated { artifact_id, .. }
+            | Self::GitCommitPushed { artifact_id, .. }
+            | Self::GitPrOpened { artifact_id, .. }
+            | Self::GitPrReviewReceived { artifact_id, .. }
+            | Self::GitCiCompleted { artifact_id, .. }
+            | Self::GitPrMerged { artifact_id, .. }
+            | Self::GitPrClosed { artifact_id, .. } => artifact_id.to_string(),
             Self::ForgeShapingDispatched { request_id, .. } => request_id.clone(),
             Self::ForgeShapingReturned { request_id, .. } => request_id.clone(),
             Self::ForgeGateRequested { artifact_id, .. } => artifact_id.to_string(),
@@ -538,6 +599,19 @@ mod tests {
     }
 
     #[test]
+    fn git_event_types_and_streams() {
+        let event = FactoryEventKind::GitPrOpened {
+            artifact_id: ArtifactId::new("art_git123"),
+            repo: "onsager-ai/onsager".into(),
+            pr_number: 42,
+            url: "https://github.com/onsager-ai/onsager/pull/42".into(),
+        };
+        assert_eq!(event.event_type(), "git.pr_opened");
+        assert_eq!(event.stream_type(), "git");
+        assert_eq!(event.stream_id(), "art_git123");
+    }
+
+    #[test]
     fn serialization_roundtrip() {
         let event = FactoryEventKind::ArtifactStateChanged {
             artifact_id: ArtifactId::new("art_abcd1234"),
@@ -569,5 +643,22 @@ mod tests {
         let specific = InsightScope::SpecificArtifact(ArtifactId::new("art_12345678"));
         let json = serde_json::to_string(&specific).unwrap();
         assert!(json.contains("art_12345678"));
+    }
+
+    #[test]
+    fn git_events_serialize_deserialize() {
+        let event = FactoryEventKind::GitCiCompleted {
+            artifact_id: ArtifactId::new("art_pr_ci"),
+            pr_number: 7,
+            check_name: "ci/test".into(),
+            conclusion: "success".into(),
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "git_ci_completed");
+        assert_eq!(json["pr_number"], 7);
+
+        let deserialized: FactoryEventKind = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized, event);
+        assert_eq!(deserialized.event_type(), "git.ci_completed");
     }
 }

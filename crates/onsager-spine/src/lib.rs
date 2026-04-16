@@ -27,7 +27,8 @@ pub mod store;
 
 pub use artifact::{
     Artifact, ArtifactId, ArtifactState, ArtifactVersion, Consumer, ConsumerType, ContentRef,
-    HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue, VerticalLineage,
+    GitContext, HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue,
+    VerticalLineage,
 };
 pub use extension_event::ExtensionEventRecord;
 pub use factory_event::{FactoryEvent, FactoryEventKind};
