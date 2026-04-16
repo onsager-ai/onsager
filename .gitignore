@@ -7,7 +7,6 @@
 *.swp
 /.idea
 /.vscode/settings.json
-/Cargo.lock
 **/dist
 **/.turbo
 **/.next
