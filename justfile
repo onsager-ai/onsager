@@ -95,6 +95,7 @@ dev-synodic port="3001":
 db-migrate:
     psql "$DATABASE_URL" -f crates/onsager-spine/migrations/001_initial.sql
     psql "$DATABASE_URL" -f crates/onsager-spine/migrations/002_artifacts.sql
+    psql "$DATABASE_URL" -f crates/onsager-spine/migrations/003_artifact_pipeline.sql
 
 # ── Test (with spine integration) ────────────────────────────────────
 
