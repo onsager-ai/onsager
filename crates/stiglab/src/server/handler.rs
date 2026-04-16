@@ -50,7 +50,11 @@ pub async fn handle_agent_message(
             stream,
         } => {
             // Normalize: anything that isn't "stderr" is treated as "stdout"
-            let stream = if stream == "stderr" { "stderr" } else { "stdout" };
+            let stream = if stream == "stderr" {
+                "stderr"
+            } else {
+                "stdout"
+            };
             if let Err(e) = db::append_session_log(pool, &session_id, &chunk, stream).await {
                 tracing::error!("failed to append session log: {e}");
             }
