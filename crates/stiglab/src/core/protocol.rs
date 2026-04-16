@@ -6,6 +6,10 @@ use crate::core::node::NodeInfo;
 use crate::core::session::SessionState;
 use crate::core::task::Task;
 
+fn default_stdout() -> String {
+    "stdout".to_string()
+}
+
 /// Messages sent from the agent to the server over WebSocket.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -21,6 +25,9 @@ pub enum AgentMessage {
     SessionOutput {
         session_id: String,
         chunk: String,
+        /// "stdout" or "stderr" — defaults to "stdout" for backward compat.
+        #[serde(default = "default_stdout")]
+        stream: String,
     },
     SessionCompleted {
         session_id: String,

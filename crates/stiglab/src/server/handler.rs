@@ -44,19 +44,24 @@ pub async fn handle_agent_message(
                 }
             }
         }
-        AgentMessage::SessionOutput { session_id, chunk } => {
-            if let Err(e) = db::append_session_log(pool, &session_id, &chunk, "stdout").await {
+        AgentMessage::SessionOutput {
+            session_id,
+            chunk,
+            stream,
+        } => {
+            if let Err(e) = db::append_session_log(pool, &session_id, &chunk, &stream).await {
                 tracing::error!("failed to append session log: {e}");
             }
         }
-        AgentMessage::SessionCompleted { session_id, output } => {
+        AgentMessage::SessionCompleted {
+            session_id,
+            output: _,
+        } => {
+            // Note: we don't re-append `output` to session_logs here because it
+            // was already streamed chunk-by-chunk via SessionOutput messages.
+            // Appending it again would duplicate the entire response.
             if let Err(e) = db::update_session_state(pool, &session_id, SessionState::Done).await {
                 tracing::error!("failed to update session state to done: {e}");
-            }
-            if !output.is_empty() {
-                if let Err(e) = db::append_session_log(pool, &session_id, &output, "stdout").await {
-                    tracing::error!("failed to append session log: {e}");
-                }
             }
             // Emit spine event for session completion
             if let Some(spine) = spine {
