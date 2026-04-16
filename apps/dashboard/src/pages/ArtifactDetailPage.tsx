@@ -124,7 +124,7 @@ export function ArtifactDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {artifact.versions
+                {[...artifact.versions]
                   .sort((a, b) => b.version - a.version)
                   .map((v) => (
                     <TableRow key={v.version}>

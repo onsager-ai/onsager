@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::response::IntoResponse;
 use tokio::sync::RwLock;
 
-use onsager_spine::artifact::Kind;
+use onsager_spine::artifact::{ArtifactState, Kind};
 use onsager_spine::factory_event::ShapingOutcome;
 use onsager_spine::protocol::ShapingResult;
 use onsager_spine::EventStore;
@@ -24,20 +24,22 @@ struct HttpStiglabDispatcher {
 
 impl StiglabDispatcher for HttpStiglabDispatcher {
     fn dispatch(&self, request: &ShapingRequest) -> ShapingResult {
-        // Use a blocking approach since the pipeline tick is synchronous.
-        // In a fully async pipeline, this would be async.
-        let rt = tokio::runtime::Handle::current();
+        // The pipeline tick is synchronous, so use block_in_place to allow
+        // blocking on async HTTP calls without panicking inside the Tokio runtime.
         let url = format!("{}/api/shaping", self.stiglab_url);
         let body = serde_json::to_value(request).unwrap_or_default();
+        let client = self.client.clone();
 
-        match rt.block_on(async {
-            self.client
-                .post(&url)
-                .json(&body)
-                .send()
-                .await?
-                .json::<ShapingResult>()
-                .await
+        match tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                client
+                    .post(&url)
+                    .json(&body)
+                    .send()
+                    .await?
+                    .json::<ShapingResult>()
+                    .await
+            })
         }) {
             Ok(result) => result,
             Err(e) => {
@@ -69,35 +71,38 @@ struct HttpSynodicGate {
 
 impl SynodicGate for HttpSynodicGate {
     fn evaluate(&self, request: &GateRequest) -> GateVerdict {
-        let rt = tokio::runtime::Handle::current();
         let url = format!("{}/api/gate", self.synodic_url);
         let body = serde_json::to_value(request).unwrap_or_default();
+        let client = self.client.clone();
 
-        match rt.block_on(async { self.client.post(&url).json(&body).send().await }) {
-            Ok(resp) => {
-                if resp.status().is_success() {
-                    match rt.block_on(resp.json::<GateVerdict>()) {
-                        Ok(verdict) => verdict,
-                        Err(e) => {
-                            tracing::warn!(
-                                "synodic gate response parse error: {e}, defaulting to Allow"
-                            );
-                            GateVerdict::Allow
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            match rt.block_on(async { client.post(&url).json(&body).send().await }) {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        match rt.block_on(resp.json::<GateVerdict>()) {
+                            Ok(verdict) => verdict,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "synodic gate response parse error: {e}, defaulting to Allow"
+                                );
+                                GateVerdict::Allow
+                            }
                         }
+                    } else {
+                        tracing::warn!(
+                            "synodic gate returned {}, defaulting to Allow",
+                            resp.status()
+                        );
+                        GateVerdict::Allow
                     }
-                } else {
-                    tracing::warn!(
-                        "synodic gate returned {}, defaulting to Allow",
-                        resp.status()
-                    );
+                }
+                Err(e) => {
+                    tracing::warn!("synodic gate unavailable: {e}, defaulting to Allow");
                     GateVerdict::Allow
                 }
             }
-            Err(e) => {
-                tracing::warn!("synodic gate unavailable: {e}, defaulting to Allow");
-                GateVerdict::Allow
-            }
-        }
+        })
     }
 }
 
@@ -135,13 +140,14 @@ pub fn run(database_url: &str, tick_ms: u64) {
         // Load existing artifacts from the spine database.
         let mut artifact_store = ArtifactStore::new();
         if let Some(ref spine) = spine {
-            if let Ok(rows) = sqlx::query_as::<_, (String, String, String, String, i32)>(
-                "SELECT artifact_id, kind, name, owner, current_version FROM artifacts WHERE state != 'archived'"
+            if let Ok(rows) = sqlx::query_as::<_, (String, String, String, String, String, i32)>(
+                "SELECT artifact_id, kind, name, owner, state, current_version \
+                 FROM artifacts WHERE state != 'archived'",
             )
             .fetch_all(spine.pool())
             .await
             {
-                for (id, kind, name, owner, _version) in &rows {
+                for (id, kind, name, owner, state_str, version) in &rows {
                     let kind_enum = match kind.as_str() {
                         "code" => Kind::Code,
                         "document" => Kind::Document,
@@ -151,18 +157,32 @@ pub fn run(database_url: &str, tick_ms: u64) {
                         "api_call" => Kind::ApiCall,
                         other => Kind::Custom(other.to_string()),
                     };
-                    artifact_store.register_with_id(id.clone(), kind_enum, name.clone(), owner.clone());
+                    let state = match state_str.as_str() {
+                        "in_progress" => ArtifactState::InProgress,
+                        "under_review" => ArtifactState::UnderReview,
+                        "released" => ArtifactState::Released,
+                        "archived" => ArtifactState::Archived,
+                        _ => ArtifactState::Draft,
+                    };
+                    artifact_store.register_with_id(
+                        id.clone(),
+                        kind_enum,
+                        name.clone(),
+                        owner.clone(),
+                        state,
+                        *version as u32,
+                    );
                 }
                 tracing::info!("forge: loaded {} active artifacts from spine", rows.len());
             }
         }
 
         let stiglab_port = std::env::var("STIGLAB_PORT").unwrap_or_else(|_| "3000".to_string());
-        let stiglab_url =
-            std::env::var("STIGLAB_URL").unwrap_or_else(|_| format!("http://localhost:{stiglab_port}"));
+        let stiglab_url = std::env::var("STIGLAB_URL")
+            .unwrap_or_else(|_| format!("http://localhost:{stiglab_port}"));
         let synodic_port = std::env::var("SYNODIC_PORT").unwrap_or_else(|_| "3001".to_string());
-        let synodic_url =
-            std::env::var("SYNODIC_URL").unwrap_or_else(|_| format!("http://localhost:{synodic_port}"));
+        let synodic_url = std::env::var("SYNODIC_URL")
+            .unwrap_or_else(|_| format!("http://localhost:{synodic_port}"));
 
         let client = reqwest::Client::new();
 
@@ -202,14 +222,20 @@ pub fn run(database_url: &str, tick_ms: u64) {
             let mut interval = tokio::time::interval(std::time::Duration::from_millis(tick_ms));
             loop {
                 interval.tick().await;
-                let mut state = tick_shared.write().await;
-                // Clone kernel snapshot to avoid borrowing state immutably and mutably.
-                let kernel = state.kernel.clone();
-                let output = state.pipeline.tick(&kernel);
 
-                // Emit pipeline events to the spine.
+                // Run the pipeline tick under the write lock, then release it
+                // before emitting spine events so HTTP reads aren't starved.
+                let (output, spine) = {
+                    let mut state = tick_shared.write().await;
+                    let kernel = state.kernel.clone();
+                    let output = state.pipeline.tick(&kernel);
+                    let spine = state.spine.clone();
+                    (output, spine)
+                };
+
+                // Emit pipeline events to the spine (lock released).
                 for event in &output.events {
-                    if let Some(ref spine) = state.spine {
+                    if let Some(ref spine) = spine {
                         emit_pipeline_event(spine, event).await;
                     }
                     match event {
