@@ -266,10 +266,17 @@ export function createClient(baseUrl?: string): OnsagerClient {
       sessionId: string,
       signal?: AbortSignal,
     ): AsyncGenerator<LogEvent, void, unknown> {
-      const res = await fetch(`${url}/api/sessions/${sessionId}/logs`, {
-        headers: { Accept: "text/event-stream" },
-        signal,
-      });
+      let res: Response;
+      try {
+        res = await fetch(`${url}/api/sessions/${sessionId}/logs`, {
+          headers: { Accept: "text/event-stream" },
+          signal,
+        });
+      } catch (err) {
+        // Abort is a normal control path — terminate cleanly
+        if (isAbortError(err)) return;
+        throw err;
+      }
 
       if (!res.ok) {
         throw new ApiError(
@@ -284,7 +291,15 @@ export function createClient(baseUrl?: string): OnsagerClient {
 
       try {
         while (true) {
-          const { done, value } = await reader.read();
+          let result: ReadableStreamReadResult<Uint8Array>;
+          try {
+            result = await reader.read();
+          } catch (err) {
+            // Abort during read is normal — stop iterating
+            if (isAbortError(err)) break;
+            throw err;
+          }
+          const { done, value } = result;
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
@@ -333,6 +348,10 @@ export function createClient(baseUrl?: string): OnsagerClient {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
 }
 
 /**

@@ -50,13 +50,8 @@ describe("Log Streaming", () => {
     const final = await client.waitForSession(session.id, ["done", "failed"]);
 
     // Give the stream a moment to flush, then abort if still open
-    await Promise.race([
-      streamPromise,
-      new Promise<void>((r) => setTimeout(() => {
-        controller.abort();
-        r();
-      }, 5_000)),
-    ]);
+    controller.abort();
+    await streamPromise;
 
     expect(final.state).toBe("done");
 
@@ -89,20 +84,20 @@ describe("Log Streaming", () => {
     const logsPromise = collectLogs(client, session.id, controller.signal);
     const final = await client.waitForSession(session.id, ["done", "failed"]);
 
-    // Give stream time to close naturally, then abort
-    const { output, states } = await Promise.race([
+    // Give stream time to close naturally (5s), then abort and await
+    const result = await Promise.race([
       logsPromise,
-      new Promise<{ output: string; states: string[] }>((resolve) =>
-        setTimeout(async () => {
-          controller.abort();
-          // Return what we have from session output instead
-          resolve({
-            output: final.output ?? "",
-            states: [final.state],
-          });
-        }, 10_000),
-      ),
+      new Promise<null>((r) => setTimeout(() => r(null), 5_000)),
     ]);
+
+    if (result === null) {
+      // Stream didn't close naturally — abort and collect what we got
+      controller.abort();
+      // Await to avoid unhandled rejection (streamLogs handles AbortError cleanly)
+      await logsPromise.catch(() => {});
+    }
+
+    const output = result?.output ?? final.output ?? "";
 
     expect(final.state).toBe("done");
     // Output from either SSE or polling should have content
@@ -131,13 +126,9 @@ describe("Log Streaming", () => {
 
     await client.waitForSession(session.id, ["done", "failed"]);
 
-    await Promise.race([
-      streamPromise,
-      new Promise<void>((r) => setTimeout(() => {
-        controller.abort();
-        r();
-      }, 5_000)),
-    ]);
+    // Abort and await cleanly
+    controller.abort();
+    await streamPromise;
 
     // SSE should have reported at least the "running" state
     // (pending/dispatched may be too fast to catch)
