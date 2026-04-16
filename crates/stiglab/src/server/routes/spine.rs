@@ -39,6 +39,7 @@ pub struct SpineArtifact {
     pub state: String,
     pub owner: String,
     pub current_version: i32,
+    pub consumers: serde_json::Value,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -165,7 +166,7 @@ pub async fn list_artifacts(State(state): State<AppState>) -> impl IntoResponse 
     let pool = spine.pool();
 
     let result = sqlx::query_as::<_, SpineArtifact>(
-        "SELECT artifact_id AS id, kind, name, state, owner, current_version, created_at, updated_at \
+        "SELECT artifact_id AS id, kind, name, state, owner, current_version, consumers, created_at, updated_at \
          FROM artifacts ORDER BY updated_at DESC LIMIT 100",
     )
     .fetch_all(pool)
@@ -231,6 +232,7 @@ pub async fn register_artifact(
                     .emit_raw(
                         &format!("forge:{artifact_id}"),
                         "forge",
+                        "dashboard",
                         "artifact.registered",
                         &data,
                     )
@@ -242,7 +244,7 @@ pub async fn register_artifact(
 
             // Query back the inserted artifact.
             let artifact = sqlx::query_as::<_, SpineArtifact>(
-                "SELECT artifact_id AS id, kind, name, state, owner, current_version, created_at, updated_at \
+                "SELECT artifact_id AS id, kind, name, state, owner, current_version, consumers, created_at, updated_at \
                  FROM artifacts WHERE artifact_id = $1",
             )
             .bind(&artifact_id)
@@ -269,7 +271,7 @@ pub async fn register_artifact(
             tracing::error!("failed to register artifact: {e}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("failed to register artifact: {e}") })),
+                Json(serde_json::json!({ "error": "failed to register artifact" })),
             )
                 .into_response()
         }
@@ -295,7 +297,7 @@ pub async fn get_artifact(
     let pool = spine.pool();
 
     let artifact = sqlx::query_as::<_, SpineArtifact>(
-        "SELECT artifact_id AS id, kind, name, state, owner, current_version, created_at, updated_at \
+        "SELECT artifact_id AS id, kind, name, state, owner, current_version, consumers, created_at, updated_at \
          FROM artifacts WHERE artifact_id = $1",
     )
     .bind(&id)
@@ -322,7 +324,7 @@ pub async fn get_artifact(
     };
 
     // Fetch versions
-    let versions = sqlx::query_as::<_, ArtifactVersionRow>(
+    let versions = match sqlx::query_as::<_, ArtifactVersionRow>(
         "SELECT version, content_ref_uri, content_ref_checksum, change_summary, \
          created_by_session, parent_version, created_at \
          FROM artifact_versions WHERE artifact_id = $1 ORDER BY version DESC",
@@ -330,17 +332,37 @@ pub async fn get_artifact(
     .bind(&id)
     .fetch_all(pool)
     .await
-    .unwrap_or_default();
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("failed to load versions for artifact {id}: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "failed to load artifact versions" })),
+            )
+                .into_response();
+        }
+    };
 
     // Fetch vertical lineage
-    let lineage = sqlx::query_as::<_, VerticalLineageRow>(
+    let lineage = match sqlx::query_as::<_, VerticalLineageRow>(
         "SELECT version, session_id, recorded_at \
          FROM vertical_lineage WHERE artifact_id = $1 ORDER BY version DESC",
     )
     .bind(&id)
     .fetch_all(pool)
     .await
-    .unwrap_or_default();
+    {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("failed to load vertical lineage for artifact {id}: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "failed to load vertical lineage" })),
+            )
+                .into_response();
+        }
+    };
 
     // Fetch created_by from artifacts table
     let created_by: String =

@@ -26,7 +26,7 @@ afterAll(() => {
   }
 });
 
-describe("E2E Regression: Dashboard Data", () => {
+describe("E2E Regression: Factory Overview Data", () => {
   it("renders stat cards with numeric values", () => {
     browser.open("/");
     const snapshot = browser.snapshot();
@@ -34,21 +34,20 @@ describe("E2E Regression: Dashboard Data", () => {
     // Stat card titles must be present
     const requiredLabels = [
       "Nodes Online",
-      "Active Sessions",
-      "Waiting Input",
-      "Completed",
+      "Total Artifacts",
+      "Factory Events",
+      "Gov. Issues",
     ];
     for (const label of requiredLabels) {
       expect(snapshot).toContain(label);
     }
   });
 
-  it("renders stat card descriptions", () => {
+  it("renders pipeline stats section", () => {
     browser.open("/");
     const snapshot = browser.snapshot();
 
-    expect(snapshot).toContain("Currently running");
-    expect(snapshot).toContain("Successfully done");
+    expect(snapshot).toContain("Artifact Pipeline");
   });
 });
 
@@ -58,7 +57,7 @@ describe("E2E Regression: Sidebar Navigation", () => {
     const interactive = browser.interactiveSnapshot();
 
     // Sidebar should have navigation links
-    expect(interactive).toContain("Dashboard");
+    expect(interactive).toContain("Overview");
     expect(interactive).toContain("Sessions");
     expect(interactive).toContain("Nodes");
   });

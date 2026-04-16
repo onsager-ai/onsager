@@ -27,12 +27,12 @@ afterAll(() => {
 });
 
 describe("E2E Smoke: Navigation", () => {
-  it("loads the dashboard page", () => {
+  it("loads the factory overview page", () => {
     const output = browser.open("/");
     expect(output).toBeDefined();
 
     const snapshot = browser.snapshot();
-    expect(snapshot).toContain("Dashboard");
+    expect(snapshot).toContain("Factory");
   });
 
   it("navigates to Sessions page", () => {
@@ -48,20 +48,20 @@ describe("E2E Smoke: Navigation", () => {
   });
 });
 
-describe("E2E Smoke: Dashboard", () => {
+describe("E2E Smoke: Factory Overview", () => {
   it("displays overview stat cards", () => {
     browser.open("/");
     const snapshot = browser.snapshot();
 
     expect(snapshot).toContain("Nodes Online");
-    expect(snapshot).toContain("Active Sessions");
-    expect(snapshot).toContain("Completed");
+    expect(snapshot).toContain("Total Artifacts");
+    expect(snapshot).toContain("Factory Events");
   });
 
-  it("displays recent sessions section", () => {
+  it("displays active artifacts section", () => {
     browser.open("/");
     const snapshot = browser.snapshot();
-    expect(snapshot).toContain("Recent Sessions");
+    expect(snapshot).toContain("Active Artifacts");
   });
 });
 

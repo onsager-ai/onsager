@@ -117,7 +117,7 @@ export interface SpineArtifact {
   owner: string;
   state: string;
   current_version: number;
-  consumers: string[];
+  consumers?: string[];
   created_at: string;
   updated_at: string;
 }
