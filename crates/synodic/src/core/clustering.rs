@@ -76,7 +76,7 @@ pub fn cluster_reasons(reasons: &[String]) -> Vec<ReasonCluster> {
         });
     }
 
-    clusters.sort_by(|a, b| b.reasons.len().cmp(&a.reasons.len()));
+    clusters.sort_by_key(|c| std::cmp::Reverse(c.reasons.len()));
     clusters
 }
 
