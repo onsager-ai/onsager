@@ -53,7 +53,10 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route("/api/governance/{*path}", any(routes::governance::proxy))
         // Spine API — exposes shared event spine data to the dashboard
         .route("/api/spine/events", get(routes::spine::list_events))
-        .route("/api/spine/artifacts", get(routes::spine::list_artifacts))
+        .route(
+            "/api/spine/artifacts",
+            get(routes::spine::list_artifacts).post(routes::spine::register_artifact),
+        )
         .route(
             "/api/spine/artifacts/{id}",
             get(routes::spine::get_artifact),

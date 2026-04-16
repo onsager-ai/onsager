@@ -77,7 +77,7 @@ impl Ord for SchedulableArtifact {
 /// - Picks the highest-priority artifact in `Draft` or `InProgress` state
 /// - Skips artifacts that are `UnderReview`, `Released`, or `Archived`
 /// - Respects `max_in_flight` concurrency limit
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct BaselineKernel {
     /// Failure counts per artifact (from Ising insights).
     failure_counts: std::collections::HashMap<String, u32>,

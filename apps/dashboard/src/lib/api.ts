@@ -113,11 +113,43 @@ export interface SpineEvent {
 export interface SpineArtifact {
   id: string;
   kind: string;
-  state: string;
+  name: string;
   owner: string;
+  state: string;
   current_version: number;
+  consumers: string[];
   created_at: string;
   updated_at: string;
+}
+
+export interface ArtifactDetail extends SpineArtifact {
+  created_by: string;
+  versions: ArtifactVersion[];
+  vertical_lineage: ArtifactLineageEntry[];
+}
+
+export interface ArtifactVersion {
+  version: number;
+  content_ref_uri: string;
+  content_ref_checksum: string | null;
+  change_summary: string;
+  created_by_session: string;
+  parent_version: number | null;
+  created_at: string;
+}
+
+export interface ArtifactLineageEntry {
+  version: number;
+  session_id: string;
+  recorded_at: string;
+}
+
+export interface RegisterArtifactRequest {
+  kind: string;
+  name: string;
+  owner: string;
+  description?: string;
+  working_dir?: string;
 }
 
 export const api = {
@@ -164,5 +196,10 @@ export const api = {
     return request<{ events: SpineEvent[] }>(`/spine/events${qs}`);
   },
   getArtifacts: () => request<{ artifacts: SpineArtifact[] }>('/spine/artifacts'),
-  getArtifact: (id: string) => request<{ artifact: SpineArtifact }>(`/spine/artifacts/${id}`),
+  getArtifact: (id: string) => request<{ artifact: ArtifactDetail }>(`/spine/artifacts/${id}`),
+  registerArtifact: (req: RegisterArtifactRequest) =>
+    request<{ artifact: SpineArtifact }>('/spine/artifacts', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
 };

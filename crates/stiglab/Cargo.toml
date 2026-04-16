@@ -21,6 +21,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+ulid = { version = "1", features = ["serde"] }
 thiserror = { workspace = true }
 
 # From stiglab-server

@@ -40,6 +40,22 @@ impl ArtifactStore {
         id
     }
 
+    /// Register an artifact with a pre-assigned ID (for loading from the database).
+    pub fn register_with_id(
+        &mut self,
+        id: impl Into<String>,
+        kind: Kind,
+        name: impl Into<String>,
+        owner: impl Into<String>,
+    ) -> ArtifactId {
+        let id_str = id.into();
+        let artifact_id = ArtifactId::new(&id_str);
+        let mut artifact = Artifact::new(kind, name, owner, "forge", vec![]);
+        artifact.artifact_id = artifact_id.clone();
+        self.artifacts.insert(id_str, artifact);
+        artifact_id
+    }
+
     /// Get an artifact by ID.
     pub fn get(&self, id: &ArtifactId) -> Option<&Artifact> {
         self.artifacts.get(id.as_str())
