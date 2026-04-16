@@ -1,4 +1,4 @@
-import { LayoutDashboard, Plus, Server, Terminal, Settings, LogOut } from "lucide-react"
+import { LayoutDashboard, Plus, Server, Terminal, Settings, LogOut, Shield, Package, Activity } from "lucide-react"
 import { OnsagerLogo } from "./OnsagerLogo"
 import { Link, useLocation } from "react-router-dom"
 import {
@@ -18,11 +18,39 @@ import { useAuth } from "@/lib/auth"
 import { CreateSessionSheet } from "@/components/sessions/CreateSessionSheet"
 import { Button } from "@/components/ui/button"
 
-const navItems = [
-  { title: "Dashboard", icon: LayoutDashboard, path: "/" },
-  { title: "Nodes", icon: Server, path: "/nodes" },
-  { title: "Sessions", icon: Terminal, path: "/sessions" },
-  { title: "Settings", icon: Settings, path: "/settings" },
+const navSections = [
+  {
+    label: "Overview",
+    items: [
+      { title: "Dashboard", icon: LayoutDashboard, path: "/" },
+    ],
+  },
+  {
+    label: "Agents",
+    items: [
+      { title: "Sessions", icon: Terminal, path: "/sessions" },
+      { title: "Nodes", icon: Server, path: "/nodes" },
+    ],
+  },
+  {
+    label: "Governance",
+    items: [
+      { title: "Governance", icon: Shield, path: "/governance" },
+    ],
+  },
+  {
+    label: "Factory",
+    items: [
+      { title: "Artifacts", icon: Package, path: "/artifacts" },
+      { title: "Event Spine", icon: Activity, path: "/spine" },
+    ],
+  },
+  {
+    label: "System",
+    items: [
+      { title: "Settings", icon: Settings, path: "/settings" },
+    ],
+  },
 ]
 
 export function AppSidebar() {
@@ -38,24 +66,30 @@ export function AppSidebar() {
         </Link>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    render={<Link to={item.path} />}
-                    isActive={location.pathname === item.path}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {navSections.map((section) => (
+          <SidebarGroup key={section.label}>
+            <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {section.items.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      render={<Link to={item.path} />}
+                      isActive={
+                        item.path === "/"
+                          ? location.pathname === "/"
+                          : location.pathname.startsWith(item.path)
+                      }
+                    >
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
         <SidebarGroup>
           <SidebarGroupContent>
             <CreateSessionSheet>

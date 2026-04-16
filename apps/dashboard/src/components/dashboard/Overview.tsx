@@ -1,13 +1,15 @@
-import { Server, Terminal, AlertCircle, CheckCircle } from "lucide-react"
+import { Server, Terminal, AlertCircle, CheckCircle, Shield, Package } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import type { Node, Session } from "@/lib/api"
+import type { Node, Session, GovernanceStats, SpineArtifact } from "@/lib/api"
 
 interface OverviewProps {
   nodes: Node[]
   sessions: Session[]
+  governanceStats?: GovernanceStats | null
+  artifacts?: SpineArtifact[]
 }
 
-export function Overview({ nodes, sessions }: OverviewProps) {
+export function Overview({ nodes, sessions, governanceStats, artifacts }: OverviewProps) {
   const onlineNodes = nodes.filter((n) => n.status === "online").length
   const activeSessions = sessions.filter((s) =>
     ["running", "dispatched", "waiting_input"].includes(s.state)
@@ -41,10 +43,23 @@ export function Overview({ nodes, sessions }: OverviewProps) {
       icon: CheckCircle,
       description: "Successfully done",
     },
+    {
+      title: "Gov. Issues",
+      value: governanceStats?.unresolved ?? 0,
+      icon: Shield,
+      description: `${governanceStats?.total ?? 0} total events`,
+      highlight: (governanceStats?.unresolved ?? 0) > 0,
+    },
+    {
+      title: "Artifacts",
+      value: artifacts?.length ?? 0,
+      icon: Package,
+      description: "In pipeline",
+    },
   ]
 
   return (
-    <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-3 xl:grid-cols-6">
       {stats.map((stat) => (
         <Card key={stat.title} className={stat.highlight ? "border-yellow-500/50" : ""}>
           <CardHeader className="flex flex-row items-center justify-between px-3 pb-1 pt-3 md:px-6 md:pb-2 md:pt-6">

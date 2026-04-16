@@ -9,6 +9,9 @@ import { SessionsPage } from "@/pages/SessionsPage"
 import { SessionDetailPage } from "@/pages/SessionDetailPage"
 import { LoginPage } from "@/pages/LoginPage"
 import { SettingsPage } from "@/pages/SettingsPage"
+import { GovernancePage } from "@/pages/GovernancePage"
+import { SpinePage } from "@/pages/SpinePage"
+import { ArtifactsPage } from "@/pages/ArtifactsPage"
 import type { ReactNode } from "react"
 
 const queryClient = new QueryClient({
@@ -74,6 +77,9 @@ function AppRoutes() {
                 <Route path="/nodes" element={<NodesPage />} />
                 <Route path="/sessions" element={<SessionsPage />} />
                 <Route path="/sessions/:id" element={<SessionDetailPage />} />
+                <Route path="/governance" element={<GovernancePage />} />
+                <Route path="/artifacts" element={<ArtifactsPage />} />
+                <Route path="/spine" element={<SpinePage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             </AppLayout>

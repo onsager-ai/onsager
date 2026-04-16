@@ -9,7 +9,7 @@ pub mod ws;
 
 pub use sqlx::AnyPool;
 
-use axum::routing::{get, post, put};
+use axum::routing::{any, get, post, put};
 use axum::Router;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -48,6 +48,15 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route(
             "/api/credentials/{name}",
             put(routes::credentials::set_credential).delete(routes::credentials::delete_credential),
+        )
+        // Governance proxy — forwards to synodic on internal port
+        .route("/api/governance/{*path}", any(routes::governance::proxy))
+        // Spine API — exposes shared event spine data to the dashboard
+        .route("/api/spine/events", get(routes::spine::list_events))
+        .route("/api/spine/artifacts", get(routes::spine::list_artifacts))
+        .route(
+            "/api/spine/artifacts/{id}",
+            get(routes::spine::get_artifact),
         );
 
     // Configure CORS

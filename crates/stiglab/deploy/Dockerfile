@@ -43,13 +43,14 @@ RUN mkdir -p \
       crates/ising/src/main.rs \
       crates/stiglab/src/main.rs \
       crates/synodic/src/main.rs \
-    && cargo build --release -p stiglab 2>/dev/null || true
+    && cargo build --release -p stiglab -p synodic --features synodic/postgres 2>/dev/null || true
 # Copy actual source and rebuild.
 # Touch all .rs files so their mtime is newer than the dummy-build artifacts —
 # Docker's COPY preserves git timestamps which may predate the dummy build,
 # causing Cargo to skip recompilation and deploy the stub binary instead.
 COPY crates/ crates/
-RUN find crates -name "*.rs" | xargs touch && cargo build --release -p stiglab
+RUN find crates -name "*.rs" | xargs touch \
+    && cargo build --release -p stiglab -p synodic --features synodic/postgres
 
 # ---- Stage 3: Node.js for runtime (glibc-compatible) ----
 FROM node:20-bookworm-slim AS node-runtime
@@ -83,9 +84,12 @@ RUN useradd -m -s /bin/bash onsager
 
 WORKDIR /app
 COPY --from=rust-builder /app/target/release/stiglab /app/stiglab
+COPY --from=rust-builder /app/target/release/synodic /app/synodic
 COPY --from=ui-builder /app/apps/dashboard/dist /app/static
 # Spine migrations — applied on startup when ONSAGER_DATABASE_URL is set
 COPY crates/onsager-spine/migrations/ /app/spine-migrations/
+# Synodic (governance) migrations
+COPY crates/synodic/migrations/pg/ /app/synodic-migrations/
 COPY crates/stiglab/deploy/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

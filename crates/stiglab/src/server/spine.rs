@@ -34,6 +34,11 @@ impl SpineEmitter {
             .await
     }
 
+    /// Get a reference to the underlying PostgreSQL pool for direct queries.
+    pub fn pool(&self) -> &sqlx::PgPool {
+        self.store.pool()
+    }
+
     /// Emit a session-started event.
     pub async fn emit_session_started(
         &self,

@@ -69,6 +69,57 @@ export interface Credential {
   updated_at: string;
 }
 
+// Governance types (proxied to synodic via /api/governance/*)
+export interface GovernanceEvent {
+  id: string;
+  event_type: string;
+  title: string;
+  severity: string;
+  source: string;
+  metadata: Record<string, unknown>;
+  resolved: boolean;
+  resolution_notes: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface GovernanceStats {
+  total: number;
+  unresolved: number;
+  by_type: Record<string, number>;
+  by_severity: Record<string, number>;
+}
+
+export interface GovernanceRule {
+  name: string;
+  description: string;
+  pattern: string;
+  event_type: string;
+  severity: string;
+  enabled: boolean;
+}
+
+// Spine types (direct from stiglab)
+export interface SpineEvent {
+  id: number;
+  stream_id: string;
+  stream_type: string;
+  event_type: string;
+  data: Record<string, unknown>;
+  actor: string;
+  created_at: string;
+}
+
+export interface SpineArtifact {
+  id: string;
+  kind: string;
+  state: string;
+  owner: string;
+  current_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export const api = {
   getNodes: () => request<{ nodes: Node[] }>('/nodes'),
   getSessions: () => request<{ sessions: Session[] }>('/sessions'),
@@ -95,4 +146,23 @@ export const api = {
     request<{ ok: boolean }>(`/credentials/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
+  // Governance (proxied to synodic)
+  getGovernanceEvents: (type?: string) =>
+    request<GovernanceEvent[]>(`/governance/events${type ? `?type=${type}` : ''}`),
+  getGovernanceStats: () => request<GovernanceStats>('/governance/stats'),
+  getGovernanceRules: () => request<GovernanceRule[]>('/governance/rules'),
+  resolveGovernanceEvent: (id: string, notes?: string) =>
+    request<void>(`/governance/events/${id}/resolve`, {
+      method: 'PATCH',
+      body: JSON.stringify({ notes }),
+    }),
+  // Spine
+  getSpineEvents: (params?: { stream_type?: string; event_type?: string; limit?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])
+    ).toString() : '';
+    return request<{ events: SpineEvent[] }>(`/spine/events${qs}`);
+  },
+  getArtifacts: () => request<{ artifacts: SpineArtifact[] }>('/spine/artifacts'),
+  getArtifact: (id: string) => request<{ artifact: SpineArtifact }>(`/spine/artifacts/${id}`),
 };
