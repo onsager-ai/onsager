@@ -15,10 +15,33 @@ interface SSEData {
   chunks: SSERawChunk[];
 }
 
+/** Merge adjacent chunks that share the same stream type. */
+function coalesce(chunks: LogChunk[]): LogChunk[] {
+  if (chunks.length === 0) return chunks;
+  const out: LogChunk[] = [{ ...chunks[0] }];
+  for (let i = 1; i < chunks.length; i++) {
+    const last = out[out.length - 1];
+    if (chunks[i].stream === last.stream) {
+      last.text += chunks[i].text;
+    } else {
+      out.push({ ...chunks[i] });
+    }
+  }
+  return out;
+}
+
 export function useSessionLogs(sessionId: string | undefined) {
   const [chunks, setChunks] = useState<LogChunk[]>([]);
   const [state, setState] = useState<string>('');
+  const [prevSessionId, setPrevSessionId] = useState<string | undefined>(undefined);
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  // Reset state when sessionId changes (React-idiomatic prop-change pattern)
+  if (sessionId !== prevSessionId) {
+    setPrevSessionId(sessionId);
+    setChunks([]);
+    setState('');
+  }
 
   useEffect(() => {
     if (!sessionId) return;
@@ -37,7 +60,7 @@ export function useSessionLogs(sessionId: string | undefined) {
             text: c.chunk,
             stream: c.stream === 'stderr' ? 'stderr' : 'stdout',
           }));
-          setChunks((prev) => [...prev, ...newChunks]);
+          setChunks((prev) => coalesce([...prev, ...newChunks]));
         }
       } catch {
         // ignore parse errors

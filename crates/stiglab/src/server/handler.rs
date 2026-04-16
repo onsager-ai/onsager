@@ -49,19 +49,30 @@ pub async fn handle_agent_message(
             chunk,
             stream,
         } => {
-            if let Err(e) = db::append_session_log(pool, &session_id, &chunk, &stream).await {
+            // Normalize: anything that isn't "stderr" is treated as "stdout"
+            let stream = if stream == "stderr" { "stderr" } else { "stdout" };
+            if let Err(e) = db::append_session_log(pool, &session_id, &chunk, stream).await {
                 tracing::error!("failed to append session log: {e}");
             }
         }
-        AgentMessage::SessionCompleted {
-            session_id,
-            output: _,
-        } => {
-            // Note: we don't re-append `output` to session_logs here because it
-            // was already streamed chunk-by-chunk via SessionOutput messages.
-            // Appending it again would duplicate the entire response.
+        AgentMessage::SessionCompleted { session_id, output } => {
             if let Err(e) = db::update_session_state(pool, &session_id, SessionState::Done).await {
                 tracing::error!("failed to update session state to done: {e}");
+            }
+            // Only persist the final output as a fallback when no chunks were
+            // already streamed, to avoid duplicating the entire response.
+            if !output.is_empty() {
+                let already_streamed = db::get_session_logs(pool, &session_id)
+                    .await
+                    .map(|logs| !logs.is_empty())
+                    .unwrap_or(false);
+                if !already_streamed {
+                    if let Err(e) =
+                        db::append_session_log(pool, &session_id, &output, "stdout").await
+                    {
+                        tracing::error!("failed to append final session output: {e}");
+                    }
+                }
             }
             // Emit spine event for session completion
             if let Some(spine) = spine {

@@ -43,6 +43,6 @@ describe("Overview", () => {
     render(<Overview nodes={[]} sessions={[]} />);
 
     expect(screen.getByText("0/0")).toBeInTheDocument();
-    expect(screen.getAllByText("0")).toHaveLength(3); // active, waiting, completed
+    expect(screen.getAllByText("0")).toHaveLength(5); // active, waiting, completed, gov issues, artifacts
   });
 });
