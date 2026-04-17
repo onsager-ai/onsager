@@ -8,13 +8,13 @@ allowed-tools: Bash(npx agent-browser:*), Bash(agent-browser:*), Read, Write, Ed
 
 L2 AI-driven web UI testing for Stiglab. Validates new and changed UI
 surfaces using agent-browser. Regression is L1's job (deterministic tests
-in `tests/smoke/` and `tests/e2e/`). L2 findings get crystallized into L1.
+in `apps/dashboard/tests/smoke/` and `tests/e2e/product/`). L2 findings get crystallized into L1.
 
 ## Inputs
 
 L2 works from three things — no separate spec needed:
 - **PR diff** (`git diff origin/main...HEAD`) — what changed, what to test
-- **Existing L1 tests** (`tests/smoke/`, `tests/e2e/`) — what's already covered
+- **Existing L1 tests** (`apps/dashboard/tests/smoke/`, `tests/e2e/product/`) — what's already covered
 - **agent-browser** — to explore the running UI
 
 ## Routes
@@ -112,10 +112,11 @@ mutations:**
 
 **Key output of L2.** When you validate new behavior or find a bug:
 
-- **Validated new behavior** → write a new L1 test in `tests/smoke/` or
-  `tests/e2e/` that encodes it as a deterministic assertion.
+- **Validated new behavior** → write a new L1 test in
+  `apps/dashboard/tests/smoke/` (component-level, vitest + Testing Library) or
+  `tests/e2e/product/` (full-stack product flow) that encodes it as a
+  deterministic assertion.
 - **Bug found** → report it. Once fixed, write an L1 regression test.
-- **Update regression contract** → add assertions to `tests/e2e/ui-regression.toml`.
 
 ### 4. Report
 
