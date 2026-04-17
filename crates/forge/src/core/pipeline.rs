@@ -147,9 +147,13 @@ impl<W: Warehouse + 'static> SealSink for WarehouseSealSink<W> {
             outputs,
         };
         let warehouse = self.warehouse.clone();
-        let bundle = self
-            .runtime
-            .block_on(async move { warehouse.seal(req).await })?;
+        let runtime = self.runtime.clone();
+        // `block_in_place` permits nesting a blocking `block_on` inside an
+        // active Tokio runtime without panicking; matches the pattern used by
+        // the HTTP sync adapters in `crates/forge/src/cmd/serve.rs`.
+        let bundle = tokio::task::block_in_place(|| {
+            runtime.block_on(async move { warehouse.seal(req).await })
+        })?;
         Ok(SealedRef {
             bundle_id: bundle.bundle_id,
             version: bundle.version,
@@ -358,6 +362,33 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
         match transition_verdict {
             GateVerdict::Allow | GateVerdict::Modify { .. } => {
                 let from_state = artifact.state;
+
+                // Seal before advancing to Released (warehouse-and-delivery-v0.1
+                // §5.1: "Released" implies a sealed bundle exists). If sealing
+                // fails, abort the transition — the artifact stays in its
+                // prior state and a follow-up tick can retry.
+                let sealing_release = decision.target_state == ArtifactState::Released
+                    && result.outcome == ShapingOutcome::Completed;
+                let sealed = if sealing_release {
+                    match &self.warehouse {
+                        Some(warehouse) => {
+                            match warehouse.seal_release(&decision.artifact_id, &result) {
+                                Ok(s) => Some(s),
+                                Err(e) => {
+                                    output.events.push(PipelineEvent::Error(format!(
+                                        "warehouse seal failed for {}: {}",
+                                        decision.artifact_id, e
+                                    )));
+                                    return output;
+                                }
+                            }
+                        }
+                        None => None,
+                    }
+                } else {
+                    None
+                };
+
                 match self
                     .store
                     .advance(&decision.artifact_id, decision.target_state, &result)
@@ -369,32 +400,14 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
                             to_state: decision.target_state,
                         });
 
-                        // Seal a bundle on successful Released transition
-                        // (warehouse-and-delivery-v0.1 §5.1).
-                        if decision.target_state == ArtifactState::Released
-                            && result.outcome == ShapingOutcome::Completed
-                        {
-                            if let Some(warehouse) = &self.warehouse {
-                                match warehouse.seal_release(&decision.artifact_id, &result) {
-                                    Ok(sealed) => {
-                                        self.store.record_bundle(
-                                            &decision.artifact_id,
-                                            sealed.bundle_id.clone(),
-                                        );
-                                        output.events.push(PipelineEvent::BundleSealed {
-                                            artifact_id: decision.artifact_id.to_string(),
-                                            bundle_id: sealed.bundle_id,
-                                            version: sealed.version,
-                                        });
-                                    }
-                                    Err(e) => {
-                                        output.events.push(PipelineEvent::Error(format!(
-                                            "warehouse seal failed for {}: {}",
-                                            decision.artifact_id, e
-                                        )));
-                                    }
-                                }
-                            }
+                        if let Some(sealed) = sealed {
+                            self.store
+                                .record_bundle(&decision.artifact_id, sealed.bundle_id.clone());
+                            output.events.push(PipelineEvent::BundleSealed {
+                                artifact_id: decision.artifact_id.to_string(),
+                                bundle_id: sealed.bundle_id,
+                                version: sealed.version,
+                            });
                         }
                     }
                     Err(e) => {
@@ -653,6 +666,60 @@ mod tests {
         assert_eq!(art.state, ArtifactState::Released);
         assert_eq!(art.current_bundle_id.as_ref(), Some(&evt_bundle));
         assert_eq!(art.bundle_history.len(), 1);
+    }
+
+    /// SealSink that always returns a terminal sealing error.
+    struct FailingSeal;
+    impl SealSink for FailingSeal {
+        fn seal_release(
+            &self,
+            _artifact_id: &onsager_spine::artifact::ArtifactId,
+            _result: &ShapingResult,
+        ) -> Result<SealedRef, SealError> {
+            Err(SealError::Invalid("mock seal failure".into()))
+        }
+    }
+
+    #[test]
+    fn seal_failure_blocks_release_transition() {
+        // warehouse-and-delivery-v0.1 §5.1: Released implies a sealed bundle.
+        // If sealing fails, the artifact must not advance to Released.
+        let mut pipeline =
+            ForgePipeline::new(MockStiglab, MockSynodicAllow).with_warehouse(Box::new(FailingSeal));
+        let id = pipeline.store.register(Kind::Code, "svc", "marvin");
+
+        let baseline = BaselineKernel::new();
+        pipeline.tick(&baseline);
+        pipeline.tick(&baseline);
+        assert_eq!(
+            pipeline.store.get(&id).unwrap().state,
+            ArtifactState::UnderReview
+        );
+
+        let output = pipeline.tick(&ReleaseKernel);
+        // No advance, no sealed event.
+        let has_advance = output.events.iter().any(|e| {
+            matches!(
+                e,
+                PipelineEvent::ArtifactAdvanced {
+                    to_state: ArtifactState::Released,
+                    ..
+                }
+            )
+        });
+        assert!(
+            !has_advance,
+            "sealing failure must abort the release transition"
+        );
+        let has_sealed = output
+            .events
+            .iter()
+            .any(|e| matches!(e, PipelineEvent::BundleSealed { .. }));
+        assert!(!has_sealed);
+
+        let art = pipeline.store.get(&id).unwrap();
+        assert_eq!(art.state, ArtifactState::UnderReview);
+        assert!(art.current_bundle_id.is_none());
     }
 
     #[test]
