@@ -10,11 +10,16 @@ fn db_url() -> Option<String> {
 }
 
 async fn cleanup(store: &EventStore, seed_name: &str, workspace_id: &str) {
-    // Remove any registry events emitted by previous runs of this test.
-    sqlx::query("DELETE FROM events WHERE stream_type = 'registry'")
-        .execute(store.pool())
-        .await
-        .ok();
+    // Scope registry-event deletion to this workspace so parallel or shared
+    // test runs don't erase each other's events.
+    sqlx::query(
+        "DELETE FROM events WHERE stream_type = 'registry' \
+         AND data->'event'->>'workspace_id' = $1",
+    )
+    .bind(workspace_id)
+    .execute(store.pool())
+    .await
+    .ok();
     sqlx::query("DELETE FROM registry_seed_marker WHERE seed_name = $1 AND workspace_id = $2")
         .bind(seed_name)
         .bind(workspace_id)
@@ -82,8 +87,12 @@ async fn seed_applies_once_then_is_noop() {
     let expected_events =
         seed.types.len() + seed.adapters.len() + seed.evaluators.len() + seed.profiles.len();
     let evts: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM events WHERE stream_type = 'registry' AND metadata->>'actor' = 'seed'",
+        "SELECT COUNT(*) FROM events \
+         WHERE stream_type = 'registry' \
+           AND metadata->>'actor' = 'seed' \
+           AND data->'event'->>'workspace_id' = $1",
     )
+    .bind(workspace)
     .fetch_one(store.pool())
     .await
     .unwrap();

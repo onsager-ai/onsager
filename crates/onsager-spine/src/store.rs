@@ -196,6 +196,37 @@ impl EventStore {
         query.fetch_all(&self.pool).await
     }
 
+    /// Fetch a single core event by id. Returns `None` if not found.
+    pub async fn get_event_by_id(&self, id: i64) -> Result<Option<EventRecord>, sqlx::Error> {
+        sqlx::query_as::<_, EventRecord>(
+            r#"
+            SELECT id, stream_id, stream_type, event_type, data, metadata, sequence, created_at
+            FROM events
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    /// Fetch a single extension event by id. Returns `None` if not found.
+    pub async fn get_ext_event_by_id(
+        &self,
+        id: i64,
+    ) -> Result<Option<ExtensionEventRecord>, sqlx::Error> {
+        sqlx::query_as::<_, ExtensionEventRecord>(
+            r#"
+            SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at
+            FROM events_ext
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     /// Query extension events, optionally filtered by namespace.
     pub async fn query_ext_events(
         &self,

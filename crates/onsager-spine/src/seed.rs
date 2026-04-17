@@ -117,8 +117,13 @@ async fn apply_in_tx(
     let mut events_emitted = 0usize;
     let status = RegistryStatus::Approved.as_str();
 
+    // Only emit a registry.* event when the row was actually inserted. ON
+    // CONFLICT DO NOTHING returns 0 rows affected for duplicates (YAML
+    // duplicates or concurrent seeds), and an event in that case would
+    // falsely claim a registration happened.
+
     for adapter in &catalog.adapters {
-        sqlx::query(
+        let affected = sqlx::query(
             r#"
             INSERT INTO artifact_adapters (adapter_id, workspace_id, revision, status, config)
             VALUES ($1, $2, 1, $3, $4)
@@ -130,19 +135,22 @@ async fn apply_in_tx(
         .bind(status)
         .bind(&adapter.config)
         .execute(&mut **tx)
-        .await?;
+        .await?
+        .rows_affected();
 
-        let evt = registry_event(FactoryEventKind::AdapterRegistered {
-            adapter_id: adapter.adapter_id.clone(),
-            workspace_id: workspace_id.to_owned(),
-            revision: 1,
-        });
-        append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
-        events_emitted += 1;
+        if affected == 1 {
+            let evt = registry_event(FactoryEventKind::AdapterRegistered {
+                adapter_id: adapter.adapter_id.clone(),
+                workspace_id: workspace_id.to_owned(),
+                revision: 1,
+            });
+            append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
+            events_emitted += 1;
+        }
     }
 
     for evaluator in &catalog.evaluators {
-        sqlx::query(
+        let affected = sqlx::query(
             r#"
             INSERT INTO gate_evaluators (evaluator_id, workspace_id, revision, status, config)
             VALUES ($1, $2, 1, $3, $4)
@@ -154,20 +162,23 @@ async fn apply_in_tx(
         .bind(status)
         .bind(&evaluator.config)
         .execute(&mut **tx)
-        .await?;
+        .await?
+        .rows_affected();
 
-        let evt = registry_event(FactoryEventKind::GateRegistered {
-            evaluator_id: evaluator.evaluator_id.clone(),
-            workspace_id: workspace_id.to_owned(),
-            revision: 1,
-        });
-        append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
-        events_emitted += 1;
+        if affected == 1 {
+            let evt = registry_event(FactoryEventKind::GateRegistered {
+                evaluator_id: evaluator.evaluator_id.clone(),
+                workspace_id: workspace_id.to_owned(),
+                revision: 1,
+            });
+            append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
+            events_emitted += 1;
+        }
     }
 
     for profile in &catalog.profiles {
         let config = serde_json::to_value(profile)?;
-        sqlx::query(
+        let affected = sqlx::query(
             r#"
             INSERT INTO agent_profiles (profile_id, workspace_id, revision, status, config)
             VALUES ($1, $2, 1, $3, $4)
@@ -179,20 +190,23 @@ async fn apply_in_tx(
         .bind(status)
         .bind(&config)
         .execute(&mut **tx)
-        .await?;
+        .await?
+        .rows_affected();
 
-        let evt = registry_event(FactoryEventKind::ProfileRegistered {
-            profile_id: profile.profile_id.as_str().to_owned(),
-            workspace_id: workspace_id.to_owned(),
-            revision: 1,
-        });
-        append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
-        events_emitted += 1;
+        if affected == 1 {
+            let evt = registry_event(FactoryEventKind::ProfileRegistered {
+                profile_id: profile.profile_id.as_str().to_owned(),
+                workspace_id: workspace_id.to_owned(),
+                revision: 1,
+            });
+            append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
+            events_emitted += 1;
+        }
     }
 
     for type_def in &catalog.types {
         let definition = serde_json::to_value(type_def)?;
-        sqlx::query(
+        let affected = sqlx::query(
             r#"
             INSERT INTO artifact_types (type_id, workspace_id, revision, status, definition)
             VALUES ($1, $2, 1, $3, $4)
@@ -204,15 +218,18 @@ async fn apply_in_tx(
         .bind(status)
         .bind(&definition)
         .execute(&mut **tx)
-        .await?;
+        .await?
+        .rows_affected();
 
-        let evt = registry_event(FactoryEventKind::TypeApproved {
-            type_id: type_def.type_id.as_str().to_owned(),
-            workspace_id: workspace_id.to_owned(),
-            revision: 1,
-        });
-        append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
-        events_emitted += 1;
+        if affected == 1 {
+            let evt = registry_event(FactoryEventKind::TypeApproved {
+                type_id: type_def.type_id.as_str().to_owned(),
+                workspace_id: workspace_id.to_owned(),
+                revision: 1,
+            });
+            append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
+            events_emitted += 1;
+        }
     }
 
     // Write the marker last so a partial failure rolls back both the marker
