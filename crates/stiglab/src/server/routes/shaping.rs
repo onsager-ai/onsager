@@ -48,6 +48,8 @@ pub async fn create_shaping(
         prompt: task.prompt.clone(),
         output: None,
         working_dir: task.working_dir.clone(),
+        artifact_id: Some(req.artifact_id.to_string()),
+        artifact_version: Some(req.target_version as i32),
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
@@ -149,7 +151,12 @@ pub async fn create_shaping(
         match final_session.state {
             SessionState::Done => {
                 let _ = spine
-                    .emit_session_completed(&session.id, &req.request_id, duration_ms)
+                    .emit_session_completed(
+                        &session.id,
+                        &req.request_id,
+                        duration_ms,
+                        Some(&req.artifact_id.to_string()),
+                    )
                     .await;
             }
             SessionState::Failed => {

@@ -173,6 +173,11 @@ pub enum FactoryEventKind {
         session_id: String,
         request_id: String,
         duration_ms: u64,
+        /// Artifact this session was shaping (issue #14 phase 2). Optional so
+        /// non-shaping sessions (e.g. direct task POSTs) don't emit a
+        /// meaningless id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        artifact_id: Option<String>,
     },
 
     /// A session terminated with an error.

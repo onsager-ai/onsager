@@ -80,7 +80,7 @@ pub async fn handle_agent_message(
             }
             // Emit spine event for session completion
             if let Some(spine) = spine {
-                if let Err(e) = spine.emit_session_completed(&session_id, "", 0).await {
+                if let Err(e) = spine.emit_session_completed(&session_id, "", 0, None).await {
                     tracing::warn!("failed to emit session_completed spine event: {e}");
                 }
             }

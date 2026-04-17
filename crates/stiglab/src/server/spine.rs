@@ -86,16 +86,22 @@ impl SpineEmitter {
     }
 
     /// Emit a session-completed event.
+    ///
+    /// `artifact_id` links the session to the factory pipeline artifact it
+    /// was shaping (issue #14 phase 2). Pass `None` for sessions that don't
+    /// originate from a `ShapingRequest`.
     pub async fn emit_session_completed(
         &self,
         session_id: &str,
         request_id: &str,
         duration_ms: u64,
+        artifact_id: Option<&str>,
     ) -> Result<i64, sqlx::Error> {
         self.emit(FactoryEventKind::StiglabSessionCompleted {
             session_id: session_id.to_string(),
             request_id: request_id.to_string(),
             duration_ms,
+            artifact_id: artifact_id.map(str::to_owned),
         })
         .await
     }

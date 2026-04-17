@@ -155,6 +155,20 @@ async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
+    // Issue #14 phase 2: link sessions to the artifact they're shaping.
+    // Try the ALTERs unconditionally; the errors are swallowed when the
+    // columns already exist (both SQLite and Postgres return a distinct
+    // error for duplicate columns, which we don't surface here).
+    let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN artifact_id TEXT")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN artifact_version INTEGER")
+        .execute(pool)
+        .await;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_artifact_id ON sessions (artifact_id)")
+        .execute(pool)
+        .await?;
+
     Ok(())
 }
 
@@ -256,8 +270,9 @@ pub async fn get_node(pool: &AnyPool, node_id: &str) -> anyhow::Result<Option<No
 
 pub async fn insert_session(pool: &AnyPool, session: &Session) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO sessions (id, task_id, node_id, state, prompt, output, working_dir, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        "INSERT INTO sessions (id, task_id, node_id, state, prompt, output, working_dir, \
+                               artifact_id, artifact_version, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
     )
     .bind(&session.id)
     .bind(&session.task_id)
@@ -266,6 +281,8 @@ pub async fn insert_session(pool: &AnyPool, session: &Session) -> anyhow::Result
     .bind(&session.prompt)
     .bind(&session.output)
     .bind(&session.working_dir)
+    .bind(&session.artifact_id)
+    .bind(session.artifact_version)
     .bind(session.created_at.to_rfc3339())
     .bind(session.updated_at.to_rfc3339())
     .execute(pool)
@@ -275,7 +292,9 @@ pub async fn insert_session(pool: &AnyPool, session: &Session) -> anyhow::Result
 
 pub async fn list_sessions(pool: &AnyPool) -> anyhow::Result<Vec<Session>> {
     let rows = sqlx::query_as::<_, SessionRow>(
-        "SELECT id, task_id, node_id, state, prompt, output, working_dir, created_at, updated_at FROM sessions ORDER BY created_at DESC",
+        "SELECT id, task_id, node_id, state, prompt, output, working_dir, \
+                artifact_id, artifact_version, created_at, updated_at \
+         FROM sessions ORDER BY created_at DESC",
     )
     .fetch_all(pool)
     .await?;
@@ -284,7 +303,9 @@ pub async fn list_sessions(pool: &AnyPool) -> anyhow::Result<Vec<Session>> {
 
 pub async fn get_session(pool: &AnyPool, session_id: &str) -> anyhow::Result<Option<Session>> {
     let row = sqlx::query_as::<_, SessionRow>(
-        "SELECT id, task_id, node_id, state, prompt, output, working_dir, created_at, updated_at FROM sessions WHERE id = $1",
+        "SELECT id, task_id, node_id, state, prompt, output, working_dir, \
+                artifact_id, artifact_version, created_at, updated_at \
+         FROM sessions WHERE id = $1",
     )
     .bind(session_id)
     .fetch_optional(pool)
@@ -631,8 +652,9 @@ pub async fn insert_session_with_user(
     user_id: Option<&str>,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO sessions (id, task_id, node_id, state, prompt, output, working_dir, user_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        "INSERT INTO sessions (id, task_id, node_id, state, prompt, output, working_dir, \
+                               user_id, artifact_id, artifact_version, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
     )
     .bind(&session.id)
     .bind(&session.task_id)
@@ -642,6 +664,8 @@ pub async fn insert_session_with_user(
     .bind(&session.output)
     .bind(&session.working_dir)
     .bind(user_id)
+    .bind(&session.artifact_id)
+    .bind(session.artifact_version)
     .bind(session.created_at.to_rfc3339())
     .bind(session.updated_at.to_rfc3339())
     .execute(pool)
@@ -651,7 +675,9 @@ pub async fn insert_session_with_user(
 
 pub async fn list_sessions_for_user(pool: &AnyPool, user_id: &str) -> anyhow::Result<Vec<Session>> {
     let rows = sqlx::query_as::<_, SessionRow>(
-        "SELECT id, task_id, node_id, state, prompt, output, working_dir, created_at, updated_at FROM sessions WHERE user_id = $1 ORDER BY created_at DESC",
+        "SELECT id, task_id, node_id, state, prompt, output, working_dir, \
+                artifact_id, artifact_version, created_at, updated_at \
+         FROM sessions WHERE user_id = $1 ORDER BY created_at DESC",
     )
     .bind(user_id)
     .fetch_all(pool)
@@ -714,6 +740,8 @@ struct SessionRow {
     prompt: String,
     output: Option<String>,
     working_dir: Option<String>,
+    artifact_id: Option<String>,
+    artifact_version: Option<i32>,
     created_at: String,
     updated_at: String,
 }
@@ -733,6 +761,8 @@ impl TryFrom<SessionRow> for Session {
             prompt: row.prompt,
             output: row.output,
             working_dir: row.working_dir,
+            artifact_id: row.artifact_id,
+            artifact_version: row.artifact_version,
             created_at: chrono::DateTime::parse_from_rfc3339(&row.created_at)?.with_timezone(&Utc),
             updated_at: chrono::DateTime::parse_from_rfc3339(&row.updated_at)?.with_timezone(&Utc),
         })
