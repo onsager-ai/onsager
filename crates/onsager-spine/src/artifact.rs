@@ -8,6 +8,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::bundle::BundleId;
+
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
@@ -281,6 +283,16 @@ pub struct Artifact {
     pub state: ArtifactState,
     pub current_version: u32,
 
+    // Warehouse pointer (warehouse-and-delivery-v0.1 §4.1).
+    //
+    // `current_bundle_id` advances on each successful release; a rework does
+    // not clear it until the new bundle is sealed. `bundle_history` is
+    // append-only and records every sealed bundle in order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_bundle_id: Option<BundleId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundle_history: Vec<BundleId>,
+
     // History (loaded on demand in practice, but modeled here for completeness)
     pub versions: Vec<ArtifactVersion>,
     pub vertical_lineage: Vec<VerticalLineage>,
@@ -289,6 +301,13 @@ pub struct Artifact {
 }
 
 impl Artifact {
+    /// Record a newly sealed bundle: advance `current_bundle_id` and append
+    /// to `bundle_history` (warehouse-and-delivery-v0.1 §6.3, invariant §9.4).
+    pub fn record_bundle(&mut self, bundle_id: BundleId) {
+        self.bundle_history.push(bundle_id.clone());
+        self.current_bundle_id = Some(bundle_id);
+    }
+
     /// Create a new artifact in `Draft` state with no versions yet.
     pub fn new(
         kind: Kind,
@@ -308,6 +327,8 @@ impl Artifact {
             consumers,
             state: ArtifactState::Draft,
             current_version: 0,
+            current_bundle_id: None,
+            bundle_history: Vec::new(),
             versions: Vec::new(),
             vertical_lineage: Vec::new(),
             horizontal_lineage: Vec::new(),
@@ -398,6 +419,24 @@ mod tests {
         assert!(art.git_context.is_none());
         assert!(art.versions.is_empty());
         assert!(!art.consumers.is_empty());
+        assert!(art.current_bundle_id.is_none());
+        assert!(art.bundle_history.is_empty());
+    }
+
+    #[test]
+    fn record_bundle_advances_current_and_history() {
+        let mut art = Artifact::new(Kind::Code, "svc", "marvin", "system", vec![]);
+        let v1 = BundleId::new("bnd_v1");
+        let v2 = BundleId::new("bnd_v2");
+
+        art.record_bundle(v1.clone());
+        assert_eq!(art.current_bundle_id.as_ref(), Some(&v1));
+        assert_eq!(art.bundle_history, vec![v1.clone()]);
+
+        art.record_bundle(v2.clone());
+        // Current pointer advances to newest; history is append-only.
+        assert_eq!(art.current_bundle_id.as_ref(), Some(&v2));
+        assert_eq!(art.bundle_history, vec![v1, v2]);
     }
 
     #[test]

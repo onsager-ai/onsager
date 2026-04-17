@@ -18,7 +18,9 @@
 //! `migrations/001_initial.sql`; downstream services apply it themselves.
 
 pub mod artifact;
+pub mod bundle;
 pub mod catalog;
+pub mod delivery;
 pub mod evaluators;
 pub mod extension_event;
 pub mod factory_event;
@@ -35,7 +37,16 @@ pub use artifact::{
     GitContext, HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue,
     VerticalLineage,
 };
+pub use bundle::{
+    sha256_hex, Bundle, BundleId, FetchError as BundleFetchError, FilesystemWarehouse, Manifest,
+    ManifestEntry, Outputs, SealError, SealRequest, Warehouse,
+};
 pub use catalog::{engineering_types, register_engineering_catalog, CatalogOutcome, CATALOG_ACTOR};
+pub use delivery::{
+    ConfigError as DeliveryConfigError, Consumer as DeliveryConsumer, ConsumerId, ConsumerKind,
+    ConsumerSink, Delivery, DeliveryError, DeliveryId, DeliveryKind, DeliveryStatus, Receipt,
+    RetryPolicy,
+};
 pub use evaluators::{CiGreen, HumanApproval, ReviewApproved};
 pub use extension_event::ExtensionEventRecord;
 pub use factory_event::{FactoryEvent, FactoryEventKind};

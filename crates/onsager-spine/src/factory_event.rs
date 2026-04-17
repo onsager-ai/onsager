@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::artifact::{ArtifactId, ArtifactState, Kind, QualitySignal};
+use crate::bundle::BundleId;
 
 // ---------------------------------------------------------------------------
 // Factory event envelope
@@ -101,6 +102,30 @@ pub enum FactoryEventKind {
     ArtifactArchived {
         artifact_id: ArtifactId,
         reason: String,
+    },
+
+    // -- Warehouse & Delivery (warehouse-and-delivery-v0.1) -----------------
+    /// A new bundle was sealed for an artifact (§5.1).
+    BundleSealed {
+        artifact_id: ArtifactId,
+        bundle_id: BundleId,
+        version: u32,
+    },
+
+    /// A delivery attempt succeeded; the receipt is stored on the delivery row (§5.3).
+    DeliverySucceeded {
+        bundle_id: BundleId,
+        consumer_id: String,
+    },
+
+    /// A delivery attempt failed; includes whether the worker will retry or
+    /// has marked the delivery `Abandoned` (§5.3).
+    DeliveryFailed {
+        bundle_id: BundleId,
+        consumer_id: String,
+        reason: String,
+        /// Whether the delivery has been abandoned (terminal) or will retry.
+        abandoned: bool,
     },
 
     // -- Git lifecycle events -------------------------------------------------
@@ -406,6 +431,9 @@ impl FactoryEventKind {
             Self::ArtifactQualityRecorded { .. } => "artifact.quality_recorded",
             Self::ArtifactRouted { .. } => "artifact.routed",
             Self::ArtifactArchived { .. } => "artifact.archived",
+            Self::BundleSealed { .. } => "warehouse.bundle_sealed",
+            Self::DeliverySucceeded { .. } => "delivery.succeeded",
+            Self::DeliveryFailed { .. } => "delivery.failed",
             Self::GitBranchCreated { .. } => "git.branch_created",
             Self::GitCommitPushed { .. } => "git.commit_pushed",
             Self::GitPrOpened { .. } => "git.pr_opened",
@@ -468,6 +496,8 @@ impl FactoryEventKind {
             | Self::ArtifactQualityRecorded { .. }
             | Self::ArtifactRouted { .. }
             | Self::ArtifactArchived { .. } => "artifact",
+            Self::BundleSealed { .. } => "warehouse",
+            Self::DeliverySucceeded { .. } | Self::DeliveryFailed { .. } => "delivery",
             Self::GitBranchCreated { .. }
             | Self::GitCommitPushed { .. }
             | Self::GitPrOpened { .. }
@@ -530,6 +560,10 @@ impl FactoryEventKind {
             | Self::ArtifactQualityRecorded { artifact_id, .. }
             | Self::ArtifactRouted { artifact_id, .. }
             | Self::ArtifactArchived { artifact_id, .. } => artifact_id.to_string(),
+            Self::BundleSealed { bundle_id, .. } => bundle_id.to_string(),
+            Self::DeliverySucceeded { bundle_id, .. } | Self::DeliveryFailed { bundle_id, .. } => {
+                bundle_id.to_string()
+            }
             Self::GitBranchCreated { artifact_id, .. }
             | Self::GitCommitPushed { artifact_id, .. }
             | Self::GitPrOpened { artifact_id, .. }
