@@ -56,7 +56,7 @@ export function GovernancePage() {
 
   return (
     <div className="space-y-4 md:space-y-6">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight md:text-2xl">Governance</h1>
           <p className="text-sm text-muted-foreground">
@@ -64,7 +64,7 @@ export function GovernancePage() {
           </p>
         </div>
         {stats && (
-          <div className="flex gap-6 text-sm">
+          <div className="grid grid-cols-3 gap-4 rounded-lg border p-3 md:flex md:gap-6 md:border-0 md:p-0">
             <StatCard label="Total" value={stats.total} />
             <StatCard label="Unresolved" value={stats.unresolved} variant="destructive" />
             <StatCard
@@ -75,17 +75,19 @@ export function GovernancePage() {
         )}
       </div>
 
-      <div className="flex gap-2">
-        {EVENT_TYPES.map((t) => (
-          <Button
-            key={t}
-            variant={filter === t ? "default" : "outline"}
-            size="sm"
-            onClick={() => setFilter(t)}
-          >
-            {t ? TYPE_LABELS[t] || t : "All"}
-          </Button>
-        ))}
+      <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:overflow-visible md:px-0">
+        <div className="flex gap-2 whitespace-nowrap">
+          {EVENT_TYPES.map((t) => (
+            <Button
+              key={t}
+              variant={filter === t ? "default" : "outline"}
+              size="sm"
+              onClick={() => setFilter(t)}
+            >
+              {t ? TYPE_LABELS[t] || t : "All"}
+            </Button>
+          ))}
+        </div>
       </div>
 
       <Card>
@@ -100,10 +102,52 @@ export function GovernancePage() {
               No governance events. Submit events via the synodic CLI or API.
             </p>
           ) : (
-            <EventsTable events={events} onResolve={handleResolve} />
+            <>
+              {/* Mobile: card list */}
+              <div className="flex flex-col gap-2 md:hidden">
+                {events.map((e) => (
+                  <EventCard key={e.id} event={e} onResolve={handleResolve} />
+                ))}
+              </div>
+
+              {/* Desktop: table */}
+              <div className="hidden md:block">
+                <EventsTable events={events} onResolve={handleResolve} />
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+function EventCard({ event, onResolve }: { event: GovernanceEvent; onResolve: (id: string) => void }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border p-3">
+      <div className="flex items-center gap-2">
+        <Badge variant={SEVERITY_VARIANT[event.severity] || "secondary"}>
+          {event.severity}
+        </Badge>
+        <Badge variant="outline">{TYPE_LABELS[event.event_type] || event.event_type}</Badge>
+        <div className="ml-auto">
+          {event.resolved ? (
+            <Badge variant="secondary">Resolved</Badge>
+          ) : (
+            <Badge variant="destructive">Open</Badge>
+          )}
+        </div>
+      </div>
+      <p className="text-sm font-medium">{event.title}</p>
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span className="truncate">{event.source}</span>
+        <span className="shrink-0">{new Date(event.created_at).toLocaleString()}</span>
+      </div>
+      {!event.resolved && (
+        <Button variant="outline" size="sm" onClick={() => onResolve(event.id)} className="mt-1">
+          Resolve
+        </Button>
+      )}
     </div>
   )
 }
@@ -162,7 +206,7 @@ function EventsTable({ events, onResolve }: { events: GovernanceEvent[]; onResol
 function StatCard({ label, value, variant }: { label: string; value: string | number; variant?: string }) {
   return (
     <div className="text-center">
-      <div className={`text-xl font-bold ${variant === "destructive" ? "text-destructive" : ""}`}>
+      <div className={`text-lg font-bold md:text-xl ${variant === "destructive" ? "text-destructive" : ""}`}>
         {value}
       </div>
       <div className="text-xs text-muted-foreground">{label}</div>

@@ -24,11 +24,15 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 
 interface CreateSessionSheetProps {
-  children: ReactElement
+  children?: ReactElement
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function CreateSessionSheet({ children }: CreateSessionSheetProps) {
-  const [open, setOpen] = useState(false)
+export function CreateSessionSheet({ children, open: openProp, onOpenChange }: CreateSessionSheetProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp ?? internalOpen
+  const setOpen = onOpenChange ?? setInternalOpen
   const [prompt, setPrompt] = useState("")
   const [nodeId, setNodeId] = useState("")
   const [workingDir, setWorkingDir] = useState("")
@@ -61,7 +65,7 @@ export function CreateSessionSheet({ children }: CreateSessionSheetProps) {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger render={children} />
+      {children && <SheetTrigger render={children} />}
       <SheetContent side={isMobile ? "bottom" : "right"} className={isMobile ? "rounded-t-xl" : ""}>
         <SheetHeader>
           <SheetTitle>New Session</SheetTitle>

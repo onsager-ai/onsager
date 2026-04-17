@@ -1,4 +1,4 @@
-import { Factory, Plus, Server, Terminal, Settings, LogOut, Shield, Package, Activity } from "lucide-react"
+import { Factory, Plus, Server, Terminal, Settings, Shield, Package, Activity } from "lucide-react"
 import { OnsagerLogo } from "./OnsagerLogo"
 import { Link, useLocation } from "react-router-dom"
 import {
@@ -12,6 +12,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { ThemeToggle } from "./ThemeToggle"
 import { useAuth } from "@/lib/auth"
@@ -50,12 +51,17 @@ const navSections = [
 
 export function AppSidebar() {
   const location = useLocation()
-  const { user, authEnabled, logout } = useAuth()
+  const { user, authEnabled } = useAuth()
+  const { isMobile, setOpenMobile } = useSidebar()
+
+  const closeMobile = () => {
+    if (isMobile) setOpenMobile(false)
+  }
 
   return (
     <Sidebar>
       <SidebarHeader className="border-b px-6 py-4">
-        <Link to="/" className="flex items-center gap-2">
+        <Link to="/" className="flex items-center gap-2" onClick={closeMobile}>
           <OnsagerLogo size={24} />
           <span className="text-lg font-semibold">Onsager</span>
         </Link>
@@ -69,7 +75,7 @@ export function AppSidebar() {
                 {section.items.map((item) => (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
-                      render={<Link to={item.path} />}
+                      render={<Link to={item.path} onClick={closeMobile} />}
                       isActive={
                         item.path === "/"
                           ? location.pathname === "/"
@@ -99,25 +105,27 @@ export function AppSidebar() {
       <SidebarFooter className="border-t p-4 space-y-3">
         {authEnabled && user && (
           <div className="flex items-center gap-2">
-            {user.github_avatar_url && (
+            {user.github_avatar_url ? (
               <img
                 src={user.github_avatar_url}
                 alt={user.github_login}
-                className="h-6 w-6 rounded-full"
+                className="h-7 w-7 rounded-full"
               />
+            ) : (
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium uppercase">
+                {user.github_name?.[0] ?? user.github_login[0]}
+              </div>
             )}
-            <span className="flex-1 truncate text-sm">
-              {user.github_name ?? user.github_login}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0"
-              onClick={logout}
-              title="Sign out"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-            </Button>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">
+                {user.github_name ?? user.github_login}
+              </p>
+              {user.github_name && (
+                <p className="truncate text-xs text-muted-foreground">
+                  @{user.github_login}
+                </p>
+              )}
+            </div>
           </div>
         )}
         <div className="flex items-center justify-between">

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { api } from "@/lib/api"
+import { api, type SpineArtifact } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Plus } from "lucide-react"
+import { ChevronRight, Plus } from "lucide-react"
 import { Link } from "react-router-dom"
 import { CreateArtifactSheet } from "@/components/factory/CreateArtifactSheet"
 
@@ -34,7 +34,7 @@ export function ArtifactsPage() {
 
   return (
     <div className="space-y-4 md:space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight md:text-2xl">Artifacts</h1>
           <p className="text-sm text-muted-foreground">
@@ -42,9 +42,10 @@ export function ArtifactsPage() {
           </p>
         </div>
         <CreateArtifactSheet>
-          <Button size="sm">
-            <Plus className="mr-1.5 h-4 w-4" />
-            Register Artifact
+          <Button size="sm" className="shrink-0">
+            <Plus className="h-4 w-4" data-icon="inline-start" />
+            <span className="hidden sm:inline">Register Artifact</span>
+            <span className="sm:hidden">New</span>
           </Button>
         </CreateArtifactSheet>
       </div>
@@ -65,51 +66,87 @@ export function ArtifactsPage() {
               </p>
               <CreateArtifactSheet>
                 <Button variant="outline" className="mt-4">
-                  <Plus className="mr-1.5 h-4 w-4" />
+                  <Plus className="h-4 w-4" data-icon="inline-start" />
                   Register your first artifact
                 </Button>
               </CreateArtifactSheet>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead>Owner</TableHead>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Updated</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              {/* Mobile: card list */}
+              <div className="flex flex-col gap-2 md:hidden">
                 {artifacts.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell>
-                      <Link to={`/artifacts/${a.id}`} className="font-medium hover:underline">
-                        {a.name ?? a.id}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{a.kind}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={STATE_VARIANT[a.state] || "secondary"}>
-                        {a.state.replace("_", " ")}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{a.owner}</TableCell>
-                    <TableCell className="font-mono">v{a.current_version}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {new Date(a.updated_at).toLocaleString()}
-                    </TableCell>
-                  </TableRow>
+                  <ArtifactCard key={a.id} artifact={a} />
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+
+              {/* Desktop: table */}
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Kind</TableHead>
+                      <TableHead>State</TableHead>
+                      <TableHead>Owner</TableHead>
+                      <TableHead>Version</TableHead>
+                      <TableHead>Updated</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {artifacts.map((a) => (
+                      <TableRow key={a.id}>
+                        <TableCell>
+                          <Link to={`/artifacts/${a.id}`} className="font-medium hover:underline">
+                            {a.name ?? a.id}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{a.kind}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={STATE_VARIANT[a.state] || "secondary"}>
+                            {a.state.replace("_", " ")}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{a.owner}</TableCell>
+                        <TableCell className="font-mono">v{a.current_version}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {new Date(a.updated_at).toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+function ArtifactCard({ artifact }: { artifact: SpineArtifact }) {
+  return (
+    <Link
+      to={`/artifacts/${artifact.id}`}
+      className="flex items-center gap-3 rounded-lg border p-3 transition-colors active:bg-accent"
+    >
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium">{artifact.name ?? artifact.id}</span>
+          <Badge variant={STATE_VARIANT[artifact.state] || "secondary"} className="shrink-0">
+            {artifact.state.replace("_", " ")}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Badge variant="outline" className="shrink-0">{artifact.kind}</Badge>
+          <span className="truncate">{artifact.owner}</span>
+          <span className="shrink-0 font-mono">v{artifact.current_version}</span>
+        </div>
+      </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+    </Link>
   )
 }

@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
+import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Tooltip,
@@ -153,7 +154,7 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
-  const { isMobile, state } = useSidebar()
+  const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
 
   if (collapsible === "none") {
     return (
@@ -171,8 +172,20 @@ function Sidebar({
   }
 
   if (isMobile) {
-    // On mobile, navigation is handled by BottomNav — hide the sidebar entirely
-    return null
+    return (
+      <Sheet open={openMobile} onOpenChange={setOpenMobile}>
+        <SheetContent
+          side={side}
+          showCloseButton={false}
+          className="w-[18rem] bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          data-slot="sidebar"
+          data-mobile="true"
+          data-sidebar="sidebar"
+        >
+          <div className="flex h-full w-full flex-col">{children}</div>
+        </SheetContent>
+      </Sheet>
+    )
   }
 
   return (
