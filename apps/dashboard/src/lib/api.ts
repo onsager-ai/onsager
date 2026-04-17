@@ -126,6 +126,7 @@ export interface ArtifactDetail extends SpineArtifact {
   created_by: string;
   versions: ArtifactVersion[];
   vertical_lineage: ArtifactLineageEntry[];
+  related_events?: SpineEvent[];
 }
 
 export interface ArtifactVersion {
@@ -150,6 +151,23 @@ export interface RegisterArtifactRequest {
   owner: string;
   description?: string;
   working_dir?: string;
+}
+
+export interface ArtifactActionRequest {
+  reason?: string;
+  actor?: string;
+}
+
+export interface OverrideGateRequestBody extends ArtifactActionRequest {
+  verdict?: 'allow' | 'deny';
+}
+
+export interface ArtifactActionResponse {
+  artifact_id: string;
+  action: string;
+  verdict?: string;
+  reason?: string;
+  escalation_id?: string;
 }
 
 export const api = {
@@ -201,5 +219,20 @@ export const api = {
     request<{ artifact: SpineArtifact }>('/spine/artifacts', {
       method: 'POST',
       body: JSON.stringify(req),
+    }),
+  retryArtifact: (id: string, body: ArtifactActionRequest = {}) =>
+    request<ArtifactActionResponse>(`/spine/artifacts/${id}/retry`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  abortArtifact: (id: string, body: ArtifactActionRequest = {}) =>
+    request<ArtifactActionResponse>(`/spine/artifacts/${id}/abort`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  overrideGate: (id: string, body: OverrideGateRequestBody = {}) =>
+    request<ArtifactActionResponse>(`/spine/artifacts/${id}/override-gate`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 };
