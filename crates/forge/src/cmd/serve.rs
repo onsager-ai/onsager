@@ -556,6 +556,19 @@ async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
                 "to_state": format!("{to_state:?}"),
             }),
         ),
+        PipelineEvent::BundleSealed {
+            artifact_id,
+            bundle_id,
+            version,
+        } => (
+            format!("warehouse:{artifact_id}"),
+            "warehouse.bundle_sealed",
+            serde_json::json!({
+                "artifact_id": artifact_id,
+                "bundle_id": bundle_id.as_str(),
+                "version": version,
+            }),
+        ),
         PipelineEvent::IdleTick => return,
         PipelineEvent::Error(msg) => (
             "forge:system".to_string(),

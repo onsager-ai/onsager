@@ -12,6 +12,7 @@ use chrono::Utc;
 use onsager_spine::artifact::{
     Artifact, ArtifactId, ArtifactState, ArtifactVersion, ContentRef, Kind, VerticalLineage,
 };
+use onsager_spine::bundle::BundleId;
 use onsager_spine::factory_event::ShapingOutcome;
 use onsager_spine::protocol::ShapingResult;
 
@@ -135,6 +136,18 @@ impl ArtifactStore {
         artifact.state = target_state;
 
         Ok(())
+    }
+
+    /// Record a newly sealed bundle on the artifact
+    /// (warehouse-and-delivery-v0.1 §6.3).
+    ///
+    /// No-op if the artifact is not found (the caller already emits an error
+    /// event for the missing artifact; a missing bundle recording is strictly
+    /// subordinate to that).
+    pub fn record_bundle(&mut self, id: &ArtifactId, bundle_id: BundleId) {
+        if let Some(artifact) = self.artifacts.get_mut(id.as_str()) {
+            artifact.record_bundle(bundle_id);
+        }
     }
 
     /// Archive an artifact (any state -> Archived).
