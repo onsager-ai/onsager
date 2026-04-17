@@ -32,11 +32,15 @@ const ARTIFACT_KINDS = [
 ]
 
 interface CreateArtifactSheetProps {
-  children: ReactElement
+  children?: ReactElement
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function CreateArtifactSheet({ children }: CreateArtifactSheetProps) {
-  const [open, setOpen] = useState(false)
+export function CreateArtifactSheet({ children, open: openProp, onOpenChange }: CreateArtifactSheetProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp ?? internalOpen
+  const setOpen = onOpenChange ?? setInternalOpen
   const [name, setName] = useState("")
   const [kind, setKind] = useState("code")
   const [owner, setOwner] = useState("")
@@ -72,7 +76,7 @@ export function CreateArtifactSheet({ children }: CreateArtifactSheetProps) {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger render={children} />
+      {children && <SheetTrigger render={children} />}
       <SheetContent side={isMobile ? "bottom" : "right"} className={isMobile ? "rounded-t-xl" : ""}>
         <SheetHeader>
           <SheetTitle>Register Artifact</SheetTitle>

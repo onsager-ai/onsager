@@ -19,9 +19,10 @@ export function SessionsPage() {
           </p>
         </div>
         <CreateSessionSheet>
-          <Button size="sm" className="hidden md:inline-flex">
+          <Button size="sm" className="shrink-0">
             <Plus className="h-4 w-4" data-icon="inline-start" />
-            New Session
+            <span className="hidden sm:inline">New Session</span>
+            <span className="sm:hidden">New</span>
           </Button>
         </CreateSessionSheet>
       </div>
