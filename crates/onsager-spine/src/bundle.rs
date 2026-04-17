@@ -26,7 +26,7 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SubsecRound, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -362,7 +362,9 @@ impl Warehouse for FilesystemWarehouse {
         }
 
         let content_ref = self.content_ref_uri();
-        let sealed_at = Utc::now();
+        // Postgres TIMESTAMPTZ is microsecond-precision; truncate here so the
+        // Bundle we return round-trips byte-for-byte with a subsequent fetch.
+        let sealed_at = Utc::now().trunc_subsecs(6);
         let manifest_json = serde_json::to_value(&manifest)
             .map_err(|e| SealError::Invalid(format!("manifest serialisation: {e}")))?;
 
