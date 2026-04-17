@@ -150,12 +150,13 @@ pub async fn create_shaping(
     if let Some(ref spine) = state.spine {
         match final_session.state {
             SessionState::Done => {
+                let artifact_id = req.artifact_id.to_string();
                 let _ = spine
                     .emit_session_completed(
                         &session.id,
                         &req.request_id,
                         duration_ms,
-                        Some(&req.artifact_id.to_string()),
+                        Some(&artifact_id),
                     )
                     .await;
             }

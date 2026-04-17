@@ -1,28 +1,26 @@
 //! Event-driven handler for stiglab session completions (issue #14 phase 2).
 //!
 //! The HTTP dispatcher in `cmd/serve.rs` is synchronous: it blocks the
-//! pipeline tick until Stiglab returns. That works when the agent finishes
-//! within the request timeout, but long-running shaping tasks need an
-//! asynchronous path. This listener is the first piece of that path.
+//! pipeline tick until Stiglab returns. Long-running shaping tasks need an
+//! asynchronous path, and this listener is the first piece of it.
 //!
-//! Design:
+//! Why no namespace filter: the [`Listener`] namespace filter keys on a
+//! `stream_id` prefix convention (`"<ns>:..."`). Stiglab currently writes
+//! session events with the raw session UUID as `stream_id`, so subscribing
+//! to the `stiglab` namespace would drop every notification. We filter on
+//! `event_type` here instead, which is unambiguous.
 //!
-//! - subscribe to the spine with the `stiglab` namespace filter
-//! - buffer notifications; for each one with `event_type ==
-//!   "stiglab.session_completed"`, load the full event row from the store
-//!   and parse it into a typed [`SessionCompleted`]
-//! - invoke a caller-supplied [`SessionCompletedHandler`] with the parsed
-//!   event, so forge-specific state mutations stay in the forge crate and
-//!   spine stays a generic library
-//!
-//! The initial integration only handles `session_completed`; failed/aborted
-//! variants are easy to add later by extending the match arm.
+//! Data layout: `stiglab::server::spine::SpineEmitter::emit` writes events
+//! into `events_ext` with the [`FactoryEventKind`] variant directly as the
+//! `data` column; the `FactoryEvent` envelope is only used in the core
+//! `events` table. Both code paths are supported below so a future migration
+//! either way doesn't break this listener.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use onsager_spine::factory_event::{FactoryEvent, FactoryEventKind};
-use onsager_spine::{EventHandler, EventNotification, EventStore, Listener, Namespace};
+use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 
 /// A parsed stiglab.session_completed event (issue #14 phase 2).
 #[derive(Debug, Clone)]
@@ -54,16 +52,56 @@ pub async fn run<H: SessionCompletedHandler>(
         store: store.clone(),
         handler: Arc::new(handler),
     };
-    Listener::new(store)
-        .subscribe(Namespace::new("stiglab").map_err(anyhow::Error::from)?)
-        .with_since(since)
-        .run(dispatcher)
-        .await
+    Listener::new(store).with_since(since).run(dispatcher).await
 }
 
 struct Dispatcher<H: SessionCompletedHandler> {
     store: EventStore,
     handler: Arc<H>,
+}
+
+impl<H: SessionCompletedHandler> Dispatcher<H> {
+    /// Load the event payload and parse it into the typed variant.
+    async fn load_session_completed(
+        &self,
+        notification: &EventNotification,
+    ) -> anyhow::Result<Option<SessionCompleted>> {
+        let (id, kind) = match notification.table.as_str() {
+            "events" => {
+                let Some(row) = self.store.get_event_by_id(notification.id).await? else {
+                    return Ok(None);
+                };
+                let envelope: FactoryEvent = serde_json::from_value(row.data)?;
+                (row.id, envelope.event)
+            }
+            "events_ext" => {
+                let Some(row) = self.store.get_ext_event_by_id(notification.id).await? else {
+                    return Ok(None);
+                };
+                let kind: FactoryEventKind = serde_json::from_value(row.data)?;
+                (row.id, kind)
+            }
+            _ => return Ok(None),
+        };
+
+        let FactoryEventKind::StiglabSessionCompleted {
+            session_id,
+            request_id,
+            duration_ms,
+            artifact_id,
+        } = kind
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(SessionCompleted {
+            event_id: id,
+            session_id,
+            request_id,
+            duration_ms,
+            artifact_id,
+        }))
+    }
 }
 
 #[async_trait]
@@ -72,49 +110,19 @@ impl<H: SessionCompletedHandler> EventHandler for Dispatcher<H> {
         if notification.event_type != "stiglab.session_completed" {
             return Ok(());
         }
-        // Skip events that live in events_ext — session_completed events are
-        // always written via append_factory_event to the core events table.
-        if notification.table != "events" {
-            return Ok(());
-        }
 
-        let records = self
-            .store
-            .query_events(Some(&notification.stream_id), None, None, 100)
-            .await?;
-        let Some(record) = records.into_iter().find(|r| r.id == notification.id) else {
-            tracing::warn!(
-                id = notification.id,
-                stream = %notification.stream_id,
-                "session_completed notification had no matching event row"
-            );
-            return Ok(());
-        };
-
-        let evt: FactoryEvent = match serde_json::from_value(record.data.clone()) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to parse FactoryEvent");
-                return Ok(());
+        match self.load_session_completed(&notification).await {
+            Ok(Some(evt)) => self.handler.on_session_completed(evt).await?,
+            Ok(None) => {
+                tracing::debug!(
+                    id = notification.id,
+                    table = %notification.table,
+                    "session_completed notification had no matching row or mismatched variant"
+                );
             }
-        };
-
-        if let FactoryEventKind::StiglabSessionCompleted {
-            session_id,
-            request_id,
-            duration_ms,
-            artifact_id,
-        } = evt.event
-        {
-            self.handler
-                .on_session_completed(SessionCompleted {
-                    event_id: record.id,
-                    session_id,
-                    request_id,
-                    duration_ms,
-                    artifact_id,
-                })
-                .await?;
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load session_completed event");
+            }
         }
         Ok(())
     }
