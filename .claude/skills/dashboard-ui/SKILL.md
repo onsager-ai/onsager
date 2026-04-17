@@ -12,7 +12,9 @@ and accessibility behavior baked into the shadcn primitives.
 
 ## The rule
 
-In any `.tsx` under `apps/dashboard/src/`:
+In any `.tsx` under `apps/dashboard/src/` — **except** for the shadcn
+primitives themselves in `apps/dashboard/src/components/ui/**`, which
+legitimately wrap native elements:
 
 - **Do not** write `<input>`, `<select>`, `<textarea>`, `<button>`,
   `<option>`, native `<dialog>`, native checkbox/radio `<input type="...">`,
@@ -44,10 +46,11 @@ In any `.tsx` under `apps/dashboard/src/`:
 These are already present under `apps/dashboard/src/components/ui/`:
 
 `badge`, `button`, `card`, `dropdown-menu`, `input`, `scroll-area`,
-`separator`, `sheet`, `sidebar`, `skeleton`, `table`, `tabs`, `tooltip`.
+`select`, `separator`, `sheet`, `sidebar`, `skeleton`, `table`, `tabs`,
+`textarea`, `tooltip`.
 
-If you need a component that isn't in the list (e.g. `select`, `dialog`,
-`checkbox`, `textarea`, `radio-group`, `form`, `switch`), add it with:
+If you need a component that isn't in the list (e.g. `dialog`, `checkbox`,
+`radio-group`, `form`, `switch`), add it with:
 
 ```bash
 cd apps/dashboard
@@ -64,7 +67,8 @@ Before claiming a dashboard change is done, grep for violations in files you
 touched:
 
 ```bash
-rg -n '<(button|input|select|textarea|option|dialog)[ />]' apps/dashboard/src
+rg -n '<(button|input|select|textarea|option|dialog)[ />]' apps/dashboard/src \
+  --glob '!apps/dashboard/src/components/ui/**'
 ```
 
 Any hit in your diff should be replaced with the shadcn primitive.
