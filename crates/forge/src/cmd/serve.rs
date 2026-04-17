@@ -151,10 +151,7 @@ pub fn run(database_url: &str, tick_ms: u64) {
                     let kind_enum = match kind.as_str() {
                         "code" => Kind::Code,
                         "document" => Kind::Document,
-                        "report" => Kind::Report,
-                        "dataset" => Kind::Dataset,
-                        "config" => Kind::Config,
-                        "api_call" => Kind::ApiCall,
+                        "pull_request" => Kind::PullRequest,
                         other => Kind::Custom(other.to_string()),
                     };
                     let state = match state_str.as_str() {
@@ -303,10 +300,7 @@ async fn register_artifact(
     let kind = match req.kind.as_str() {
         "code" => Kind::Code,
         "document" => Kind::Document,
-        "report" => Kind::Report,
-        "dataset" => Kind::Dataset,
-        "config" => Kind::Config,
-        "api_call" => Kind::ApiCall,
+        "pull_request" => Kind::PullRequest,
         other => Kind::Custom(other.to_string()),
     };
 
