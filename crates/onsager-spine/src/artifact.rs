@@ -55,10 +55,7 @@ impl fmt::Display for ArtifactId {
 pub enum Kind {
     Code,
     Document,
-    Report,
-    Dataset,
-    Config,
-    ApiCall,
+    PullRequest,
     /// User-defined kind not in the built-in set.
     Custom(String),
 }
@@ -68,10 +65,7 @@ impl fmt::Display for Kind {
         match self {
             Kind::Code => write!(f, "code"),
             Kind::Document => write!(f, "document"),
-            Kind::Report => write!(f, "report"),
-            Kind::Dataset => write!(f, "dataset"),
-            Kind::Config => write!(f, "config"),
-            Kind::ApiCall => write!(f, "api_call"),
+            Kind::PullRequest => write!(f, "pull_request"),
             Kind::Custom(s) => write!(f, "{s}"),
         }
     }
@@ -159,6 +153,18 @@ pub struct ContentRef {
     /// Optional content checksum for integrity verification.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checksum: Option<String>,
+}
+
+/// Git hosting context for pull request-oriented artifacts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitContext {
+    pub repo: String,
+    pub base_branch: String,
+    pub head_branch: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_url: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +270,8 @@ pub struct Artifact {
     pub name: String,
     pub created_at: DateTime<Utc>,
     pub created_by: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_context: Option<GitContext>,
 
     // Ownership
     pub owner: String,
@@ -295,6 +303,7 @@ impl Artifact {
             name: name.into(),
             created_at: Utc::now(),
             created_by: created_by.into(),
+            git_context: None,
             owner: owner.into(),
             consumers,
             state: ArtifactState::Draft,
@@ -363,6 +372,10 @@ mod tests {
         let json = serde_json::to_string(&kind).unwrap();
         assert_eq!(json, r#""code""#);
 
+        let pr = Kind::PullRequest;
+        let json = serde_json::to_string(&pr).unwrap();
+        assert_eq!(json, r#""pull_request""#);
+
         let custom = Kind::Custom("test_execution_report".into());
         let json = serde_json::to_string(&custom).unwrap();
         assert!(json.contains("test_execution_report"));
@@ -371,8 +384,8 @@ mod tests {
     #[test]
     fn new_artifact_defaults() {
         let art = Artifact::new(
-            Kind::Report,
-            "Q1 Analysis",
+            Kind::PullRequest,
+            "Q1 Feature Work",
             "marvin",
             "system",
             vec![Consumer {
@@ -382,8 +395,32 @@ mod tests {
         );
         assert_eq!(art.state, ArtifactState::Draft);
         assert_eq!(art.current_version, 0);
+        assert!(art.git_context.is_none());
         assert!(art.versions.is_empty());
         assert!(!art.consumers.is_empty());
+    }
+
+    #[test]
+    fn git_context_serde_roundtrip() {
+        let context = GitContext {
+            repo: "onsager-ai/onsager".into(),
+            base_branch: "main".into(),
+            head_branch: "copilot/feature-pr-kind".into(),
+            pr_number: Some(42),
+            pr_url: Some("https://github.com/onsager-ai/onsager/pull/42".into()),
+        };
+
+        let json = serde_json::to_value(&context).unwrap();
+        let roundtrip: GitContext = serde_json::from_value(json).unwrap();
+        assert_eq!(roundtrip, context);
+    }
+
+    #[test]
+    fn custom_report_escape_hatch() {
+        let kind = Kind::Custom("report".into());
+        let json = serde_json::to_string(&kind).unwrap();
+        let roundtrip: Kind = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip, kind);
     }
 
     #[test]

@@ -32,7 +32,8 @@ pub mod store;
 
 pub use artifact::{
     Artifact, ArtifactId, ArtifactState, ArtifactVersion, Consumer, ConsumerType, ContentRef,
-    HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue, VerticalLineage,
+    GitContext, HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue,
+    VerticalLineage,
 };
 pub use catalog::{engineering_types, register_engineering_catalog, CatalogOutcome, CATALOG_ACTOR};
 pub use evaluators::{CiGreen, HumanApproval, ReviewApproved};
