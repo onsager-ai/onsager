@@ -13,6 +13,15 @@ pub struct Session {
     pub prompt: String,
     pub output: Option<String>,
     pub working_dir: Option<String>,
+    /// Onsager artifact this session is shaping (factory pipeline).
+    ///
+    /// Populated when the session originates from a [`ShapingRequest`]; `None`
+    /// for sessions created via the older task-only API. Issue #14 phase 2.
+    #[serde(default)]
+    pub artifact_id: Option<String>,
+    /// Target artifact version this session is producing.
+    #[serde(default)]
+    pub artifact_version: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

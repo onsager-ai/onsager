@@ -93,6 +93,8 @@ pub fn task_to_session(task: &Task, node_id: &str) -> Session {
         prompt: task.prompt.clone(),
         output: None,
         working_dir: task.working_dir.clone(),
+        artifact_id: None,
+        artifact_version: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }
@@ -197,6 +199,8 @@ mod tests {
             prompt: "Fix the login bug".to_string(),
             output: Some("Fixed the authentication flow".to_string()),
             working_dir: Some("/home/user/project".to_string()),
+            artifact_id: None,
+            artifact_version: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -254,6 +258,8 @@ mod tests {
             prompt: "Fix the login bug".to_string(),
             output: Some("Partial progress".to_string()),
             working_dir: None,
+            artifact_id: None,
+            artifact_version: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -278,6 +284,8 @@ mod tests {
             prompt: "Fix the login bug".to_string(),
             output: Some("Agent timed out".to_string()),
             working_dir: None,
+            artifact_id: None,
+            artifact_version: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

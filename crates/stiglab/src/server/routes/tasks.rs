@@ -90,6 +90,8 @@ pub async fn create_task(
         prompt: request.prompt.clone(),
         output: None,
         working_dir: request.working_dir.clone(),
+        artifact_id: None,
+        artifact_version: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };

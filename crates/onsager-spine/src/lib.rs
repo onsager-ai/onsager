@@ -18,12 +18,15 @@
 //! `migrations/001_initial.sql`; downstream services apply it themselves.
 
 pub mod artifact;
+pub mod catalog;
+pub mod evaluators;
 pub mod extension_event;
 pub mod factory_event;
 pub mod listener;
 pub mod namespace;
 pub mod protocol;
 pub mod registry;
+pub mod registry_store;
 pub mod seed;
 pub mod store;
 
@@ -32,6 +35,8 @@ pub use artifact::{
     GitContext, HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue,
     VerticalLineage,
 };
+pub use catalog::{engineering_types, register_engineering_catalog, CatalogOutcome, CATALOG_ACTOR};
+pub use evaluators::{CiGreen, HumanApproval, ReviewApproved};
 pub use extension_event::ExtensionEventRecord;
 pub use factory_event::{FactoryEvent, FactoryEventKind};
 pub use listener::{EventHandler, Listener};
@@ -42,6 +47,7 @@ pub use registry::{
     GateContext, GateEvaluator, GateVerdict, RegisteredType, RegistryId, RegistryStatus,
     TypeDefinition, DEFAULT_WORKSPACE, SEED_ACTOR,
 };
+pub use registry_store::{RegistryKind, RegistryRecord, RegistryStore};
 pub use seed::{apply_seed, SeedCatalog, SeedOutcome};
 pub use store::{
     append_factory_event_tx, EventMetadata, EventNotification, EventRecord, EventStore,
