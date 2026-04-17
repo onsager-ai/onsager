@@ -32,40 +32,20 @@ jobs:
               - 'rust-toolchain.toml'
             onsager-spine:
               - 'crates/onsager-spine/**'
-              - '!crates/onsager-spine/**/*.md'
-              - '!crates/onsager-spine/.claude/**'
             forge:
               - 'crates/forge/**'
-              - '!crates/forge/**/*.md'
-              - '!crates/forge/.claude/**'
               - 'crates/onsager-spine/**'
-              - '!crates/onsager-spine/**/*.md'
-              - '!crates/onsager-spine/.claude/**'
             ising:
               - 'crates/ising/**'
-              - '!crates/ising/**/*.md'
-              - '!crates/ising/.claude/**'
               - 'crates/onsager-spine/**'
-              - '!crates/onsager-spine/**/*.md'
-              - '!crates/onsager-spine/.claude/**'
             stiglab:
               - 'crates/stiglab/**'
-              - '!crates/stiglab/**/*.md'
-              - '!crates/stiglab/.claude/**'
               - 'crates/onsager-spine/**'
-              - '!crates/onsager-spine/**/*.md'
-              - '!crates/onsager-spine/.claude/**'
             synodic:
               - 'crates/synodic/**'
-              - '!crates/synodic/**/*.md'
-              - '!crates/synodic/.claude/**'
               - 'crates/onsager-spine/**'
-              - '!crates/onsager-spine/**/*.md'
-              - '!crates/onsager-spine/.claude/**'
             onsager:
               - 'crates/onsager/**'
-              - '!crates/onsager/**/*.md'
-              - '!crates/onsager/.claude/**'
 
   check:
     needs: changes
