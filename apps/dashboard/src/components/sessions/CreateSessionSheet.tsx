@@ -14,6 +14,14 @@ import {
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 
 interface CreateSessionSheetProps {
   children: ReactElement
@@ -64,14 +72,13 @@ export function CreateSessionSheet({ children }: CreateSessionSheetProps) {
             <label htmlFor="prompt" className="text-sm font-medium">
               Prompt
             </label>
-            <textarea
+            <Textarea
               id="prompt"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="Describe the task for the agent..."
               rows={3}
               required
-              className="w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-2 text-base transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
             />
           </div>
 
@@ -80,19 +87,19 @@ export function CreateSessionSheet({ children }: CreateSessionSheetProps) {
               <label htmlFor="node" className="text-sm font-medium">
                 Node <span className="text-muted-foreground font-normal">(optional)</span>
               </label>
-              <select
-                id="node"
-                value={nodeId}
-                onChange={(e) => setNodeId(e.target.value)}
-                className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
-              >
-                <option value="">Auto-assign</option>
-                {onlineNodes.map((node) => (
-                  <option key={node.id} value={node.id}>
-                    {node.name} ({node.active_sessions}/{node.max_sessions})
-                  </option>
-                ))}
-              </select>
+              <Select value={nodeId} onValueChange={(v) => setNodeId(v ?? "")}>
+                <SelectTrigger id="node" className="w-full">
+                  <SelectValue placeholder="Auto-assign" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Auto-assign</SelectItem>
+                  {onlineNodes.map((node) => (
+                    <SelectItem key={node.id} value={node.id}>
+                      {node.name} ({node.active_sessions}/{node.max_sessions})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
 

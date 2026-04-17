@@ -13,6 +13,14 @@ import {
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 
 const ARTIFACT_KINDS = [
   { value: "code", label: "Code" },
@@ -90,18 +98,22 @@ export function CreateArtifactSheet({ children }: CreateArtifactSheetProps) {
             <label htmlFor="artifact-kind" className="text-sm font-medium">
               Kind
             </label>
-            <select
-              id="artifact-kind"
+            <Select
               value={kind}
-              onChange={(e) => setKind(e.target.value)}
-              className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
+              onValueChange={(v) => setKind(v ?? "code")}
+              items={ARTIFACT_KINDS}
             >
-              {ARTIFACT_KINDS.map((k) => (
-                <option key={k.value} value={k.value}>
-                  {k.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="artifact-kind" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ARTIFACT_KINDS.map((k) => (
+                  <SelectItem key={k.value} value={k.value}>
+                    {k.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-1.5">
@@ -121,13 +133,12 @@ export function CreateArtifactSheet({ children }: CreateArtifactSheetProps) {
             <label htmlFor="artifact-description" className="text-sm font-medium">
               Description <span className="text-muted-foreground font-normal">(optional)</span>
             </label>
-            <textarea
+            <Textarea
               id="artifact-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What should this artifact accomplish..."
               rows={3}
-              className="w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-2 text-base transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
             />
           </div>
 
