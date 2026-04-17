@@ -83,6 +83,7 @@ jobs:
           psql "$DATABASE_URL" -f crates/onsager-spine/migrations/002_artifacts.sql
           psql "$DATABASE_URL" -f crates/onsager-spine/migrations/003_artifacts_git_context.sql
           psql "$DATABASE_URL" -f crates/onsager-spine/migrations/004_artifact_pipeline.sql
+          psql "$DATABASE_URL" -f crates/onsager-spine/migrations/005_warehouse_delivery.sql
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
       - name: Test onsager-spine (serial — shares DB)
