@@ -90,6 +90,7 @@ impl fmt::Display for DeliveryId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConsumerKind {
+    #[serde(rename = "github")]
     GitHub,
     Webhook,
     S3,
@@ -382,6 +383,18 @@ mod tests {
         assert_eq!(ConsumerKind::GitHub.to_string(), "github");
         assert_eq!(ConsumerKind::Webhook.to_string(), "webhook");
         assert_eq!(ConsumerKind::Custom("slack".into()).to_string(), "slack");
+    }
+
+    #[test]
+    fn consumer_kind_serde_matches_display() {
+        // Regression: default snake_case would emit "git_hub"; the explicit
+        // rename keeps serde in sync with Display and Receipt tags.
+        assert_eq!(
+            serde_json::to_string(&ConsumerKind::GitHub).unwrap(),
+            r#""github""#
+        );
+        let back: ConsumerKind = serde_json::from_str(r#""github""#).unwrap();
+        assert_eq!(back, ConsumerKind::GitHub);
     }
 
     #[test]

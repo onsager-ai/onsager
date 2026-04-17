@@ -84,7 +84,12 @@ CREATE TABLE IF NOT EXISTS deliveries (
     last_error     TEXT,
     receipt        JSONB,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- One row per (bundle, consumer): retries update attempts/status in place,
+    -- not via additional rows. This enforces the at-least-once idempotency
+    -- model (§9.6) at the schema level.
+    UNIQUE (bundle_id, consumer_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_deliveries_bundle  ON deliveries (bundle_id);

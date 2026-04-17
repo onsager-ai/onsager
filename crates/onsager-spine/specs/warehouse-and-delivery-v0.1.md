@@ -175,8 +175,9 @@ Rework never mutates a prior bundle. Recall is achieved by advancing the current
 ## 7. Consumer contract
 
 ```rust
+#[async_trait]
 trait Consumer {
-    fn deliver(
+    async fn deliver(
         &self,
         bundle: &Bundle,
         kind: DeliveryKind,
@@ -206,22 +207,29 @@ enum Receipt {
 
 ## 8. Warehouse backend
 
-The warehouse is backend-agnostic. v0.1 ships two backends:
+The warehouse is backend-agnostic. v0.1 ships one backend:
 
 - **`filesystem`** — content blobs under `$ONSAGER_WAREHOUSE_ROOT/blobs/`, manifests in Postgres. Default for local dev.
-- **`postgres-lo`** — content in Postgres large objects. Zero external infra; suitable for small deployments.
 
-S3/R2 is planned but out of scope for v0.1.
+Planned but out of scope for v0.1:
+
+- **`postgres-lo`** — content in Postgres large objects. Zero external infra; suitable for small deployments.
+- **S3/R2** — for larger deployments.
 
 Backend is configured via env var; Forge and the delivery worker only see the `Warehouse` trait:
 
 ```rust
+#[async_trait]
 trait Warehouse {
-    fn seal(&self, artifact_id: ArtifactId, outputs: Outputs) -> Result<BundleId, SealError>;
-    fn fetch(&self, bundle_id: BundleId) -> Result<Bundle, FetchError>;
-    fn exists(&self, bundle_id: BundleId) -> Result<bool, FetchError>;
+    async fn seal(&self, request: SealRequest) -> Result<Bundle, SealError>;
+    async fn fetch(&self, bundle_id: &BundleId) -> Result<Bundle, FetchError>;
+    async fn exists(&self, bundle_id: &BundleId) -> Result<bool, FetchError>;
 }
 ```
+
+where `SealRequest` carries `artifact_id`, `sealed_by`, operator metadata, and
+the `Outputs` list. The trait returns a full [`Bundle`] — id, version, manifest,
+and timestamps — so callers do not need a follow-up fetch.
 
 ---
 

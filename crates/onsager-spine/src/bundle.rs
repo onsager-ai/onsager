@@ -40,9 +40,11 @@ use crate::artifact::ArtifactId;
 
 /// Content-addressed bundle identifier.
 ///
-/// Format: `bnd_<64-char-hex>`, where the hex is the SHA-256 of the
-/// canonicalised manifest. Two seals with the same manifest produce the same
-/// id, which is what makes bundles content-addressed and idempotent.
+/// Format: `bnd_<64-char-hex>`, where the hex is the SHA-256 of
+/// `(artifact_id, version, canonical_manifest_bytes)`. Two seals of the same
+/// artifact at the same version with identical file contents produce the same
+/// id (idempotent reseal → `VersionConflict`). Two different artifacts with
+/// identical files produce different ids, so they do not collide.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BundleId(String);
 
@@ -277,7 +279,15 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn build_manifest(outputs: &Outputs) -> Manifest {
+fn build_manifest(outputs: &Outputs) -> Result<Manifest, SealError> {
+    let mut seen = std::collections::HashSet::new();
+    for (path, _) in &outputs.files {
+        if !seen.insert(path.as_str()) {
+            return Err(SealError::Invalid(format!(
+                "duplicate path in outputs: {path}"
+            )));
+        }
+    }
     let mut entries: Vec<ManifestEntry> = outputs
         .files
         .iter()
@@ -288,7 +298,7 @@ fn build_manifest(outputs: &Outputs) -> Manifest {
         })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path));
-    Manifest { entries }
+    Ok(Manifest { entries })
 }
 
 #[async_trait]
@@ -301,8 +311,16 @@ impl Warehouse for FilesystemWarehouse {
             outputs,
         } = request;
 
-        // 1. Build the manifest (sorted, hashed).
-        let manifest = build_manifest(&outputs);
+        // 1. Build the manifest (sorted, hashed). Also index the raw bytes by
+        //    path so blob writes align with the sorted manifest entries —
+        //    zipping `outputs.files` (insertion order) with `manifest.entries`
+        //    (sorted) would write the wrong blob under each content hash.
+        let manifest = build_manifest(&outputs)?;
+        let bytes_by_path: std::collections::HashMap<&str, &[u8]> = outputs
+            .files
+            .iter()
+            .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+            .collect();
 
         // 2. Determine the next version and prior bundle by scanning existing
         //    bundles for this artifact. Done inside a transaction to guard
@@ -336,7 +354,10 @@ impl Warehouse for FilesystemWarehouse {
         let bundle_id = BundleId::from_manifest(&manifest, &artifact_id, version);
 
         // 3. Write blobs to disk. Content-addressed — safe to retry.
-        for ((_, bytes), entry) in outputs.files.iter().zip(manifest.entries.iter()) {
+        for entry in &manifest.entries {
+            let bytes = bytes_by_path
+                .get(entry.path.as_str())
+                .expect("manifest entries derive from outputs.files keys");
             self.write_blob(&entry.content_hash, bytes).await?;
         }
 
@@ -441,7 +462,15 @@ impl Warehouse for FilesystemWarehouse {
 impl FilesystemWarehouse {
     /// Read a blob by its content hash. Useful for consumers that want to
     /// stream a bundle's contents without re-sealing it.
+    ///
+    /// Rejects malformed hashes (wrong length or non-hex) with
+    /// [`FetchError::Corrupted`] rather than panicking in the path builder.
     pub async fn read_blob_by_hash(&self, hash: &str) -> Result<Vec<u8>, FetchError> {
+        if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(FetchError::Corrupted(format!(
+                "malformed blob hash: {hash}"
+            )));
+        }
         match self.read_blob(hash).await {
             Ok(bytes) => Ok(bytes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -481,9 +510,36 @@ mod tests {
         outputs.push("a.txt", b"a".to_vec());
         outputs.push("m.txt", b"m".to_vec());
 
-        let manifest = build_manifest(&outputs);
+        let manifest = build_manifest(&outputs).unwrap();
         let paths: Vec<_> = manifest.entries.iter().map(|e| e.path.as_str()).collect();
         assert_eq!(paths, vec!["a.txt", "m.txt", "z.txt"]);
+    }
+
+    #[test]
+    fn manifest_entry_hash_matches_bytes_at_that_path() {
+        // Regression guard: insertion order (z, a) differs from sorted order
+        // (a, z). Each entry's content_hash must be the hash of the bytes
+        // at its path, not a blindly-zipped slot.
+        let mut outputs = Outputs::new();
+        outputs.push("z.txt", b"z-bytes".to_vec());
+        outputs.push("a.txt", b"a-bytes".to_vec());
+
+        let manifest = build_manifest(&outputs).unwrap();
+        let a_entry = manifest.entries.iter().find(|e| e.path == "a.txt").unwrap();
+        let z_entry = manifest.entries.iter().find(|e| e.path == "z.txt").unwrap();
+        assert_eq!(a_entry.content_hash, sha256_hex(b"a-bytes"));
+        assert_eq!(z_entry.content_hash, sha256_hex(b"z-bytes"));
+    }
+
+    #[test]
+    fn manifest_rejects_duplicate_paths() {
+        let mut outputs = Outputs::new();
+        outputs.push("a.txt", b"first".to_vec());
+        outputs.push("a.txt", b"second".to_vec());
+
+        let err = build_manifest(&outputs).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("duplicate"), "unexpected: {msg}");
     }
 
     #[test]
