@@ -60,6 +60,18 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route(
             "/api/spine/artifacts/{id}",
             get(routes::spine::get_artifact),
+        )
+        .route(
+            "/api/spine/artifacts/{id}/retry",
+            post(routes::spine::retry_artifact),
+        )
+        .route(
+            "/api/spine/artifacts/{id}/abort",
+            post(routes::spine::abort_artifact),
+        )
+        .route(
+            "/api/spine/artifacts/{id}/override-gate",
+            post(routes::spine::override_gate),
         );
 
     // Configure CORS

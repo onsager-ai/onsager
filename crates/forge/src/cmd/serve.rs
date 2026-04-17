@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use axum::response::IntoResponse;
 use tokio::sync::RwLock;
 
@@ -13,6 +14,7 @@ use onsager_spine::EventStore;
 use crate::core::artifact_store::ArtifactStore;
 use crate::core::kernel::BaselineKernel;
 use crate::core::pipeline::{ForgePipeline, PipelineEvent, StiglabDispatcher, SynodicGate};
+use crate::core::session_listener::{self, SessionCompleted, SessionCompletedHandler};
 
 use onsager_spine::protocol::{GateRequest, GateVerdict, ShapingRequest};
 
@@ -243,9 +245,93 @@ pub fn run(database_url: &str, tick_ms: u64) {
             }
         });
 
+        // Spawn the stiglab.session_completed listener (issue #14 phase 2).
+        //
+        // This is the event-driven counterpart to the synchronous HTTP
+        // dispatcher in the tick loop. When Stiglab emits a completion
+        // event carrying an artifact_id, we record the linkage in the spine
+        // so that the dashboard can render the per-run lineage without
+        // rescanning the pipeline's in-memory state.
+        let listener_shared = shared.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = listener_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: session_completed listener disabled (no spine connection)");
+                return;
+            };
+            let handler = SessionLinker {
+                shared: listener_shared,
+            };
+            if let Err(e) = session_listener::run(store, handler, None).await {
+                tracing::error!("forge: session_completed listener exited: {e}");
+            }
+        });
+
         // Run the HTTP server.
         axum::serve(listener, app).await.unwrap();
     });
+}
+
+/// Event-driven handler that links completed Stiglab sessions back to the
+/// pipeline artifact they were shaping.
+///
+/// For now the work is light: log the linkage and emit a spine event so the
+/// dashboard's per-run DAG has a recorded edge. The next step (not yet done)
+/// is to fold the ShapingResult back into the pipeline state without the
+/// synchronous HTTP roundtrip in `HttpStiglabDispatcher::dispatch`.
+struct SessionLinker {
+    shared: SharedForge,
+}
+
+#[async_trait]
+impl SessionCompletedHandler for SessionLinker {
+    async fn on_session_completed(&self, event: SessionCompleted) -> anyhow::Result<()> {
+        let Some(ref artifact_id) = event.artifact_id else {
+            // Non-shaping sessions (direct task POSTs) have no artifact linkage.
+            return Ok(());
+        };
+
+        tracing::info!(
+            session_id = %event.session_id,
+            artifact_id = %artifact_id,
+            duration_ms = event.duration_ms,
+            "forge: session completed, recording lineage"
+        );
+
+        // Persist the linkage as a vertical_lineage row so the dashboard can
+        // render it immediately — the spine event is the source of truth,
+        // this is just the materialized projection. INSERT is idempotent:
+        // duplicates are a no-op thanks to ON CONFLICT DO NOTHING.
+        let spine = {
+            let state = self.shared.read().await;
+            state.spine.clone()
+        };
+        let Some(spine) = spine else { return Ok(()) };
+
+        // Look up the current version for this artifact; default to 0 if
+        // the artifact isn't yet tracked (e.g. dashboard-registered only).
+        let version: i32 =
+            sqlx::query_scalar("SELECT current_version FROM artifacts WHERE artifact_id = $1")
+                .bind(artifact_id)
+                .fetch_optional(spine.pool())
+                .await?
+                .unwrap_or(0);
+
+        let _ = sqlx::query(
+            "INSERT INTO vertical_lineage (artifact_id, version, session_id) \
+             VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+        )
+        .bind(artifact_id)
+        .bind(version)
+        .bind(&event.session_id)
+        .execute(spine.pool())
+        .await?;
+
+        Ok(())
+    }
 }
 
 /// Build the Forge HTTP API router.

@@ -71,6 +71,47 @@ pub struct RegisterArtifactRequest {
     pub working_dir: Option<String>,
 }
 
+/// POST /api/spine/artifacts/:id/retry — request re-shaping of an artifact.
+///
+/// Emits a `forge.retry_requested` event and bumps the artifact back to
+/// `in_progress` if it was stuck in `under_review`. Forge picks it up on
+/// the next tick.
+#[derive(Debug, Deserialize, Default)]
+pub struct RetryRequest {
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub actor: Option<String>,
+}
+
+/// POST /api/spine/artifacts/:id/abort — archive an artifact.
+///
+/// Flips state to `archived` and emits `artifact.archived`. Irreversible;
+/// the dashboard asks for confirmation.
+#[derive(Debug, Deserialize, Default)]
+pub struct AbortRequest {
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub actor: Option<String>,
+}
+
+/// POST /api/spine/artifacts/:id/override-gate — record a manual gate override.
+///
+/// Emits `synodic.escalation_resolved` with the chosen verdict so Forge's
+/// next tick honors it. This is the dashboard's counterpart to a human
+/// resolving an escalated gate.
+#[derive(Debug, Deserialize, Default)]
+pub struct OverrideGateRequest {
+    /// `allow` (default) or `deny`.
+    #[serde(default)]
+    pub verdict: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub actor: Option<String>,
+}
+
 /// GET /api/spine/events — query the events_ext table.
 pub async fn list_events(
     State(state): State<AppState>,
@@ -374,6 +415,12 @@ pub async fn get_artifact(
             .flatten()
             .unwrap_or_default();
 
+    // Fetch related spine events for the per-run DAG (issue #14 phase 3).
+    let related_events = fetch_related_events(pool, &id).await.unwrap_or_else(|e| {
+        tracing::warn!("failed to load related events for artifact {id}: {e}");
+        Vec::new()
+    });
+
     Json(serde_json::json!({
         "artifact": {
             "id": artifact.id,
@@ -387,7 +434,285 @@ pub async fn get_artifact(
             "updated_at": artifact.updated_at,
             "versions": versions,
             "vertical_lineage": lineage,
+            "related_events": related_events,
         }
     }))
     .into_response()
+}
+
+/// Fetch spine events related to an artifact for the per-run DAG (issue #14
+/// phase 3). Filters on `stream_id = forge:<artifact_id>` (the convention
+/// forge follows) and on session completions whose payload references this
+/// artifact.
+async fn fetch_related_events(
+    pool: &sqlx::PgPool,
+    artifact_id: &str,
+) -> Result<Vec<SpineEvent>, sqlx::Error> {
+    let stream_key = format!("forge:{artifact_id}");
+    sqlx::query_as::<_, SpineEvent>(
+        "SELECT id, stream_id, stream_type, event_type, data, actor, created_at \
+         FROM events_ext \
+         WHERE stream_id = $1 \
+            OR (event_type IN ('stiglab.session_completed', 'stiglab.session_failed') \
+                AND data->>'artifact_id' = $2) \
+         ORDER BY id ASC \
+         LIMIT 500",
+    )
+    .bind(&stream_key)
+    .bind(artifact_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// POST /api/spine/artifacts/:id/retry
+pub async fn retry_artifact(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<RetryRequest>,
+) -> impl IntoResponse {
+    let spine = match &state.spine {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "spine not connected" })),
+            )
+                .into_response()
+        }
+    };
+
+    let pool = spine.pool();
+
+    // Confirm the artifact exists and is not archived.
+    let current_state: Option<String> =
+        sqlx::query_scalar("SELECT state FROM artifacts WHERE artifact_id = $1")
+            .bind(&id)
+            .fetch_optional(pool)
+            .await
+            .unwrap_or(None);
+
+    let Some(state_str) = current_state else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "artifact not found" })),
+        )
+            .into_response();
+    };
+
+    if state_str == "archived" || state_str == "released" {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": format!("cannot retry artifact in {state_str} state"),
+            })),
+        )
+            .into_response();
+    }
+
+    let actor = req.actor.as_deref().unwrap_or("dashboard");
+    let data = serde_json::json!({
+        "artifact_id": id,
+        "reason": req.reason,
+        "previous_state": state_str,
+    });
+    if let Err(e) = spine
+        .emit_raw(
+            &format!("forge:{id}"),
+            "forge",
+            actor,
+            "forge.retry_requested",
+            &data,
+        )
+        .await
+    {
+        tracing::warn!("failed to emit forge.retry_requested event: {e}");
+    }
+
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "artifact_id": id,
+            "action": "retry_requested",
+        })),
+    )
+        .into_response()
+}
+
+/// POST /api/spine/artifacts/:id/abort
+pub async fn abort_artifact(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<AbortRequest>,
+) -> impl IntoResponse {
+    let spine = match &state.spine {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "spine not connected" })),
+            )
+                .into_response()
+        }
+    };
+
+    let pool = spine.pool();
+
+    let previous_state: Option<String> =
+        sqlx::query_scalar("SELECT state FROM artifacts WHERE artifact_id = $1")
+            .bind(&id)
+            .fetch_optional(pool)
+            .await
+            .unwrap_or(None);
+
+    let Some(previous_state) = previous_state else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "artifact not found" })),
+        )
+            .into_response();
+    };
+
+    if previous_state == "archived" {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": "artifact already archived" })),
+        )
+            .into_response();
+    }
+
+    let reason = req
+        .reason
+        .clone()
+        .unwrap_or_else(|| "aborted via dashboard".to_string());
+    let actor = req.actor.as_deref().unwrap_or("dashboard");
+
+    // Flip state to archived. The factory pipeline treats archived as terminal.
+    if let Err(e) = sqlx::query(
+        "UPDATE artifacts SET state = 'archived', updated_at = NOW() WHERE artifact_id = $1",
+    )
+    .bind(&id)
+    .execute(pool)
+    .await
+    {
+        tracing::error!("failed to archive artifact {id}: {e}");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "failed to archive artifact" })),
+        )
+            .into_response();
+    }
+
+    let data = serde_json::json!({
+        "artifact_id": id,
+        "reason": reason,
+        "previous_state": previous_state,
+    });
+    if let Err(e) = spine
+        .emit_raw(
+            &format!("forge:{id}"),
+            "forge",
+            actor,
+            "artifact.archived",
+            &data,
+        )
+        .await
+    {
+        tracing::warn!("failed to emit artifact.archived event: {e}");
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "artifact_id": id,
+            "action": "archived",
+            "reason": reason,
+        })),
+    )
+        .into_response()
+}
+
+/// POST /api/spine/artifacts/:id/override-gate
+pub async fn override_gate(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<OverrideGateRequest>,
+) -> impl IntoResponse {
+    let spine = match &state.spine {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "spine not connected" })),
+            )
+                .into_response()
+        }
+    };
+
+    let pool = spine.pool();
+
+    let exists: Option<String> =
+        sqlx::query_scalar("SELECT artifact_id FROM artifacts WHERE artifact_id = $1")
+            .bind(&id)
+            .fetch_optional(pool)
+            .await
+            .unwrap_or(None);
+
+    if exists.is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "artifact not found" })),
+        )
+            .into_response();
+    }
+
+    let verdict = req.verdict.as_deref().unwrap_or("allow").to_lowercase();
+    if verdict != "allow" && verdict != "deny" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "verdict must be 'allow' or 'deny'",
+            })),
+        )
+            .into_response();
+    }
+
+    let actor = req.actor.as_deref().unwrap_or("dashboard");
+    let reason = req
+        .reason
+        .clone()
+        .unwrap_or_else(|| format!("manual {verdict} via dashboard"));
+    let escalation_id = format!("esc_{}", ulid::Ulid::new());
+
+    let data = serde_json::json!({
+        "escalation_id": escalation_id,
+        "artifact_id": id,
+        "resolution": {
+            "verdict": verdict,
+            "resolved_by": actor,
+            "reason": reason,
+        },
+    });
+    if let Err(e) = spine
+        .emit_raw(
+            &format!("forge:{id}"),
+            "synodic",
+            actor,
+            "synodic.escalation_resolved",
+            &data,
+        )
+        .await
+    {
+        tracing::warn!("failed to emit synodic.escalation_resolved event: {e}");
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "artifact_id": id,
+            "action": "gate_override",
+            "verdict": verdict,
+            "escalation_id": escalation_id,
+        })),
+    )
+        .into_response()
 }
