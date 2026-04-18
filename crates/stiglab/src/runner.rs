@@ -134,9 +134,17 @@ pub async fn start_built_in_runner(
     // Task: process outbound messages from SessionManager using the shared handler
     let event_pool = pool.clone();
     let runner_spine = state.spine.clone();
+    let runner_completion_tx = state.session_completion_tx.clone();
     tokio::spawn(async move {
         while let Some(msg) = outbound_rx.recv().await {
-            handler::handle_agent_message(&event_pool, &node_id, msg, runner_spine.as_ref()).await;
+            handler::handle_agent_message(
+                &event_pool,
+                &node_id,
+                msg,
+                runner_spine.as_ref(),
+                Some(&runner_completion_tx),
+            )
+            .await;
         }
     });
 

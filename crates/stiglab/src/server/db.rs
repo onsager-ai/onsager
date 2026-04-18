@@ -169,6 +169,20 @@ async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
+    // Issue #31: idempotency key for POST /api/shaping. Same swallow-on-
+    // duplicate pattern as above for cross-backend ALTER compatibility.
+    // Uniqueness is enforced by the application (lookup-before-insert) so
+    // a non-unique index suffices and works on every backend.
+    let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN idempotency_key TEXT")
+        .execute(pool)
+        .await;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_idempotency_key \
+         ON sessions (idempotency_key)",
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
@@ -311,6 +325,56 @@ pub async fn get_session(pool: &AnyPool, session_id: &str) -> anyhow::Result<Opt
     .fetch_optional(pool)
     .await?;
     row.map(|r| r.try_into()).transpose()
+}
+
+/// Look up an existing session by its idempotency key.
+///
+/// `request_id` from a `ShapingRequest` (or the `Idempotency-Key` header) is
+/// used as the key so that a Forge retry on a dropped connection collapses
+/// onto the original session instead of dispatching a second agent
+/// (issue #31).
+pub async fn find_session_by_idempotency_key(
+    pool: &AnyPool,
+    key: &str,
+) -> anyhow::Result<Option<Session>> {
+    let row = sqlx::query_as::<_, SessionRow>(
+        "SELECT id, task_id, node_id, state, prompt, output, working_dir, \
+                artifact_id, artifact_version, created_at, updated_at \
+         FROM sessions WHERE idempotency_key = $1 \
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(key)
+    .fetch_optional(pool)
+    .await?;
+    row.map(|r| r.try_into()).transpose()
+}
+
+/// Insert a session and bind it to an idempotency key in the same row.
+pub async fn insert_session_with_idempotency_key(
+    pool: &AnyPool,
+    session: &Session,
+    idempotency_key: &str,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO sessions (id, task_id, node_id, state, prompt, output, working_dir, \
+                               artifact_id, artifact_version, idempotency_key, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+    )
+    .bind(&session.id)
+    .bind(&session.task_id)
+    .bind(&session.node_id)
+    .bind(session.state.to_string())
+    .bind(&session.prompt)
+    .bind(&session.output)
+    .bind(&session.working_dir)
+    .bind(&session.artifact_id)
+    .bind(session.artifact_version)
+    .bind(idempotency_key)
+    .bind(session.created_at.to_rfc3339())
+    .bind(session.updated_at.to_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 pub async fn update_session_state(

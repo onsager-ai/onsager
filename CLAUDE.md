@@ -81,6 +81,19 @@ cargo fmt --all -- --check
 - Unit tests co-located in `#[cfg(test)]` modules
 - All internal deps use `path = "../..."` -- no git deps, no crates.io
 
+## Environment variables
+
+Subsystem-specific env vars worth calling out:
+
+- `SYNODIC_FAIL_POLICY` (forge, default `escalate`) — what verdict the Forge
+  side returns when the Synodic gate is unreachable, returns 5xx, or its
+  response cannot be parsed. One of `escalate` | `deny` | `allow`.
+  `escalate` parks the decision non-blockingly (forge invariant #5);
+  `deny` keeps the artifact in its current state; `allow` is the legacy
+  fail-open behavior and must be opted into explicitly. 4xx responses and
+  parse errors always deny regardless of policy — those are protocol bugs
+  that should surface loudly.
+
 ## Per-crate context
 
 Each subsystem has its own CLAUDE.md or `.claude/` directory with

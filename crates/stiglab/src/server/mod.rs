@@ -25,6 +25,10 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route("/api/nodes", get(routes::nodes::list_nodes))
         .route("/api/tasks", post(routes::tasks::create_task))
         .route("/api/shaping", post(routes::shaping::create_shaping))
+        .route(
+            "/api/shaping/{session_id}",
+            get(routes::shaping::get_shaping_status),
+        )
         .route("/api/sessions", get(routes::sessions::list_sessions))
         .route("/api/sessions/{id}", get(routes::sessions::get_session))
         .route(
