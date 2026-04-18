@@ -61,6 +61,7 @@ To stop: `Ctrl+C` for services, `just dev-down` for Postgres.
 just build           # Rust workspace + dashboard
 just test            # All tests
 just test-all        # Includes spine integration tests
+just test-e2e        # Live E2E suite (requires a running stack)
 just lint            # fmt + clippy + eslint
 ```
 

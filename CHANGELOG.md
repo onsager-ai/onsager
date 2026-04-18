@@ -18,6 +18,11 @@ project does not yet publish numbered releases.
   replaced with shadcn primitives, enforced by the `dashboard-ui` skill.
 - **Dashboard tests**: L1 Playwright e2e scaffold and L2 AI-driven
   web-testing flow (issue #23).
+- **Tests**: live E2E product-validation framework running real agent
+  sessions against a running stack — `just test-e2e` /
+  `just test-e2e-remote`, suites under `tests/e2e/product/` (session
+  lifecycle, log streaming, multi-session, spine events), plus a
+  nightly/manual CI workflow. <!-- sha: bf21cd7 -->
 - **Deployment**: Railway config-as-code, deploy-readiness CI, and
   unified container with all subsystems plus the combined dashboard.
 - **Skills**: `onsager-pre-push`, `onsager-pr-lifecycle`, `dashboard-ui`,
