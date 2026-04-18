@@ -1,42 +1,108 @@
 # Onsager
 
-AI factory stack — unified monorepo.
+AI factory stack — monorepo for the Onsager event bus and its subsystems.
+
+## Architecture
+
+Onsager is a **factory event bus** architecture. Subsystems are runtime-decoupled
+via a shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel.
+They coordinate through stigmergy (indirect signals via shared medium), not
+direct calls.
+
+```
+         onsager-spine (event bus lib)
+        /       |        |        \
+   forge    stiglab   synodic    ising
+```
+
+Subsystems must NOT import each other and must NOT be statically linked into
+the same binary. The `onsager` dispatcher has zero business dependencies — it
+discovers subsystem binaries on `PATH`.
 
 ## Subsystems
 
-| Crate              | Role                                                  |
-|--------------------|-------------------------------------------------------|
-| `onsager-spine`    | Shared event bus library (PostgreSQL + pg_notify)     |
-| `onsager`          | Unified CLI dispatcher (`onsager <subsystem> ...`)    |
-| `stiglab`          | Distributed AI agent session orchestration            |
-| `synodic`          | AI agent governance (hooks + spine integration)       |
+| Crate           | Role                                                          |
+|-----------------|---------------------------------------------------------------|
+| `onsager-spine` | Shared event bus library (PostgreSQL + `pg_notify`)           |
+| `onsager`       | Unified CLI dispatcher (`onsager <subsystem> ...`)            |
+| `forge`         | Production line — drives artifacts through their lifecycle    |
+| `stiglab`       | Distributed AI agent session orchestration                    |
+| `synodic`       | AI agent governance (hooks + spine integration)               |
+| `ising`         | Continuous improvement engine — observes and surfaces insights|
 
-All subsystems coordinate at runtime through the `onsager-spine` event bus.
-They are **not** statically linked into a shared binary — loose coupling is
-preserved at the build dependency graph level.
+A single React app at `apps/dashboard/` surfaces sessions, nodes, governance,
+and factory views.
 
-## Dashboard
+## Getting Started
 
-A single React app at `apps/dashboard/` surfaces sessions (stiglab), nodes
-(stiglab), governance (synodic), and factory events (onsager-spine) views.
+Prerequisites: Docker, Rust toolchain (via rustup), pnpm.
 
-## Build
+```bash
+cp .env.example .env       # configure environment
+just dev                   # Postgres, migrations, and all services
+just smoke-test            # verify everything works (in another terminal)
+```
 
-    just build         # Rust workspace + dashboard
-    just test
-    just lint
+To run agent sessions, add your `CLAUDE_CODE_OAUTH_TOKEN` via
+**Dashboard → Settings → Credentials** (encrypted at rest, passed to agents
+as env vars).
 
-## Run locally
+Services:
+- **Dashboard** — http://localhost:5173 (Vite dev server with HMR)
+- **Stiglab API** — http://localhost:3000 (sessions, nodes, WebSocket)
+- **Synodic API** — http://localhost:3001 (governance)
+- **Postgres** — `postgres://onsager:onsager@localhost:5432/onsager`
 
-    just dev-stiglab   # cargo run -p stiglab -- serve
-    just dev-synodic   # cargo run -p synodic -- serve
-    just dev-dashboard # pnpm --filter dashboard dev
+To stop: `Ctrl+C` for services, `just dev-down` for Postgres.
+
+## Build & Test
+
+```bash
+just build           # Rust workspace + dashboard
+just test            # All tests
+just test-all        # Includes spine integration tests
+just lint            # fmt + clippy + eslint
+```
+
+Or directly:
+
+```bash
+cargo build --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+```
 
 ## Install
 
-    just install       # installs onsager, stiglab, synodic binaries
+```bash
+just install         # installs onsager dispatcher + subsystem binaries
+```
 
 After install, both forms work:
 
-    onsager stiglab serve
-    stiglab serve
+```bash
+onsager stiglab serve
+stiglab serve
+```
+
+## Conventions
+
+- Rust edition 2021, rustfmt formatting, clippy with warnings-as-errors
+- `thiserror` for library errors, `anyhow` for application errors
+- Small focused commits, imperative mood, under 72 characters
+- Unit tests co-located in `#[cfg(test)]` modules
+- All internal deps use `path = "../..."` — no git deps, no crates.io
+
+## Per-crate context
+
+Each subsystem has its own `CLAUDE.md` or `.claude/` directory with
+subsystem-specific instructions:
+
+- `crates/onsager-spine/CLAUDE.md`
+- `crates/stiglab/.claude/`
+- `crates/synodic/.claude/`
+
+## License
+
+AGPL-3.0
