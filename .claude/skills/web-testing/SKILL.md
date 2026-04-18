@@ -6,9 +6,10 @@ description: L2 AI-driven web UI testing for Onsager Dashboard. Use when testing
 # Web Testing Protocol (L2)
 
 Exploratory, AI-driven validation of Onsager Dashboard UI changes — **not**
-regression testing. Regression coverage is L1's job (`tests/smoke/` +
-`tests/e2e/`). L2 catches things L1 misses: layout bugs, mobile regressions,
-interaction flows that only fail in a real browser.
+regression testing. Regression coverage is L1's job
+(`apps/dashboard/tests/smoke/` + `apps/dashboard/tests/e2e/`). L2 catches
+things L1 misses: layout bugs, mobile regressions, interaction flows that
+only fail in a real browser.
 
 ## When to invoke
 

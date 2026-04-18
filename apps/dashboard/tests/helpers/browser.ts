@@ -1,9 +1,18 @@
 import { execFileSync, type ExecFileSyncOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
+// Per-command timeout. Kept below Vitest's testTimeout (60s) so a single slow
+// command doesn't starve the test of its overall budget when a test runs
+// multiple commands (open + snapshot + ...). Override via env for slow CI.
+const EXEC_TIMEOUT_MS = (() => {
+  const raw = process.env.ONSAGER_BROWSER_EXEC_TIMEOUT_MS;
+  const n = raw ? Number.parseInt(raw, 10) : 30_000;
+  return Number.isFinite(n) && n > 0 ? n : 30_000;
+})();
+
 const EXEC_OPTIONS: ExecFileSyncOptions = {
   encoding: "utf-8",
-  timeout: 60_000,
+  timeout: EXEC_TIMEOUT_MS,
   stdio: ["pipe", "pipe", "pipe"],
 };
 
@@ -36,7 +45,7 @@ export class Browser {
   }
 
   open(path = "/"): string {
-    return this.run(["open", `${this.baseUrl}${path}`]);
+    return this.run(["open", new URL(path, this.baseUrl).toString()]);
   }
 
   snapshot(): string {
