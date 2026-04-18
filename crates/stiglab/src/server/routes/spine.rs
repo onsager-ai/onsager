@@ -131,14 +131,18 @@ pub async fn list_events(
     let pool = spine.pool();
     let limit = params.limit.unwrap_or(50).min(500);
 
-    // Build query dynamically based on filters.
+    // `events_ext` stores the partition key in `namespace` and the actor inside
+    // `metadata`. The API surfaces them as `stream_type` / `actor` for clients,
+    // so we alias on the way out.
+    let select = "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
+                  COALESCE(metadata->>'actor', '') AS actor, created_at FROM events_ext";
+
     let result = match (params.stream_type.as_deref(), params.event_type.as_deref()) {
         (Some(st), Some(et)) => {
-            sqlx::query_as::<_, SpineEvent>(
-                "SELECT id, stream_id, stream_type, event_type, data, actor, created_at \
-                 FROM events_ext WHERE stream_type = $1 AND event_type = $2 \
-                 ORDER BY id DESC LIMIT $3",
-            )
+            sqlx::query_as::<_, SpineEvent>(&format!(
+                "{select} WHERE namespace = $1 AND event_type = $2 \
+                 ORDER BY id DESC LIMIT $3"
+            ))
             .bind(st)
             .bind(et)
             .bind(limit)
@@ -146,35 +150,28 @@ pub async fn list_events(
             .await
         }
         (Some(st), None) => {
-            sqlx::query_as::<_, SpineEvent>(
-                "SELECT id, stream_id, stream_type, event_type, data, actor, created_at \
-                 FROM events_ext WHERE stream_type = $1 \
-                 ORDER BY id DESC LIMIT $2",
-            )
+            sqlx::query_as::<_, SpineEvent>(&format!(
+                "{select} WHERE namespace = $1 ORDER BY id DESC LIMIT $2"
+            ))
             .bind(st)
             .bind(limit)
             .fetch_all(pool)
             .await
         }
         (None, Some(et)) => {
-            sqlx::query_as::<_, SpineEvent>(
-                "SELECT id, stream_id, stream_type, event_type, data, actor, created_at \
-                 FROM events_ext WHERE event_type = $1 \
-                 ORDER BY id DESC LIMIT $2",
-            )
+            sqlx::query_as::<_, SpineEvent>(&format!(
+                "{select} WHERE event_type = $1 ORDER BY id DESC LIMIT $2"
+            ))
             .bind(et)
             .bind(limit)
             .fetch_all(pool)
             .await
         }
         (None, None) => {
-            sqlx::query_as::<_, SpineEvent>(
-                "SELECT id, stream_id, stream_type, event_type, data, actor, created_at \
-                 FROM events_ext ORDER BY id DESC LIMIT $1",
-            )
-            .bind(limit)
-            .fetch_all(pool)
-            .await
+            sqlx::query_as::<_, SpineEvent>(&format!("{select} ORDER BY id DESC LIMIT $1"))
+                .bind(limit)
+                .fetch_all(pool)
+                .await
         }
     };
 
@@ -450,7 +447,8 @@ async fn fetch_related_events(
 ) -> Result<Vec<SpineEvent>, sqlx::Error> {
     let stream_key = format!("forge:{artifact_id}");
     sqlx::query_as::<_, SpineEvent>(
-        "SELECT id, stream_id, stream_type, event_type, data, actor, created_at \
+        "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
+                COALESCE(metadata->>'actor', '') AS actor, created_at \
          FROM events_ext \
          WHERE stream_id = $1 \
             OR (event_type IN ('stiglab.session_completed', 'stiglab.session_failed') \
