@@ -3,18 +3,34 @@
 
 use crate::core::{AgentMessage, SessionState};
 use sqlx::AnyPool;
+use tokio::sync::broadcast;
 
 use crate::server::db;
 use crate::server::spine::SpineEmitter;
 
+/// Notify in-process waiters that a session reached a terminal state.
+///
+/// `tx` is `None` for the runner code path that doesn't carry an `AppState`
+/// — those callers don't have HTTP `wait` clients to notify, so the no-op
+/// is safe.
+fn notify_terminal(tx: Option<&broadcast::Sender<String>>, session_id: &str) {
+    if let Some(tx) = tx {
+        // Errors are expected when there are zero subscribers; ignore.
+        let _ = tx.send(session_id.to_string());
+    }
+}
+
 /// Process an `AgentMessage` by applying the corresponding DB mutations.
 /// `node_id` identifies the agent node (used only for heartbeat updates).
 /// If `spine` is provided, factory events are emitted on session transitions.
+/// If `completion_tx` is provided, in-process waiters subscribed to it are
+/// notified when a session reaches Done or Failed (issue #31).
 pub async fn handle_agent_message(
     pool: &AnyPool,
     node_id: &str,
     msg: AgentMessage,
     spine: Option<&SpineEmitter>,
+    completion_tx: Option<&broadcast::Sender<String>>,
 ) {
     match msg {
         AgentMessage::Heartbeat { active_sessions } => {
@@ -43,6 +59,9 @@ pub async fn handle_agent_message(
                     }
                 }
             }
+            if matches!(*state, SessionState::Done | SessionState::Failed) {
+                notify_terminal(completion_tx, &session_id);
+            }
         }
         AgentMessage::SessionOutput {
             session_id,
@@ -63,6 +82,7 @@ pub async fn handle_agent_message(
             if let Err(e) = db::update_session_state(pool, &session_id, SessionState::Done).await {
                 tracing::error!("failed to update session state to done: {e}");
             }
+            notify_terminal(completion_tx, &session_id);
             // Only persist the final output as a fallback when no chunks were
             // already streamed, to avoid duplicating the entire response.
             if !output.is_empty() {
@@ -90,6 +110,7 @@ pub async fn handle_agent_message(
             {
                 tracing::error!("failed to update session state to failed: {e}");
             }
+            notify_terminal(completion_tx, &session_id);
             if let Err(e) = db::append_session_log(pool, &session_id, &error, "stderr").await {
                 tracing::error!("failed to append session log: {e}");
             }
