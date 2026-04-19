@@ -95,7 +95,7 @@ describe("WorkspacesCard — OAuth-first Add project flow", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("uses a search+select combobox for the repo picker (not free-form typing)", async () => {
+  it("uses a search+select picker for the repo (not free-form typing)", async () => {
     await primeMocks({
       repos: [
         { owner: "onsager-ai", name: "onsager", default_branch: "main", private: false },
@@ -104,10 +104,11 @@ describe("WorkspacesCard — OAuth-first Add project flow", () => {
     })
     renderCard()
     fireEvent.click(await screen.findByRole("button", { name: /add project/i }))
-    const combobox = await screen.findByRole("combobox", {
+    const trigger = await screen.findByRole("button", {
       name: /select a repository/i,
     })
-    expect(combobox).toBeInTheDocument()
+    expect(trigger).toBeInTheDocument()
+    expect(trigger.getAttribute("aria-expanded")).toBe("false")
   })
 
   it("never renders a 'Link manually' button", async () => {

@@ -32,7 +32,6 @@ import {
 } from "@/components/ui/command"
 import {
   Building2,
-  Check,
   ChevronsUpDown,
   GitBranch,
   Plus,
@@ -561,7 +560,6 @@ function RepoCombobox({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        role="combobox"
         aria-expanded={open}
         aria-label="Select a repository"
         className={cn(
@@ -576,7 +574,7 @@ function RepoCombobox({
         </span>
         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
       </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+      <PopoverContent className="w-[var(--anchor-width)] min-w-64 p-0" align="start">
         <Command>
           <CommandInput placeholder="Search repositories…" />
           <CommandList>
@@ -588,17 +586,12 @@ function RepoCombobox({
                   <CommandItem
                     key={value}
                     value={value}
+                    data-checked={selected === value}
                     onSelect={() => {
                       onSelect(r)
                       setOpen(false)
                     }}
                   >
-                    <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        selected === value ? "opacity-100" : "opacity-0",
-                      )}
-                    />
                     <span className="truncate font-mono text-xs">
                       {r.owner}/{r.name}
                     </span>
