@@ -86,39 +86,51 @@ pub async fn handle(
             }
         };
 
-    // Verify signature when the installation has a configured secret.
-    if let Some(cipher) = installation.webhook_secret_cipher.as_ref() {
-        let Some(key_hex) = state.config.credential_key.as_ref() else {
-            tracing::error!(
-                "installation {} has webhook_secret_cipher but ONSAGER_CREDENTIAL_KEY not set",
-                installation.id
-            );
+    // Fail closed: an installation row without a configured secret would
+    // otherwise let an attacker send unsigned webhooks and have them accepted.
+    // Configuration must be completed (install row gets a `webhook_secret_cipher`)
+    // before the installation can route traffic.
+    let Some(cipher) = installation.webhook_secret_cipher.as_ref() else {
+        tracing::warn!(
+            "installation {} has no webhook secret configured; rejecting webhook",
+            installation.id
+        );
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "webhook secret not configured"})),
+        )
+            .into_response();
+    };
+    let Some(key_hex) = state.config.credential_key.as_ref() else {
+        tracing::error!(
+            "installation {} has webhook_secret_cipher but ONSAGER_CREDENTIAL_KEY not set",
+            installation.id
+        );
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let secret = match decrypt(key_hex, cipher) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "webhook secret decrypt failed");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        };
-        let secret = match decrypt(key_hex, cipher) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!(error = %e, "webhook secret decrypt failed");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        };
-        let Some(sig) = signature.as_deref() else {
+        }
+    };
+    let Some(sig) = signature.as_deref() else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "missing signature"})),
+        )
+            .into_response();
+    };
+    match verify_signature(sig, &body, secret.as_bytes()) {
+        SignatureCheck::Valid => {}
+        other => {
+            tracing::warn!(?other, "signature check failed");
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "missing signature"})),
+                Json(serde_json::json!({"error": "signature invalid"})),
             )
                 .into_response();
-        };
-        match verify_signature(sig, &body, secret.as_bytes()) {
-            SignatureCheck::Valid => {}
-            other => {
-                tracing::warn!(?other, "signature check failed");
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({"error": "signature invalid"})),
-                )
-                    .into_response();
-            }
         }
     }
 

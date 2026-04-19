@@ -187,17 +187,29 @@ async fn git_context_for_session(
     let Some(working_dir) = working_dir else {
         return (None, project_id);
     };
-    let branch = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("git")
-            .args(["-C", &working_dir, "rev-parse", "--abbrev-ref", "HEAD"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
-    })
+    // Detached HEAD and empty output both mean "no usable branch name" —
+    // record neither, otherwise the portal's branch-match lookup could
+    // correlate unrelated sessions. The 5-second timeout keeps session
+    // completion responsive against a stuck git invocation (e.g. a broken
+    // index lock file) instead of blocking the event loop indefinitely.
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.kill_on_drop(true);
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        cmd.args(["-C", &working_dir, "rev-parse", "--abbrev-ref", "HEAD"])
+            .output(),
+    )
     .await
     .ok()
-    .flatten();
+    .and_then(Result::ok);
+    let branch = output.filter(|o| o.status.success()).and_then(|o| {
+        let name = String::from_utf8_lossy(&o.stdout).trim().to_owned();
+        if name.is_empty() || name == "HEAD" {
+            None
+        } else {
+            Some(name)
+        }
+    });
     (branch, project_id)
 }
 
@@ -212,15 +224,17 @@ async fn record_branch_link(
     project_id: Option<&str>,
     branch: &str,
 ) -> Result<(), sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO pr_branch_links (session_id, project_id, branch, recorded_at) \
-         VALUES ($1, $2, $3, NOW()) \
+         VALUES ($1, $2, $3, $4) \
          ON CONFLICT (session_id) DO UPDATE SET branch = EXCLUDED.branch, \
-            project_id = EXCLUDED.project_id, recorded_at = NOW()",
+            project_id = EXCLUDED.project_id, recorded_at = EXCLUDED.recorded_at",
     )
     .bind(session_id)
     .bind(project_id)
     .bind(branch)
+    .bind(&now)
     .execute(spine_pool)
     .await?;
     Ok(())

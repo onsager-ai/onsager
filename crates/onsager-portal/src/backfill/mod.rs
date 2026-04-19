@@ -4,12 +4,14 @@
 //!
 //! - `recent` (default): the most-recent N items, paginated newest-first.
 //!   Cheap; the right default for onboarding a fresh project.
-//! - `active`: weighted by recent activity — strips stale items so a
-//!   long-tail repo doesn't ingest a thousand year-old issues just to
-//!   reach `cap`.
-//! - `refract`: pipes the candidate set through Refract's prioritization
-//!   scaffolding to surface a useful slice of a VS-Code-scale repo (issue
-//!   #58 / #60 §Backfill).
+//! - `active`: strips stale items (closed-but-unmerged PRs, closed issues)
+//!   so a long-tail repo doesn't spend its cap on year-old chatter.
+//! - `refract`: ranks the candidate set with a local priority heuristic
+//!   (open-before-closed, more labels first) — the in-tree placeholder for
+//!   the future LLM-backed scorer. Today it does NOT dispatch through the
+//!   `refract` crate's intent decomposer; the crate is carried as a
+//!   dependency so the scorer can land additively without a call-site
+//!   refactor (issue #58 / #60 §Backfill).
 //!
 //! Output shape is a `BackfillReport` summarizing per-strategy counts so
 //! the CLI can print a single JSON blob the dashboard can later render.
@@ -93,12 +95,11 @@ pub async fn run(
                 .collect(),
         ),
         Strategy::Refract => {
-            // Reuses Refract's intent decomposer scaffolding as a generic
-            // candidate prioritizer: each backlog item is treated as an
-            // intent, the decomposer ranks them, and we keep the top `cap`.
-            // The exact ranking heuristic lives in
-            // `refract::backlog_prioritize` so future tuning is decoupled
-            // from the portal.
+            // Placeholder ranking: open-before-closed, more-labelled first.
+            // The real LLM-backed scorer slots in here without changing the
+            // portal call site — today there is no `refract` crate API
+            // doing prioritization; the dependency is pre-wired so the
+            // scorer lands additively.
             (
                 refract_prioritize_issues(issues, cap),
                 refract_prioritize_pulls(pulls, cap),
@@ -134,11 +135,19 @@ pub async fn run(
             next_state,
         )
         .await?;
-        let event = if pr.merged_at.is_some() {
+        let event = if let Some(merge_sha) = pr
+            .merge_commit_sha
+            .clone()
+            .filter(|_| pr.merged_at.is_some())
+        {
+            // Only emit `GitPrMerged` when GitHub gave us the mainline merge
+            // commit. `pr.head.sha` is the PR-branch tip, not the merge
+            // commit — consumers correlating against `git log main` would
+            // miss the match.
             FactoryEventKind::GitPrMerged {
                 artifact_id: ArtifactId::new(artifact.artifact_id.clone()),
                 pr_number: pr.number,
-                merge_sha: pr.head.sha.clone(),
+                merge_sha,
             }
         } else if pr.state == "closed" {
             FactoryEventKind::GitPrClosed {
@@ -181,7 +190,7 @@ pub async fn run(
             "github:{}/{}:issue#{}",
             project.repo_owner, project.repo_name, issue.number
         );
-        db::upsert_factory_task(
+        let task = db::upsert_factory_task(
             pool,
             &project.id,
             "spec_issue",
@@ -190,6 +199,27 @@ pub async fn run(
             issue.body.as_deref(),
         )
         .await?;
+        // Emit the same `portal.task_materialized` event the live webhook
+        // handler produces, so dashboard / ising consumers see a uniform
+        // stream whether the task came from backfill or a live `issues.opened`.
+        let stream_id = format!("portal:task:{}", task.id);
+        spine
+            .append_ext(
+                &stream_id,
+                "portal",
+                "portal.task_materialized",
+                serde_json::json!({
+                    "task_id": task.id,
+                    "project_id": project.id,
+                    "source": task.source,
+                    "source_ref": task.source_ref,
+                    "title": task.title,
+                    "backfill": true,
+                }),
+                &metadata,
+                None,
+            )
+            .await?;
         report.tasks_materialized += 1;
     }
 

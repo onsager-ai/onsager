@@ -12,6 +12,7 @@
 //! threshold the root sits.
 
 use chrono::Duration;
+use onsager_artifact::ArtifactId;
 use onsager_protocol::{FactoryEventRef, Insight};
 use onsager_spine::factory_event::{InsightKind, InsightScope};
 
@@ -90,7 +91,11 @@ impl Analyzer for PrChurnAnalyzer {
                 Some(Insight {
                     insight_id: format!("ins_prc_{root}_{opened}"),
                     kind: InsightKind::Waste,
-                    scope: InsightScope::ArtifactKind(root.clone()),
+                    // `root` is the PR artifact id today (lineage-root
+                    // widening is a future follow-up) — use the specific
+                    // artifact scope so the emitter routes it correctly,
+                    // rather than mislabelling it as a `Kind`.
+                    scope: InsightScope::SpecificArtifact(ArtifactId::new(root.clone())),
                     observation: format!(
                         "{root}: {opened} PR opens vs {merged} merges over the last {} days — \
                          the spec or PreDispatch gate may be too loose, letting under-baked \

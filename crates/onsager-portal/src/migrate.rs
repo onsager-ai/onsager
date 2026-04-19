@@ -52,20 +52,23 @@ pub async fn run(pool: &PgPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // `pr_branch_links` is also created by stiglab's startup migrations
+    // (session-side writer) — the DDL here matches the stiglab side so
+    // whoever migrates first wins and the other becomes a no-op.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS pr_branch_links (
-            session_id  TEXT        PRIMARY KEY,
+            session_id  TEXT PRIMARY KEY,
             project_id  TEXT,
-            branch      TEXT        NOT NULL,
+            branch      TEXT NOT NULL,
             pr_number   BIGINT,
-            recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            recorded_at TEXT NOT NULL
         )",
     )
     .execute(pool)
     .await?;
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_pr_branch_links_lookup \
-         ON pr_branch_links (project_id, branch, recorded_at DESC)",
+         ON pr_branch_links (project_id, branch)",
     )
     .execute(pool)
     .await?;

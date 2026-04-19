@@ -19,6 +19,12 @@ pub struct Pull {
     pub state: String,
     #[serde(default)]
     pub merged_at: Option<String>,
+    /// Present on merged PRs; this is the commit created *in the base
+    /// branch* by the merge (as opposed to `head.sha`, which is the tip
+    /// of the PR branch itself). `None` for unmerged PRs — GitHub returns
+    /// `null`.
+    #[serde(default)]
+    pub merge_commit_sha: Option<String>,
     pub head: PullRef,
     pub base: PullRef,
     pub html_url: String,
