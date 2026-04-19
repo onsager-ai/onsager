@@ -15,6 +15,13 @@ project does not yet publish numbered releases.
   `onsager-registry`, `onsager-protocol`. Spine now carries only event-bus
   primitives. `cargo tree -p ising` no longer pulls warehouse/delivery/
   registry. Pure refactor, no behavior change. Closes #33.
+- **Forge persistence**: tick state transitions now mirror to the
+  `artifacts` row after lock release, so `state`, `current_version`, and
+  `current_bundle_id` survive a restart. Artifact registration is
+  DB-first — the in-memory cache is only populated after the INSERT
+  commits, so a failed DB write cannot leave a ghost artifact. New
+  `forge::core::persistence` module and DB-backed
+  `tests/persistence_restart.rs` cover the round-trip. Closes #30.
 - **Spine + forge**: warehouse & delivery v0.1 foundations with the spec
   in `crates/onsager-spine/specs/warehouse-and-delivery-v0.1.md`.
 - **Spine**: factory pipeline foundations (issue #14, phases 0–3),

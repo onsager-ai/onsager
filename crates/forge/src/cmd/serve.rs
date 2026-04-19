@@ -8,7 +8,7 @@ use axum::response::IntoResponse;
 use chrono::Utc;
 use tokio::sync::RwLock;
 
-use onsager_artifact::{ArtifactState, Kind};
+use onsager_artifact::Kind;
 use onsager_protocol::{
     EscalationContext, GateRequest, GateVerdict, ShapingRequest, ShapingResult,
 };
@@ -17,6 +17,7 @@ use onsager_spine::EventStore;
 
 use crate::core::artifact_store::ArtifactStore;
 use crate::core::kernel::BaselineKernel;
+use crate::core::persistence;
 use crate::core::pipeline::{ForgePipeline, PipelineEvent, StiglabDispatcher, SynodicGate};
 use crate::core::session_listener::{self, SessionCompleted, SessionCompletedHandler};
 
@@ -337,42 +338,25 @@ pub fn run(database_url: &str, tick_ms: u64) {
             }
         };
 
-        // Load existing artifacts from the spine database.
-        let mut artifact_store = ArtifactStore::new();
-        if let Some(ref spine) = spine {
-            if let Ok(rows) = sqlx::query_as::<_, (String, String, String, String, String, i32)>(
-                "SELECT artifact_id, kind, name, owner, state, current_version \
-                 FROM artifacts WHERE state != 'archived'",
-            )
-            .fetch_all(spine.pool())
-            .await
-            {
-                for (id, kind, name, owner, state_str, version) in &rows {
-                    let kind_enum = match kind.as_str() {
-                        "code" => Kind::Code,
-                        "document" => Kind::Document,
-                        "pull_request" => Kind::PullRequest,
-                        other => Kind::Custom(other.to_string()),
-                    };
-                    let state = match state_str.as_str() {
-                        "in_progress" => ArtifactState::InProgress,
-                        "under_review" => ArtifactState::UnderReview,
-                        "released" => ArtifactState::Released,
-                        "archived" => ArtifactState::Archived,
-                        _ => ArtifactState::Draft,
-                    };
-                    artifact_store.register_with_id(
-                        id.clone(),
-                        kind_enum,
-                        name.clone(),
-                        owner.clone(),
-                        state,
-                        *version as u32,
+        // Load existing artifacts from the spine database (issue #30).
+        // `load_artifact_store` restores state, version, and current_bundle_id
+        // so a mid-tick restart resumes at the last persisted transition.
+        let artifact_store = match spine.as_ref() {
+            Some(s) => match persistence::load_artifact_store(s.pool()).await {
+                Ok(store) => {
+                    tracing::info!(
+                        "forge: loaded {} active artifacts from spine",
+                        store.active_artifacts().len()
                     );
+                    store
                 }
-                tracing::info!("forge: loaded {} active artifacts from spine", rows.len());
-            }
-        }
+                Err(e) => {
+                    tracing::error!("forge: failed to load artifacts from spine: {e}");
+                    ArtifactStore::new()
+                }
+            },
+            None => ArtifactStore::new(),
+        };
 
         let stiglab_port = std::env::var("STIGLAB_PORT").unwrap_or_else(|_| "3000".to_string());
         let stiglab_url = std::env::var("STIGLAB_URL")
@@ -436,6 +420,47 @@ pub fn run(database_url: &str, tick_ms: u64) {
                     let spine = state.spine.clone();
                     (output, spine)
                 };
+
+                // Mirror state transitions to the artifacts row before the
+                // audit-log event so a crash between the two leaves the
+                // durable state ahead of (not behind) the event stream —
+                // replay can catch up, but a state behind the event stream
+                // is silent drift (issue #30).
+                if let Some(ref spine) = spine {
+                    for event in &output.events {
+                        let artifact_id = match event {
+                            PipelineEvent::ArtifactAdvanced { artifact_id, .. }
+                            | PipelineEvent::BundleSealed { artifact_id, .. } => Some(artifact_id),
+                            _ => None,
+                        };
+                        if let Some(aid) = artifact_id {
+                            let snapshot = {
+                                let state = tick_shared.read().await;
+                                state
+                                    .pipeline
+                                    .store
+                                    .get(&onsager_artifact::ArtifactId::new(aid))
+                                    .cloned()
+                            };
+                            if let Some(artifact) = snapshot {
+                                if let Err(e) =
+                                    persistence::persist_artifact_state(spine.pool(), &artifact)
+                                        .await
+                                {
+                                    tracing::error!(
+                                        artifact_id = %aid,
+                                        "forge: failed to persist state transition: {e}"
+                                    );
+                                }
+                            } else {
+                                tracing::warn!(
+                                    artifact_id = %aid,
+                                    "forge: state transition event references unknown artifact"
+                                );
+                            }
+                        }
+                    }
+                }
 
                 // Emit pipeline events to the spine (lock released).
                 for event in &output.events {
@@ -587,7 +612,7 @@ struct RegisterRequest {
 async fn register_artifact(
     axum::extract::State(shared): axum::extract::State<SharedForge>,
     axum::Json(req): axum::Json<RegisterRequest>,
-) -> impl axum::response::IntoResponse {
+) -> axum::response::Response {
     let kind = match req.kind.as_str() {
         "code" => Kind::Code,
         "document" => Kind::Document,
@@ -595,25 +620,45 @@ async fn register_artifact(
         other => Kind::Custom(other.to_string()),
     };
 
-    let mut state = shared.write().await;
-    let id = state
-        .pipeline
-        .store
-        .register(kind.clone(), &req.name, &req.owner);
+    // Build the artifact up front so we know the ULID before touching any
+    // store. With a spine, the DB row is written first; only on success do
+    // we insert into the in-memory cache. Issue #30: the old code did the
+    // two writes in the other order and ignored the DB error, producing a
+    // ghost artifact on failure.
+    let artifact =
+        onsager_artifact::Artifact::new(kind, req.name.clone(), req.owner.clone(), "forge", vec![]);
+    let id = artifact.artifact_id.clone();
 
-    // Persist to spine database.
-    if let Some(ref spine) = state.spine {
-        let _ = sqlx::query(
-            "INSERT INTO artifacts (artifact_id, kind, name, owner, created_by, state, current_version) \
-             VALUES ($1, $2, $3, $4, 'forge', 'draft', 0) \
-             ON CONFLICT (artifact_id) DO NOTHING",
+    let spine = {
+        let state = shared.read().await;
+        state.spine.clone()
+    };
+
+    if let Some(spine) = spine.as_ref() {
+        if let Err(e) = persistence::insert_artifact_row(
+            spine.pool(),
+            id.as_str(),
+            &req.kind,
+            &req.name,
+            &req.owner,
         )
-        .bind(id.as_str())
-        .bind(&req.kind)
-        .bind(&req.name)
-        .bind(&req.owner)
-        .execute(spine.pool())
-        .await;
+        .await
+        {
+            tracing::error!("forge: failed to register artifact in spine: {e}");
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(serde_json::json!({
+                    "error": "failed to persist artifact",
+                    "detail": e.to_string(),
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    {
+        let mut state = shared.write().await;
+        state.pipeline.store.insert(artifact);
     }
 
     (
@@ -629,6 +674,7 @@ async fn register_artifact(
             }
         })),
     )
+        .into_response()
 }
 
 async fn list_artifacts(
