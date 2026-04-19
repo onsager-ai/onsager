@@ -449,7 +449,13 @@ pub async fn add_project(
                     }
                 }
             }
-            _ => "main".to_string(),
+            Ok(None) => "main".to_string(),
+            Err(e) => {
+                tracing::warn!(
+                    "installation token lookup failed for default_branch inference on {repo_owner}/{repo_name}: {e}"
+                );
+                "main".to_string()
+            }
         },
     };
 
@@ -816,22 +822,60 @@ pub async fn github_app_install_callback(
         }
     };
 
-    let install = GitHubAppInstallation {
-        id: Uuid::new_v4().to_string(),
-        tenant_id: tenant_id.clone(),
-        install_id: query.installation_id,
-        account_login: info.account_login,
-        account_type: info.account_type,
-        created_at: Utc::now(),
-    };
-
-    // No webhook secret here — the App-managed shared secret is a server
-    // env var (portal reads it); per-install override remains the manual
-    // endpoint's job.
-    if let Err(e) = db::insert_github_app_installation(&state.db, &install, None).await {
-        // If the install was already linked (e.g. user re-ran the flow),
-        // surface a friendly redirect rather than a 500.
-        tracing::warn!("insert_github_app_installation returned error: {e}");
+    // Idempotency: if the user re-runs the install flow (or GitHub
+    // redelivers the callback), we must not blind-insert — the numeric
+    // `install_id` is UNIQUE. Pre-check and either treat as a no-op
+    // (same tenant) or refuse with 409 (different tenant).
+    match db::get_github_app_installation_by_install_id(&state.db, query.installation_id).await {
+        Ok(Some(existing)) if existing.tenant_id == tenant_id => {
+            tracing::info!(
+                "GitHub App installation {} already linked to tenant {}; treating callback as idempotent",
+                query.installation_id,
+                tenant_id
+            );
+        }
+        Ok(Some(existing)) => {
+            tracing::warn!(
+                "GitHub App installation {} is already linked to tenant {}; requested tenant {}",
+                query.installation_id,
+                existing.tenant_id,
+                tenant_id
+            );
+            return (
+                StatusCode::CONFLICT,
+                "GitHub installation is already linked to a different workspace",
+            )
+                .into_response();
+        }
+        Ok(None) => {
+            let install = GitHubAppInstallation {
+                id: Uuid::new_v4().to_string(),
+                tenant_id: tenant_id.clone(),
+                install_id: query.installation_id,
+                account_login: info.account_login,
+                account_type: info.account_type,
+                created_at: Utc::now(),
+            };
+            // No webhook secret here — the App-managed shared secret is a
+            // server env var (portal reads it); per-install override
+            // remains the manual endpoint's job.
+            if let Err(e) = db::insert_github_app_installation(&state.db, &install, None).await {
+                tracing::error!("insert_github_app_installation failed: {e}");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "GitHub installation link failed",
+                )
+                    .into_response();
+            }
+        }
+        Err(e) => {
+            tracing::error!("install_id lookup failed: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "GitHub installation link could not be verified",
+            )
+                .into_response();
+        }
     }
 
     let sec = if state

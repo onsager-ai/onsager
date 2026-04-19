@@ -1185,6 +1185,23 @@ pub async fn get_github_app_installation(
     row.map(|r| r.try_into()).transpose()
 }
 
+/// Look up an installation by its **numeric GitHub install_id** (not the
+/// internal UUID). Used by the install callback to detect idempotent
+/// re-runs vs. cross-tenant linkage conflicts before inserting.
+pub async fn get_github_app_installation_by_install_id(
+    pool: &AnyPool,
+    install_id: i64,
+) -> anyhow::Result<Option<GitHubAppInstallation>> {
+    let row = sqlx::query_as::<_, GitHubAppInstallationRow>(
+        "SELECT id, tenant_id, install_id, account_login, account_type, created_at \
+         FROM github_app_installations WHERE install_id = $1",
+    )
+    .bind(install_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(|r| r.try_into()).transpose()
+}
+
 pub async fn delete_github_app_installation(
     pool: &AnyPool,
     install_id: &str,
