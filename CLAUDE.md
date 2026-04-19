@@ -109,6 +109,17 @@ Subsystem-specific env vars worth calling out:
   parse errors always deny regardless of policy — those are protocol bugs
   that should surface loudly.
 
+## Session defaults (Claude Code cloud)
+
+When finishing a task on a branch in a Claude Code cloud session, always:
+
+1. Push the branch.
+2. Open a pull request (do not wait to be asked).
+3. Subscribe to PR activity so CI failures and review comments are auto-fixed.
+
+This repo does not want the "manually click Create PR / toggle auto-fix" flow
+— treat PR creation and `subscribe_pr_activity` as part of finishing the task.
+
 ## Per-crate context
 
 Each subsystem has its own CLAUDE.md or `.claude/` directory with
