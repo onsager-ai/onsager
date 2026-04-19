@@ -9,6 +9,9 @@ via a shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel.
 They coordinate through stigmergy (indirect signals via shared medium), not
 direct calls.
 
+See [ADR 0001](docs/adr/0001-event-bus-coordination-model.md) for the
+decision and migration checklist.
+
 ```
          onsager-spine (event bus lib)
         /       |        |        \
