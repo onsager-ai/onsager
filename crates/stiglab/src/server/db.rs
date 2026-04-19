@@ -171,13 +171,18 @@ async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
 
     // Issue #31: idempotency key for POST /api/shaping. Same swallow-on-
     // duplicate pattern as above for cross-backend ALTER compatibility.
-    // Uniqueness is enforced by the application (lookup-before-insert) so
-    // a non-unique index suffices and works on every backend.
+    //
+    // The index is UNIQUE so the database enforces at-most-one session per
+    // key — the application lookup is just the fast path; concurrent inserts
+    // with the same key are caught by a unique-violation at commit and
+    // translated back to "return existing session". Both SQLite and Postgres
+    // treat NULL values as distinct in a unique index, so sessions without an
+    // idempotency key don't collide.
     let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN idempotency_key TEXT")
         .execute(pool)
         .await;
     sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_sessions_idempotency_key \
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_idempotency_key \
          ON sessions (idempotency_key)",
     )
     .execute(pool)
@@ -349,16 +354,26 @@ pub async fn find_session_by_idempotency_key(
     row.map(|r| r.try_into()).transpose()
 }
 
-/// Insert a session and bind it to an idempotency key in the same row.
+/// Insert a session bound to an idempotency key.
+///
+/// Returns `Ok(true)` on a fresh insert, `Ok(false)` when a row with the same
+/// key already existed and the insert was skipped (via `ON CONFLICT DO
+/// NOTHING`). Callers should re-lookup on `false` to recover the winning
+/// session id.
+///
+/// The database's unique index on `idempotency_key` is the authoritative
+/// guard against concurrent POSTs with the same key — the lookup-before-
+/// insert path in the handler is a fast path, not a correctness barrier.
 pub async fn insert_session_with_idempotency_key(
     pool: &AnyPool,
     session: &Session,
     idempotency_key: &str,
-) -> anyhow::Result<()> {
-    sqlx::query(
+) -> anyhow::Result<bool> {
+    let affected = sqlx::query(
         "INSERT INTO sessions (id, task_id, node_id, state, prompt, output, working_dir, \
                                artifact_id, artifact_version, idempotency_key, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
+         ON CONFLICT (idempotency_key) DO NOTHING",
     )
     .bind(&session.id)
     .bind(&session.task_id)
@@ -373,8 +388,9 @@ pub async fn insert_session_with_idempotency_key(
     .bind(session.created_at.to_rfc3339())
     .bind(session.updated_at.to_rfc3339())
     .execute(pool)
-    .await?;
-    Ok(())
+    .await?
+    .rows_affected();
+    Ok(affected > 0)
 }
 
 pub async fn update_session_state(

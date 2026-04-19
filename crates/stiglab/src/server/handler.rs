@@ -47,9 +47,13 @@ pub async fn handle_agent_message(
             session_id,
             ref state,
         } => {
-            if let Err(e) = db::update_session_state(pool, &session_id, *state).await {
-                tracing::error!("failed to update session state: {e}");
-            }
+            let persisted = match db::update_session_state(pool, &session_id, *state).await {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::error!("failed to update session state: {e}");
+                    false
+                }
+            };
             // Emit spine event when session transitions to Running
             if *state == SessionState::Running {
                 if let Some(spine) = spine {
@@ -59,7 +63,7 @@ pub async fn handle_agent_message(
                     }
                 }
             }
-            if matches!(*state, SessionState::Done | SessionState::Failed) {
+            if persisted && matches!(*state, SessionState::Done | SessionState::Failed) {
                 notify_terminal(completion_tx, &session_id);
             }
         }
@@ -79,10 +83,17 @@ pub async fn handle_agent_message(
             }
         }
         AgentMessage::SessionCompleted { session_id, output } => {
-            if let Err(e) = db::update_session_state(pool, &session_id, SessionState::Done).await {
-                tracing::error!("failed to update session state to done: {e}");
+            let persisted =
+                match db::update_session_state(pool, &session_id, SessionState::Done).await {
+                    Ok(()) => true,
+                    Err(e) => {
+                        tracing::error!("failed to update session state to done: {e}");
+                        false
+                    }
+                };
+            if persisted {
+                notify_terminal(completion_tx, &session_id);
             }
-            notify_terminal(completion_tx, &session_id);
             // Only persist the final output as a fallback when no chunks were
             // already streamed, to avoid duplicating the entire response.
             if !output.is_empty() {
@@ -106,11 +117,17 @@ pub async fn handle_agent_message(
             }
         }
         AgentMessage::SessionFailed { session_id, error } => {
-            if let Err(e) = db::update_session_state(pool, &session_id, SessionState::Failed).await
-            {
-                tracing::error!("failed to update session state to failed: {e}");
+            let persisted =
+                match db::update_session_state(pool, &session_id, SessionState::Failed).await {
+                    Ok(()) => true,
+                    Err(e) => {
+                        tracing::error!("failed to update session state to failed: {e}");
+                        false
+                    }
+                };
+            if persisted {
+                notify_terminal(completion_tx, &session_id);
             }
-            notify_terminal(completion_tx, &session_id);
             if let Err(e) = db::append_session_log(pool, &session_id, &error, "stderr").await {
                 tracing::error!("failed to append session log: {e}");
             }
