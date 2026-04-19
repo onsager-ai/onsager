@@ -38,7 +38,7 @@ the `draft → planned` alignment gate.
      │        ↓                                                        │
      │   git push → open PR (body: "Closes #N" or "Part of #N")        │
      │        │                                                        │
-     │        │ pr-opened-progress routine → label: in-progress        │
+     │        │ pr-spec-sync workflow → label: in-progress             │
      │        ↓                                                        │
      │   onsager-pr-lifecycle skill  ← CI triage, review, iterate      │
      │        │                                                        │
@@ -154,8 +154,8 @@ respond to a webhook). It covers:
 - Copilot vs real defects.
 - Webhook subscription to stream CI + review events.
 
-The `pr-opened-progress` routine has already flipped the spec to
-`in-progress`. No human action needed on labels during review.
+The `pr-spec-sync` workflow has already flipped the spec to `in-progress`.
+No human action needed on labels during review.
 
 ### 7. Merge
 
@@ -169,8 +169,8 @@ The `pr-opened-progress` routine has already flipped the spec to
 ### 8. Closed-unmerged path
 
 If you close a PR without merging (e.g. abandoned approach), the
-`pr-closed-unmerged` routine checks whether any other PR still references
-the spec. If none, it flips the spec back to `planned` so the next
+`pr-spec-sync` workflow checks whether any other PR still references the
+spec. If none, it flips the spec back to `planned` so the next
 implementer can pick it up.
 
 ## The `trivial` escape hatch
@@ -203,13 +203,15 @@ The labels on a spec issue must reflect reality at all times:
 | `in-progress` | At least one PR is open against this spec. |
 | (closed) | All Plan items delivered, spec closed. |
 
-Routines maintain these on PR events. If the routines are disabled or
-fail, the `onsager-pr-lifecycle` skill documents the manual transitions.
+The `pr-spec-sync` workflow handles the open and close-unmerged
+transitions; the `pr-merged-progress` routine handles Plan-item ticks on
+merge. If the merged-progress routine is disabled, the
+`onsager-pr-lifecycle` skill documents the manual transitions.
 
 ## Anti-patterns (don't)
 
-- **PR without a spec and no `trivial` label.** The `pr-opened-progress`
-  routine will comment; the PR should not merge until the author either
+- **PR without a spec and no `trivial` label.** The `pr-spec-sync`
+  workflow will comment; the PR should not merge until the author either
   adds a spec link or the `trivial` label.
 - **Moving `draft → planned` as the AI.** Human-only transition.
 - **Closing a spec manually when you meant `Closes #N`.** Let GitHub do it
@@ -229,10 +231,10 @@ fail, the `onsager-pr-lifecycle` skill documents the manual transitions.
 | Write the spec | [`issue-spec`](../issue-spec/SKILL.md) |
 | Sanity-check `planned` specs | [`spec-planned-review`](../../routines/spec-planned-review.md) |
 | Pre-push checks | [`onsager-pre-push`](../onsager-pre-push/SKILL.md) |
-| On PR open → flip to `in-progress` | [`pr-opened-progress`](../../routines/pr-opened-progress.md) |
+| On PR open → flip to `in-progress` | [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) |
 | CI triage, review, iterate | [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md) |
 | On PR merge → tick Plan items | [`pr-merged-progress`](../../routines/pr-merged-progress.md) |
-| On PR close (unmerged) → revert label | [`pr-closed-unmerged`](../../routines/pr-closed-unmerged.md) |
+| On PR close (unmerged) → revert label | [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) |
 
 Routines live at [claude.ai/code/routines](https://claude.ai/code/routines);
 their version-controlled prompts are in `.claude/routines/`. See that
