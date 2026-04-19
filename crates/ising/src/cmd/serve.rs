@@ -23,7 +23,9 @@ use onsager_spine::{EventMetadata, EventStore};
 
 use crate::analyzers::register_defaults;
 use crate::core::emitter::{EmitResult, EmitterConfig, InsightEmitter};
-use crate::core::{insight_to_emitted_event, AnalyzerRegistry, FactoryModel};
+use crate::core::{
+    insight_to_emitted_event, insight_to_rule_proposal, AnalyzerRegistry, FactoryModel,
+};
 
 /// How far back to look for forge events when rebuilding the factory model.
 /// Matches the default `GateOverrideConfig::window` so insights have enough
@@ -90,6 +92,7 @@ async fn run_tick(
     }
 
     let mut emitted = 0usize;
+    let mut proposals = 0usize;
     for (analyzer_name, insights) in registry.run_all(&model) {
         for insight in insights {
             match emitter.emit(insight) {
@@ -100,6 +103,19 @@ async fn run_tick(
                         continue;
                     }
                     emitted += 1;
+
+                    // Issue #36 Step 2: for signals that warrant a rule
+                    // change, emit `ising.rule_proposed` alongside the
+                    // observation event. The proposal is paired with its
+                    // backing `insight_emitted` via `insight_id` so Synodic
+                    // can audit the evidence without a second query.
+                    if let Some(proposal) = insight_to_rule_proposal(&analyzer_name, &insight) {
+                        if let Err(e) = append_rule_proposed(spine, &proposal).await {
+                            tracing::warn!("ising: failed to append rule_proposed event: {e}");
+                        } else {
+                            proposals += 1;
+                        }
+                    }
                 }
                 EmitResult::Suppressed { reason, .. } => {
                     tracing::debug!(
@@ -115,8 +131,8 @@ async fn run_tick(
         }
     }
 
-    if emitted > 0 {
-        tracing::info!(emitted, "ising: tick emitted insights");
+    if emitted > 0 || proposals > 0 {
+        tracing::info!(emitted, proposals, "ising: tick emitted insights");
     }
     Ok(())
 }
@@ -285,6 +301,41 @@ async fn append_insight_emitted(
             &stream_id,
             "ising",
             "ising.insight_emitted",
+            data,
+            &meta,
+            None,
+        )
+        .await?;
+    Ok(id)
+}
+
+/// Append an `ising.rule_proposed` row to `events_ext` so Synodic's
+/// proposal-queue listener can pick it up (issue #36 Step 2). The payload
+/// is a full serialization of the `IsingRuleProposed` variant so the
+/// consumer can `serde_json::from_value::<FactoryEventKind>` without a
+/// second parser, unlike the hand-rolled `insight_emitted` body.
+async fn append_rule_proposed(
+    spine: &EventStore,
+    event: &FactoryEventKind,
+) -> Result<i64, anyhow::Error> {
+    if !matches!(event, FactoryEventKind::IsingRuleProposed { .. }) {
+        return Err(anyhow::anyhow!(
+            "append_rule_proposed called with non-IsingRuleProposed variant"
+        ));
+    }
+
+    let stream_id = event.stream_id();
+    let data = serde_json::to_value(event)?;
+    let meta = EventMetadata {
+        actor: "ising".to_string(),
+        ..Default::default()
+    };
+
+    let id = spine
+        .append_ext(
+            &stream_id,
+            "ising",
+            "ising.rule_proposed",
             data,
             &meta,
             None,

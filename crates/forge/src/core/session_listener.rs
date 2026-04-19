@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use onsager_spine::factory_event::{FactoryEvent, FactoryEventKind};
 use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 
-/// A parsed stiglab.session_completed event (issue #14 phase 2).
+/// A parsed stiglab.session_completed event (issue #14 phase 2, #39).
 #[derive(Debug, Clone)]
 pub struct SessionCompleted {
     pub event_id: i64,
@@ -30,6 +30,8 @@ pub struct SessionCompleted {
     pub request_id: String,
     pub duration_ms: u64,
     pub artifact_id: Option<String>,
+    /// LLM token usage, if the producing runtime reported it (issue #39).
+    pub token_usage: Option<onsager_spine::factory_event::TokenUsage>,
 }
 
 /// Caller-supplied callback invoked for every session completion.
@@ -89,6 +91,7 @@ impl<H: SessionCompletedHandler> Dispatcher<H> {
             request_id,
             duration_ms,
             artifact_id,
+            token_usage,
         } = kind
         else {
             return Ok(None);
@@ -100,6 +103,7 @@ impl<H: SessionCompletedHandler> Dispatcher<H> {
             request_id,
             duration_ms,
             artifact_id,
+            token_usage,
         }))
     }
 }
@@ -155,6 +159,7 @@ mod tests {
                 request_id: "r".into(),
                 duration_ms: 42,
                 artifact_id: Some("art_test".into()),
+                token_usage: None,
             })
             .await
             .unwrap();

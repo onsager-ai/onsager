@@ -1,0 +1,29 @@
+[package]
+name = "refract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Intent decomposer — expands high-level intents into artifact trees"
+
+[lib]
+name = "refract"
+path = "src/lib.rs"
+
+[[bin]]
+name = "refract"
+path = "src/main.rs"
+
+[dependencies]
+onsager-artifact = { path = "../onsager-artifact" }
+onsager-spine = { path = "../onsager-spine" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+ulid = "1"
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }

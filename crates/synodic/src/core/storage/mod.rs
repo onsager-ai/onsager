@@ -224,6 +224,43 @@ pub struct GovernanceEventFilters {
     pub event_type: Option<String>,
 }
 
+/// A rule-change proposal enqueued by Ising (issue #36 Step 2). Each row
+/// corresponds to one `ising.rule_proposed` event the listener ingested.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleProposal {
+    pub id: String,
+    /// Unique key from Ising — used by the listener for idempotent INSERTs.
+    pub insight_id: String,
+    pub signal_kind: String,
+    pub subject_ref: String,
+    /// Serialized `onsager_spine::factory_event::RuleProposalAction` — the
+    /// Synodic listener stores it as JSON so new action kinds don't require
+    /// a migration.
+    pub proposed_action: serde_json::Value,
+    pub class: String,
+    pub rationale: String,
+    pub confidence: f64,
+    pub status: String,
+    pub resolution_notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub resolved_at: Option<DateTime<Utc>>,
+}
+
+/// Parameters for inserting a new rule proposal (source: Ising event).
+#[derive(Debug, Clone)]
+pub struct CreateRuleProposal {
+    pub insight_id: String,
+    pub signal_kind: String,
+    pub subject_ref: String,
+    pub proposed_action: serde_json::Value,
+    pub class: String,
+    pub rationale: String,
+    pub confidence: f64,
+    /// If `Some`, insert with this status (e.g. `"approved"` for safe-auto
+    /// proposals the listener auto-applies). Defaults to `"pending"`.
+    pub initial_status: Option<String>,
+}
+
 /// Result of an adversarial probe against a rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeResult {
@@ -371,4 +408,26 @@ pub trait Storage: Send + Sync {
 
     /// Resolve a governance event.
     async fn resolve_governance_event(&self, id: &str, notes: Option<String>) -> Result<()>;
+
+    // -- Rule proposals (issue #36 Step 2) ----------------------------------
+
+    /// List rule proposals, optionally filtered by status
+    /// (`"pending"` / `"approved"` / `"rejected"`).
+    async fn list_rule_proposals(&self, status: Option<&str>) -> Result<Vec<RuleProposal>>;
+
+    /// Insert a new rule proposal. Deduplicates on `insight_id` — if a row
+    /// with the same `insight_id` already exists the existing proposal is
+    /// returned unchanged. The listener relies on this so redelivery
+    /// (restart, catch-up) is a no-op.
+    async fn create_rule_proposal(&self, proposal: CreateRuleProposal) -> Result<RuleProposal>;
+
+    /// Transition a proposal to a terminal status (`"approved"` or
+    /// `"rejected"`). Errors if the id doesn't exist or the proposal is
+    /// already resolved.
+    async fn resolve_rule_proposal(
+        &self,
+        id: &str,
+        status: &str,
+        notes: Option<String>,
+    ) -> Result<()>;
 }

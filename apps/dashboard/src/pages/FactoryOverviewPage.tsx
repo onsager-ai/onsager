@@ -10,9 +10,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Package, Activity, Shield, Server, ArrowRight } from "lucide-react"
+import {
+  Package,
+  Activity,
+  Shield,
+  Server,
+  ArrowRight,
+  Coins,
+  Gauge,
+  CheckCircle2,
+  Timer,
+  AlertTriangle,
+} from "lucide-react"
 import { Link } from "react-router-dom"
-import type { SpineArtifact, SpineEvent } from "@/lib/api"
+import type { SessionSpend, SpineArtifact, SpineEvent } from "@/lib/api"
 
 const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -97,11 +108,21 @@ export function FactoryOverviewPage() {
     queryFn: api.getNodes,
     refetchInterval: 10000,
   })
+  // Issue #39 — per-session token usage, pulled from the last N
+  // session_completed events so the spend card can render without a
+  // dedicated accounting endpoint.
+  const { data: spendData } = useQuery({
+    queryKey: ["session-spend"],
+    queryFn: () => api.getSessionSpend(100),
+    refetchInterval: 30000,
+  })
 
   const artifacts = artifactsData?.artifacts ?? []
   const events = spineData?.events ?? []
   const nodes = nodesData?.nodes ?? []
   const onlineNodes = nodes.filter((n) => n.status === "online").length
+  const sessions = spendData ?? []
+  const productivity = computeProductivityMetrics(artifacts)
 
   const stats = [
     {
@@ -158,6 +179,10 @@ export function FactoryOverviewPage() {
           </Card>
         ))}
       </div>
+
+      <ProductivityMetrics metrics={productivity} />
+
+      <SpendCard sessions={sessions} />
 
       <PipelineStats artifacts={artifacts} />
 
@@ -248,4 +273,235 @@ export function FactoryOverviewPage() {
       </div>
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Issue #38 — productivity metrics
+// ---------------------------------------------------------------------------
+
+interface ProductivityStats {
+  throughputLast24h: number
+  yieldRatio: number | null
+  avgCycleMs: number | null
+  bottleneckState: string | null
+  bottleneckCount: number
+  releasedCount: number
+  totalTracked: number
+}
+
+function computeProductivityMetrics(
+  artifacts: SpineArtifact[],
+): ProductivityStats {
+  const now = Date.now()
+  const dayAgo = now - 24 * 60 * 60 * 1000
+
+  const released = artifacts.filter((a) => a.state === "released")
+  const archivedOrTerminal = artifacts.filter(
+    (a) => a.state === "released" || a.state === "archived",
+  )
+  const tracked = artifacts.length
+  const throughputLast24h = released.filter(
+    (a) => new Date(a.updated_at).getTime() >= dayAgo,
+  ).length
+
+  // Yield: released / (released + archived) among terminal artifacts. A
+  // tracker may stay in_progress for long stretches, so skipping non-
+  // terminal ones keeps the number interpretable as "of the ones we tried
+  // to finish, how many shipped".
+  const yieldRatio =
+    archivedOrTerminal.length > 0
+      ? released.length / archivedOrTerminal.length
+      : null
+
+  // Cycle time: average created_at → updated_at among released artifacts.
+  // Ignoring archived-without-release cases so a string of aborts doesn't
+  // shrink the number to zero.
+  let avgCycleMs: number | null = null
+  if (released.length > 0) {
+    const total = released.reduce((acc, a) => {
+      const created = new Date(a.created_at).getTime()
+      const updated = new Date(a.updated_at).getTime()
+      return acc + Math.max(0, updated - created)
+    }, 0)
+    avgCycleMs = total / released.length
+  }
+
+  // Bottleneck: the non-terminal state with the most artifacts. "If the
+  // belt is stuck, where did the boxes pile up?"
+  const nonTerminalStates = new Map<string, number>()
+  for (const a of artifacts) {
+    if (a.state === "released" || a.state === "archived") continue
+    nonTerminalStates.set(a.state, (nonTerminalStates.get(a.state) ?? 0) + 1)
+  }
+  let bottleneckState: string | null = null
+  let bottleneckCount = 0
+  for (const [state, count] of nonTerminalStates) {
+    if (count > bottleneckCount) {
+      bottleneckState = state
+      bottleneckCount = count
+    }
+  }
+
+  return {
+    throughputLast24h,
+    yieldRatio,
+    avgCycleMs,
+    bottleneckState,
+    bottleneckCount,
+    releasedCount: released.length,
+    totalTracked: tracked,
+  }
+}
+
+function ProductivityMetrics({ metrics }: { metrics: ProductivityStats }) {
+  const yieldDisplay =
+    metrics.yieldRatio == null
+      ? "—"
+      : `${Math.round(metrics.yieldRatio * 100)}%`
+  const cycleDisplay = formatDuration(metrics.avgCycleMs)
+  const bottleneckDisplay = metrics.bottleneckState
+    ? `${metrics.bottleneckState.replace("_", " ")} (${metrics.bottleneckCount})`
+    : "—"
+
+  const cards = [
+    {
+      title: "Throughput (24h)",
+      value: metrics.throughputLast24h.toString(),
+      icon: Gauge,
+      description: `${metrics.releasedCount} released all-time`,
+    },
+    {
+      title: "Yield",
+      value: yieldDisplay,
+      icon: CheckCircle2,
+      description: "released / (released + archived)",
+    },
+    {
+      title: "Avg Cycle Time",
+      value: cycleDisplay,
+      icon: Timer,
+      description: "released artifacts",
+    },
+    {
+      title: "Bottleneck",
+      value: bottleneckDisplay,
+      icon: AlertTriangle,
+      description: "largest non-terminal state",
+    },
+  ]
+
+  return (
+    <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+      {cards.map((stat) => (
+        <Card key={stat.title}>
+          <CardHeader className="flex flex-row items-center justify-between px-3 pb-1 pt-3 md:px-6 md:pb-2 md:pt-6">
+            <CardTitle className="text-xs font-medium text-muted-foreground md:text-sm">
+              {stat.title}
+            </CardTitle>
+            <stat.icon className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="px-3 pb-3 md:px-6 md:pb-6">
+            <div className="text-xl font-bold md:text-2xl">{stat.value}</div>
+            <p className="text-[10px] text-muted-foreground md:text-xs">
+              {stat.description}
+            </p>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms == null) return "—"
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`
+  if (ms < 86_400_000) return `${(ms / 3_600_000).toFixed(1)}h`
+  return `${(ms / 86_400_000).toFixed(1)}d`
+}
+
+// ---------------------------------------------------------------------------
+// Issue #39 — session spend summary
+// ---------------------------------------------------------------------------
+
+function SpendCard({ sessions }: { sessions: SessionSpend[] }) {
+  let inputTokens = 0
+  let outputTokens = 0
+  let cachedTokens = 0
+  let reported = 0
+  const byModel = new Map<string, number>()
+  for (const s of sessions) {
+    if (!s.token_usage) continue
+    reported += 1
+    inputTokens += s.token_usage.input_tokens
+    outputTokens += s.token_usage.output_tokens
+    cachedTokens +=
+      (s.token_usage.cache_read_tokens ?? 0) +
+      (s.token_usage.cache_write_tokens ?? 0)
+    const model = s.token_usage.model ?? "unknown"
+    byModel.set(model, (byModel.get(model) ?? 0) + 1)
+  }
+  const totalTokens = inputTokens + outputTokens
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between px-4 md:px-6">
+        <CardTitle className="text-base md:text-lg">Token Spend</CardTitle>
+        <Coins className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent className="px-4 md:px-6">
+        {reported === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">
+            No session_completed events report token_usage yet. The field is
+            optional; Stiglab starts reporting it once the agent runtime
+            forwards usage numbers.
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <SpendStat label="Sessions" value={reported.toString()} />
+            <SpendStat label="Total tokens" value={formatTokens(totalTokens)} />
+            <SpendStat label="Input" value={formatTokens(inputTokens)} />
+            <SpendStat label="Output" value={formatTokens(outputTokens)} />
+            <SpendStat
+              label="Cached"
+              value={formatTokens(cachedTokens)}
+              description="reads + writes"
+            />
+            <SpendStat
+              label="Models"
+              value={Array.from(byModel.keys()).slice(0, 2).join(", ") || "—"}
+              description={byModel.size > 2 ? `+${byModel.size - 2} more` : ""}
+            />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function SpendStat({
+  label,
+  value,
+  description,
+}: {
+  label: string
+  value: string
+  description?: string
+}) {
+  return (
+    <div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-lg font-bold md:text-xl">{value}</div>
+      {description && (
+        <div className="text-[10px] text-muted-foreground">{description}</div>
+      )}
+    </div>
+  )
+}
+
+function formatTokens(n: number): string {
+  if (n < 1_000) return n.toString()
+  if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`
+  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(2)}M`
+  return `${(n / 1_000_000_000).toFixed(2)}B`
 }

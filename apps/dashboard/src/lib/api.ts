@@ -111,6 +111,44 @@ export interface IsingInsightEmittedEvent {
   evidence: { event_id: number; event_type: string }[];
 }
 
+// Ising rule proposal queue (issue #36 Step 2). Proxied through Synodic —
+// each row corresponds to one `ising.rule_proposed` event the listener
+// ingested and is awaiting human (or supervisor-agent) resolution.
+export interface RuleProposal {
+  id: string;
+  insight_id: string;
+  signal_kind: string;
+  subject_ref: string;
+  proposed_action: Record<string, unknown>;
+  class: 'safe_auto' | 'review_required';
+  rationale: string;
+  confidence: number;
+  status: 'pending' | 'approved' | 'rejected';
+  resolution_notes: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+// Token usage carried by `stiglab.session_completed` events (issue #39).
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  model?: string;
+}
+
+// Denormalized session-completion spend row (issue #39), projected from
+// `stiglab.session_completed` spine events.
+export interface SessionSpend {
+  id: number;
+  created_at: string;
+  session_id: string;
+  artifact_id: string | null;
+  duration_ms: number;
+  token_usage: TokenUsage | null;
+}
+
 // Spine types (direct from stiglab)
 export interface SpineEvent {
   id: number;
@@ -242,6 +280,42 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ notes }),
     }),
+  // Ising rule proposals (issue #36 Step 2). Served by Synodic and
+  // proxied through stiglab's /api/governance/rule-proposals.
+  getRuleProposals: (status?: RuleProposal['status']) =>
+    request<RuleProposal[]>(
+      `/governance/rule-proposals${status ? `?status=${status}` : ''}`,
+    ),
+  resolveRuleProposal: (id: string, status: 'approved' | 'rejected', notes?: string) =>
+    request<void>(`/governance/rule-proposals/${id}/resolve`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, notes }),
+    }),
+  // Session spend view (issue #39). Reads recent `stiglab.session_completed`
+  // events and unpacks the typed `token_usage` payload client-side so we
+  // don't have to spin up a dedicated pricing/accounting endpoint just to
+  // render the dashboard card.
+  getSessionSpend: async (limit = 50): Promise<SessionSpend[]> => {
+    const res = await request<{ events: SpineEvent[] }>(
+      `/spine/events?event_type=stiglab.session_completed&limit=${limit}`,
+    );
+    return res.events.map((e) => {
+      const d = e.data as {
+        session_id?: string;
+        artifact_id?: string | null;
+        duration_ms?: number;
+        token_usage?: TokenUsage;
+      };
+      return {
+        id: e.id,
+        created_at: e.created_at,
+        session_id: d.session_id ?? '',
+        artifact_id: d.artifact_id ?? null,
+        duration_ms: typeof d.duration_ms === 'number' ? d.duration_ms : 0,
+        token_usage: d.token_usage ?? null,
+      };
+    });
+  },
   // Spine
   getSpineEvents: (params?: { stream_type?: string; event_type?: string; limit?: number }) => {
     const qs = params ? '?' + new URLSearchParams(

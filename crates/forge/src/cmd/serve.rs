@@ -205,12 +205,24 @@ impl SynodicFailPolicy {
                 context: EscalationContext {
                     escalation_id: format!("synodic-fail-{}", ulid::Ulid::new()),
                     reason: format!("synodic gate failure: {reason}"),
-                    target: "supervisor".into(),
+                    // Issue #37: the default escalation target is the
+                    // supervisor agent, but operators can redirect to a
+                    // specific human (e.g. `"human:marvin"`) via env var
+                    // when the Stiglab supervisor profile isn't yet wired.
+                    target: escalation_default_target(),
                     timeout_at: Utc::now() + chrono::Duration::minutes(15),
                 },
             },
         }
     }
+}
+
+/// Who receives escalations when Synodic says so but no specific target is
+/// set on the verdict (issue #37). Reads `ESCALATION_DEFAULT_TARGET`;
+/// defaults to `"supervisor"` so the supervisor Stiglab agent is the
+/// natural first responder.
+fn escalation_default_target() -> String {
+    std::env::var("ESCALATION_DEFAULT_TARGET").unwrap_or_else(|_| "supervisor".to_string())
 }
 
 /// Distinguishes failure modes for the Synodic gate so that transient

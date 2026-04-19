@@ -1,7 +1,11 @@
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import type { GovernanceEvent, IsingInsightEmittedEvent } from "@/lib/api"
+import type {
+  GovernanceEvent,
+  IsingInsightEmittedEvent,
+  RuleProposal,
+} from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -55,12 +59,29 @@ export function GovernancePage() {
     refetchInterval: 15000,
   })
 
+  // Issue #36 Step 2 — pending rule proposals. Same slow-refresh cadence as
+  // insights; proposals churn at most once per ising tick.
+  const { data: pendingProposals } = useQuery({
+    queryKey: ["rule-proposals-pending"],
+    queryFn: () => api.getRuleProposals("pending"),
+    refetchInterval: 15000,
+  })
+
   const handleResolve = async (id: string) => {
     const notes = prompt("Resolution notes:")
     if (notes === null) return
     await api.resolveGovernanceEvent(id, notes)
     queryClient.invalidateQueries({ queryKey: ["governance-events"] })
     queryClient.invalidateQueries({ queryKey: ["governance-stats"] })
+  }
+
+  const handleProposalResolve = async (
+    id: string,
+    status: "approved" | "rejected",
+  ) => {
+    const notes = prompt(`Notes for ${status} proposal (optional):`) ?? undefined
+    await api.resolveRuleProposal(id, status, notes || undefined)
+    queryClient.invalidateQueries({ queryKey: ["rule-proposals-pending"] })
   }
 
   return (
@@ -98,6 +119,11 @@ export function GovernancePage() {
           ))}
         </div>
       </div>
+
+      <RuleProposalsCard
+        proposals={pendingProposals ?? []}
+        onResolve={handleProposalResolve}
+      />
 
       <IsingInsightsCard insights={insights ?? []} />
 
@@ -250,6 +276,97 @@ function IsingInsightsCard({ insights }: { insights: IsingInsightEmittedEvent[] 
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function RuleProposalsCard({
+  proposals,
+  onResolve,
+}: {
+  proposals: RuleProposal[]
+  onResolve: (id: string, status: "approved" | "rejected") => void
+}) {
+  return (
+    <Card>
+      <CardHeader className="px-4 md:px-6">
+        <CardTitle className="text-base md:text-lg">Rule Proposals</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Rule changes Ising queued for review. Approve to apply; reject to
+          keep the rule as-is. Safe-auto proposals already applied and land
+          here in the "approved" view only.
+        </p>
+      </CardHeader>
+      <CardContent className="px-4 md:px-6">
+        {proposals.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No pending proposals. Ising surfaces them when a signal crosses
+            the rule-proposal threshold.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {proposals.map((p) => {
+              const action = p.proposed_action as {
+                action?: string
+                rule_id?: string
+                subject_ref?: string
+              }
+              const actionLabel =
+                action.action === "retire"
+                  ? `retire rule ${action.rule_id}`
+                  : action.action === "rewrite"
+                    ? `rewrite rule ${action.rule_id}`
+                    : action.action === "introduce"
+                      ? `introduce rule for ${action.subject_ref}`
+                      : action.action ?? "change"
+              return (
+                <div
+                  key={p.id}
+                  className="flex flex-col gap-2 rounded-lg border p-3"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{p.signal_kind}</Badge>
+                    <Badge
+                      variant={
+                        p.class === "safe_auto" ? "secondary" : "default"
+                      }
+                    >
+                      {p.class.replace("_", " ")}
+                    </Badge>
+                    <span className="text-sm font-medium">{actionLabel}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {(p.confidence * 100).toFixed(0)}% confidence
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{p.rationale}</p>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="truncate">
+                      subject: {p.subject_ref}
+                    </span>
+                    <span>{new Date(p.created_at).toLocaleString()}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => onResolve(p.id, "approved")}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onResolve(p.id, "rejected")}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </CardContent>

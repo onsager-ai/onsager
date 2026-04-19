@@ -1,7 +1,7 @@
 //! Optional event spine integration for emitting factory events to the
 //! Onsager event store.
 
-use onsager_spine::factory_event::FactoryEventKind;
+use onsager_spine::factory_event::{FactoryEventKind, TokenUsage};
 use onsager_spine::{EventMetadata, EventStore};
 
 /// Emits factory events to the Onsager event spine under the "stiglab" namespace.
@@ -89,19 +89,22 @@ impl SpineEmitter {
     ///
     /// `artifact_id` links the session to the factory pipeline artifact it
     /// was shaping (issue #14 phase 2). Pass `None` for sessions that don't
-    /// originate from a `ShapingRequest`.
+    /// originate from a `ShapingRequest`. `token_usage` is the LLM accounting
+    /// payload (issue #39); pass `None` when the runtime can't report it.
     pub async fn emit_session_completed(
         &self,
         session_id: &str,
         request_id: &str,
         duration_ms: u64,
         artifact_id: Option<&str>,
+        token_usage: Option<TokenUsage>,
     ) -> Result<i64, sqlx::Error> {
         self.emit(FactoryEventKind::StiglabSessionCompleted {
             session_id: session_id.to_string(),
             request_id: request_id.to_string(),
             duration_ms,
             artifact_id: artifact_id.map(str::to_owned),
+            token_usage,
         })
         .await
     }
