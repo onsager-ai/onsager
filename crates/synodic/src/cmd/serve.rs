@@ -229,8 +229,8 @@ async fn list_rules(State(store): State<AppState>) -> Result<Json<Vec<ApiRule>>,
 
 async fn gate_handler(
     State(store): State<AppState>,
-    Json(req): Json<onsager_spine::protocol::GateRequest>,
-) -> Result<Json<onsager_spine::protocol::GateVerdict>, AppError> {
+    Json(req): Json<onsager_protocol::GateRequest>,
+) -> Result<Json<onsager_protocol::GateVerdict>, AppError> {
     // Load active rules from storage and convert to InterceptRules
     let storage_rules = store.get_rules(true).await?;
     let rules: Vec<InterceptRule> = storage_rules.iter().map(InterceptRule::from).collect();

@@ -7,7 +7,7 @@ use crate::core::session::{Session, SessionState};
 use crate::core::task::Task;
 
 /// Convert an Onsager `ShapingRequest` into a Stiglab `Task`.
-pub fn shaping_request_to_task(req: &onsager_spine::ShapingRequest) -> Task {
+pub fn shaping_request_to_task(req: &onsager_protocol::ShapingRequest) -> Task {
     let prompt = req
         .shaping_intent
         .get("prompt")
@@ -41,10 +41,10 @@ pub fn shaping_request_to_task(req: &onsager_spine::ShapingRequest) -> Task {
 
 /// Convert a completed `Session` into an Onsager `ShapingResult`.
 pub fn session_to_shaping_result(
-    req: &onsager_spine::ShapingRequest,
+    req: &onsager_protocol::ShapingRequest,
     session: &Session,
     duration_ms: u64,
-) -> onsager_spine::ShapingResult {
+) -> onsager_protocol::ShapingResult {
     let outcome = match session.state {
         SessionState::Done => onsager_spine::factory_event::ShapingOutcome::Completed,
         SessionState::Failed => onsager_spine::factory_event::ShapingOutcome::Failed,
@@ -54,7 +54,7 @@ pub fn session_to_shaping_result(
     let content_ref = session
         .working_dir
         .as_ref()
-        .map(|dir| onsager_spine::ContentRef {
+        .map(|dir| onsager_artifact::ContentRef {
             uri: format!("file://{dir}"),
             checksum: None,
         });
@@ -62,7 +62,7 @@ pub fn session_to_shaping_result(
     let change_summary = session.output.clone().unwrap_or_default();
 
     let error = if session.state == SessionState::Failed {
-        Some(onsager_spine::protocol::ErrorDetail {
+        Some(onsager_protocol::ErrorDetail {
             code: "session_failed".to_string(),
             message: change_summary.clone(),
             retriable: Some(true),
@@ -71,7 +71,7 @@ pub fn session_to_shaping_result(
         None
     };
 
-    onsager_spine::ShapingResult {
+    onsager_protocol::ShapingResult {
         request_id: req.request_id.clone(),
         outcome,
         content_ref,
@@ -100,10 +100,7 @@ pub fn task_to_session(task: &Task, node_id: &str) -> Session {
     }
 }
 
-fn find_constraint_str(
-    constraints: &[onsager_spine::protocol::Constraint],
-    name: &str,
-) -> Option<String> {
+fn find_constraint_str(constraints: &[onsager_protocol::Constraint], name: &str) -> Option<String> {
     constraints
         .iter()
         .find(|c| c.constraint_type == name)
@@ -111,10 +108,7 @@ fn find_constraint_str(
         .map(|s| s.to_string())
 }
 
-fn find_constraint_u32(
-    constraints: &[onsager_spine::protocol::Constraint],
-    name: &str,
-) -> Option<u32> {
+fn find_constraint_u32(constraints: &[onsager_protocol::Constraint], name: &str) -> Option<u32> {
     constraints
         .iter()
         .find(|c| c.constraint_type == name)
@@ -126,10 +120,10 @@ fn find_constraint_u32(
 mod tests {
     use super::*;
 
-    fn sample_request() -> onsager_spine::ShapingRequest {
-        onsager_spine::ShapingRequest {
+    fn sample_request() -> onsager_protocol::ShapingRequest {
+        onsager_protocol::ShapingRequest {
             request_id: "req_001".to_string(),
-            artifact_id: onsager_spine::ArtifactId::new("art_test1234"),
+            artifact_id: onsager_artifact::ArtifactId::new("art_test1234"),
             target_version: 1,
             shaping_intent: serde_json::json!({
                 "prompt": "Fix the login bug",
@@ -137,15 +131,15 @@ mod tests {
             }),
             inputs: vec![],
             constraints: vec![
-                onsager_spine::protocol::Constraint {
+                onsager_protocol::Constraint {
                     constraint_type: "model".to_string(),
                     value: serde_json::json!("claude-sonnet-4-20250514"),
                 },
-                onsager_spine::protocol::Constraint {
+                onsager_protocol::Constraint {
                     constraint_type: "max_turns".to_string(),
                     value: serde_json::json!(10),
                 },
-                onsager_spine::protocol::Constraint {
+                onsager_protocol::Constraint {
                     constraint_type: "permission_mode".to_string(),
                     value: serde_json::json!("auto"),
                 },
@@ -170,9 +164,9 @@ mod tests {
 
     #[test]
     fn test_shaping_request_to_task_minimal() {
-        let req = onsager_spine::ShapingRequest {
+        let req = onsager_protocol::ShapingRequest {
             request_id: "req_002".to_string(),
-            artifact_id: onsager_spine::ArtifactId::new("art_abcd1234"),
+            artifact_id: onsager_artifact::ArtifactId::new("art_abcd1234"),
             target_version: 1,
             shaping_intent: serde_json::json!({}),
             inputs: vec![],

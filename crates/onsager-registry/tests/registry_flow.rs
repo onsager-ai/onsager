@@ -3,10 +3,11 @@
 //!
 //! Skipped unless `DATABASE_URL` is set.
 
-use onsager_spine::{
-    apply_seed, register_engineering_catalog, EventStore, RegistryKind, RegistryStatus,
-    RegistryStore, SeedCatalog, TypeDefinition,
+use onsager_registry::{
+    apply_seed, register_engineering_catalog, RegistryKind, RegistryStatus, RegistryStore,
+    SeedCatalog, TypeDefinition,
 };
+use onsager_spine::EventStore;
 
 fn db_url() -> Option<String> {
     std::env::var("DATABASE_URL").ok()

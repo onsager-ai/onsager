@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
-use onsager_spine::artifact::{ArtifactId, ArtifactState, Kind};
+use onsager_artifact::{ArtifactId, ArtifactState, Kind};
 use onsager_spine::factory_event::{FactoryEventKind, ShapingOutcome};
 
 /// A tracked shaping attempt.
@@ -185,7 +185,7 @@ impl Default for FactoryModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use onsager_spine::artifact::Kind;
+    use onsager_artifact::Kind;
 
     #[test]
     fn ingest_artifact_registered() {

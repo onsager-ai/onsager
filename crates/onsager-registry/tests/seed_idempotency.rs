@@ -3,7 +3,8 @@
 //! Skipped unless `DATABASE_URL` is set (matches the convention in
 //! `store::tests`). Run via `just test-spine`.
 
-use onsager_spine::{apply_seed, EventStore, SeedCatalog, DEFAULT_WORKSPACE};
+use onsager_registry::{apply_seed, SeedCatalog, DEFAULT_WORKSPACE};
+use onsager_spine::EventStore;
 
 fn db_url() -> Option<String> {
     std::env::var("DATABASE_URL").ok()

@@ -6,10 +6,8 @@
 //! library provides a single typed vocabulary.
 
 use chrono::{DateTime, Utc};
+use onsager_artifact::{ArtifactId, ArtifactState, BundleId, Kind, QualitySignal};
 use serde::{Deserialize, Serialize};
-
-use crate::artifact::{ArtifactId, ArtifactState, Kind, QualitySignal};
-use crate::bundle::BundleId;
 
 // ---------------------------------------------------------------------------
 // Factory event envelope

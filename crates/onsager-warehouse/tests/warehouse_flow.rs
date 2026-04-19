@@ -8,10 +8,9 @@
 //! Skipped unless `DATABASE_URL` is set (matches the convention in
 //! `store::tests` and `seed_idempotency`).
 
-use onsager_spine::{
-    bundle::{FilesystemWarehouse, Outputs, SealRequest, Warehouse},
-    ArtifactId, EventStore,
-};
+use onsager_artifact::ArtifactId;
+use onsager_spine::EventStore;
+use onsager_warehouse::{FilesystemWarehouse, Outputs, SealRequest, Warehouse};
 
 fn db_url() -> Option<String> {
     std::env::var("DATABASE_URL").ok()

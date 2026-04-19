@@ -7,12 +7,13 @@
 //! See `registry.rs` for the trait-based plug points and value objects.
 
 use chrono::{DateTime, Utc};
+use onsager_spine::{
+    append_factory_event_tx, EventMetadata, EventStore, FactoryEvent, FactoryEventKind,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Row, Transaction};
 
-use crate::factory_event::{FactoryEvent, FactoryEventKind};
 use crate::registry::{RegistryStatus, TypeDefinition, DEFAULT_WORKSPACE};
-use crate::store::{append_factory_event_tx, EventMetadata, EventStore};
 
 /// Row-like view of an entry in one of the four registry tables.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

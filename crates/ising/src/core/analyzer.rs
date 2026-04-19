@@ -10,7 +10,7 @@
 //! Any implementation that produces well-formed insights (with evidence,
 //! valid confidence, correct scope) is valid.
 
-use onsager_spine::protocol::Insight;
+use onsager_protocol::Insight;
 
 use super::model::FactoryModel;
 
@@ -67,8 +67,8 @@ impl AnalyzerRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use onsager_protocol::FactoryEventRef;
     use onsager_spine::factory_event::{InsightKind, InsightScope};
-    use onsager_spine::protocol::FactoryEventRef;
 
     struct DummyAnalyzer;
     impl Analyzer for DummyAnalyzer {

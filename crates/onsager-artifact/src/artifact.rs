@@ -8,8 +8,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::bundle::BundleId;
-
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
@@ -42,6 +40,40 @@ impl ArtifactId {
 }
 
 impl fmt::Display for ArtifactId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bundle identity
+// ---------------------------------------------------------------------------
+
+/// Content-addressed bundle identifier.
+///
+/// Format: `bnd_<64-char-hex>`, where the hex is the SHA-256 of
+/// `(artifact_id, version, canonical_manifest_bytes)`. Two seals of the same
+/// artifact at the same version with identical file contents produce the same
+/// id (idempotent reseal → `VersionConflict`). Two different artifacts with
+/// identical files produce different ids, so they do not collide.
+///
+/// This type lives here (not in `onsager-warehouse`) so that `Artifact` can
+/// reference bundles without creating an artifact↔warehouse cycle. Hashing
+/// logic that derives a BundleId from a manifest lives in `onsager-warehouse`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BundleId(String);
+
+impl BundleId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for BundleId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }

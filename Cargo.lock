@@ -606,7 +606,10 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "onsager-artifact",
+ "onsager-protocol",
  "onsager-spine",
+ "onsager-warehouse",
  "reqwest",
  "serde",
  "serde_json",
@@ -1169,6 +1172,8 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
+ "onsager-artifact",
+ "onsager-protocol",
  "onsager-spine",
  "serde",
  "serde_json",
@@ -1433,25 +1438,91 @@ name = "onsager"
 version = "0.1.0"
 
 [[package]]
+name = "onsager-artifact"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "ulid",
+]
+
+[[package]]
+name = "onsager-delivery"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "onsager-artifact",
+ "onsager-warehouse",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "ulid",
+]
+
+[[package]]
+name = "onsager-protocol"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "onsager-artifact",
+ "onsager-spine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "onsager-registry"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "onsager-artifact",
+ "onsager-spine",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "onsager-spine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "hex",
+ "onsager-artifact",
  "serde",
  "serde_json",
- "serde_yaml",
- "sha2",
  "sqlx",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "ulid",
- "uuid",
+]
+
+[[package]]
+name = "onsager-warehouse"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "hex",
+ "onsager-artifact",
+ "onsager-spine",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -2331,6 +2402,8 @@ dependencies = [
  "futures-util",
  "hex",
  "hostname",
+ "onsager-artifact",
+ "onsager-protocol",
  "onsager-spine",
  "rand 0.8.5",
  "reqwest",
@@ -2402,6 +2475,8 @@ dependencies = [
  "clap",
  "console",
  "indicatif",
+ "onsager-artifact",
+ "onsager-protocol",
  "onsager-spine",
  "regex",
  "reqwest",

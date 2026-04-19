@@ -270,10 +270,10 @@ mod tests {
     /// Requires DATABASE_URL to be set.
     #[tokio::test]
     async fn listener_backfill_and_live() {
-        use crate::artifact::{ArtifactId, Kind};
         use crate::factory_event::{FactoryEvent, FactoryEventKind};
         use crate::store::{append_factory_event_tx, EventMetadata, EventStore};
         use chrono::Utc;
+        use onsager_artifact::{ArtifactId, Kind};
         use std::sync::atomic::{AtomicI64, Ordering};
         use tokio::sync::Semaphore;
 

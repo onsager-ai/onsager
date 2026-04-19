@@ -1,9 +1,9 @@
 [package]
-name = "onsager-spine"
+name = "onsager-warehouse"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Client library for the Onsager event spine — shared PostgreSQL event stream coordination."
+description = "Bundle model and Warehouse trait — sealed artifact storage for the Onsager factory."
 
 [dependencies]
 onsager-artifact = { path = "../onsager-artifact" }
@@ -14,10 +14,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
 async-trait = "0.1"
+sha2 = "0.10"
+hex = { workspace = true }
 
 [dev-dependencies]
-tracing-subscriber = { workspace = true }
-ulid = { version = "1", features = ["serde"] }
+onsager-spine = { path = "../onsager-spine" }
+tempfile = { workspace = true }

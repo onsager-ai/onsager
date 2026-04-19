@@ -12,13 +12,13 @@
 //!     emit_factory_events()
 //! ```
 
-use onsager_spine::artifact::ArtifactState;
-use onsager_spine::bundle::{BundleId, Outputs, SealError, SealRequest, Warehouse};
-use onsager_spine::factory_event::{GatePoint, ShapingOutcome, VerdictSummary};
-use onsager_spine::protocol::{
+use onsager_artifact::{ArtifactState, BundleId};
+use onsager_protocol::{
     GateContext, GateRequest, GateVerdict, ProposedAction, ShapingDecision, ShapingRequest,
     ShapingResult,
 };
+use onsager_spine::factory_event::{GatePoint, ShapingOutcome, VerdictSummary};
+use onsager_warehouse::{Outputs, SealError, SealRequest, Warehouse};
 
 use super::artifact_store::ArtifactStore;
 use super::kernel::{SchedulingKernel, WorldState};
@@ -95,7 +95,7 @@ pub trait SynodicGate: Send + Sync {
 pub trait SealSink: Send + Sync {
     fn seal_release(
         &self,
-        artifact_id: &onsager_spine::artifact::ArtifactId,
+        artifact_id: &onsager_artifact::ArtifactId,
         result: &ShapingResult,
     ) -> Result<SealedRef, SealError>;
 }
@@ -127,7 +127,7 @@ impl<W: Warehouse + 'static> WarehouseSealSink<W> {
 impl<W: Warehouse + 'static> SealSink for WarehouseSealSink<W> {
     fn seal_release(
         &self,
-        artifact_id: &onsager_spine::artifact::ArtifactId,
+        artifact_id: &onsager_artifact::ArtifactId,
         result: &ShapingResult,
     ) -> Result<SealedRef, SealError> {
         let mut outputs = Outputs::new();
@@ -441,8 +441,8 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
 mod tests {
     use super::*;
     use crate::core::kernel::BaselineKernel;
-    use onsager_spine::artifact::ContentRef;
-    use onsager_spine::artifact::Kind;
+    use onsager_artifact::ContentRef;
+    use onsager_artifact::Kind;
     use onsager_spine::factory_event::ShapingOutcome;
 
     /// Mock Stiglab dispatcher that always succeeds.
@@ -592,7 +592,7 @@ mod tests {
     impl SealSink for MockSeal {
         fn seal_release(
             &self,
-            artifact_id: &onsager_spine::artifact::ArtifactId,
+            artifact_id: &onsager_artifact::ArtifactId,
             _result: &ShapingResult,
         ) -> Result<SealedRef, SealError> {
             let version = self
@@ -673,7 +673,7 @@ mod tests {
     impl SealSink for FailingSeal {
         fn seal_release(
             &self,
-            _artifact_id: &onsager_spine::artifact::ArtifactId,
+            _artifact_id: &onsager_artifact::ArtifactId,
             _result: &ShapingResult,
         ) -> Result<SealedRef, SealError> {
             Err(SealError::Invalid("mock seal failure".into()))
@@ -760,7 +760,7 @@ mod tests {
                     quality_signals: vec![],
                     session_id: "mock_session".into(),
                     duration_ms: 100,
-                    error: Some(onsager_spine::protocol::ErrorDetail {
+                    error: Some(onsager_protocol::ErrorDetail {
                         code: "test_failure".into(),
                         message: "mock failure".into(),
                         retriable: Some(true),

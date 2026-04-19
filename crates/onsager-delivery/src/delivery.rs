@@ -22,10 +22,10 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use onsager_artifact::BundleId;
+use onsager_warehouse::Bundle;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-use crate::bundle::{Bundle, BundleId};
 
 // ---------------------------------------------------------------------------
 // Identity

@@ -10,6 +10,11 @@ project does not yet publish numbered releases.
 - **Architecture**: ADR 0001 commits Onsager to the event-bus coordination
   model (Option A), with a concrete migration checklist for the remaining
   sync-RPC call sites. Linked from `CLAUDE.md`. Closes #27.
+- **Crates**: split `onsager-spine` into focused crates —
+  `onsager-artifact`, `onsager-warehouse`, `onsager-delivery`,
+  `onsager-registry`, `onsager-protocol`. Spine now carries only event-bus
+  primitives. `cargo tree -p ising` no longer pulls warehouse/delivery/
+  registry. Pure refactor, no behavior change. Closes #33.
 - **Spine + forge**: warehouse & delivery v0.1 foundations with the spec
   in `crates/onsager-spine/specs/warehouse-and-delivery-v0.1.md`.
 - **Spine**: factory pipeline foundations (issue #14, phases 0–3),

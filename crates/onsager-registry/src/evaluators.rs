@@ -150,8 +150,8 @@ impl GateEvaluator for ReviewApproved {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifact::ArtifactId;
     use crate::registry::DEFAULT_WORKSPACE;
+    use onsager_artifact::ArtifactId;
 
     fn ctx(payload: serde_json::Value) -> GateContext {
         GateContext {
