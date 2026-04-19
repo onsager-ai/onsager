@@ -125,8 +125,33 @@ is explicitly trivial). This is the local counterpart to the
    Also draft a `## Delivers` subsection listing the exact Plan items you
    tick with this PR.
 
-4. **If this is genuinely trivial** (typo, doc-only, one-line obvious
-   fix), skip steps 6.1–6.3 and plan to apply the `trivial` label to the
+4. **Scan the branch's commit messages for implicit issue references**
+   (advisory, not blocking):
+
+   ```bash
+   git log --format='%s%n%b' origin/main..HEAD | grep -oE '#[0-9]+' | sort -u
+   ```
+
+   For each `#N` returned, check whether the drafted PR body already
+   mentions it on a linking line (`Closes` / `Fixes` / `Resolves` /
+   `Part of` / `Refs` / `Related`). If not, decide deliberately:
+
+   - **PR delivers that issue's acceptance** → add `Closes #N` to the
+     body. Multi-issue `Closes` lines are fine (`Closes #27, Closes #30,
+     Closes #33`). Auto-close doesn't fire for issues that are only
+     *mentioned* in commit subjects — without an explicit `Closes` line
+     those issues stay open after merge.
+   - **PR only touches that issue** → use `Refs #N` so it cross-links
+     without claiming closure.
+   - **False positive** (issue number inside a code identifier, commit
+     hash, etc.) → ignore.
+
+   This is the step that catches the PR #43 failure mode: three
+   acceptance criteria met across three commits, only one `#N` in the
+   title, two issues silently left open after merge.
+
+5. **If this is genuinely trivial** (typo, doc-only, one-line obvious
+   fix), skip steps 6.1–6.4 and plan to apply the `trivial` label to the
    PR immediately after `mcp__github__create_pull_request`. Use sparingly.
 
 ### 7. Push

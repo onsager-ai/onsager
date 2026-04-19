@@ -51,6 +51,27 @@ the UI. Use them for scaffolding so the spec stays open for the real slice.
 Edit the PR body via `mcp__github__update_pull_request` (don't open a new PR
 just to fix the link). Put the linking line at the top of the body.
 
+### Multi-issue PRs — enumerate every closure
+
+If a single PR delivers acceptance for more than one issue (rare but
+legitimate — e.g. a refactor that completes two related specs), write
+**one `Closes` keyword per issue** on the linking line:
+
+```markdown
+Closes #27, Closes #30, Closes #33
+```
+
+GitHub only honors the auto-close keyword on each `#N` individually;
+`Closes #27, #30, #33` closes #27 and leaves #30/#33 open. This is how
+PR #43 quietly left three issues open even though their acceptance
+criteria were met — the PR title only mentioned `(#27)` and no `Closes`
+line enumerated the others.
+
+`onsager-pre-push` step 6.4 now scans the branch's commits for `#N`
+mentions and warns when they're missing from the linking line. The
+check is advisory at push time; this skill is where the discipline is
+enforced post-push if the pre-push scan was skipped or overridden.
+
 ### The `## Delivers` subsection
 
 For `Part of #N` PRs (and ideally all PRs), include a `## Delivers`
@@ -100,6 +121,33 @@ transitions. On PR open, flip the linked spec's label via
 Never bypass the `draft → planned` gate from within this skill — that's a
 human decision. If the linked spec is still `draft`, comment on the PR
 asking the author to drive the spec through review first.
+
+## Umbrella tracker refresh
+
+Some issues are **umbrella trackers** that reference several sub-issues as
+a checklist — identified by a `[Tracking]` title prefix, a `tracking`
+label, or a `## Progress` section whose items are `- [ ] #N` lines.
+Examples: #40 (architectural review), anything opened with
+`issue-spec`'s tracker flow.
+
+When a PR closes a sub-issue, the tracker does **not** update itself.
+After merge, for each auto-closed or explicitly-closed issue in the PR:
+
+1. Search for umbrella trackers that reference it:
+   `mcp__github__search_issues` with `repo:onsager-ai/onsager #N in:body
+   is:issue is:open` — trackers will list `#N` in their Progress section.
+2. For each match, read the tracker body. If there's a matching
+   `- [ ] ... #N ...` line in a Progress / Plan section, flip it to `- [x]`.
+3. Post one tracker comment summarizing the delta, not one per issue:
+   "PR #<pr> landed #N1, #N2, #N3; ticked in Progress."
+4. If after the tick every sub-issue in the Progress section is closed,
+   note that the tracker itself is now a candidate for closure — don't
+   close it unilaterally (the author or a human decides), just flag it.
+
+The `pr-merged-progress` routine automates the common case. This section
+is the manual fallback for when (a) routines aren't configured,
+(b) routines ran but couldn't disambiguate, or (c) the tracker uses a
+non-standard checklist shape the routine didn't recognize.
 
 ## CI triage
 
