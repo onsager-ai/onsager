@@ -2,6 +2,7 @@
 
 pub mod artifact_store;
 pub mod kernel;
+pub mod persistence;
 pub mod pipeline;
 pub mod session_listener;
 pub mod state;

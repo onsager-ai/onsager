@@ -41,27 +41,13 @@ impl ArtifactStore {
         id
     }
 
-    /// Register an artifact with a pre-assigned ID (for loading from the database).
-    ///
-    /// Restores the persisted `state` and `current_version` so in-memory state
-    /// matches the database after restart.
-    pub fn register_with_id(
-        &mut self,
-        id: impl Into<String>,
-        kind: Kind,
-        name: impl Into<String>,
-        owner: impl Into<String>,
-        state: ArtifactState,
-        current_version: u32,
-    ) -> ArtifactId {
-        let id_str = id.into();
-        let artifact_id = ArtifactId::new(&id_str);
-        let mut artifact = Artifact::new(kind, name, owner, "forge", vec![]);
-        artifact.artifact_id = artifact_id.clone();
-        artifact.state = state;
-        artifact.current_version = current_version;
-        self.artifacts.insert(id_str, artifact);
-        artifact_id
+    /// Insert a pre-built artifact. Used both for DB-first registration
+    /// (issue #30) and for restoring state during startup reload — the
+    /// caller builds the `Artifact` with the right state/version/bundle
+    /// fields set and this just drops it into the map.
+    pub fn insert(&mut self, artifact: Artifact) {
+        self.artifacts
+            .insert(artifact.artifact_id.as_str().to_owned(), artifact);
     }
 
     /// Get an artifact by ID.
