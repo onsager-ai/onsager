@@ -12,6 +12,13 @@ direct calls.
 See [ADR 0001](docs/adr/0001-event-bus-coordination-model.md) for the
 decision and migration checklist.
 
+[ADR 0002](docs/adr/0002-process-product-isomorphism.md) frames design as
+two loops — the **inner loop** (spec → PR → merge) and the **outer loop**
+(observe drift → propose rule → activate rule → modify inner loop) — and
+commits us to process ↔ product isomorphism: every factory primitive
+ships with its dev-process counterpart enabled, and every durable
+dev-process pattern is filed as evidence for a future primitive.
+
 ```
          onsager-spine (event bus lib)
         /       |        |        \
