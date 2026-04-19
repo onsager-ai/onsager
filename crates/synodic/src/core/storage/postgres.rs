@@ -688,7 +688,15 @@ impl Storage for PostgresStorage {
         .execute(&self.pool)
         .await?;
         if result.rows_affected() == 0 {
-            anyhow::bail!("proposal not found or already resolved: {id}");
+            let row: Option<(String,)> =
+                sqlx::query_as("SELECT status FROM rule_proposals WHERE id = $1")
+                    .bind(id)
+                    .fetch_optional(&self.pool)
+                    .await?;
+            match row {
+                None => anyhow::bail!("proposal not found: {id}"),
+                Some((s,)) => anyhow::bail!("proposal already resolved ({s}): {id}"),
+            }
         }
         Ok(())
     }
