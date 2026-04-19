@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { WorkspacesCard } from "@/components/settings/WorkspacesCard"
+import { WorkspaceCard } from "@/components/workspaces/WorkspaceCard"
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -35,30 +35,36 @@ const orgInstall = {
   created_at: "2026-01-01",
 }
 
-async function primeMocks(opts: { repos: unknown[] }) {
+async function primeMocks(opts: {
+  repos: unknown[]
+  installations?: unknown[]
+  appEnabled?: boolean
+}) {
   const { api } = await import("@/lib/api")
   vi.mocked(api.listWorkspaces).mockResolvedValue({ tenants: [ws] })
   vi.mocked(api.listWorkspaceMembers).mockResolvedValue({ members: [] })
   vi.mocked(api.listWorkspaceInstallations).mockResolvedValue({
-    installations: [orgInstall],
+    installations: (opts.installations ?? [orgInstall]) as never,
   })
   vi.mocked(api.listWorkspaceProjects).mockResolvedValue({ projects: [] })
   vi.mocked(api.listInstallationRepos).mockResolvedValue({
     repos: opts.repos as never,
   })
-  vi.mocked(api.getGitHubAppConfig).mockResolvedValue({ enabled: true })
+  vi.mocked(api.getGitHubAppConfig).mockResolvedValue({
+    enabled: opts.appEnabled ?? true,
+  })
 }
 
 function renderCard() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <WorkspacesCard />
+      <WorkspaceCard workspace={ws} />
     </QueryClientProvider>,
   )
 }
 
-describe("WorkspacesCard — OAuth-first Add project flow", () => {
+describe("WorkspaceCard — OAuth-first Add project flow", () => {
   beforeEach(() => vi.clearAllMocks())
 
   it("deep-links to GitHub install settings when the install has no accessible repos", async () => {
@@ -124,14 +130,7 @@ describe("WorkspacesCard — OAuth-first Add project flow", () => {
   })
 
   it("tells the user to contact an admin when the GitHub App is not configured", async () => {
-    const { api } = await import("@/lib/api")
-    vi.mocked(api.listWorkspaces).mockResolvedValue({ tenants: [ws] })
-    vi.mocked(api.listWorkspaceMembers).mockResolvedValue({ members: [] })
-    vi.mocked(api.listWorkspaceInstallations).mockResolvedValue({
-      installations: [],
-    })
-    vi.mocked(api.listWorkspaceProjects).mockResolvedValue({ projects: [] })
-    vi.mocked(api.getGitHubAppConfig).mockResolvedValue({ enabled: false })
+    await primeMocks({ repos: [], installations: [], appEnabled: false })
     renderCard()
     await waitFor(() =>
       expect(
