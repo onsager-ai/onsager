@@ -102,6 +102,10 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         )
         // Governance proxy — forwards to synodic on internal port
         .route("/api/governance/{*path}", any(routes::governance::proxy))
+        // Portal webhook proxy — forwards `/webhooks/github` to the
+        // onsager-portal binary running on an internal port so the
+        // Railway service exposes a single external origin.
+        .route("/webhooks/github", any(routes::portal::proxy))
         // Spine API — exposes shared event spine data to the dashboard
         .route("/api/spine/events", get(routes::spine::list_events))
         .route(

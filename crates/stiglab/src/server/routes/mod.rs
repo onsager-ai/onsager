@@ -3,6 +3,7 @@ pub mod credentials;
 pub mod governance;
 pub mod health;
 pub mod nodes;
+pub mod portal;
 pub mod sessions;
 pub mod shaping;
 pub mod spine;
