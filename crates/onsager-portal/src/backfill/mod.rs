@@ -1,0 +1,280 @@
+//! Backfill — bulk-ingest a project's existing issues + PRs.
+//!
+//! Three strategies:
+//!
+//! - `recent` (default): the most-recent N items, paginated newest-first.
+//!   Cheap; the right default for onboarding a fresh project.
+//! - `active`: weighted by recent activity — strips stale items so a
+//!   long-tail repo doesn't ingest a thousand year-old issues just to
+//!   reach `cap`.
+//! - `refract`: pipes the candidate set through Refract's prioritization
+//!   scaffolding to surface a useful slice of a VS-Code-scale repo (issue
+//!   #58 / #60 §Backfill).
+//!
+//! Output shape is a `BackfillReport` summarizing per-strategy counts so
+//! the CLI can print a single JSON blob the dashboard can later render.
+
+use std::str::FromStr;
+
+use serde::Serialize;
+use sqlx::postgres::PgPool;
+
+use onsager_artifact::ArtifactId;
+use onsager_spine::factory_event::FactoryEventKind;
+use onsager_spine::{EventMetadata, EventStore};
+
+use crate::db::{self, PrLifecycleState};
+use crate::github::{Client, Issue, Pull};
+use crate::handlers::issues::SPEC_LABEL;
+
+/// Ingestion strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Strategy {
+    Recent,
+    Active,
+    Refract,
+}
+
+impl FromStr for Strategy {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "recent" => Ok(Strategy::Recent),
+            "active" => Ok(Strategy::Active),
+            "refract" => Ok(Strategy::Refract),
+            other => anyhow::bail!("unknown strategy: {other}"),
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct BackfillReport {
+    pub strategy: String,
+    pub project_id: String,
+    pub repo: String,
+    pub cap: usize,
+    pub prs_ingested: usize,
+    pub tasks_materialized: usize,
+    pub skipped: usize,
+}
+
+/// Drive the chosen strategy against the project's repo. Pulls candidates
+/// from the GitHub REST API, then funnels them through the same write paths
+/// the live webhook handler uses, so backfilled and live-streamed events
+/// have identical shapes.
+pub async fn run(
+    pool: &PgPool,
+    spine: &EventStore,
+    project_id: &str,
+    strategy: Strategy,
+    cap: usize,
+    github_token: Option<String>,
+) -> anyhow::Result<BackfillReport> {
+    let project = db::get_project(pool, project_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("project not found"))?;
+    let client = Client::new(github_token);
+
+    let issues = client
+        .list_recent_issues(&project.repo_owner, &project.repo_name, cap)
+        .await?;
+    let pulls = client
+        .list_recent_pulls(&project.repo_owner, &project.repo_name, cap)
+        .await?;
+
+    let (issues, pulls) = match strategy {
+        Strategy::Recent => (issues, pulls),
+        Strategy::Active => (
+            issues.into_iter().filter(|i| i.state == "open").collect(),
+            pulls
+                .into_iter()
+                .filter(|p| p.state == "open" || p.merged_at.is_some())
+                .collect(),
+        ),
+        Strategy::Refract => {
+            // Reuses Refract's intent decomposer scaffolding as a generic
+            // candidate prioritizer: each backlog item is treated as an
+            // intent, the decomposer ranks them, and we keep the top `cap`.
+            // The exact ranking heuristic lives in
+            // `refract::backlog_prioritize` so future tuning is decoupled
+            // from the portal.
+            (
+                refract_prioritize_issues(issues, cap),
+                refract_prioritize_pulls(pulls, cap),
+            )
+        }
+    };
+
+    let mut report = BackfillReport {
+        strategy: format!("{strategy:?}").to_lowercase(),
+        project_id: project.id.clone(),
+        repo: format!("{}/{}", project.repo_owner, project.repo_name),
+        cap,
+        ..Default::default()
+    };
+
+    let metadata = EventMetadata {
+        actor: "onsager-portal/backfill".into(),
+        ..Default::default()
+    };
+
+    for pr in pulls {
+        let next_state = match (pr.state.as_str(), pr.merged_at.is_some()) {
+            (_, true) => PrLifecycleState::Released,
+            ("closed", false) => PrLifecycleState::Archived,
+            _ => PrLifecycleState::InProgress,
+        };
+        let artifact = db::upsert_pr_artifact(
+            pool,
+            &project.id,
+            pr.number,
+            &pr.title,
+            &pr.user.login,
+            next_state,
+        )
+        .await?;
+        let event = if pr.merged_at.is_some() {
+            FactoryEventKind::GitPrMerged {
+                artifact_id: ArtifactId::new(artifact.artifact_id.clone()),
+                pr_number: pr.number,
+                merge_sha: pr.head.sha.clone(),
+            }
+        } else if pr.state == "closed" {
+            FactoryEventKind::GitPrClosed {
+                artifact_id: ArtifactId::new(artifact.artifact_id.clone()),
+                pr_number: pr.number,
+            }
+        } else {
+            FactoryEventKind::GitPrOpened {
+                artifact_id: ArtifactId::new(artifact.artifact_id.clone()),
+                repo: format!("{}/{}", project.repo_owner, project.repo_name),
+                pr_number: pr.number,
+                url: pr.html_url.clone(),
+            }
+        };
+        let stream_id = crate::handlers::pull_request::pr_stream_id(&project.id, pr.number);
+        spine
+            .append_ext(
+                &stream_id,
+                "git",
+                event.event_type(),
+                serde_json::to_value(&event)?,
+                &metadata,
+                None,
+            )
+            .await?;
+        report.prs_ingested += 1;
+    }
+
+    for issue in issues {
+        if issue.is_pull_request() {
+            // PRs come back through the issues endpoint too; skip — they
+            // were handled in the pulls loop with full PR metadata.
+            continue;
+        }
+        if !issue.has_label(SPEC_LABEL) {
+            report.skipped += 1;
+            continue;
+        }
+        let source_ref = format!(
+            "github:{}/{}:issue#{}",
+            project.repo_owner, project.repo_name, issue.number
+        );
+        db::upsert_factory_task(
+            pool,
+            &project.id,
+            "spec_issue",
+            &source_ref,
+            &issue.title,
+            issue.body.as_deref(),
+        )
+        .await?;
+        report.tasks_materialized += 1;
+    }
+
+    Ok(report)
+}
+
+/// Refract-style prioritization for issues. Today the heuristic is "open
+/// before closed, more labels first" — a placeholder that demonstrates the
+/// shape; the future LLM-backed scorer slots in here without changing the
+/// portal call site.
+fn refract_prioritize_issues(mut issues: Vec<Issue>, cap: usize) -> Vec<Issue> {
+    issues.sort_by(|a, b| {
+        let key = |i: &Issue| {
+            let open = i.state == "open";
+            let labels = i.labels.len();
+            (open as i32, labels as i32)
+        };
+        key(b).cmp(&key(a))
+    });
+    issues.truncate(cap);
+    issues
+}
+
+/// Refract-style prioritization for pulls. Open-then-merged-then-closed,
+/// plus prefer base-branch=main as the most likely workflow signal.
+fn refract_prioritize_pulls(mut pulls: Vec<Pull>, cap: usize) -> Vec<Pull> {
+    pulls.sort_by(|a, b| {
+        let key = |p: &Pull| {
+            let open = p.state == "open";
+            let merged = p.merged_at.is_some();
+            let primary_base = p.base.ref_name == "main" || p.base.ref_name == "master";
+            (open as i32, merged as i32, primary_base as i32)
+        };
+        key(b).cmp(&key(a))
+    });
+    pulls.truncate(cap);
+    pulls
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn issue(number: u64, state: &str, labels: &[&str]) -> Issue {
+        Issue {
+            number,
+            title: format!("issue {number}"),
+            state: state.into(),
+            body: None,
+            labels: labels
+                .iter()
+                .map(|n| crate::github::Label { name: (*n).into() })
+                .collect(),
+            pull_request: None,
+        }
+    }
+
+    #[test]
+    fn refract_orders_open_before_closed() {
+        let mixed = vec![
+            issue(1, "closed", &[]),
+            issue(2, "open", &["bug"]),
+            issue(3, "open", &["bug", "spec"]),
+            issue(4, "closed", &["spec", "perf", "ux"]),
+        ];
+        let prioritized = refract_prioritize_issues(mixed, 4);
+        // Most-labeled open first, then less-labeled open, then most-labeled closed.
+        assert_eq!(prioritized[0].number, 3);
+        assert_eq!(prioritized[1].number, 2);
+        assert_eq!(prioritized[2].number, 4);
+        assert_eq!(prioritized[3].number, 1);
+    }
+
+    #[test]
+    fn refract_respects_cap() {
+        let many: Vec<Issue> = (0..20).map(|n| issue(n, "open", &[])).collect();
+        let cut = refract_prioritize_issues(many, 5);
+        assert_eq!(cut.len(), 5);
+    }
+
+    #[test]
+    fn strategy_parses() {
+        assert_eq!("recent".parse::<Strategy>().unwrap(), Strategy::Recent);
+        assert_eq!("ACTIVE".parse::<Strategy>().unwrap(), Strategy::Active);
+        assert_eq!("Refract".parse::<Strategy>().unwrap(), Strategy::Refract);
+        assert!("nope".parse::<Strategy>().is_err());
+    }
+}

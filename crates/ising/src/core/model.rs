@@ -54,6 +54,24 @@ pub struct TrackedArtifact {
     pub last_updated: DateTime<Utc>,
 }
 
+/// One PR observation derived from the spine `git.*` stream (issue #62).
+/// `lineage_root` collapses to the artifact id today — once Forge writes
+/// horizontal lineage between specs and PRs, the analyzer can climb to the
+/// real root. Until then, "PRs that share a lineage root" means "PRs that
+/// touch the same PR artifact" — enough for the churn signal because every
+/// reopened-with-new-branch attempt creates a fresh PR row.
+#[derive(Debug, Clone)]
+pub struct PrRecord {
+    pub event_id: i64,
+    pub artifact_id: ArtifactId,
+    pub pr_number: u64,
+    /// Logical bucket key for the churn analyzer. Today equals
+    /// `artifact_id.as_str()`; future lineage walking can rewrite this.
+    pub lineage_root: String,
+    pub merged: bool,
+    pub recorded_at: DateTime<Utc>,
+}
+
 /// Accumulated factory model — the internal state Ising maintains.
 #[derive(Debug)]
 pub struct FactoryModel {
@@ -66,6 +84,9 @@ pub struct FactoryModel {
     /// Gate verdict records observed by the model (same retention contract
     /// as `shaping_records`).
     pub gate_verdict_records: Vec<GateVerdictRecord>,
+    /// PR records derived from `git.pr_*` events (issue #62). Same retention
+    /// contract as `shaping_records` — caller windows by `recorded_at`.
+    pub pr_records: Vec<PrRecord>,
     /// Total events processed.
     pub events_processed: u64,
     /// Last processed event ID (for catch-up).
@@ -78,6 +99,7 @@ impl FactoryModel {
             artifacts: HashMap::new(),
             shaping_records: Vec::new(),
             gate_verdict_records: Vec::new(),
+            pr_records: Vec::new(),
             events_processed: 0,
             last_event_id: None,
         }
@@ -179,6 +201,52 @@ impl FactoryModel {
                     verdict: verdict.clone(),
                     recorded_at,
                 });
+            }
+
+            // PR lifecycle (issue #62) — every git.pr_opened becomes one
+            // record; git.pr_merged flips the most recent matching open
+            // record to `merged=true` so the churn analyzer can count
+            // un-merged opens vs. merged outcomes.
+            FactoryEventKind::GitPrOpened {
+                artifact_id,
+                pr_number,
+                ..
+            } => {
+                let lineage_root = artifact_id.as_str().to_owned();
+                self.pr_records.push(PrRecord {
+                    event_id,
+                    artifact_id: artifact_id.clone(),
+                    pr_number: *pr_number,
+                    lineage_root,
+                    merged: false,
+                    recorded_at,
+                });
+            }
+            FactoryEventKind::GitPrMerged {
+                artifact_id,
+                pr_number,
+                ..
+            } => {
+                if let Some(record) = self
+                    .pr_records
+                    .iter_mut()
+                    .rev()
+                    .find(|r| r.artifact_id == *artifact_id && r.pr_number == *pr_number)
+                {
+                    record.merged = true;
+                    record.recorded_at = recorded_at;
+                } else {
+                    // Merged with no observed open — backfill loaded the merge
+                    // event but missed the open. Track it as a merged record.
+                    self.pr_records.push(PrRecord {
+                        event_id,
+                        artifact_id: artifact_id.clone(),
+                        pr_number: *pr_number,
+                        lineage_root: artifact_id.as_str().to_owned(),
+                        merged: true,
+                        recorded_at,
+                    });
+                }
             }
 
             _ => {}
@@ -328,6 +396,44 @@ impl FactoryModel {
             .map(|a| {
                 let records = self.shaping_history(&a.artifact_id);
                 (a, records)
+            })
+            .collect()
+    }
+
+    /// PR records observed within `window`, grouped by `lineage_root`.
+    /// Caller chooses what to do with merged-vs-unmerged distribution per
+    /// group (the `pr_churn` analyzer counts unmerged opens before the
+    /// first merge).
+    pub fn pr_records_since(&self, cutoff: DateTime<Utc>) -> Vec<&PrRecord> {
+        self.pr_records
+            .iter()
+            .filter(|r| r.recorded_at >= cutoff)
+            .collect()
+    }
+
+    /// Per-`lineage_root` (artifact id today, future: spec lineage root)
+    /// summary of PR activity within `window`. Returns
+    /// `(opened_count, merged_count, evidence event ids)` so analyzers can
+    /// reason about churn (many opens before a merge) or regression (many
+    /// merges in close succession).
+    pub fn pr_activity_by_root(
+        &self,
+        window: Duration,
+    ) -> HashMap<String, (usize, usize, Vec<i64>)> {
+        let cutoff = Utc::now() - window;
+        let mut buckets: HashMap<String, Vec<&PrRecord>> = HashMap::new();
+        for r in self.pr_records_since(cutoff) {
+            buckets.entry(r.lineage_root.clone()).or_default().push(r);
+        }
+        buckets
+            .into_iter()
+            .map(|(root, recs)| {
+                let opened = recs.len();
+                let merged = recs.iter().filter(|r| r.merged).count();
+                let mut evidence: Vec<i64> = recs.iter().map(|r| r.event_id).collect();
+                evidence.sort_unstable_by(|a, b| b.cmp(a));
+                evidence.truncate(5);
+                (root, (opened, merged, evidence))
             })
             .collect()
     }

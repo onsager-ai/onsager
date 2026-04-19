@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use onsager_spine::factory_event::{FactoryEvent, FactoryEventKind};
 use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 
-/// A parsed stiglab.session_completed event (issue #14 phase 2, #39).
+/// A parsed stiglab.session_completed event (issue #14 phase 2, #39, #60).
 #[derive(Debug, Clone)]
 pub struct SessionCompleted {
     pub event_id: i64,
@@ -32,6 +32,13 @@ pub struct SessionCompleted {
     pub artifact_id: Option<String>,
     /// LLM token usage, if the producing runtime reported it (issue #39).
     pub token_usage: Option<onsager_spine::factory_event::TokenUsage>,
+    /// Working-tree branch the agent pushed (issue #60), used by the portal
+    /// for PR↔session vertical lineage. `None` when the agent didn't write
+    /// to a git working dir.
+    pub branch: Option<String>,
+    /// PR number known at session completion (issue #60). Optional for the
+    /// same reason as `branch`.
+    pub pr_number: Option<u64>,
 }
 
 /// Caller-supplied callback invoked for every session completion.
@@ -92,6 +99,8 @@ impl<H: SessionCompletedHandler> Dispatcher<H> {
             duration_ms,
             artifact_id,
             token_usage,
+            branch,
+            pr_number,
         } = kind
         else {
             return Ok(None);
@@ -104,6 +113,8 @@ impl<H: SessionCompletedHandler> Dispatcher<H> {
             duration_ms,
             artifact_id,
             token_usage,
+            branch,
+            pr_number,
         }))
     }
 }
@@ -160,6 +171,8 @@ mod tests {
                 duration_ms: 42,
                 artifact_id: Some("art_test".into()),
                 token_usage: None,
+                branch: None,
+                pr_number: None,
             })
             .await
             .unwrap();

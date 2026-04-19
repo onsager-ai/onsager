@@ -87,6 +87,24 @@ pub fn insight_to_rule_proposal(signal_kind: &str, insight: &Insight) -> Option<
                 "cap rework on `{subject_ref}` artifacts (e.g. max_shapings_per_artifact)"
             )),
         },
+        "pr_churn" => RuleProposalAction::Introduce {
+            // Churn means PRs land before they're ready. Suggest a
+            // `PreDispatch` gate that requires evidence (passing tests,
+            // human design-review) before the PR opens.
+            subject_ref: subject_ref.clone(),
+            suggested_condition: Some(format!(
+                "require PreDispatch evidence for `{subject_ref}` (passing tests + design review)"
+            )),
+        },
+        "gate_deny_rate" => RuleProposalAction::Rewrite {
+            // High deny rate often means the rule is over-strict, not the
+            // contributors. Rewrite — relax the predicate — rather than
+            // retire it outright.
+            rule_id: subject_ref.clone(),
+            suggested_condition: Some(format!(
+                "relax gate predicate for `{subject_ref}`; current rule denies > 40% of PRs"
+            )),
+        },
         _ => return None,
     };
 

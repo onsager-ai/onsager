@@ -138,22 +138,26 @@ async fn run_tick(
 }
 
 /// Rebuild an in-memory [`FactoryModel`] from the recent-events window in
-/// `events_ext`. Parses the hand-coded JSON payloads Forge / Stiglab write
-/// today — once events are emitted through a typed spine helper this parser
-/// collapses to `serde_json::from_value`.
+/// `events_ext`. Parses the hand-coded JSON payloads Forge / Stiglab / the
+/// portal write today — once events are emitted through a typed spine helper
+/// this parser collapses to `serde_json::from_value`.
 async fn build_model(spine: &EventStore) -> Result<FactoryModel, anyhow::Error> {
     let cutoff = Utc::now() - LOOKBACK;
-    let rows = spine
+    // Pull both the `forge` and `git` namespaces — Phase 3 analyzers
+    // (`pr_churn`, `gate_deny_rate`) need the full PR + verdict stream.
+    let mut rows = spine
         .query_ext_events(None, Some("forge"), EVENT_FETCH_LIMIT)
         .await?;
+    let git_rows = spine
+        .query_ext_events(None, Some("git"), EVENT_FETCH_LIMIT)
+        .await?;
+    rows.extend(git_rows);
 
-    // If we pulled the whole fetch cap and the oldest row we got is still
-    // inside the lookback window, there are events we didn't load. The
-    // override rate is then computed from a truncated slice — surface it
-    // loudly rather than silently under-count. A DB-side `created_at >=
-    // cutoff` filter is the structural fix and belongs in the EventStore
-    // API; this warning is the cheap forcing function to get us there.
-    if rows.len() as i64 >= EVENT_FETCH_LIMIT
+    // If we pulled the whole fetch cap on either namespace and the oldest
+    // row we got is still inside the lookback window, there are events we
+    // didn't load. The override rate is then computed from a truncated
+    // slice — surface it loudly rather than silently under-count.
+    if rows.len() as i64 >= EVENT_FETCH_LIMIT * 2
         && rows
             .iter()
             .map(|r| r.created_at)
@@ -163,14 +167,13 @@ async fn build_model(spine: &EventStore) -> Result<FactoryModel, anyhow::Error> 
         tracing::warn!(
             event_fetch_limit = EVENT_FETCH_LIMIT,
             lookback_days = LOOKBACK.num_days(),
-            "ising: forge event fetch cap reached before lookback cutoff; \
+            "ising: spine fetch cap reached before lookback cutoff; \
              model window may be incomplete"
         );
     }
 
     // Rows come back newest-first; ingest oldest-first so event_id ordering
     // inside the model matches spine order.
-    let mut rows = rows;
     rows.sort_by_key(|r| r.id);
 
     let mut model = FactoryModel::new();
@@ -228,6 +231,43 @@ fn parse_forge_event(event_type: &str, data: &serde_json::Value) -> Option<Facto
                 artifact_id: ArtifactId::new(artifact_id),
                 gate_point,
                 verdict,
+            })
+        }
+        // `git.pr_*` events arrive from `onsager-portal` (issue #60). Phase
+        // 3 analyzers (`pr_churn`, `gate_deny_rate`) are the consumers; the
+        // model already knows how to ingest these variants.
+        "git.pr_opened" => {
+            let artifact_id = data.get("artifact_id")?.as_str()?;
+            let pr_number = data.get("pr_number")?.as_u64()?;
+            let repo = data
+                .get("repo")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let url = data
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some(FactoryEventKind::GitPrOpened {
+                artifact_id: ArtifactId::new(artifact_id),
+                repo,
+                pr_number,
+                url,
+            })
+        }
+        "git.pr_merged" => {
+            let artifact_id = data.get("artifact_id")?.as_str()?;
+            let pr_number = data.get("pr_number")?.as_u64()?;
+            let merge_sha = data
+                .get("merge_sha")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some(FactoryEventKind::GitPrMerged {
+                artifact_id: ArtifactId::new(artifact_id),
+                pr_number,
+                merge_sha,
             })
         }
         "forge.shaping_returned" => {

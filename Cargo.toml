@@ -8,6 +8,7 @@ members = [
     "crates/onsager-protocol",
     "crates/onsager-spine",
     "crates/onsager",
+    "crates/onsager-portal",
     "crates/forge",
     "crates/ising",
     "crates/refract",

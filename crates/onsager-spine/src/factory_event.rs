@@ -246,6 +246,16 @@ pub enum FactoryEventKind {
         /// zero bill — `None` means "not reported", not "cost nothing".
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token_usage: Option<TokenUsage>,
+        /// Working-tree branch the agent pushed at session completion (issue
+        /// #60). Used by `onsager-portal` to attach `vertical_lineage` when
+        /// the matching PR webhook arrives. Optional — sessions that don't
+        /// touch a git working dir leave it `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
+        /// PR number the agent opened, when known at completion time.
+        /// Optional for the same reasons as `branch`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pr_number: Option<u64>,
     },
 
     /// A session terminated with an error.
@@ -1065,11 +1075,21 @@ mod tests {
             duration_ms: 123,
             artifact_id: None,
             token_usage: None,
+            branch: None,
+            pr_number: None,
         };
         let json = serde_json::to_value(&without).unwrap();
         assert!(
             !json.as_object().unwrap().contains_key("token_usage"),
             "None token_usage must be omitted for wire compatibility"
+        );
+        assert!(
+            !json.as_object().unwrap().contains_key("branch"),
+            "None branch must be omitted for wire compatibility"
+        );
+        assert!(
+            !json.as_object().unwrap().contains_key("pr_number"),
+            "None pr_number must be omitted for wire compatibility"
         );
 
         // With token_usage populated
@@ -1085,10 +1105,14 @@ mod tests {
                 cache_write_tokens: 100,
                 model: Some("claude-sonnet-4-6".into()),
             }),
+            branch: Some("claude/feature".into()),
+            pr_number: Some(42),
         };
         let json = serde_json::to_value(&with).unwrap();
         assert_eq!(json["token_usage"]["input_tokens"], 1_000);
         assert_eq!(json["token_usage"]["model"], "claude-sonnet-4-6");
+        assert_eq!(json["branch"], "claude/feature");
+        assert_eq!(json["pr_number"], 42);
         let back: FactoryEventKind = serde_json::from_value(json).unwrap();
         assert_eq!(back, with);
     }

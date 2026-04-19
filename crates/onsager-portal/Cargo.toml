@@ -1,0 +1,38 @@
+[package]
+name = "onsager-portal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GitHub webhook ingress for the Onsager factory — verifies, resolves, emits"
+
+[lib]
+name = "onsager_portal"
+path = "src/lib.rs"
+
+[[bin]]
+name = "onsager-portal"
+path = "src/main.rs"
+
+[dependencies]
+onsager-artifact = { path = "../onsager-artifact" }
+onsager-spine = { path = "../onsager-spine" }
+refract = { path = "../refract" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+clap = { workspace = true }
+axum = { workspace = true }
+reqwest = { workspace = true }
+sqlx = { workspace = true }
+ring = { workspace = true }
+hex = { workspace = true }
+base64 = { workspace = true }
+regex = "1"
