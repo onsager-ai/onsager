@@ -53,6 +53,36 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/credentials/{name}",
             put(routes::credentials::set_credential).delete(routes::credentials::delete_credential),
         )
+        // Tenant / workspace routes (issue #59 — Phase 0)
+        .route(
+            "/api/tenants",
+            get(routes::tenants::list_tenants).post(routes::tenants::create_tenant),
+        )
+        .route("/api/tenants/{id}", get(routes::tenants::get_tenant))
+        .route(
+            "/api/tenants/{id}/members",
+            get(routes::tenants::list_members),
+        )
+        .route(
+            "/api/tenants/{id}/github-installations",
+            get(routes::tenants::list_installations).post(routes::tenants::register_installation),
+        )
+        .route(
+            "/api/tenants/{id}/github-installations/{install_id}",
+            axum::routing::delete(routes::tenants::delete_installation),
+        )
+        .route(
+            "/api/tenants/{id}/projects",
+            get(routes::tenants::list_projects).post(routes::tenants::add_project),
+        )
+        .route(
+            "/api/projects",
+            get(routes::tenants::list_all_projects_for_user),
+        )
+        .route(
+            "/api/projects/{id}",
+            get(routes::tenants::get_project).delete(routes::tenants::delete_project),
+        )
         // Governance proxy — forwards to synodic on internal port
         .route("/api/governance/{*path}", any(routes::governance::proxy))
         // Spine API — exposes shared event spine data to the dashboard
