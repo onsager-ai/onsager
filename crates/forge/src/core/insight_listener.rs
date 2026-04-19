@@ -66,25 +66,31 @@ impl EventHandler for Dispatcher {
 /// at this point (the variant uses `Failure` as a conservative default)
 /// since nothing in the scheduler branches on kind today; when it does,
 /// this mapping moves to a dedicated table.
+///
+/// The spine contract says `evidence` is non-empty (enforced by Ising's
+/// `InsightEmitter`). We enforce the same here so a malformed producer
+/// can't silently feed contract-violating rows into the scheduling cache;
+/// missing, malformed, or empty evidence returns `None` so the caller
+/// logs and drops the row.
 pub fn parse_insight_from_emitted(event_id: i64, data: &serde_json::Value) -> Option<Insight> {
     let signal_kind = data.get("signal_kind")?.as_str()?;
     let subject_ref = data.get("subject_ref")?.as_str()?;
     let confidence = data.get("confidence")?.as_f64()?;
 
     let evidence: Vec<FactoryEventRef> = data
-        .get("evidence")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|e| {
-                    Some(FactoryEventRef {
-                        event_id: e.get("event_id")?.as_i64()?,
-                        event_type: e.get("event_type")?.as_str()?.to_string(),
-                    })
-                })
-                .collect()
+        .get("evidence")?
+        .as_array()?
+        .iter()
+        .map(|e| {
+            Some(FactoryEventRef {
+                event_id: e.get("event_id")?.as_i64()?,
+                event_type: e.get("event_type")?.as_str()?.to_string(),
+            })
         })
-        .unwrap_or_default();
+        .collect::<Option<Vec<_>>>()?;
+    if evidence.is_empty() {
+        return None;
+    }
 
     Some(Insight {
         insight_id: format!("ins_spine_{event_id}"),
@@ -122,14 +128,39 @@ mod tests {
     }
 
     #[test]
-    fn tolerates_missing_evidence_array() {
+    fn rejects_missing_evidence_array() {
+        // Contract violation: the spine event variant documents evidence as
+        // non-empty, so a payload with no evidence must not reach the cache.
         let data = json!({
             "signal_kind": "x",
             "subject_ref": "code",
             "confidence": 0.6,
         });
-        let insight = parse_insight_from_emitted(1, &data).expect("parses");
-        assert!(insight.evidence.is_empty());
+        assert!(parse_insight_from_emitted(1, &data).is_none());
+    }
+
+    #[test]
+    fn rejects_empty_evidence_array() {
+        let data = json!({
+            "signal_kind": "x",
+            "subject_ref": "code",
+            "confidence": 0.6,
+            "evidence": [],
+        });
+        assert!(parse_insight_from_emitted(1, &data).is_none());
+    }
+
+    #[test]
+    fn rejects_evidence_row_with_wrong_shape() {
+        // A single bad row taints the whole parse — the cache should never
+        // see partial evidence for a signal.
+        let data = json!({
+            "signal_kind": "x",
+            "subject_ref": "code",
+            "confidence": 0.6,
+            "evidence": [{"event_id": 1}],
+        });
+        assert!(parse_insight_from_emitted(1, &data).is_none());
     }
 
     #[test]

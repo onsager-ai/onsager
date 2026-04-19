@@ -487,6 +487,12 @@ pub fn run(database_url: &str, tick_ms: u64) {
         // Spawn the ising.insight_emitted listener (issue #36). It pushes
         // parsed insights into `insight_cache`, which the pipeline pulls
         // into `WorldState.insights` on every tick.
+        //
+        // Warm-start the listener at the current max event id so it skips
+        // history-wide backfill. Replaying the entire spine on every boot
+        // would delay startup and push unbounded rows through the handler;
+        // insights are advisory priors, so forgoing old ones is correct —
+        // new emissions arrive live via pg_notify.
         let insight_listener_shared = shared.clone();
         let insight_cache_for_listener = insight_cache.clone();
         tokio::spawn(async move {
@@ -498,7 +504,17 @@ pub fn run(database_url: &str, tick_ms: u64) {
                 tracing::info!("forge: insight listener disabled (no spine connection)");
                 return;
             };
-            if let Err(e) = insight_listener::run(store, insight_cache_for_listener, None).await {
+            let since = match store.max_event_id().await {
+                Ok(cursor) => cursor,
+                Err(e) => {
+                    tracing::warn!(
+                        "forge: max_event_id lookup failed ({e}); starting insight \
+                         listener from the beginning"
+                    );
+                    None
+                }
+            };
+            if let Err(e) = insight_listener::run(store, insight_cache_for_listener, since).await {
                 tracing::error!("forge: insight listener exited: {e}");
             }
         });
