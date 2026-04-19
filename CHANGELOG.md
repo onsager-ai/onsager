@@ -7,6 +7,66 @@ project does not yet publish numbered releases.
 ## [Unreleased]
 
 ### Added
+- **Architecture**: ADR 0002 frames design as two loops — inner
+  (spec → PR → merge) and outer (observe drift → propose rule → activate
+  rule → modify inner loop) — and commits the repo to process ↔ product
+  isomorphism. Linked from `CLAUDE.md`. <!-- sha: f5f03d9 -->
+- **Ising**: close the feedback loop with gate-override-rate insights.
+  `GateOverrideAnalyzer` emits `ising.insight_emitted` on deny+escalate
+  rate over a 7-day window; Forge's `InsightCache` tails the stream so
+  `WorldState.insights` reflects live priors instead of a hardcoded
+  empty vec; Governance dashboard surfaces the signals via a new
+  "Ising Insights" card. Part of #36, #40. <!-- sha: aec1c03, 2c9757c -->
+- **Ising**: `shape_retry_spike` analyzer flags kinds whose shaping
+  rules are under-specified and routes the insight as an `Introduce`
+  rule proposal into Synodic's review queue. `parse_forge_event` now
+  ingests `forge.shaping_returned` so the analyzer has data in
+  production. Part of #40. <!-- sha: 223b821, fe5eb57 -->
+- **Ising + Synodic**: second-wave #40 sweep. `IsingRuleProposed` gains
+  `signal_kind`, `subject_ref`, `proposed_action`, `class`, `rationale`,
+  `confidence`; Synodic gains a `rule_proposals` table and listener;
+  new `refract` stream-type events (`IntentSubmitted`,
+  `RefractDecomposed`, `RefractFailed`); `SynodicGateResolutionProposed`
+  event; optional `TokenUsage` on `StiglabSessionCompleted`
+  (wire-compatible). Closes #35, #37, #38, #39. Part of #36, #40.
+  <!-- sha: b673f21 -->
+- **Stiglab + Dashboard**: Phase 0 multi-tenant scaffolding —
+  `tenants`, `tenant_members`, `github_app_installations`, `projects`
+  tables plus `sessions.project_id`. Webhook secrets encrypted via the
+  existing credential key. Dashboard adds a "Workspaces" Settings card
+  (members / installations / projects) and a workspace → project
+  cascade on session creation. Part of #58, #59. <!-- sha: b714e7d -->
+- **Stiglab + Dashboard**: GitHub App install flow closes the Phase 0
+  deferred items. New `github_app.rs` mints App JWTs (RS256), exchanges
+  installation tokens, and exposes `/api/github-app/config`,
+  `/install-start`, `/install-callback`, and per-install
+  `accessible-repos`. `add_project` now infers `default_branch` via
+  the installation token with fallback to `"main"`. Dashboard surfaces
+  an "Install via GitHub App" button and a repo dropdown on Add
+  Project; manual-entry path still works when the App is unconfigured.
+  Part of #58, #59. <!-- sha: f751330 -->
+- **Portal**: new `onsager-portal` crate — a standalone webhook
+  deployable that owns GitHub ingress for every factory tenant. HMAC
+  signature verification, AES-256-GCM secret decryption shared with
+  stiglab, `pull_request.*` → `Kind::PullRequest` + `git.pr_*` events,
+  `issues.{opened,labeled}` with `spec` label → `factory_tasks` row +
+  `portal.task_materialized`, per-commit `POST /api/gate` with dedup
+  and GitHub check-run posting, spec-label sync (`Closes #N` /
+  `Part of #N`), and an `onsager-portal backfill` CLI
+  (`recent` / `active` / `refract`). Portal owns
+  `factory_tasks`, `pr_gate_verdicts`, `pr_branch_links` migrations.
+  Closes #60, #61, #62. Part of #58. <!-- sha: 9c893f2 -->
+- **Ising**: stream-level analyzers `pr_churn` (≥3 PR opens unmatched
+  by merges → `Introduce` rule suggesting a PreDispatch evidence gate)
+  and `gate_deny_rate` (≥40% Deny over ≥20 verdicts in 7 days →
+  `Rewrite` rule suggesting predicate relaxation). `FactoryModel`
+  learns `pr_records` / `pr_activity_by_root` from
+  `git.pr_opened` / `git.pr_merged`. <!-- sha: 9c893f2 -->
+- **Spine**: session ↔ PR correlation — `StiglabSessionCompleted`
+  carries optional `branch` + `pr_number` (wire-compatible); stiglab
+  writes `pr_branch_links` at completion; portal's `pr.opened` handler
+  resolves the branch and records `vertical_lineage(session →
+  pr_artifact)`. <!-- sha: 9c893f2 -->
 - **Architecture**: ADR 0001 commits Onsager to the event-bus coordination
   model (Option A), with a concrete migration checklist for the remaining
   sync-RPC call sites. Linked from `CLAUDE.md`. Closes #27.
@@ -39,6 +99,11 @@ project does not yet publish numbered releases.
   consolidated `railway` skill, and updated session-start hook docs.
 
 ### Changed
+- **Synodic**: cache `InterceptEngine` across `/gate` calls. A new
+  `RulesRevision` token (`(count, MAX(updated_at))`) on the `Storage`
+  trait (SQLite + Postgres) backs an `EngineCache` that skips the
+  per-tick rule reload; steady-state hits are a single aggregate plus
+  an `Arc` clone. Closes #32. <!-- sha: 768a25a, 934450d -->
 - **Spine**: `events_ext.namespace` now maps to `stream_type` in the
   spine API consumers; `sealed_at` truncated to microseconds for
   PostgreSQL round-trip stability.
