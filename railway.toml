@@ -2,24 +2,31 @@
 #
 # Unified single-container deployment. All subsystems run in one service:
 #
-#   Process       | Description                          | Port
-#   ------------- | ------------------------------------ | ----
-#   stiglab       | Sessions, agents, dashboard, API     | 3000 (exposed)
-#   synodic       | Governance API (internal)            | 3001 (proxied)
-#   PostgreSQL    | Shared event spine (Railway plugin)  | 5432
+#   Process         | Description                               | Port
+#   --------------- | ----------------------------------------- | ----
+#   stiglab         | Sessions, agents, dashboard, API          | 3000 (exposed)
+#   synodic         | Governance API (internal)                 | 3001 (proxied)
+#   onsager-portal  | GitHub webhook ingress (internal)         | 3002 (proxied)
+#   PostgreSQL      | Shared event spine (Railway plugin)       | 5432
 #
 # Stiglab is the front door — it serves the dashboard, its own API, and
-# reverse-proxies /api/governance/* to synodic on localhost:3001.
+# reverse-proxies /api/governance/* to synodic on localhost:3001 and
+# /webhooks/github to onsager-portal on localhost:3002. The portal runs its
+# own migrations (factory_tasks, pr_gate_verdicts, pr_branch_links) at
+# startup.
 #
 # Quick start:
 #   1. Create a Railway project and connect this repo
 #   2. Add a PostgreSQL plugin (auto-provides DATABASE_URL)
-#   3. Default service uses this config (builds stiglab + synodic)
+#   3. Default service uses this config (builds stiglab + synodic + portal)
 #   4. Set required variables (see [deploy] section below)
+#   5. Point your GitHub App webhook at
+#      https://<app>.up.railway.app/webhooks/github
 #
 # Migrations:
-#   The entrypoint auto-applies both onsager-spine and synodic migrations
-#   on startup when ONSAGER_DATABASE_URL is set.
+#   The entrypoint auto-applies onsager-spine and synodic migrations on
+#   startup when ONSAGER_DATABASE_URL is set. The portal applies its own
+#   tables when it boots.
 
 # =============================================================================
 # Stiglab — primary service (sessions + dashboard + agent runner)
@@ -30,6 +37,9 @@ builder = "DOCKERFILE"
 dockerfilePath = "crates/stiglab/deploy/Dockerfile"
 watchPatterns = [
     "crates/onsager-spine/**",
+    "crates/onsager-artifact/**",
+    "crates/onsager-portal/**",
+    "crates/refract/**",
     "crates/stiglab/**",
     "crates/synodic/**",
     "apps/dashboard/**",
@@ -60,3 +70,8 @@ numReplicas = 1
 #   STIGLAB_PUBLIC_URL        — public URL for OAuth callbacks (e.g. https://<app>.up.railway.app)
 #   GITHUB_CLIENT_ID          — GitHub OAuth app client ID
 #   GITHUB_CLIENT_SECRET      — GitHub OAuth app client secret
+#   SYNODIC_PORT              — internal port for synodic (default: 3001)
+#   PORTAL_PORT               — internal port for onsager-portal (default: 3002)
+#   GITHUB_TOKEN              — optional PAT used by the portal for posting
+#                               check runs / comments when installation-token
+#                               signing isn't wired up yet

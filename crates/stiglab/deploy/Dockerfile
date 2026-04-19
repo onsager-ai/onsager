@@ -16,16 +16,30 @@ WORKDIR /app
 # Cargo.toml before it can resolve the workspace — missing manifests cause
 # "no such file or directory" errors even when building a single crate (-p).
 COPY Cargo.toml Cargo.lock ./
-COPY crates/onsager-spine/Cargo.toml crates/onsager-spine/Cargo.toml
-COPY crates/onsager/Cargo.toml       crates/onsager/Cargo.toml
-COPY crates/forge/Cargo.toml         crates/forge/Cargo.toml
-COPY crates/ising/Cargo.toml         crates/ising/Cargo.toml
-COPY crates/stiglab/Cargo.toml       crates/stiglab/Cargo.toml
-COPY crates/synodic/Cargo.toml       crates/synodic/Cargo.toml
+COPY crates/onsager-spine/Cargo.toml    crates/onsager-spine/Cargo.toml
+COPY crates/onsager-artifact/Cargo.toml crates/onsager-artifact/Cargo.toml
+COPY crates/onsager-protocol/Cargo.toml crates/onsager-protocol/Cargo.toml
+COPY crates/onsager-warehouse/Cargo.toml crates/onsager-warehouse/Cargo.toml
+COPY crates/onsager-delivery/Cargo.toml crates/onsager-delivery/Cargo.toml
+COPY crates/onsager-registry/Cargo.toml crates/onsager-registry/Cargo.toml
+COPY crates/onsager-portal/Cargo.toml   crates/onsager-portal/Cargo.toml
+COPY crates/refract/Cargo.toml          crates/refract/Cargo.toml
+COPY crates/onsager/Cargo.toml          crates/onsager/Cargo.toml
+COPY crates/forge/Cargo.toml            crates/forge/Cargo.toml
+COPY crates/ising/Cargo.toml            crates/ising/Cargo.toml
+COPY crates/stiglab/Cargo.toml          crates/stiglab/Cargo.toml
+COPY crates/synodic/Cargo.toml          crates/synodic/Cargo.toml
 # Create dummy source files so Cargo can compile each crate stub.
 # Crates with [lib] need src/lib.rs; crates with [[bin]] need src/main.rs.
 RUN mkdir -p \
       crates/onsager-spine/src \
+      crates/onsager-artifact/src \
+      crates/onsager-protocol/src \
+      crates/onsager-warehouse/src \
+      crates/onsager-delivery/src \
+      crates/onsager-registry/src \
+      crates/onsager-portal/src \
+      crates/refract/src \
       crates/onsager/src \
       crates/forge/src \
       crates/ising/src \
@@ -33,6 +47,13 @@ RUN mkdir -p \
       crates/synodic/src \
     && touch \
       crates/onsager-spine/src/lib.rs \
+      crates/onsager-artifact/src/lib.rs \
+      crates/onsager-protocol/src/lib.rs \
+      crates/onsager-warehouse/src/lib.rs \
+      crates/onsager-delivery/src/lib.rs \
+      crates/onsager-registry/src/lib.rs \
+      crates/onsager-portal/src/lib.rs \
+      crates/refract/src/lib.rs \
       crates/forge/src/lib.rs \
       crates/ising/src/lib.rs \
       crates/stiglab/src/lib.rs \
@@ -43,14 +64,20 @@ RUN mkdir -p \
       crates/ising/src/main.rs \
       crates/stiglab/src/main.rs \
       crates/synodic/src/main.rs \
-    && cargo build --release -p stiglab -p synodic --features synodic/postgres 2>/dev/null || true
+      crates/onsager-portal/src/main.rs \
+      crates/refract/src/main.rs \
+    && cargo build --release \
+         -p stiglab -p synodic -p onsager-portal \
+         --features synodic/postgres 2>/dev/null || true
 # Copy actual source and rebuild.
 # Touch all .rs files so their mtime is newer than the dummy-build artifacts —
 # Docker's COPY preserves git timestamps which may predate the dummy build,
 # causing Cargo to skip recompilation and deploy the stub binary instead.
 COPY crates/ crates/
 RUN find crates -name "*.rs" | xargs touch \
-    && cargo build --release -p stiglab -p synodic --features synodic/postgres
+    && cargo build --release \
+         -p stiglab -p synodic -p onsager-portal \
+         --features synodic/postgres
 
 # ---- Stage 3: Node.js for runtime (glibc-compatible) ----
 FROM node:20-bookworm-slim AS node-runtime
@@ -83,8 +110,9 @@ RUN printf '#!/bin/sh\necho "username=x-access-token\npassword=${GITHUB_TOKEN}"\
 RUN useradd -m -s /bin/bash onsager
 
 WORKDIR /app
-COPY --from=rust-builder /app/target/release/stiglab /app/stiglab
-COPY --from=rust-builder /app/target/release/synodic /app/synodic
+COPY --from=rust-builder /app/target/release/stiglab        /app/stiglab
+COPY --from=rust-builder /app/target/release/synodic        /app/synodic
+COPY --from=rust-builder /app/target/release/onsager-portal /app/onsager-portal
 COPY --from=ui-builder /app/apps/dashboard/dist /app/static
 # Spine migrations — applied on startup when ONSAGER_DATABASE_URL is set
 COPY crates/onsager-spine/migrations/ /app/spine-migrations/
