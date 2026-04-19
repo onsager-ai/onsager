@@ -63,10 +63,17 @@ pub async fn create_shaping(
         .map(str::to_string)
         .unwrap_or_else(|| req.request_id.clone());
 
+    // Fast path: if a session for this key already exists, return it. The
+    // definitive check is performed on insert (ON CONFLICT DO NOTHING) to
+    // close the lookup/insert race. Echo the session's original request_id
+    // (persisted as task_id) rather than the caller's — a retry with a
+    // different request_id but the same Idempotency-Key should return the
+    // original request's identity.
     if !idempotency_key.is_empty() {
         match db::find_session_by_idempotency_key(&state.db, &idempotency_key).await {
             Ok(Some(existing)) => {
-                return accepted_response(&existing, &req.request_id);
+                let rid = existing.task_id.clone();
+                return accepted_response(&existing, &rid);
             }
             Ok(None) => {}
             Err(e) => {
@@ -112,18 +119,47 @@ pub async fn create_shaping(
         updated_at: Utc::now(),
     };
 
-    let insert_result = if idempotency_key.is_empty() {
-        db::insert_session(&state.db, &session).await
+    if idempotency_key.is_empty() {
+        if let Err(e) = db::insert_session(&state.db, &session).await {
+            tracing::error!("failed to insert session: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
     } else {
-        db::insert_session_with_idempotency_key(&state.db, &session, &idempotency_key).await
-    };
-    if let Err(e) = insert_result {
-        tracing::error!("failed to insert session: {e}");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response();
+        match db::insert_session_with_idempotency_key(&state.db, &session, &idempotency_key).await {
+            Ok(true) => { /* new session inserted */ }
+            Ok(false) => {
+                // Concurrent POST with the same key won the race. Load and
+                // return whichever session is actually persisted so the
+                // caller converges on a single session id.
+                match db::find_session_by_idempotency_key(&state.db, &idempotency_key).await {
+                    Ok(Some(existing)) => {
+                        let rid = existing.task_id.clone();
+                        return accepted_response(&existing, &rid);
+                    }
+                    Ok(None) | Err(_) => {
+                        return (
+                            StatusCode::CONFLICT,
+                            Json(serde_json::json!({
+                                "error": "idempotency conflict but no session visible"
+                            })),
+                        )
+                            .into_response();
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("failed to insert session: {e}");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": e.to_string() })),
+                )
+                    .into_response();
+            }
+        }
     }
 
     // Dispatch to agent via WebSocket.
@@ -190,7 +226,7 @@ pub async fn get_shaping_status(
     };
 
     if is_terminal(session.state) {
-        return terminal_response(&state, &session).await;
+        return terminal_response(&session).await;
     }
 
     let Some(wait_str) = query.wait.as_deref() else {
@@ -212,7 +248,7 @@ pub async fn get_shaping_status(
     let mut rx = state.session_completion_tx.subscribe();
     if let Ok(Some(s)) = db::get_session(&state.db, &session_id).await {
         if is_terminal(s.state) {
-            return terminal_response(&state, &s).await;
+            return terminal_response(&s).await;
         }
     }
 
@@ -233,7 +269,7 @@ pub async fn get_shaping_status(
     if !signaled {
         // Timed out — return current pending state without re-querying twice.
         match db::get_session(&state.db, &session_id).await {
-            Ok(Some(s)) if is_terminal(s.state) => terminal_response(&state, &s).await,
+            Ok(Some(s)) if is_terminal(s.state) => terminal_response(&s).await,
             Ok(Some(s)) => pending_response(&s),
             Ok(None) => (
                 StatusCode::NOT_FOUND,
@@ -247,8 +283,14 @@ pub async fn get_shaping_status(
                 .into_response(),
         }
     } else {
+        // A broadcast fired for this session_id; re-read the DB to get the
+        // authoritative state. The notifier only fires on a successful state
+        // update so this should be terminal, but verify before returning
+        // 200 (a spurious broadcast must not promote a non-terminal session
+        // to a terminal response).
         match db::get_session(&state.db, &session_id).await {
-            Ok(Some(s)) => terminal_response(&state, &s).await,
+            Ok(Some(s)) if is_terminal(s.state) => terminal_response(&s).await,
+            Ok(Some(s)) => pending_response(&s),
             Ok(None) => (
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({ "error": "session not found" })),
@@ -288,10 +330,16 @@ fn pending_response(session: &Session) -> axum::response::Response {
         .into_response()
 }
 
-async fn terminal_response(state: &AppState, session: &Session) -> axum::response::Response {
+async fn terminal_response(session: &Session) -> axum::response::Response {
     // Reconstruct a ShapingRequest-shaped envelope from the session's stored
     // artifact link so the adapter can build a ShapingResult identical to
     // what the legacy long-poll endpoint used to return.
+    //
+    // This handler does NOT emit spine events — the agent message handler
+    // (`crate::server::handler::handle_agent_message`) is the single source
+    // of terminal transition events. Emitting from GET as well would make
+    // the status endpoint non-idempotent and spam duplicates for every
+    // poll after a session terminates.
     let artifact_id_str = session.artifact_id.clone().unwrap_or_default();
     let synthesized_req = onsager_spine::ShapingRequest {
         request_id: session.task_id.clone(),
@@ -310,31 +358,6 @@ async fn terminal_response(state: &AppState, session: &Session) -> axum::respons
         .max(0) as u64;
 
     let result = adapter::session_to_shaping_result(&synthesized_req, session, duration_ms);
-
-    // Best-effort spine event for terminal transitions reached via this
-    // endpoint (in case the agent's own event was lost or this endpoint is
-    // the first to observe it).
-    if let Some(ref spine) = state.spine {
-        match session.state {
-            SessionState::Done => {
-                let _ = spine
-                    .emit_session_completed(
-                        &session.id,
-                        &result.request_id,
-                        duration_ms,
-                        session.artifact_id.as_deref(),
-                    )
-                    .await;
-            }
-            SessionState::Failed => {
-                let err = session.output.as_deref().unwrap_or("unknown error");
-                let _ = spine
-                    .emit_session_failed(&session.id, &result.request_id, err)
-                    .await;
-            }
-            _ => {}
-        }
-    }
 
     (StatusCode::OK, Json(result)).into_response()
 }
