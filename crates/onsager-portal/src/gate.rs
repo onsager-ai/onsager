@@ -1,11 +1,12 @@
 //! Synodic gate client (Phase 2).
 //!
-//! Wraps the `POST /api/gate` endpoint synodic exposes, plus the rule-less
-//! short-circuit: the portal asks synodic if any rules apply to a project's
-//! `(workspace, kind)` pair, and synthesises an `Allow` verdict locally
-//! when the answer is none. That way the event shape is uniform whether or
-//! not a tenant has actually authored gate rules — ising and the governance
-//! feed never need a "is gating wired up?" branch.
+//! Wraps the `POST /api/gate` endpoint synodic exposes. When a synodic base
+//! URL is configured the portal delegates verdict evaluation to synodic
+//! (whose intercept engine is the source of truth on whether any rule
+//! applies); when it is not configured — or synodic is unreachable — the
+//! portal synthesises verdicts locally (`Allow` / `Escalate` respectively)
+//! so downstream handlers always see a uniform event shape and never need
+//! an "is gating wired up?" branch.
 
 use serde::{Deserialize, Serialize};
 
@@ -56,11 +57,17 @@ impl GateClient {
         }
     }
 
-    /// Evaluate a gate. Returns `Allow` synthetically when no synodic URL is
-    /// configured (dev / rule-less projects) or when synodic returns no
-    /// applicable rules. Errors short-circuit to the configured fail policy
-    /// — for v1 we always escalate so a synodic outage never silently
-    /// approves changes.
+    /// Evaluate a gate.
+    ///
+    /// - `synodic_url` unset: synthesise `Allow` locally (dev / fresh
+    ///   tenants with no gating deployment).
+    /// - `synodic_url` set: POST to `/api/gate` and trust the returned
+    ///   verdict. Synodic itself is the source of truth on "do any rules
+    ///   apply?" — a rule-less project receives `Allow` from synodic, not a
+    ///   portal short-circuit.
+    /// - synodic unreachable / non-2xx / unparseable: `Escalate`. v1 fails
+    ///   open only when synodic is explicitly disabled, never when it's
+    ///   configured but flaky.
     pub async fn evaluate(&self, input: &GateInput) -> Verdict {
         let Some(base) = self.base.as_ref() else {
             return Verdict::Allow;

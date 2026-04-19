@@ -151,8 +151,14 @@ pub async fn find_pr_artifact(
 }
 
 /// Insert (or fetch) the canonical PR artifact for `(project_id, pr_number)`.
-/// First-write wins; subsequent calls return the existing row. This is the
-/// idempotency guarantee for webhook re-deliveries on the same PR.
+/// First-write wins; subsequent calls return the existing row. Idempotency is
+/// anchored on `external_ref` (the spine's `artifacts.external_ref` is not
+/// `UNIQUE` workspace-wide, so we serialize concurrent upserts through a
+/// transaction-scoped advisory lock keyed by the ref).
+///
+/// On a hit we also refresh `name` / `owner` / `state` so the artifact row
+/// reflects the latest webhook payload — otherwise a PR retitle or author
+/// change never propagates to the dashboard.
 pub async fn upsert_pr_artifact(
     pool: &PgPool,
     project_id: &str,
@@ -165,31 +171,52 @@ pub async fn upsert_pr_artifact(
     let new_id = format!("art_pr_{}", uuid::Uuid::new_v4().simple());
     let artifact_state = state.as_artifact_state();
 
-    let row: (String, i32) = sqlx::query_as(
-        "WITH ins AS (
-             INSERT INTO artifacts \
-                 (artifact_id, kind, name, owner, created_by, state, current_version, \
-                  external_ref, workspace_id, metadata) \
-             VALUES ($1, 'pull_request', $2, $3, 'onsager-portal', $4, 1, $5, $6, \
-                     jsonb_build_object('project_id', $6::text, 'pr_number', $7::bigint)) \
-             ON CONFLICT (artifact_id) DO NOTHING \
-             RETURNING artifact_id, current_version \
-         ) \
-         SELECT artifact_id, current_version FROM ins \
-         UNION ALL \
-         SELECT artifact_id, current_version FROM artifacts \
-             WHERE external_ref = $5 AND NOT EXISTS (SELECT 1 FROM ins) \
-         LIMIT 1",
+    let mut tx = pool.begin().await?;
+
+    // Serialize upserts for the same external_ref. Needed because the spine
+    // schema does not enforce UNIQUE(external_ref) (artifact_adapters across
+    // subsystems may legitimately share the column), so we can't let the
+    // DB dedup for us via ON CONFLICT.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(&external_ref)
+        .execute(&mut *tx)
+        .await?;
+
+    let row: (String, i32) = if let Some(existing) = sqlx::query_as::<_, (String, i32)>(
+        "UPDATE artifacts \
+            SET name = $2, owner = $3, state = $4 \
+          WHERE external_ref = $1 \
+      RETURNING artifact_id, current_version",
     )
-    .bind(&new_id)
+    .bind(&external_ref)
     .bind(name)
     .bind(owner)
     .bind(artifact_state)
-    .bind(&external_ref)
-    .bind(project_id)
-    .bind(pr_number as i64)
-    .fetch_one(pool)
-    .await?;
+    .fetch_optional(&mut *tx)
+    .await?
+    {
+        existing
+    } else {
+        sqlx::query_as(
+            "INSERT INTO artifacts \
+                (artifact_id, kind, name, owner, created_by, state, current_version, \
+                 external_ref, workspace_id, metadata) \
+             VALUES ($1, 'pull_request', $2, $3, 'onsager-portal', $4, 1, $5, $6, \
+                     jsonb_build_object('project_id', $6::text, 'pr_number', $7::bigint)) \
+             RETURNING artifact_id, current_version",
+        )
+        .bind(&new_id)
+        .bind(name)
+        .bind(owner)
+        .bind(artifact_state)
+        .bind(&external_ref)
+        .bind(project_id)
+        .bind(pr_number as i64)
+        .fetch_one(&mut *tx)
+        .await?
+    };
+
+    tx.commit().await?;
 
     Ok(PrArtifactRow {
         artifact_id: row.0,
@@ -370,16 +397,22 @@ pub async fn record_session_branch(
     branch: &str,
     pr_number: Option<u64>,
 ) -> anyhow::Result<()> {
+    // `recorded_at` is TEXT in the shared schema (stiglab's AnyPool writer
+    // needs SQLite compatibility); explicit RFC-3339 here so lexicographic
+    // ordering in `find_session_for_branch` gives us chronological order.
+    let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO pr_branch_links (session_id, project_id, branch, pr_number, recorded_at) \
-         VALUES ($1, $2, $3, $4, NOW()) \
+         VALUES ($1, $2, $3, $4, $5) \
          ON CONFLICT (session_id) DO UPDATE SET branch = EXCLUDED.branch, \
-            project_id = EXCLUDED.project_id, pr_number = EXCLUDED.pr_number",
+            project_id = EXCLUDED.project_id, pr_number = EXCLUDED.pr_number, \
+            recorded_at = EXCLUDED.recorded_at",
     )
     .bind(session_id)
     .bind(project_id)
     .bind(branch)
     .bind(pr_number.map(|n| n as i64))
+    .bind(&now)
     .execute(pool)
     .await?;
     Ok(())

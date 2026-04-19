@@ -272,6 +272,29 @@ async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
+    // Session↔PR correlation hand-off table (issue #60). Stiglab writes a row
+    // at session completion; onsager-portal reads it on `pull_request.opened`
+    // to attach vertical_lineage. The portal also creates this table at its
+    // own startup — declaring it here guarantees stiglab never races the
+    // portal's first migrate on a fresh deploy.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS pr_branch_links (
+            session_id  TEXT PRIMARY KEY,
+            project_id  TEXT,
+            branch      TEXT NOT NULL,
+            pr_number   BIGINT,
+            recorded_at TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_pr_branch_links_lookup \
+         ON pr_branch_links (project_id, branch)",
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
