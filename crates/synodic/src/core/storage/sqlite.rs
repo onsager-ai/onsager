@@ -136,6 +136,21 @@ impl Storage for SqliteStorage {
         row.map(|r| r.into_rule()).transpose()
     }
 
+    async fn get_rules_revision(&self, active_only: bool) -> Result<RulesRevision> {
+        // SQLite stores `updated_at` as TEXT (RFC3339), so MAX(updated_at)
+        // already returns a string-comparable token — no cast needed.
+        let row: (i64, Option<String>) = if active_only {
+            sqlx::query_as("SELECT COUNT(*), MAX(updated_at) FROM rules WHERE enabled = 1")
+                .fetch_one(&self.pool)
+                .await?
+        } else {
+            sqlx::query_as("SELECT COUNT(*), MAX(updated_at) FROM rules")
+                .fetch_one(&self.pool)
+                .await?
+        };
+        Ok(RulesRevision::new(row.0, row.1.unwrap_or_default()))
+    }
+
     async fn create_rule(&self, rule: CreateRule) -> Result<Rule> {
         let tools_json = serde_json::to_string(&rule.tools)?;
         let now = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
