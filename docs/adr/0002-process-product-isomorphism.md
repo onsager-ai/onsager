@@ -55,13 +55,13 @@ remaining work on #40 (#35/#36/#37/#38/#39) is not five features; it is
 the **outer loop** — *observe inner-loop drift → propose rule → activate
 rule → modify inner loop* — sliced by time horizon:
 
-| Horizon            | Primitive         | Current dev-process analog            |
-|--------------------|-------------------|---------------------------------------|
-| per-intent         | Refract (#35)     | umbrella tracker (#40 itself)         |
-| hours–days         | Ising (#36)       | `pr-merged-progress` routine          |
-| per-decision       | Supervisor (#37)  | skills + CLAUDE.md + human sequencing |
-| per-week operator  | Productivity (#38)| commented updates on the tracker     |
-| per-call accounting| Budget (#39)      | `claude/*` session tokens (ungrouped) |
+| Horizon             | Primitive          | Current dev-process analog            |
+| ------------------- | ------------------ | ------------------------------------- |
+| per-intent          | Refract (#35)      | umbrella tracker (#40 itself)         |
+| hours–days          | Ising (#36)        | `pr-merged-progress` routine          |
+| per-decision        | Supervisor (#37)   | skills + CLAUDE.md + human sequencing |
+| per-week operator   | Productivity (#38) | commented updates on the tracker      |
+| per-call accounting | Budget (#39)       | `claude/*` session tokens (ungrouped) |
 
 Every new primitive is scoped by this mapping and rejected if it cannot
 be drawn.
