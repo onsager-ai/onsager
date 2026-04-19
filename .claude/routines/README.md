@@ -77,8 +77,10 @@ prompt drift auditable and reviewable like any other code change.
   red PR check. Keeping the taxonomy in one place avoids two definitions
   of "flake" drifting apart.
 
-If you don't want to set up routines, read `onsager-pr-lifecycle` and flip
-labels manually — the skill documents the same transitions.
+If you don't want to set up routines, read `onsager-pr-lifecycle` and handle
+the remaining merge-time steps manually — chiefly ticking the matching Plan
+checkbox and refreshing the umbrella issue after merge. Open/close-unmerged
+label flips are already handled by `pr-spec-sync.yml`.
 
 ## Limits
 

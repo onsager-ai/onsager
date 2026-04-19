@@ -9,7 +9,7 @@ name: pr-spec-sync
 
 on:
   pull_request:
-    types: [opened, ready_for_review, closed]
+    types: [opened, edited, reopened, ready_for_review, closed]
 
 permissions:
   contents: read
@@ -41,13 +41,17 @@ jobs:
             // Hidden HTML marker lets re-runs skip comments they already posted.
             const marker = (tag) => `<!-- pr-spec-sync:${tag} -->`;
             const postComment = async (issueNum, tag, text) => {
-              const { data: comments } = await github.rest.issues.listComments({
-                ...context.repo, issue_number: issueNum, per_page: 100,
-              });
-              if (comments.some(c => (c.body || '').includes(marker(tag)))) return;
+              const tagMarker = marker(tag);
+              const iterator = github.paginate.iterator(
+                github.rest.issues.listComments,
+                { ...context.repo, issue_number: issueNum, per_page: 100 },
+              );
+              for await (const { data: page } of iterator) {
+                if (page.some(c => (c.body || '').includes(tagMarker))) return;
+              }
               await github.rest.issues.createComment({
                 ...context.repo, issue_number: issueNum,
-                body: `${marker(tag)}\n${text}`,
+                body: `${tagMarker}\n${text}`,
               });
             };
             const swapLabel = async (issueNum, add, remove) => {
@@ -101,9 +105,10 @@ jobs:
 
             if (action === 'closed' && !pr.merged) {
               if (linked.length === 0) return;
-              const { data: openPRs } = await github.rest.pulls.list({
-                ...context.repo, state: 'open', per_page: 100,
-              });
+              const openPRs = await github.paginate(
+                github.rest.pulls.list,
+                { ...context.repo, state: 'open', per_page: 100 },
+              );
               for (const n of linked) {
                 let issue;
                 try {
