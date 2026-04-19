@@ -7,9 +7,9 @@ import {
   type GitHubAppInstallation,
   type Project,
 } from "@/lib/api"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -32,142 +32,23 @@ import {
 } from "@/components/ui/command"
 import {
   Building2,
+  Check,
   ChevronsUpDown,
+  Circle,
   GitBranch,
+  Package,
   Plus,
   Trash2,
+  Users,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 /**
- * Settings card that lists the user's Workspaces and the nested
- * Members / GitHub installations / Projects for each.
- *
- * v1 is intentionally minimal (issue #59): no roles, no invites, no
- * cascades, no auto-mirror. GitHub App installations are registered
- * manually here — the full OAuth callback flow lands in a follow-up.
+ * Card rendering a single workspace with its GitHub installations, projects,
+ * and members. Setup state is surfaced up top so users can tell at a glance
+ * where they are in the onboarding sequence.
  */
-export function WorkspacesCard() {
-  const [creating, setCreating] = useState(false)
-  const [newSlug, setNewSlug] = useState("")
-  const [newName, setNewName] = useState("")
-  const [createError, setCreateError] = useState<string | null>(null)
-  const queryClient = useQueryClient()
-
-  const { data: wsData } = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: api.listWorkspaces,
-  })
-
-  const createMutation = useMutation({
-    mutationFn: (body: { slug: string; name: string }) => api.createWorkspace(body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["workspaces"] })
-      setCreating(false)
-      setNewSlug("")
-      setNewName("")
-      setCreateError(null)
-    },
-    onError: (err) => {
-      setCreateError(err instanceof Error ? err.message : "Failed to create workspace")
-    },
-  })
-
-  const workspaces = wsData?.tenants ?? []
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base md:text-lg">
-          <Building2 className="h-4 w-4" />
-          Workspaces
-        </CardTitle>
-        <CardDescription>
-          A workspace owns GitHub App installations and projects. Projects are
-          opt-in per repo — installing the App on an organization does not
-          auto-mirror its repositories.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {workspaces.length === 0 && !creating && (
-          <p className="text-sm text-muted-foreground">
-            You have no workspaces yet. Create one to onboard GitHub projects.
-          </p>
-        )}
-
-        {workspaces.map((ws) => (
-          <WorkspaceRow key={ws.id} workspace={ws} />
-        ))}
-
-        {creating ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (createMutation.isPending) return
-              if (newSlug && newName)
-                createMutation.mutate({ slug: newSlug, name: newName })
-            }}
-            className="space-y-2 rounded-md border border-dashed p-3"
-          >
-            <p className="text-sm font-medium">New workspace</p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[auto_1fr]">
-              <Input
-                placeholder="slug (e.g. acme)"
-                value={newSlug}
-                onChange={(e) => setNewSlug(e.target.value.toLowerCase())}
-                className="sm:w-48"
-              />
-              <Input
-                placeholder="Display name"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-              />
-            </div>
-            {createError && (
-              <p className="text-xs text-destructive">{createError}</p>
-            )}
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                type="submit"
-                disabled={!newSlug || !newName || createMutation.isPending}
-              >
-                Create
-              </Button>
-              <Button
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setCreating(false)
-                  setNewSlug("")
-                  setNewName("")
-                  setCreateError(null)
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setCreating(true)
-              setCreateError(null)
-            }}
-          >
-            <Plus className="mr-1 h-3 w-3" />
-            New workspace
-          </Button>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function WorkspaceRow({ workspace }: { workspace: Workspace }) {
+export function WorkspaceCard({ workspace }: { workspace: Workspace }) {
   const { data: membersData } = useQuery({
     queryKey: ["workspace-members", workspace.id],
     queryFn: () => api.listWorkspaceMembers(workspace.id),
@@ -185,38 +66,108 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
   const installations = installsData?.installations ?? []
   const projects = projectsData?.projects ?? []
 
+  const hasInstalls = installations.length > 0
+  const hasProjects = projects.length > 0
+  const fullySetUp = hasInstalls && hasProjects
+
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <div>
-        <p className="font-medium">{workspace.name}</p>
-        <p className="text-xs text-muted-foreground">
-          Slug: <span className="font-mono">{workspace.slug}</span> · Created{" "}
-          {new Date(workspace.created_at).toLocaleDateString()}
-        </p>
-      </div>
+    <Card>
+      <CardHeader className="gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-muted-foreground" />
+              <h2 className="truncate text-lg font-semibold">{workspace.name}</h2>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              <span className="font-mono">{workspace.slug}</span> · Created{" "}
+              {new Date(workspace.created_at).toLocaleDateString()}
+            </p>
+          </div>
+          {fullySetUp ? (
+            <Badge variant="outline" className="shrink-0">
+              <Check className="mr-1 h-3 w-3" />
+              Ready
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="shrink-0">
+              Setup needed
+            </Badge>
+          )}
+        </div>
 
-      {/* Members (read-only in v1) */}
-      <div className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Members ({members.length})
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {members.map((m) => m.user_id).join(", ") || "—"}
-        </p>
-      </div>
+        <SetupProgress
+          hasInstalls={hasInstalls}
+          hasProjects={hasProjects}
+        />
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <MembersSection members={members} />
 
-      {/* GitHub installations */}
-      <InstallationsSection
-        workspaceId={workspace.id}
-        installations={installations}
-      />
+        <InstallationsSection
+          workspaceId={workspace.id}
+          installations={installations}
+        />
 
-      {/* Projects */}
-      <ProjectsSection
-        workspaceId={workspace.id}
-        installations={installations}
-        projects={projects}
-      />
+        <ProjectsSection
+          workspaceId={workspace.id}
+          installations={installations}
+          projects={projects}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
+function SetupProgress({
+  hasInstalls,
+  hasProjects,
+}: {
+  hasInstalls: boolean
+  hasProjects: boolean
+}) {
+  const steps = [
+    { label: "Workspace created", done: true },
+    { label: "GitHub connected", done: hasInstalls },
+    { label: "Project linked", done: hasProjects },
+  ]
+  return (
+    <ol className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+      {steps.map((s, i) => (
+        <li key={s.label} className="flex items-center gap-1.5">
+          {s.done ? (
+            <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
+          ) : (
+            <Circle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+          )}
+          <span
+            className={cn(
+              "font-medium",
+              s.done ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {i + 1}. {s.label}
+          </span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function MembersSection({
+  members,
+}: {
+  members: { user_id: string }[]
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <Users className="h-3 w-3" />
+        Members ({members.length})
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {members.map((m) => m.user_id).join(", ") || "—"}
+      </p>
     </div>
   )
 }
@@ -266,11 +217,13 @@ function InstallationsSection({
     },
   })
 
+  const appMissing = appConfig && !appConfig.enabled
+
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          <GitBranch className="mr-1 inline h-3 w-3" />
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <GitBranch className="h-3 w-3" />
           GitHub installations ({installations.length})
         </p>
         {appConfig?.enabled && (
@@ -286,10 +239,17 @@ function InstallationsSection({
         )}
       </div>
 
-      {appConfig && !appConfig.enabled && installations.length === 0 && (
+      {appMissing && installations.length === 0 && (
         <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
           GitHub App is not configured on this server. Ask an administrator to
           set up the Onsager GitHub App before linking a repository.
+        </p>
+      )}
+
+      {!appMissing && installations.length === 0 && (
+        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+          No GitHub installations yet. Install the Onsager GitHub App on a
+          user or organization to let this workspace manage its repositories.
         </p>
       )}
 
@@ -300,7 +260,10 @@ function InstallationsSection({
         >
           <div className="min-w-0 flex-1">
             <p className="truncate font-mono">
-              {inst.account_login} <span className="text-muted-foreground">({inst.account_type})</span>
+              {inst.account_login}{" "}
+              <span className="text-muted-foreground">
+                ({inst.account_type})
+              </span>
             </p>
             <p className="text-muted-foreground">
               Installation #{inst.install_id}
@@ -338,10 +301,6 @@ function ProjectsSection({
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
-  // Accessible-repos dropdown population. Only queried when the user has
-  // started adding a project and selected an installation — the endpoint
-  // returns 503 when the App isn't configured, which falls us through to
-  // manual entry automatically.
   const { data: reposData, isLoading: reposLoading, isError: reposError } = useQuery({
     queryKey: ["installation-repos", workspaceId, installationId],
     queryFn: () =>
@@ -397,8 +356,9 @@ function ProjectsSection({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <Package className="h-3 w-3" />
           Projects ({projects.length})
         </p>
         {!adding && canAdd && (
@@ -418,8 +378,16 @@ function ProjectsSection({
       </div>
 
       {!canAdd && (
-        <p className="text-xs text-muted-foreground">
-          Link a GitHub installation first to add projects.
+        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+          Link a GitHub installation first — projects are picked from repos the
+          Onsager GitHub App can see.
+        </p>
+      )}
+
+      {canAdd && projects.length === 0 && !adding && (
+        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+          No projects yet. Add a repo to start running agent sessions against
+          it.
         </p>
       )}
 
@@ -455,7 +423,7 @@ function ProjectsSection({
             if (add.isPending) return
             if (installationId && repoOwner && repoName) add.mutate()
           }}
-          className="space-y-2 rounded-md border border-dashed p-2"
+          className="space-y-2 rounded-md border border-dashed p-3"
           data-testid="add-project-form"
         >
           <Select

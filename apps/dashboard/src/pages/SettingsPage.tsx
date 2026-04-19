@@ -1,12 +1,12 @@
 import { useState } from "react"
+import { Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "@/lib/auth"
 import { api } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Trash2, Plus, KeyRound, User } from "lucide-react"
-import { WorkspacesCard } from "@/components/settings/WorkspacesCard"
+import { ArrowRight, Building2, Trash2, Plus, KeyRound, User } from "lucide-react"
 
 const KNOWN_CREDENTIALS = [
   {
@@ -96,8 +96,25 @@ export function SettingsPage() {
         </Card>
       )}
 
-      {/* Workspaces */}
-      <WorkspacesCard />
+      {/* Workspaces link-out — the full management UI lives at /workspaces. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base md:text-lg">
+            <Building2 className="h-4 w-4" />
+            Workspaces
+          </CardTitle>
+          <CardDescription>
+            Manage the GitHub installations, projects, and members for each
+            workspace.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button render={<Link to="/workspaces" />} variant="outline">
+            Go to Workspaces
+            <ArrowRight className="ml-1 h-4 w-4" />
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Credentials */}
       <Card>

@@ -1,4 +1,4 @@
-import { Factory, Plus, Server, Terminal, Settings, Shield, Package, Activity } from "lucide-react"
+import { Building2, Factory, Plus, Server, Terminal, Settings, Shield, Package, Activity } from "lucide-react"
 import { OnsagerLogo } from "./OnsagerLogo"
 import { Link, useLocation } from "react-router-dom"
 import {
@@ -20,6 +20,12 @@ import { CreateArtifactSheet } from "@/components/factory/CreateArtifactSheet"
 import { Button } from "@/components/ui/button"
 
 const navSections = [
+  {
+    label: "Organization",
+    items: [
+      { title: "Workspaces", icon: Building2, path: "/workspaces" },
+    ],
+  },
   {
     label: "Factory",
     items: [

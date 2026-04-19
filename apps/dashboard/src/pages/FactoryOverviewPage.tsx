@@ -24,6 +24,8 @@ import {
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import type { SessionSpend, SpineArtifact, SpineEvent } from "@/lib/api"
+import { Building2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -116,6 +118,12 @@ export function FactoryOverviewPage() {
     queryFn: () => api.getSessionSpend(100),
     refetchInterval: 30000,
   })
+  const { data: workspacesData } = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: api.listWorkspaces,
+    staleTime: 30_000,
+  })
+  const noWorkspaces = (workspacesData?.tenants?.length ?? 0) === 0
 
   const artifacts = artifactsData?.artifacts ?? []
   const events = spineData?.events ?? []
@@ -160,6 +168,28 @@ export function FactoryOverviewPage() {
           Production pipeline overview — artifacts, events, and factory health.
         </p>
       </div>
+
+      {noWorkspaces && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div className="flex items-start gap-3">
+              <Building2 className="mt-0.5 h-5 w-5 text-primary" />
+              <div>
+                <p className="text-sm font-medium">
+                  You don't have a workspace yet
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Create one to onboard a GitHub project and start running
+                  agent sessions.
+                </p>
+              </div>
+            </div>
+            <Button render={<Link to="/workspaces?welcome=1" />}>
+              Set up workspace
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
         {stats.map((stat) => (

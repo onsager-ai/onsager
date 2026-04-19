@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { MemoryRouter } from "react-router-dom"
 import { SettingsPage } from "@/pages/SettingsPage"
 
 // Minimal mocks so SettingsPage renders without network
@@ -20,7 +21,9 @@ function renderSettings() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <SettingsPage />
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
