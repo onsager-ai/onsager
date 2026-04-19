@@ -264,10 +264,20 @@ pub async fn get_repo_default_branch(
         .ok_or_else(|| anyhow::anyhow!("repo {owner}/{repo} missing default_branch"))
 }
 
-fn gh_client() -> anyhow::Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
+/// Shared GitHub HTTP client — one per process so connection pools +
+/// TLS state get reused across JWT, installation-token, and repo calls.
+fn gh_client() -> anyhow::Result<&'static reqwest::Client> {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    if let Some(c) = CLIENT.get() {
+        return Ok(c);
+    }
+    let c = reqwest::Client::builder()
         .user_agent("onsager-stiglab/0.1")
-        .build()?)
+        .build()?;
+    // `get_or_init` would be nicer but it can't surface the build error;
+    // the race is benign — whichever thread wins sets the slot, and the
+    // losing thread's locally-built client is dropped.
+    Ok(CLIENT.get_or_init(|| c))
 }
 
 #[cfg(test)]
