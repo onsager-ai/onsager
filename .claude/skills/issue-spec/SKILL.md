@@ -194,7 +194,7 @@ open + draft  →  open + planned  →  open + in-progress  →  closed (complet
 
 - **draft**: Spec created, open questions may remain. AI wrote it, human hasn't reviewed.
 - **planned**: Human reviewed, decisions made, ready for implementation. Remove `draft`, add `planned`.
-- **in-progress**: Someone/something is actively working (PR opened). Remove `planned`, add `in-progress`. `onsager-pr-lifecycle` automates this transition on PR open.
+- **in-progress**: Someone/something is actively working (PR opened). Remove `planned`, add `in-progress`. The `pr-opened-progress` Claude Routine automates this transition on PR open when configured; otherwise flip manually per `onsager-pr-lifecycle`.
 - **closed**: All plan items done, tests passing. PR merge with `Closes #N` closes it automatically.
 
 **Key rule**: `draft → planned` is the human-AI alignment gate. A spec moves to `planned` only after a human reviews it and resolves open questions. The AI does not flip this label unprompted.
@@ -225,7 +225,7 @@ spec(stiglab): session lifecycle improvements       ← parent issue
 - **Discover first.** Always search existing issues before creating. Duplicate specs create confusion.
 - **Status labels reflect reality.** Don't label `planned` if decisions are still open. Don't label `in-progress` until a PR is open.
 - **One concern per issue.** If a spec covers two independent changes, split into sub-issues with a shared parent.
-- **Reference code, not concepts.** Point to actual types, functions, files — not abstract ideas. Use `crates/stiglab/src/session.rs` not "the session module."
+- **Reference code, not concepts.** Point to actual types, functions, files — not abstract ideas. Use `crates/stiglab/src/core/session.rs` not "the session module."
 - **Open questions are alignment points.** These are where AI must stop and ask a human. Make them explicit, specific, and include the impact of each decision.
 - **Comments are the decision record.** When a human resolves an open question, they comment on the issue. The thread becomes the audit trail.
 - **Use specs for alignment, not for everything.** Regular bugs and small tasks don't need specs. Use specs when: multiple stakeholders need alignment, intent needs persistence, or the AI needs clear boundaries.
@@ -238,7 +238,7 @@ Once a spec moves to `planned`:
 2. Follow the SDD loop in `onsager-dev-process`.
 3. Pre-push via `onsager-pre-push` (includes a spec-link check).
 4. PR body must include `Closes #N` (slice complete) or `Part of #N` (scaffolding).
-5. `onsager-pr-lifecycle` flips the issue to `in-progress` on PR open and handles merge.
+5. The `pr-opened-progress` routine flips the issue to `in-progress` on PR open (or `onsager-pr-lifecycle` covers the manual fallback); the `pr-merged-progress` routine handles merge.
 
 ## References
 

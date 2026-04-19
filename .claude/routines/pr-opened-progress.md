@@ -1,8 +1,8 @@
 ---
 name: pr-opened-progress
-trigger: GitHub event — pull_request.opened
-filters:
-  - Is draft: false
+triggers:
+  - GitHub event — pull_request.opened (no draft filter — handle draft PRs too)
+  - GitHub event — pull_request.ready_for_review (catches draft → ready transitions)
 repository: onsager-ai/onsager
 ---
 
@@ -30,12 +30,13 @@ issue's status labels with the fact that implementation has started.
      warrant a spec.
    Use `mcp__github__add_issue_comment`. Reference the
    `onsager-dev-process` and `issue-spec` skills. Stop here.
-3. **If a spec issue is linked**:
+3. **For each linked spec issue**, handle it independently:
    a. Read the issue via `mcp__github__issue_read`.
    b. If its labels include `draft`, post a comment on the PR warning that
-      the linked spec is still in `draft` (has not passed human-AI
-      alignment). Do not change the label. Stop. Humans must move the spec
-      to `planned` first.
+      this linked spec is still in `draft` (has not passed human-AI
+      alignment). Do not change the label for this issue. Continue
+      evaluating the remaining linked issues — humans must move this one
+      to `planned` separately.
    c. If its labels include `planned`, swap `planned` → `in-progress`
       using `mcp__github__issue_write`. Post a brief issue comment:
       "PR #<pr-number> opened; transitioning to in-progress."
