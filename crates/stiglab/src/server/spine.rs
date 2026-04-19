@@ -91,6 +91,9 @@ impl SpineEmitter {
     /// was shaping (issue #14 phase 2). Pass `None` for sessions that don't
     /// originate from a `ShapingRequest`. `token_usage` is the LLM accounting
     /// payload (issue #39); pass `None` when the runtime can't report it.
+    /// `branch` and `pr_number` (issue #60) carry the agent's git context
+    /// when available — used by `onsager-portal` for vertical lineage.
+    #[allow(clippy::too_many_arguments)]
     pub async fn emit_session_completed(
         &self,
         session_id: &str,
@@ -98,6 +101,8 @@ impl SpineEmitter {
         duration_ms: u64,
         artifact_id: Option<&str>,
         token_usage: Option<TokenUsage>,
+        branch: Option<&str>,
+        pr_number: Option<u64>,
     ) -> Result<i64, sqlx::Error> {
         self.emit(FactoryEventKind::StiglabSessionCompleted {
             session_id: session_id.to_string(),
@@ -105,6 +110,8 @@ impl SpineEmitter {
             duration_ms,
             artifact_id: artifact_id.map(str::to_owned),
             token_usage,
+            branch: branch.map(str::to_owned),
+            pr_number,
         })
         .await
     }

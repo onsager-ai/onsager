@@ -109,10 +109,27 @@ pub async fn handle_agent_message(
                     }
                 }
             }
-            // Emit spine event for session completion
+            // Emit spine event for session completion. Best-effort branch
+            // detection (issue #60): if the session has a working_dir, ask
+            // git for the current branch so the portal can attach
+            // vertical_lineage when the matching PR webhook arrives.
             if let Some(spine) = spine {
+                let (branch, project_id) = git_context_for_session(pool, &session_id).await;
+                if let Some(branch_name) = branch.as_deref() {
+                    let spine_pool = spine.pool().clone();
+                    if let Err(e) = record_branch_link(
+                        &spine_pool,
+                        &session_id,
+                        project_id.as_deref(),
+                        branch_name,
+                    )
+                    .await
+                    {
+                        tracing::warn!("failed to record branch link: {e}");
+                    }
+                }
                 if let Err(e) = spine
-                    .emit_session_completed(&session_id, "", 0, None, None)
+                    .emit_session_completed(&session_id, "", 0, None, None, branch.as_deref(), None)
                     .await
                 {
                     tracing::warn!("failed to emit session_completed spine event: {e}");
@@ -145,4 +162,66 @@ pub async fn handle_agent_message(
             // Registration is handled separately (node creation + WS setup)
         }
     }
+}
+
+/// Best-effort branch + project lookup for a session at completion time.
+/// Reads `working_dir` from the session row, asks `git rev-parse --abbrev-ref HEAD`
+/// for the active branch, and joins `sessions.project_id` to surface the
+/// owning project (so the portal can scope its branch-link lookup). Failures
+/// at any step degrade gracefully to `None` — branch/PR detection is purely
+/// additive context.
+async fn git_context_for_session(
+    pool: &AnyPool,
+    session_id: &str,
+) -> (Option<String>, Option<String>) {
+    let row: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT working_dir, project_id FROM sessions WHERE id = $1")
+            .bind(session_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    let Some((working_dir, project_id)) = row else {
+        return (None, None);
+    };
+    let Some(working_dir) = working_dir else {
+        return (None, project_id);
+    };
+    let branch = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("git")
+            .args(["-C", &working_dir, "rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+    })
+    .await
+    .ok()
+    .flatten();
+    (branch, project_id)
+}
+
+/// Persist a `(session_id, branch, project_id)` row in the portal-managed
+/// `pr_branch_links` table so the portal's PR-opened handler can resolve
+/// vertical lineage on webhook arrival. Stiglab writes the row via the spine
+/// pool so the portal sees it on the same Postgres instance — without a
+/// stiglab→portal HTTP call.
+async fn record_branch_link(
+    spine_pool: &sqlx::PgPool,
+    session_id: &str,
+    project_id: Option<&str>,
+    branch: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO pr_branch_links (session_id, project_id, branch, recorded_at) \
+         VALUES ($1, $2, $3, NOW()) \
+         ON CONFLICT (session_id) DO UPDATE SET branch = EXCLUDED.branch, \
+            project_id = EXCLUDED.project_id, recorded_at = NOW()",
+    )
+    .bind(session_id)
+    .bind(project_id)
+    .bind(branch)
+    .execute(spine_pool)
+    .await?;
+    Ok(())
 }
