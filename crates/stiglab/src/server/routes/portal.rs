@@ -6,6 +6,9 @@
 //! forward bytes untouched and preserve the `X-Hub-Signature-256`,
 //! `X-GitHub-Event`, and `X-GitHub-Delivery` headers.
 
+use std::sync::OnceLock;
+use std::time::Duration;
+
 use axum::body::Body;
 use axum::extract::Request;
 use axum::http::StatusCode;
@@ -14,6 +17,35 @@ use axum::response::{IntoResponse, Response};
 /// GitHub caps individual webhook payloads at 25 MiB; match that here so we
 /// don't reject legitimate deliveries at the proxy.
 const MAX_BODY_BYTES: usize = 25 * 1024 * 1024;
+
+/// Hop-by-hop headers per RFC 7230 §6.1 that must not be forwarded by a
+/// proxy. `content-length` and `host` are also stripped — reqwest derives
+/// both from the body and target URL.
+const HOP_BY_HOP: &[&str] = &[
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+    "content-length",
+    "host",
+];
+
+/// Process-wide `reqwest::Client` — pooled connections + bounded timeouts
+/// so a stalled portal can't tie up stiglab request capacity indefinitely.
+fn shared_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("failed to build portal proxy client")
+    })
+}
 
 /// Base URL for the portal webhook server (internal, not exposed by Railway).
 fn portal_base_url() -> String {
@@ -25,7 +57,7 @@ fn portal_base_url() -> String {
 }
 
 /// Proxy handler: forward `/webhooks/github` to the portal, preserving
-/// headers and raw body bytes.
+/// non-hop-by-hop headers and raw body bytes.
 pub async fn proxy(req: Request) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -43,14 +75,12 @@ pub async fn proxy(req: Request) -> Response {
         }
     };
 
-    let client = reqwest::Client::new();
-    let mut upstream = client.request(method, &target);
-    // Forward every incoming header — signature verification in the portal
-    // depends on `X-Hub-Signature-256` + the exact body bytes, and event
-    // dispatch depends on `X-GitHub-Event`. Stripping `host` avoids leaking
-    // the stiglab origin into the upstream request.
+    let mut upstream = shared_client().request(method, &target);
+    // HeaderName is normalized to lowercase, so a direct `.contains` works.
+    // Signature verification depends on the GitHub headers falling through;
+    // event dispatch depends on `x-github-event`.
     for (name, value) in headers.iter() {
-        if name == axum::http::header::HOST {
+        if HOP_BY_HOP.contains(&name.as_str()) {
             continue;
         }
         upstream = upstream.header(name, value);
@@ -78,12 +108,10 @@ pub async fn proxy(req: Request) -> Response {
                 .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
         Err(e) => {
+            // Keep upstream detail in logs only — the webhook endpoint is
+            // public, and error strings can reveal internal topology.
             tracing::error!("portal proxy error: {e}");
-            (
-                StatusCode::BAD_GATEWAY,
-                format!("portal service unavailable: {e}"),
-            )
-                .into_response()
+            (StatusCode::BAD_GATEWAY, "portal service unavailable").into_response()
         }
     }
 }

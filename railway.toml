@@ -36,12 +36,10 @@
 builder = "DOCKERFILE"
 dockerfilePath = "crates/stiglab/deploy/Dockerfile"
 watchPatterns = [
-    "crates/onsager-spine/**",
-    "crates/onsager-artifact/**",
-    "crates/onsager-portal/**",
-    "crates/refract/**",
-    "crates/stiglab/**",
-    "crates/synodic/**",
+    # All crates — every workspace member is linked into at least one of
+    # the binaries shipped in this unified container (stiglab, synodic,
+    # onsager-portal), so any change can affect the deploy.
+    "crates/**",
     "apps/dashboard/**",
     "Cargo.toml",
     "Cargo.lock",
