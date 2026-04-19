@@ -1,12 +1,12 @@
 ---
 name: issue-spec
-description: "Create lean-spec style GitHub issues as specs for human-AI aligned implementation. Use when asked to 'create a spec', 'write a spec issue', 'spec this feature', 'spec this', or when planning work that needs a specification before implementation. Follows the lean-spec SDD methodology: small focused specs (<2000 tokens), intent over implementation, context economy. Creates GitHub issues with Overview, Design, Plan, Test, Alignment, and Notes sections."
+description: Create lean-spec style GitHub issues as specs for human-AI aligned implementation on Onsager. Use when asked to "create a spec", "write a spec issue", "spec this feature", "spec this", or when planning work that needs a specification before implementation. Follows the lean-spec SDD methodology — small focused specs (<2000 tokens), intent over implementation, context economy. Creates GitHub issues with Overview, Design, Plan, Test, Alignment, and Notes sections. Paired with `onsager-dev-process` (the SDD loop), `onsager-pre-push` (pre-push checks), and `onsager-pr-lifecycle` (post-push).
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git diff:*), Bash(git log:*), Bash(git show:*), mcp__github__issue_write, mcp__github__issue_read, mcp__github__list_issues, mcp__github__search_issues, mcp__github__sub_issue_write, mcp__github__get_label
 ---
 
-# Issue Spec
+# issue-spec
 
-Create GitHub issues as lean-spec style specifications for human-AI aligned implementation. Follows the [lean-spec](https://github.com/codervisor/lean-spec) SDD methodology, using GitHub issues as the sole spec medium — no spec files.
+Create GitHub issues as lean-spec style specifications for human-AI aligned implementation on Onsager. GitHub issues are the sole spec medium — no spec files.
 
 ## Why GitHub Issues, Not Files
 
@@ -14,7 +14,7 @@ lean-spec uses Markdown files with YAML frontmatter for metadata. We replace tha
 
 - **Status** → Issue state (open/closed) + status labels (`draft`, `planned`, `in-progress`)
 - **Priority** → Labels (`priority:critical`, `priority:high`, `priority:medium`, `priority:low`)
-- **Tags** → Labels (`area:core`, `area:ui`, `feat`, `fix`, `refactor`, `perf`)
+- **Tags** → Labels (`area:<subsystem>`, `feat`, `fix`, `refactor`, `perf`)
 - **Dependencies** → Issue references (`depends on #42`) and sub-issues
 - **Parent/Child** → Sub-issues via `mcp__github__sub_issue_write`
 - **Transitions** → Issue timeline (automatic, auditable)
@@ -30,14 +30,27 @@ Three principles from lean-spec:
 2. **Intent Over Implementation** — Document the *why* and *what*, not the *how*. Implementation details belong in PRs, not spec issues. The spec captures human intent that isn't in the code.
 3. **Living Documents** — Specs evolve via issue comments and edits. Status labels track lifecycle. The issue thread becomes the decision record.
 
+## When to use this skill
+
+Use when:
+- A change touches multiple files or subsystems.
+- Multiple stakeholders need alignment before implementation.
+- The AI needs explicit boundaries for a non-trivial feature.
+- Work will span multiple PRs (parent + child specs).
+
+Skip when:
+- A typo or doc-only fix. Use the `trivial` label on the PR instead.
+- A one-line bug fix with an obvious reproduction. Just open a PR with `Fixes #existing`.
+- The feature already has a spec issue — extend that spec, don't create another.
+
 ## Setup
 
 | Parameter | Default | Example override |
 |-----------|---------|-----------------|
 | **Topic** | _(required)_ | `"session timeout"`, `"fix heartbeat race"` |
-| **Scope** | Inferred from codebase | `"only stiglab-core"` |
+| **Scope** | Inferred from codebase | `"only stiglab"` |
 | **Priority** | `medium` | `critical`, `high`, `low` |
-| **Labels** | Auto from type + area | `"spec, feat, area:core"` |
+| **Labels** | Auto from type + area | `"spec, feat, area:stiglab"` |
 | **Parent** | None | `#42` (umbrella issue) |
 
 If the user says "spec session timeout", start immediately. Do not ask clarifying questions unless the topic is genuinely ambiguous.
@@ -138,12 +151,12 @@ Create the issue using `mcp__github__issue_write`:
 
 **Title format**: `spec(<area>): <short description>`
 
-Examples: `spec(core): add session timeout`, `spec(ui): fix node status badge`
+Examples: `spec(stiglab): add session timeout`, `spec(dashboard): fix node status badge`, `spec(forge): enforce synodic fail policy`
 
 **Labels**: Apply via the issue creation:
 - `spec` — always, marks this as a spec issue
 - Type: `feat`, `fix`, `refactor`, `perf`
-- Area: `area:core`, `area:server`, `area:agent`, `area:ui`
+- Area (see taxonomy below)
 - Priority: `priority:critical`, `priority:high`, `priority:medium`, `priority:low`
 - Status: `draft` (initial state)
 
@@ -155,6 +168,22 @@ Examples: `spec(core): add session timeout`, `spec(ui): fix node status badge`
 - Any open questions that need human decisions
 - Sub-issue links if the spec was split
 
+## Area label taxonomy (Onsager monorepo)
+
+Pick one or more, aligned with `crates/` and `apps/`:
+
+- `area:spine` — `onsager-spine` (event bus client library)
+- `area:forge` — production line / artifact lifecycle
+- `area:ising` — continuous improvement engine
+- `area:stiglab` — agent session orchestration
+- `area:synodic` — agent governance
+- `area:dashboard` — React UI under `apps/dashboard`
+- `area:onsager` — the `onsager` dispatcher CLI
+- `area:infra` — CI, migrations, docker-compose, justfile, workflows
+- `area:docs` — README, CLAUDE.md, specs
+
+Respect the architectural invariant: a spec should not cross subsystem boundaries except via the spine event bus. If a spec requires changes in two subsystems, split it — one child spec per subsystem, parent tracks the end-to-end slice.
+
 ## Status Lifecycle via Labels
 
 GitHub issue state (open/closed) combined with status labels:
@@ -165,10 +194,10 @@ open + draft  →  open + planned  →  open + in-progress  →  closed (complet
 
 - **draft**: Spec created, open questions may remain. AI wrote it, human hasn't reviewed.
 - **planned**: Human reviewed, decisions made, ready for implementation. Remove `draft`, add `planned`.
-- **in-progress**: Someone is actively working. Remove `planned`, add `in-progress`.
-- **closed**: All plan items done, tests passing. Remove `in-progress`, close issue.
+- **in-progress**: Someone/something is actively working (PR opened). Remove `planned`, add `in-progress`. `onsager-pr-lifecycle` automates this transition on PR open.
+- **closed**: All plan items done, tests passing. PR merge with `Closes #N` closes it automatically.
 
-**Key rule**: `draft → planned` is the human-AI alignment gate. A spec moves to `planned` only after a human reviews it and resolves open questions.
+**Key rule**: `draft → planned` is the human-AI alignment gate. A spec moves to `planned` only after a human reviews it and resolves open questions. The AI does not flip this label unprompted.
 
 ## Spec Relationships via Sub-Issues
 
@@ -184,22 +213,32 @@ Use GitHub sub-issues for parent/child decomposition:
 
 **Example decomposition:**
 ```
-spec(server): session lifecycle improvements       ← parent issue
-├── spec(core): session timeout mechanism          ← sub-issue
-├── spec(core): session retry on failure           ← sub-issue
-└── spec(ui): timeout warning indicator            ← sub-issue
+spec(stiglab): session lifecycle improvements       ← parent issue
+├── spec(stiglab): session timeout mechanism        ← sub-issue
+├── spec(stiglab): session retry on failure         ← sub-issue
+└── spec(dashboard): timeout warning indicator      ← sub-issue
 ```
 
 ## Guidance
 
 - **Small is better.** A 500-token spec that captures intent clearly beats a 3000-token spec that tries to cover everything. Split into sub-issues early.
 - **Discover first.** Always search existing issues before creating. Duplicate specs create confusion.
-- **Status labels reflect reality.** Don't label `planned` if decisions are still open. Don't label `in-progress` until someone is actually working.
+- **Status labels reflect reality.** Don't label `planned` if decisions are still open. Don't label `in-progress` until a PR is open.
 - **One concern per issue.** If a spec covers two independent changes, split into sub-issues with a shared parent.
-- **Reference code, not concepts.** Point to actual types, functions, files — not abstract ideas. Use `crates/stiglab-core/src/session.rs` not "the session module."
+- **Reference code, not concepts.** Point to actual types, functions, files — not abstract ideas. Use `crates/stiglab/src/session.rs` not "the session module."
 - **Open questions are alignment points.** These are where AI must stop and ask a human. Make them explicit, specific, and include the impact of each decision.
 - **Comments are the decision record.** When a human resolves an open question, they comment on the issue. The thread becomes the audit trail.
 - **Use specs for alignment, not for everything.** Regular bugs and small tasks don't need specs. Use specs when: multiple stakeholders need alignment, intent needs persistence, or the AI needs clear boundaries.
+
+## Handoff to implementation
+
+Once a spec moves to `planned`:
+
+1. Create a branch referencing the issue: `claude/spec-<N>-<slug>` or similar.
+2. Follow the SDD loop in `onsager-dev-process`.
+3. Pre-push via `onsager-pre-push` (includes a spec-link check).
+4. PR body must include `Closes #N` (slice complete) or `Part of #N` (scaffolding).
+5. `onsager-pr-lifecycle` flips the issue to `in-progress` on PR open and handles merge.
 
 ## References
 

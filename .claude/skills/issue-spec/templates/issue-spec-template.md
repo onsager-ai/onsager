@@ -12,7 +12,9 @@
 
 <!-- Technical approach at intent level.
      Data flow, state changes, API surface — not line-by-line code.
-     Include what's explicitly OUT OF SCOPE. -->
+     Include what's explicitly OUT OF SCOPE.
+     Respect the architectural invariant: subsystems communicate via the
+     spine event bus, not direct imports. -->
 
 ## Plan
 
