@@ -338,6 +338,29 @@ pub enum FactoryEventKind {
         confidence: f64,
     },
 
+    /// A structured signal Ising surfaces on the spine for other subsystems
+    /// to consume (issue #36 — close the feedback loop). Unlike
+    /// `IsingInsightDetected`, which carries a human-readable observation,
+    /// this variant is the machine-readable edge: each emission names the
+    /// signal kind, the subject it attaches to, and the events that evidence
+    /// it. Forge tails these into `WorldState.insights`; a future Synodic
+    /// consumer will treat high-confidence emissions as rule-proposal input.
+    IsingInsightEmitted {
+        /// Stable signal identifier (e.g. `"repeated_gate_override"`,
+        /// `"shape_retry_spike"`). Consumers match on this string.
+        signal_kind: String,
+        /// What the signal is about — an artifact kind, artifact id, rule id,
+        /// or intent class — serialized as a free-form string so the event
+        /// contract doesn't need to know every possible subject type.
+        subject_ref: String,
+        /// Spine events that evidence this signal. Invariant: non-empty
+        /// (enforced by the producer).
+        evidence: Vec<EventRef>,
+        /// 0.0..=1.0; downstream consumers use this to route (advisory vs.
+        /// crystallization threshold).
+        confidence: f64,
+    },
+
     /// An insight was deduplicated or fell below confidence threshold (audit trail).
     IsingInsightSuppressed { insight_id: String, reason: String },
 
@@ -468,6 +491,7 @@ impl FactoryEventKind {
             Self::SynodicRuleDisabled { .. } => "synodic.rule_disabled",
             Self::SynodicRuleVersionCreated { .. } => "synodic.rule_version_created",
             Self::IsingInsightDetected { .. } => "ising.insight_detected",
+            Self::IsingInsightEmitted { .. } => "ising.insight_emitted",
             Self::IsingInsightSuppressed { .. } => "ising.insight_suppressed",
             Self::IsingRuleProposed { .. } => "ising.rule_proposed",
             Self::IsingAnalyzerError { .. } => "ising.analyzer_error",
@@ -532,6 +556,7 @@ impl FactoryEventKind {
             | Self::SynodicRuleDisabled { .. }
             | Self::SynodicRuleVersionCreated { .. } => "synodic",
             Self::IsingInsightDetected { .. }
+            | Self::IsingInsightEmitted { .. }
             | Self::IsingInsightSuppressed { .. }
             | Self::IsingRuleProposed { .. }
             | Self::IsingAnalyzerError { .. }
@@ -598,6 +623,7 @@ impl FactoryEventKind {
             Self::SynodicRuleDisabled { rule_id, .. } => rule_id.clone(),
             Self::SynodicRuleVersionCreated { rule_id, .. } => rule_id.clone(),
             Self::IsingInsightDetected { insight_id, .. } => insight_id.clone(),
+            Self::IsingInsightEmitted { subject_ref, .. } => subject_ref.clone(),
             Self::IsingInsightSuppressed { insight_id, .. } => insight_id.clone(),
             Self::IsingRuleProposed { insight_id, .. } => insight_id.clone(),
             Self::IsingAnalyzerError { analyzer, .. } => analyzer.clone(),
@@ -696,6 +722,19 @@ pub enum EscalationResolution {
     TimedOut,
 }
 
+/// Reference to a spine event used as evidence for a signal (`insight.emitted`
+/// variant carries a `Vec<EventRef>`). This is the spine-native counterpart to
+/// `onsager_protocol::FactoryEventRef` — kept in the spine crate so the event
+/// vocabulary has no protocol-crate dependency.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventRef {
+    /// The `id` column in the `events` or `events_ext` table.
+    pub event_id: i64,
+    /// The `event_type` string (e.g. `"forge.gate_verdict"`), for quick
+    /// consumer-side filtering without a second lookup.
+    pub event_type: String,
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -771,6 +810,40 @@ mod tests {
         let specific = InsightScope::SpecificArtifact(ArtifactId::new("art_12345678"));
         let json = serde_json::to_string(&specific).unwrap();
         assert!(json.contains("art_12345678"));
+    }
+
+    #[test]
+    fn ising_insight_emitted_roundtrip() {
+        // Regression: the event_type / stream_type / stream_id triple must
+        // survive a roundtrip so the listener can filter on `ising:<subject>`
+        // and the dashboard can query by `event_type = "ising.insight_emitted"`.
+        let event = FactoryEventKind::IsingInsightEmitted {
+            signal_kind: "repeated_gate_override".into(),
+            subject_ref: "code".into(),
+            evidence: vec![
+                EventRef {
+                    event_id: 101,
+                    event_type: "forge.gate_verdict".into(),
+                },
+                EventRef {
+                    event_id: 103,
+                    event_type: "forge.gate_verdict".into(),
+                },
+            ],
+            confidence: 0.82,
+        };
+        assert_eq!(event.event_type(), "ising.insight_emitted");
+        assert_eq!(event.stream_type(), "ising");
+        assert_eq!(event.stream_id(), "code");
+
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "ising_insight_emitted");
+        assert_eq!(json["signal_kind"], "repeated_gate_override");
+        assert_eq!(json["subject_ref"], "code");
+        assert_eq!(json["evidence"][0]["event_id"], 101);
+
+        let back: FactoryEventKind = serde_json::from_value(json).unwrap();
+        assert_eq!(back, event);
     }
 
     #[test]

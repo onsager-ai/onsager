@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import type { GovernanceEvent } from "@/lib/api"
+import type { GovernanceEvent, IsingInsightEmittedEvent } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -44,6 +44,15 @@ export function GovernancePage() {
     queryKey: ["governance-stats"],
     queryFn: api.getGovernanceStats,
     refetchInterval: 5000,
+  })
+
+  // Issue #36 — gate-override-rate insights surfaced by Ising. Refreshes
+  // less aggressively than governance events since analyzers tick on a 7d
+  // window, so per-second polling would burn backend cycles for no signal.
+  const { data: insights } = useQuery({
+    queryKey: ["ising-insights"],
+    queryFn: () => api.getIsingInsights(20),
+    refetchInterval: 15000,
   })
 
   const handleResolve = async (id: string) => {
@@ -89,6 +98,8 @@ export function GovernancePage() {
           ))}
         </div>
       </div>
+
+      <IsingInsightsCard insights={insights ?? []} />
 
       <Card>
         <CardHeader className="px-4 md:px-6">
@@ -200,6 +211,49 @@ function EventsTable({ events, onResolve }: { events: GovernanceEvent[]; onResol
         ))}
       </TableBody>
     </Table>
+  )
+}
+
+function IsingInsightsCard({ insights }: { insights: IsingInsightEmittedEvent[] }) {
+  return (
+    <Card>
+      <CardHeader className="px-4 md:px-6">
+        <CardTitle className="text-base md:text-lg">Ising Insights</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Signals surfaced by the Ising observation loop. Each entry points at
+          an artifact kind or subject with notable recent behavior.
+        </p>
+      </CardHeader>
+      <CardContent className="px-4 md:px-6">
+        {insights.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No insights yet. Ising emits signals as enough factory traffic
+            accumulates.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {insights.map((i) => (
+              <div
+                key={i.id}
+                className="flex flex-col gap-1 rounded-lg border p-3 md:flex-row md:items-center md:justify-between"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{i.signal_kind}</Badge>
+                  <span className="text-sm font-medium">{i.subject_ref || "—"}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {i.evidence.length} evidence event{i.evidence.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span>confidence {(i.confidence * 100).toFixed(0)}%</span>
+                  <span>{new Date(i.created_at).toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

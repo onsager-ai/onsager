@@ -16,6 +16,8 @@ use onsager_spine::factory_event::ShapingOutcome;
 use onsager_spine::EventStore;
 
 use crate::core::artifact_store::ArtifactStore;
+use crate::core::insight_cache::InsightCache;
+use crate::core::insight_listener;
 use crate::core::kernel::BaselineKernel;
 use crate::core::persistence;
 use crate::core::pipeline::{ForgePipeline, PipelineEvent, StiglabDispatcher, SynodicGate};
@@ -383,7 +385,9 @@ pub fn run(database_url: &str, tick_ms: u64) {
             fail_policy,
         };
 
-        let mut pipeline = ForgePipeline::new(stiglab, synodic);
+        let insight_cache = InsightCache::default();
+        let mut pipeline =
+            ForgePipeline::new(stiglab, synodic).with_insight_cache(insight_cache.clone());
         pipeline.store = artifact_store;
 
         let shared = Arc::new(RwLock::new(ForgeSharedState {
@@ -477,6 +481,25 @@ pub fn run(database_url: &str, tick_ms: u64) {
                         _ => tracing::info!("forge tick: {event:?}"),
                     }
                 }
+            }
+        });
+
+        // Spawn the ising.insight_emitted listener (issue #36). It pushes
+        // parsed insights into `insight_cache`, which the pipeline pulls
+        // into `WorldState.insights` on every tick.
+        let insight_listener_shared = shared.clone();
+        let insight_cache_for_listener = insight_cache.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = insight_listener_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: insight listener disabled (no spine connection)");
+                return;
+            };
+            if let Err(e) = insight_listener::run(store, insight_cache_for_listener, None).await {
+                tracing::error!("forge: insight listener exited: {e}");
             }
         });
 

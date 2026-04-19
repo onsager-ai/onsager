@@ -10,10 +10,10 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 
 use onsager_artifact::{ArtifactId, ArtifactState, Kind};
-use onsager_spine::factory_event::{FactoryEventKind, ShapingOutcome};
+use onsager_spine::factory_event::{FactoryEventKind, GatePoint, ShapingOutcome, VerdictSummary};
 
 /// A tracked shaping attempt.
 #[derive(Debug, Clone)]
@@ -24,6 +24,21 @@ pub struct ShapingRecord {
     pub artifact_id: ArtifactId,
     pub outcome: ShapingOutcome,
     pub duration_ms: Option<u64>,
+    pub recorded_at: DateTime<Utc>,
+}
+
+/// A tracked gate verdict emitted by Forge after consulting Synodic.
+///
+/// The verdict variant itself is the override signal: `Deny` / `Escalate`
+/// are the "override-equivalent" outcomes that flag rule friction for the
+/// gate-override-rate insight. The event doesn't carry a rule_id today, so
+/// grouping happens by artifact kind (resolved via `FactoryModel.artifacts`).
+#[derive(Debug, Clone)]
+pub struct GateVerdictRecord {
+    pub event_id: i64,
+    pub artifact_id: ArtifactId,
+    pub gate_point: GatePoint,
+    pub verdict: VerdictSummary,
     pub recorded_at: DateTime<Utc>,
 }
 
@@ -46,6 +61,8 @@ pub struct FactoryModel {
     pub artifacts: HashMap<String, TrackedArtifact>,
     /// Recent shaping records (bounded by retention window).
     pub shaping_records: Vec<ShapingRecord>,
+    /// Recent gate verdict records (bounded by retention window).
+    pub gate_verdict_records: Vec<GateVerdictRecord>,
     /// Total events processed.
     pub events_processed: u64,
     /// Last processed event ID (for catch-up).
@@ -57,6 +74,7 @@ impl FactoryModel {
         Self {
             artifacts: HashMap::new(),
             shaping_records: Vec::new(),
+            gate_verdict_records: Vec::new(),
             events_processed: 0,
             last_event_id: None,
         }
@@ -130,8 +148,86 @@ impl FactoryModel {
                 });
             }
 
+            FactoryEventKind::ForgeGateVerdict {
+                artifact_id,
+                gate_point,
+                verdict,
+            } => {
+                self.gate_verdict_records.push(GateVerdictRecord {
+                    event_id,
+                    artifact_id: artifact_id.clone(),
+                    gate_point: *gate_point,
+                    verdict: verdict.clone(),
+                    recorded_at: Utc::now(),
+                });
+            }
+
             _ => {}
         }
+    }
+
+    /// Gate verdict records no older than `cutoff`.
+    pub fn gate_verdicts_since(&self, cutoff: DateTime<Utc>) -> Vec<&GateVerdictRecord> {
+        self.gate_verdict_records
+            .iter()
+            .filter(|r| r.recorded_at >= cutoff)
+            .collect()
+    }
+
+    /// Deny+Escalate rate per artifact `Kind` over the given window, along
+    /// with the count of verdicts observed. Only kinds with at least
+    /// `min_samples` verdicts in the window appear in the output, so rates
+    /// aren't computed from noise.
+    ///
+    /// `Deny` and `Escalate` are both counted as "overrides" — the signal is
+    /// "rules rejecting proposed actions often enough that the policy is
+    /// worth revisiting," which both verdicts evidence.
+    pub fn override_rate_by_kind(
+        &self,
+        window: Duration,
+        min_samples: usize,
+    ) -> HashMap<Kind, (f64, usize, Vec<i64>)> {
+        let cutoff = Utc::now() - window;
+        let mut buckets: HashMap<Kind, Vec<&GateVerdictRecord>> = HashMap::new();
+        for record in self.gate_verdicts_since(cutoff) {
+            let Some(artifact) = self.artifacts.get(record.artifact_id.as_str()) else {
+                continue;
+            };
+            buckets
+                .entry(artifact.kind.clone())
+                .or_default()
+                .push(record);
+        }
+
+        buckets
+            .into_iter()
+            .filter_map(|(kind, records)| {
+                if records.len() < min_samples {
+                    return None;
+                }
+                let total = records.len();
+                let overrides = records
+                    .iter()
+                    .filter(|r| {
+                        matches!(r.verdict, VerdictSummary::Deny | VerdictSummary::Escalate)
+                    })
+                    .count();
+                // Evidence event-ids: the most recent override verdicts. Ordering
+                // by event_id descending matches "most recent first" (spine ids
+                // are monotonic) without needing to resort by timestamp.
+                let mut override_ids: Vec<i64> = records
+                    .iter()
+                    .filter(|r| {
+                        matches!(r.verdict, VerdictSummary::Deny | VerdictSummary::Escalate)
+                    })
+                    .map(|r| r.event_id)
+                    .collect();
+                override_ids.sort_unstable_by(|a, b| b.cmp(a));
+                override_ids.truncate(5);
+                let rate = overrides as f64 / total as f64;
+                Some((kind, (rate, total, override_ids)))
+            })
+            .collect()
     }
 
     /// Get shaping records for a specific artifact.
@@ -314,5 +410,101 @@ mod tests {
         let model = FactoryModel::new();
         let id = ArtifactId::new("art_nonexistent");
         assert!((model.failure_rate(&id, 5)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn ingests_gate_verdict_records() {
+        let mut model = FactoryModel::new();
+        let id = ArtifactId::new("art_gv1");
+
+        model.ingest(
+            1,
+            &FactoryEventKind::ArtifactRegistered {
+                artifact_id: id.clone(),
+                kind: Kind::Code,
+                name: "svc".into(),
+                owner: "marvin".into(),
+            },
+        );
+        model.ingest(
+            2,
+            &FactoryEventKind::ForgeGateVerdict {
+                artifact_id: id.clone(),
+                gate_point: GatePoint::PreDispatch,
+                verdict: VerdictSummary::Deny,
+            },
+        );
+
+        assert_eq!(model.gate_verdict_records.len(), 1);
+        assert_eq!(model.gate_verdict_records[0].event_id, 2);
+        assert_eq!(model.gate_verdict_records[0].verdict, VerdictSummary::Deny);
+    }
+
+    #[test]
+    fn override_rate_groups_by_kind_and_respects_min_samples() {
+        let mut model = FactoryModel::new();
+
+        // Kind::Code: 4 deny + 1 allow = 80% override (meets min_samples=3).
+        let code_id = ArtifactId::new("art_code");
+        model.ingest(
+            1,
+            &FactoryEventKind::ArtifactRegistered {
+                artifact_id: code_id.clone(),
+                kind: Kind::Code,
+                name: "svc".into(),
+                owner: "marvin".into(),
+            },
+        );
+        for (i, verdict) in [
+            VerdictSummary::Deny,
+            VerdictSummary::Deny,
+            VerdictSummary::Deny,
+            VerdictSummary::Allow,
+            VerdictSummary::Deny,
+        ]
+        .iter()
+        .enumerate()
+        {
+            model.ingest(
+                i as i64 + 100,
+                &FactoryEventKind::ForgeGateVerdict {
+                    artifact_id: code_id.clone(),
+                    gate_point: GatePoint::PreDispatch,
+                    verdict: verdict.clone(),
+                },
+            );
+        }
+
+        // Kind::Document: 1 deny only (below default min_samples=3 — filtered).
+        let doc_id = ArtifactId::new("art_doc");
+        model.ingest(
+            50,
+            &FactoryEventKind::ArtifactRegistered {
+                artifact_id: doc_id.clone(),
+                kind: Kind::Document,
+                name: "readme".into(),
+                owner: "marvin".into(),
+            },
+        );
+        model.ingest(
+            51,
+            &FactoryEventKind::ForgeGateVerdict {
+                artifact_id: doc_id,
+                gate_point: GatePoint::StateTransition,
+                verdict: VerdictSummary::Deny,
+            },
+        );
+
+        let rates = model.override_rate_by_kind(Duration::days(7), 3);
+        assert!(rates.contains_key(&Kind::Code), "code must be present");
+        assert!(
+            !rates.contains_key(&Kind::Document),
+            "document under min_samples must be dropped"
+        );
+        let (rate, total, evidence) = &rates[&Kind::Code];
+        assert_eq!(*total, 5);
+        assert!((rate - 0.8).abs() < 1e-9);
+        assert!(!evidence.is_empty());
+        assert!(evidence.windows(2).all(|w| w[0] >= w[1]), "evidence sorted");
     }
 }

@@ -21,6 +21,7 @@ use onsager_spine::factory_event::{GatePoint, ShapingOutcome, VerdictSummary};
 use onsager_warehouse::{Outputs, SealError, SealRequest, Warehouse};
 
 use super::artifact_store::ArtifactStore;
+use super::insight_cache::InsightCache;
 use super::kernel::{SchedulingKernel, WorldState};
 use super::state::ForgeState;
 
@@ -171,6 +172,11 @@ pub struct ForgePipeline<S: StiglabDispatcher, G: SynodicGate> {
     /// successful `Released` transitions (warehouse-and-delivery-v0.1 §5.1).
     /// Absent in legacy deployments; seals are skipped in that case.
     warehouse: Option<Box<dyn SealSink>>,
+    /// Shared cache of the most recent Ising insights (issue #36). The cache
+    /// is an `Arc<Mutex<...>>` so the ising listener can push to it without
+    /// holding the pipeline lock. Always present — the default cache is
+    /// empty, which preserves the pre-issue-#36 behavior.
+    insights: InsightCache,
 }
 
 impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
@@ -181,6 +187,7 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
             stiglab,
             synodic,
             warehouse: None,
+            insights: InsightCache::default(),
         }
     }
 
@@ -189,6 +196,19 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
     pub fn with_warehouse(mut self, warehouse: Box<dyn SealSink>) -> Self {
         self.warehouse = Some(warehouse);
         self
+    }
+
+    /// Attach a shared [`InsightCache`]. Hand the same clone to the
+    /// ising-event listener so insights flow into `WorldState.insights`.
+    pub fn with_insight_cache(mut self, insights: InsightCache) -> Self {
+        self.insights = insights;
+        self
+    }
+
+    /// Clone of the shared insight cache — used by the serve binary to hand
+    /// the same backing store to the ising event listener.
+    pub fn insight_cache(&self) -> InsightCache {
+        self.insights.clone()
     }
 
     /// Execute one tick of the scheduling loop.
@@ -200,10 +220,12 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
             return output;
         }
 
-        // Build world state.
+        // Build world state. `insights` is populated from the shared cache
+        // the ising-event listener writes into (issue #36); the vec was
+        // previously hardcoded empty.
         let world = WorldState {
             artifacts: self.store.active_artifacts().into_iter().cloned().collect(),
-            insights: vec![],
+            insights: self.insights.recent(),
             in_flight_count: 0,
             max_in_flight: 5,
         };
@@ -481,6 +503,56 @@ mod tests {
                 reason: "policy violation".into(),
             }
         }
+    }
+
+    /// Mock kernel that snapshots the `WorldState.insights` it sees on every
+    /// call. Tests use this to verify the pipeline threads insights from
+    /// the shared cache into the scheduling kernel (issue #36).
+    struct CapturingKernel {
+        seen: std::sync::Mutex<Vec<Vec<onsager_protocol::Insight>>>,
+    }
+    impl SchedulingKernel for CapturingKernel {
+        fn decide(&self, world: &WorldState) -> Option<ShapingDecision> {
+            self.seen.lock().unwrap().push(world.insights.clone());
+            // Return None so the tick ends early; we only care about what the
+            // kernel observed, not about driving a full lifecycle.
+            None
+        }
+        fn observe(&mut self, _event: &onsager_spine::factory_event::FactoryEvent) {}
+    }
+
+    #[test]
+    fn tick_feeds_insight_cache_into_world_state() {
+        use onsager_protocol::{FactoryEventRef, Insight};
+        use onsager_spine::{InsightKind, InsightScope};
+
+        let cache = InsightCache::default();
+        cache.push(Insight {
+            insight_id: "ins_1".into(),
+            kind: InsightKind::Failure,
+            scope: InsightScope::ArtifactKind("code".into()),
+            observation: "many overrides".into(),
+            evidence: vec![FactoryEventRef {
+                event_id: 7,
+                event_type: "forge.gate_verdict".into(),
+            }],
+            suggested_action: None,
+            confidence: 0.8,
+        });
+
+        let mut pipeline =
+            ForgePipeline::new(MockStiglab, MockSynodicAllow).with_insight_cache(cache.clone());
+        pipeline.store.register(Kind::Code, "x", "marvin");
+
+        let kernel = CapturingKernel {
+            seen: Default::default(),
+        };
+        pipeline.tick(&kernel);
+
+        let seen = kernel.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].len(), 1);
+        assert_eq!(seen[0][0].insight_id, "ins_1");
     }
 
     #[test]
