@@ -102,21 +102,21 @@ The linked spec issue's status label should always reflect reality:
 |------------|---------------|--------------|
 | `draft` | AI/human-drafted, not yet reviewed | Human (via `planned` move) |
 | `planned` | Ready for implementation | Human (alignment gate) |
-| `in-progress` | At least one open PR | `pr-opened-progress` routine |
+| `in-progress` | At least one open PR | `pr-spec-sync` workflow |
 | closed | Delivered, tests passing | GitHub (via `Closes` keyword on merge) |
 
-**If Claude Routines are configured** (see `.claude/routines/`), these
-transitions happen automatically on PR events:
+These transitions happen automatically:
 
-- PR open → `planned` becomes `in-progress`.
-- PR closed unmerged with no other open PR → reverts to `planned`.
+- PR open → `planned` becomes `in-progress` (via `pr-spec-sync.yml`).
+- PR closed unmerged with no other open PR → reverts to `planned` (via
+  `pr-spec-sync.yml`).
 - PR merged with `Closes #N` → issue auto-closes (GitHub).
-- PR merged with `Part of #N` → Plan checkboxes tick on the parent spec.
+- PR merged with `Part of #N` → Plan checkboxes tick on the parent spec
+  (via the `pr-merged-progress` Claude routine, if configured).
 
-**If routines are NOT configured**, you are responsible for the manual
-transitions. On PR open, flip the linked spec's label via
-`mcp__github__issue_write`. On merge, either GitHub auto-closes (for
-`Closes`) or tick checkboxes on the parent spec manually.
+**If the `pr-merged-progress` routine is NOT configured**, you are
+responsible for ticking Plan checkboxes on parent specs after merge. The
+label flips on open/close-unmerged always happen via the workflow.
 
 Never bypass the `draft → planned` gate from within this skill — that's a
 human decision. If the linked spec is still `draft`, comment on the PR

@@ -1,0 +1,126 @@
+name: pr-spec-sync
+
+# Keep linked spec-issue labels in sync with PR state without burning
+# Claude routine quota. Replaces the `pr-opened-progress` and
+# `pr-closed-unmerged` routines with deterministic GitHub Actions logic.
+# The merged-PR path still needs LLM judgment (Plan-checkbox mapping,
+# umbrella refresh, implicit-reference audit) and stays in the
+# `pr-merged-progress` routine.
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const action = context.payload.action;
+            const prNum = pr.number;
+            const body = pr.body || '';
+
+            const closingRe = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b/gi;
+            const refRe = /\b(?:part\s+of|refs|related)\s+#(\d+)\b/gi;
+            const grab = (re) => {
+              const out = new Set();
+              let m;
+              while ((m = re.exec(body))) out.add(parseInt(m[1], 10));
+              return [...out];
+            };
+            const linked = [...new Set([...grab(closingRe), ...grab(refRe)])];
+
+            // Hidden HTML marker lets re-runs skip comments they already posted.
+            const marker = (tag) => `<!-- pr-spec-sync:${tag} -->`;
+            const postComment = async (issueNum, tag, text) => {
+              const { data: comments } = await github.rest.issues.listComments({
+                ...context.repo, issue_number: issueNum, per_page: 100,
+              });
+              if (comments.some(c => (c.body || '').includes(marker(tag)))) return;
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: issueNum,
+                body: `${marker(tag)}\n${text}`,
+              });
+            };
+            const swapLabel = async (issueNum, add, remove) => {
+              await github.rest.issues.addLabels({
+                ...context.repo, issue_number: issueNum, labels: [add],
+              });
+              try {
+                await github.rest.issues.removeLabel({
+                  ...context.repo, issue_number: issueNum, name: remove,
+                });
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+            };
+
+            if (action === 'opened' || action === 'ready_for_review') {
+              if (linked.length === 0) {
+                if (!pr.labels.some(l => l.name === 'trivial')) {
+                  await postComment(prNum, 'no-spec-link',
+                    "This PR does not link a spec issue. Per the Onsager dev process, please either:\n" +
+                    "- Edit the PR body to add `Closes #N` or `Part of #N` pointing at a spec issue, or\n" +
+                    "- Apply the `trivial` label if this is a typo/doc-only fix that doesn't warrant a spec.\n\n" +
+                    "See the `onsager-dev-process` and `issue-spec` skills for details.");
+                }
+                return;
+              }
+              for (const n of linked) {
+                let issue;
+                try {
+                  ({ data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: n }));
+                } catch (e) {
+                  core.warning(`Could not read #${n}: ${e.message}`);
+                  continue;
+                }
+                const names = issue.labels.map(l => l.name);
+                if (names.includes('draft')) {
+                  await postComment(prNum, `draft-${n}`,
+                    `Linked spec #${n} is still in \`draft\` — it hasn't passed human-AI alignment. ` +
+                    `A maintainer should move it to \`planned\` before this PR merges.`);
+                } else if (names.includes('planned')) {
+                  await swapLabel(n, 'in-progress', 'planned');
+                  await postComment(n, `in-progress-${prNum}`,
+                    `PR #${prNum} opened; transitioning to \`in-progress\`.`);
+                } else if (names.includes('in-progress')) {
+                  await postComment(n, `additional-${prNum}`,
+                    `Additional PR #${prNum} attached to this spec.`);
+                }
+              }
+              return;
+            }
+
+            if (action === 'closed' && !pr.merged) {
+              if (linked.length === 0) return;
+              const { data: openPRs } = await github.rest.pulls.list({
+                ...context.repo, state: 'open', per_page: 100,
+              });
+              for (const n of linked) {
+                let issue;
+                try {
+                  ({ data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: n }));
+                } catch (e) {
+                  core.warning(`Could not read #${n}: ${e.message}`);
+                  continue;
+                }
+                if (issue.state !== 'open') continue;
+                if (!issue.labels.some(l => l.name === 'in-progress')) continue;
+                const issueRe = new RegExp(`#${n}\\b`);
+                const others = openPRs.filter(
+                  p => p.number !== prNum && issueRe.test(p.body || '')
+                );
+                if (others.length > 0) continue;
+                await swapLabel(n, 'planned', 'in-progress');
+                await postComment(n, `reverted-${prNum}`,
+                  `PR #${prNum} closed without merging. No other PRs in flight — spec returned to \`planned\`.`);
+              }
+            }

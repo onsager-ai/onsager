@@ -65,7 +65,7 @@ The `draft → planned` transition is the **human-AI alignment gate**. Only a hu
 - Design approach is approved
 - Scope and priority are accepted
 
-`planned → in-progress` happens automatically when a PR referencing the issue is opened (see the `pr-opened-progress` Claude Routine in `.claude/routines/`). If you're working without routines, flip the label manually when you open the PR.
+`planned → in-progress` happens automatically when a PR referencing the issue is opened (via `.github/workflows/pr-spec-sync.yml`).
 
 `in-progress → closed` happens automatically on PR merge with a `Closes #N` keyword. `Part of #N` PRs don't close the parent; the routine updates the parent's Plan checkboxes instead.
 

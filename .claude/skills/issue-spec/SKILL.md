@@ -194,7 +194,7 @@ open + draft  →  open + planned  →  open + in-progress  →  closed (complet
 
 - **draft**: Spec created, open questions may remain. AI wrote it, human hasn't reviewed.
 - **planned**: Human reviewed, decisions made, ready for implementation. Remove `draft`, add `planned`.
-- **in-progress**: Someone/something is actively working (PR opened). Remove `planned`, add `in-progress`. The `pr-opened-progress` Claude Routine automates this transition on PR open when configured; otherwise flip manually per `onsager-pr-lifecycle`.
+- **in-progress**: Someone/something is actively working (PR opened). Remove `planned`, add `in-progress`. The `pr-spec-sync.yml` GitHub Actions workflow automates this transition on PR open.
 - **closed**: All plan items done, tests passing. PR merge with `Closes #N` closes it automatically.
 
 **Key rule**: `draft → planned` is the human-AI alignment gate. A spec moves to `planned` only after a human reviews it and resolves open questions. The AI does not flip this label unprompted.
@@ -238,7 +238,7 @@ Once a spec moves to `planned`:
 2. Follow the SDD loop in `onsager-dev-process`.
 3. Pre-push via `onsager-pre-push` (includes a spec-link check).
 4. PR body must include `Closes #N` (slice complete) or `Part of #N` (scaffolding).
-5. The `pr-opened-progress` routine flips the issue to `in-progress` on PR open (or `onsager-pr-lifecycle` covers the manual fallback); the `pr-merged-progress` routine handles merge.
+5. The `pr-spec-sync.yml` workflow flips the issue to `in-progress` on PR open; the `pr-merged-progress` routine handles merge.
 
 ## References
 

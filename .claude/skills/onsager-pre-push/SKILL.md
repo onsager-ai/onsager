@@ -19,7 +19,7 @@ insufficient. Skipping this checklist is how we got three red CI runs in a row.
 
 The spec-link step enforces "no PR without a spec or a `trivial` label" at
 push time, before the PR is open — so the author sees the problem locally
-instead of hearing about it from `pr-opened-progress` after the fact.
+instead of hearing about it from `pr-spec-sync` after the fact.
 
 ## Steps
 
@@ -172,7 +172,7 @@ something is interfering with rustfmt (rare — usually a tool config drift).
 
 Before pushing, confirm this branch corresponds to a known spec issue (or
 is explicitly trivial). This is the local counterpart to the
-`pr-opened-progress` routine — catching the miss here avoids a round-trip.
+`pr-spec-sync` workflow — catching the miss here avoids a round-trip.
 
 1. **Find the spec issue.** Search open issues with the `spec` label
    whose title or body matches the branch's purpose:
@@ -239,9 +239,8 @@ git push -u origin <branch>
 Retry up to 4 times with exponential backoff on transient network errors.
 **Never** use `--force` on main or long-lived branches without explicit ask.
 
-After push, the `pr-opened-progress` routine (if configured) will flip the
-linked spec to `in-progress` automatically. If routines aren't configured,
-do it manually via `onsager-pr-lifecycle`.
+After push, the `pr-spec-sync.yml` workflow flips the linked spec to
+`in-progress` automatically on PR open.
 
 ## Fast path
 
