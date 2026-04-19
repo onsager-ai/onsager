@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Trash2, Plus, KeyRound, User } from "lucide-react"
+import { WorkspacesCard } from "@/components/settings/WorkspacesCard"
 
 const KNOWN_CREDENTIALS = [
   {
@@ -94,6 +95,9 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Workspaces */}
+      <WorkspacesCard />
 
       {/* Credentials */}
       <Card>

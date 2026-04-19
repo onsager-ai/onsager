@@ -102,7 +102,52 @@ pub async fn create_task(
         Some(auth_user.user_id.as_str())
     };
 
-    if let Err(e) = db::insert_session_with_user(&state.db, &session, user_id).await {
+    // Validate project membership if the caller scoped the session to a
+    // tenant-owned project (issue #59). Non-members get 404 via
+    // `assert_tenant_member` so project IDs can't be enumerated.
+    if let Some(ref project_id) = request.project_id {
+        let Some(caller_id) = user_id else {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "authentication required to scope a session to a project"
+                })),
+            )
+                .into_response();
+        };
+        let project = match db::get_project(&state.db, project_id).await {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "project not found" })),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                tracing::error!("failed to look up project: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+            }
+        };
+        if let Err(r) = crate::server::routes::tenants::assert_tenant_member(
+            &state.db,
+            caller_id,
+            &project.tenant_id,
+        )
+        .await
+        {
+            return r;
+        }
+    }
+
+    if let Err(e) = db::insert_session_with_user_and_project(
+        &state.db,
+        &session,
+        user_id,
+        request.project_id.as_deref(),
+    )
+    .await
+    {
         tracing::error!("failed to insert session: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }

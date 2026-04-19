@@ -54,6 +54,7 @@ export interface TaskRequest {
   working_dir?: string;
   allowed_tools?: string[];
   max_turns?: number;
+  project_id?: string;
 }
 
 export interface User {
@@ -67,6 +68,43 @@ export interface Credential {
   name: string;
   created_at: string;
   updated_at: string;
+}
+
+// Workspace (tenant) / membership / GitHub App installation / project
+// types, issue #59 (Phase 0).
+export interface Workspace {
+  id: string;
+  slug: string;
+  name: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface WorkspaceMember {
+  tenant_id: string;
+  user_id: string;
+  joined_at: string;
+}
+
+export type GitHubAccountType = 'user' | 'organization';
+
+export interface GitHubAppInstallation {
+  id: string;
+  tenant_id: string;
+  install_id: number;
+  account_login: string;
+  account_type: GitHubAccountType;
+  created_at: string;
+}
+
+export interface Project {
+  id: string;
+  tenant_id: string;
+  github_app_installation_id: string;
+  repo_owner: string;
+  repo_name: string;
+  default_branch: string;
+  created_at: string;
 }
 
 // Governance types (proxied to synodic via /api/governance/*)
@@ -244,6 +282,63 @@ export const api = {
     }),
   deleteCredential: (name: string) =>
     request<{ ok: boolean }>(`/credentials/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+  // Workspaces / tenants (issue #59)
+  listWorkspaces: () => request<{ tenants: Workspace[] }>('/tenants'),
+  createWorkspace: (body: { slug: string; name: string }) =>
+    request<{ tenant: Workspace }>('/tenants', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  getWorkspace: (id: string) =>
+    request<{ tenant: Workspace }>(`/tenants/${encodeURIComponent(id)}`),
+  listWorkspaceMembers: (id: string) =>
+    request<{ members: WorkspaceMember[] }>(
+      `/tenants/${encodeURIComponent(id)}/members`,
+    ),
+  listWorkspaceInstallations: (id: string) =>
+    request<{ installations: GitHubAppInstallation[] }>(
+      `/tenants/${encodeURIComponent(id)}/github-installations`,
+    ),
+  registerWorkspaceInstallation: (
+    id: string,
+    body: {
+      install_id: number;
+      account_login: string;
+      account_type: GitHubAccountType;
+      webhook_secret?: string;
+    },
+  ) =>
+    request<{ installation: GitHubAppInstallation }>(
+      `/tenants/${encodeURIComponent(id)}/github-installations`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  deleteWorkspaceInstallation: (tenantId: string, installId: string) =>
+    request<{ ok: boolean }>(
+      `/tenants/${encodeURIComponent(tenantId)}/github-installations/${encodeURIComponent(installId)}`,
+      { method: 'DELETE' },
+    ),
+  listWorkspaceProjects: (id: string) =>
+    request<{ projects: Project[] }>(
+      `/tenants/${encodeURIComponent(id)}/projects`,
+    ),
+  addWorkspaceProject: (
+    id: string,
+    body: {
+      github_app_installation_id: string;
+      repo_owner: string;
+      repo_name: string;
+      default_branch?: string;
+    },
+  ) =>
+    request<{ project: Project }>(
+      `/tenants/${encodeURIComponent(id)}/projects`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  listAllProjects: () => request<{ projects: Project[] }>('/projects'),
+  deleteProject: (id: string) =>
+    request<{ ok: boolean }>(`/projects/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
   // Governance (proxied to synodic)

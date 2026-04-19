@@ -1,18 +1,26 @@
 pub mod adapter;
 pub mod error;
 pub mod event;
+pub mod github_app_installation;
 pub mod node;
+pub mod project;
 pub mod protocol;
 pub mod session;
 pub mod task;
+pub mod tenant;
+pub mod tenant_member;
 pub mod user;
 
 pub use error::StiglabError;
 pub use event::Event;
+pub use github_app_installation::{GitHubAccountType, GitHubAppInstallation};
 pub use node::{Node, NodeInfo, NodeStatus};
+pub use project::Project;
 pub use protocol::{AgentMessage, ServerMessage};
 pub use session::{Session, SessionState};
 pub use task::{Task, TaskRequest};
+pub use tenant::Tenant;
+pub use tenant_member::TenantMember;
 pub use user::User;
 
 #[cfg(test)]
@@ -98,5 +106,29 @@ mod tests {
             ServerMessage::Registered { node_id } => assert_eq!(node_id, "node-1"),
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn test_github_account_type_display_and_parse() {
+        assert_eq!(GitHubAccountType::User.to_string(), "user");
+        assert_eq!(GitHubAccountType::Organization.to_string(), "organization");
+        assert_eq!(
+            "user".parse::<GitHubAccountType>().unwrap(),
+            GitHubAccountType::User
+        );
+        assert_eq!(
+            "Organization".parse::<GitHubAccountType>().unwrap(),
+            GitHubAccountType::Organization
+        );
+        assert!("bot".parse::<GitHubAccountType>().is_err());
+    }
+
+    #[test]
+    fn test_github_account_type_serde() {
+        let user = GitHubAccountType::User;
+        let json = serde_json::to_string(&user).unwrap();
+        assert_eq!(json, "\"user\"");
+        let parsed: GitHubAccountType = serde_json::from_str("\"organization\"").unwrap();
+        assert_eq!(parsed, GitHubAccountType::Organization);
     }
 }

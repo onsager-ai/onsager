@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use crate::core::{Node, NodeStatus, Session, SessionState, User};
+use crate::core::{
+    GitHubAppInstallation, Node, NodeStatus, Project, Session, SessionState, Tenant, TenantMember,
+    User,
+};
 use chrono::Utc;
 use sqlx::pool::PoolOptions;
 use sqlx::AnyPool;
@@ -187,6 +190,87 @@ async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     )
     .execute(pool)
     .await?;
+
+    // ── Tenant / membership / GitHub App / project tables (issue #59) ──
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS tenants (
+            id TEXT PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS tenant_members (
+            tenant_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            joined_at TEXT NOT NULL,
+            PRIMARY KEY (tenant_id, user_id)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_tenant_members_user_id ON tenant_members (user_id)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS github_app_installations (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            install_id BIGINT NOT NULL UNIQUE,
+            account_login TEXT NOT NULL,
+            account_type TEXT NOT NULL,
+            webhook_secret_cipher TEXT,
+            created_at TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_github_app_installations_tenant_id \
+         ON github_app_installations (tenant_id)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            github_app_installation_id TEXT NOT NULL,
+            repo_owner TEXT NOT NULL,
+            repo_name TEXT NOT NULL,
+            default_branch TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(tenant_id, repo_owner, repo_name)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_projects_tenant_id ON projects (tenant_id)")
+        .execute(pool)
+        .await?;
+
+    // Attach sessions to projects (nullable; pre-existing sessions stay personal).
+    // Same swallow-on-duplicate ALTER pattern as earlier migrations for
+    // cross-backend compatibility.
+    let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN project_id TEXT")
+        .execute(pool)
+        .await;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions (project_id)")
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
@@ -731,10 +815,23 @@ pub async fn insert_session_with_user(
     session: &Session,
     user_id: Option<&str>,
 ) -> anyhow::Result<()> {
+    insert_session_with_user_and_project(pool, session, user_id, None).await
+}
+
+/// Variant that also binds a `project_id` when the session is scoped to a
+/// tenant-owned project (issue #59). Pre-existing sessions with a null
+/// `project_id` remain personal sessions forever.
+pub async fn insert_session_with_user_and_project(
+    pool: &AnyPool,
+    session: &Session,
+    user_id: Option<&str>,
+    project_id: Option<&str>,
+) -> anyhow::Result<()> {
     sqlx::query(
         "INSERT INTO sessions (id, task_id, node_id, state, prompt, output, working_dir, \
-                               user_id, artifact_id, artifact_version, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                               user_id, project_id, artifact_id, artifact_version, \
+                               created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
     )
     .bind(&session.id)
     .bind(&session.task_id)
@@ -744,6 +841,7 @@ pub async fn insert_session_with_user(
     .bind(&session.output)
     .bind(&session.working_dir)
     .bind(user_id)
+    .bind(project_id)
     .bind(&session.artifact_id)
     .bind(session.artifact_version)
     .bind(session.created_at.to_rfc3339())
@@ -902,4 +1000,573 @@ struct UserCredentialRow {
 struct CredentialKvRow {
     name: String,
     encrypted_value: String,
+}
+
+// ── Tenant / membership / installation / project CRUD (issue #59) ──
+
+pub async fn insert_tenant(pool: &AnyPool, tenant: &Tenant) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO tenants (id, slug, name, created_by, created_at) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(&tenant.id)
+    .bind(&tenant.slug)
+    .bind(&tenant.name)
+    .bind(&tenant.created_by)
+    .bind(tenant.created_at.to_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_tenant(pool: &AnyPool, tenant_id: &str) -> anyhow::Result<Option<Tenant>> {
+    let row = sqlx::query_as::<_, TenantRow>(
+        "SELECT id, slug, name, created_by, created_at FROM tenants WHERE id = $1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(|r| r.try_into()).transpose()
+}
+
+pub async fn list_tenants_for_user(pool: &AnyPool, user_id: &str) -> anyhow::Result<Vec<Tenant>> {
+    let rows = sqlx::query_as::<_, TenantRow>(
+        "SELECT t.id, t.slug, t.name, t.created_by, t.created_at \
+         FROM tenants t \
+         JOIN tenant_members m ON t.id = m.tenant_id \
+         WHERE m.user_id = $1 \
+         ORDER BY t.created_at ASC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
+pub async fn insert_tenant_member(pool: &AnyPool, member: &TenantMember) -> anyhow::Result<()> {
+    sqlx::query("INSERT INTO tenant_members (tenant_id, user_id, joined_at) VALUES ($1, $2, $3)")
+        .bind(&member.tenant_id)
+        .bind(&member.user_id)
+        .bind(member.joined_at.to_rfc3339())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn is_tenant_member(
+    pool: &AnyPool,
+    tenant_id: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let row = sqlx::query_scalar::<_, String>(
+        "SELECT user_id FROM tenant_members WHERE tenant_id = $1 AND user_id = $2",
+    )
+    .bind(tenant_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.is_some())
+}
+
+pub async fn list_tenant_members(
+    pool: &AnyPool,
+    tenant_id: &str,
+) -> anyhow::Result<Vec<TenantMember>> {
+    let rows = sqlx::query_as::<_, TenantMemberRow>(
+        "SELECT tenant_id, user_id, joined_at \
+         FROM tenant_members WHERE tenant_id = $1 ORDER BY joined_at ASC",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
+pub async fn insert_github_app_installation(
+    pool: &AnyPool,
+    install: &GitHubAppInstallation,
+    webhook_secret_cipher: Option<&str>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO github_app_installations (id, tenant_id, install_id, account_login, \
+                                               account_type, webhook_secret_cipher, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(&install.id)
+    .bind(&install.tenant_id)
+    .bind(install.install_id)
+    .bind(&install.account_login)
+    .bind(install.account_type.to_string())
+    .bind(webhook_secret_cipher)
+    .bind(install.created_at.to_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn list_github_app_installations_for_tenant(
+    pool: &AnyPool,
+    tenant_id: &str,
+) -> anyhow::Result<Vec<GitHubAppInstallation>> {
+    let rows = sqlx::query_as::<_, GitHubAppInstallationRow>(
+        "SELECT id, tenant_id, install_id, account_login, account_type, created_at \
+         FROM github_app_installations WHERE tenant_id = $1 ORDER BY created_at ASC",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
+pub async fn get_github_app_installation(
+    pool: &AnyPool,
+    install_id: &str,
+) -> anyhow::Result<Option<GitHubAppInstallation>> {
+    let row = sqlx::query_as::<_, GitHubAppInstallationRow>(
+        "SELECT id, tenant_id, install_id, account_login, account_type, created_at \
+         FROM github_app_installations WHERE id = $1",
+    )
+    .bind(install_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(|r| r.try_into()).transpose()
+}
+
+pub async fn delete_github_app_installation(
+    pool: &AnyPool,
+    install_id: &str,
+) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM github_app_installations WHERE id = $1")
+        .bind(install_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn insert_project(pool: &AnyPool, project: &Project) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO projects (id, tenant_id, github_app_installation_id, repo_owner, \
+                               repo_name, default_branch, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(&project.id)
+    .bind(&project.tenant_id)
+    .bind(&project.github_app_installation_id)
+    .bind(&project.repo_owner)
+    .bind(&project.repo_name)
+    .bind(&project.default_branch)
+    .bind(project.created_at.to_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_project(pool: &AnyPool, project_id: &str) -> anyhow::Result<Option<Project>> {
+    let row = sqlx::query_as::<_, ProjectRow>(
+        "SELECT id, tenant_id, github_app_installation_id, repo_owner, repo_name, \
+                default_branch, created_at \
+         FROM projects WHERE id = $1",
+    )
+    .bind(project_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(|r| r.try_into()).transpose()
+}
+
+pub async fn list_projects_for_tenant(
+    pool: &AnyPool,
+    tenant_id: &str,
+) -> anyhow::Result<Vec<Project>> {
+    let rows = sqlx::query_as::<_, ProjectRow>(
+        "SELECT id, tenant_id, github_app_installation_id, repo_owner, repo_name, \
+                default_branch, created_at \
+         FROM projects WHERE tenant_id = $1 ORDER BY created_at ASC",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
+pub async fn list_projects_for_user(pool: &AnyPool, user_id: &str) -> anyhow::Result<Vec<Project>> {
+    let rows = sqlx::query_as::<_, ProjectRow>(
+        "SELECT p.id, p.tenant_id, p.github_app_installation_id, p.repo_owner, p.repo_name, \
+                p.default_branch, p.created_at \
+         FROM projects p \
+         JOIN tenant_members m ON p.tenant_id = m.tenant_id \
+         WHERE m.user_id = $1 \
+         ORDER BY p.created_at ASC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
+pub async fn delete_project(pool: &AnyPool, project_id: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM projects WHERE id = $1")
+        .bind(project_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Count sessions attached to a project that are not in a terminal state.
+/// Used to block project deletion while live sessions reference it (no
+/// cascade, no soft-delete in v1).
+pub async fn count_live_sessions_for_project(
+    pool: &AnyPool,
+    project_id: &str,
+) -> anyhow::Result<i64> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sessions \
+         WHERE project_id = $1 AND state NOT IN ('done', 'failed')",
+    )
+    .bind(project_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(count)
+}
+
+// ── Row types (Tenant / membership / installation / project) ──
+
+#[derive(sqlx::FromRow)]
+struct TenantRow {
+    id: String,
+    slug: String,
+    name: String,
+    created_by: String,
+    created_at: String,
+}
+
+impl TryFrom<TenantRow> for Tenant {
+    type Error = anyhow::Error;
+
+    fn try_from(row: TenantRow) -> anyhow::Result<Self> {
+        Ok(Tenant {
+            id: row.id,
+            slug: row.slug,
+            name: row.name,
+            created_by: row.created_by,
+            created_at: chrono::DateTime::parse_from_rfc3339(&row.created_at)?.with_timezone(&Utc),
+        })
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct TenantMemberRow {
+    tenant_id: String,
+    user_id: String,
+    joined_at: String,
+}
+
+impl TryFrom<TenantMemberRow> for TenantMember {
+    type Error = anyhow::Error;
+
+    fn try_from(row: TenantMemberRow) -> anyhow::Result<Self> {
+        Ok(TenantMember {
+            tenant_id: row.tenant_id,
+            user_id: row.user_id,
+            joined_at: chrono::DateTime::parse_from_rfc3339(&row.joined_at)?.with_timezone(&Utc),
+        })
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct GitHubAppInstallationRow {
+    id: String,
+    tenant_id: String,
+    install_id: i64,
+    account_login: String,
+    account_type: String,
+    created_at: String,
+}
+
+impl TryFrom<GitHubAppInstallationRow> for GitHubAppInstallation {
+    type Error = anyhow::Error;
+
+    fn try_from(row: GitHubAppInstallationRow) -> anyhow::Result<Self> {
+        Ok(GitHubAppInstallation {
+            id: row.id,
+            tenant_id: row.tenant_id,
+            install_id: row.install_id,
+            account_login: row.account_login,
+            account_type: row
+                .account_type
+                .parse()
+                .map_err(|e: crate::core::StiglabError| anyhow::anyhow!(e))?,
+            created_at: chrono::DateTime::parse_from_rfc3339(&row.created_at)?.with_timezone(&Utc),
+        })
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct ProjectRow {
+    id: String,
+    tenant_id: String,
+    github_app_installation_id: String,
+    repo_owner: String,
+    repo_name: String,
+    default_branch: String,
+    created_at: String,
+}
+
+impl TryFrom<ProjectRow> for Project {
+    type Error = anyhow::Error;
+
+    fn try_from(row: ProjectRow) -> anyhow::Result<Self> {
+        Ok(Project {
+            id: row.id,
+            tenant_id: row.tenant_id,
+            github_app_installation_id: row.github_app_installation_id,
+            repo_owner: row.repo_owner,
+            repo_name: row.repo_name,
+            default_branch: row.default_branch,
+            created_at: chrono::DateTime::parse_from_rfc3339(&row.created_at)?.with_timezone(&Utc),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{GitHubAccountType, Project, Session, SessionState, Tenant, TenantMember};
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    async fn test_pool() -> AnyPool {
+        sqlx::any::install_default_drivers();
+        let pool = PoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("failed to connect to sqlite in-memory");
+        run_migrations(&pool)
+            .await
+            .expect("migrations should succeed");
+        pool
+    }
+
+    async fn seed_user(pool: &AnyPool, user_id: &str) {
+        // Derive a stable non-colliding github_id from the user_id bytes.
+        let github_id: i64 = user_id.bytes().fold(0i64, |acc, b| acc * 131 + b as i64);
+        sqlx::query(
+            "INSERT INTO users (id, github_id, github_login, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $4)",
+        )
+        .bind(user_id)
+        .bind(github_id)
+        .bind(user_id)
+        .bind(Utc::now().to_rfc3339())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    fn new_tenant(created_by: &str) -> Tenant {
+        Tenant {
+            id: Uuid::new_v4().to_string(),
+            slug: format!("tenant-{}", Uuid::new_v4().simple()),
+            name: "Test Tenant".to_string(),
+            created_by: created_by.to_string(),
+            created_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn tenant_crud_roundtrip() {
+        let pool = test_pool().await;
+        seed_user(&pool, "u1").await;
+
+        let tenant = new_tenant("u1");
+        insert_tenant(&pool, &tenant).await.unwrap();
+
+        let fetched = get_tenant(&pool, &tenant.id).await.unwrap().unwrap();
+        assert_eq!(fetched.id, tenant.id);
+        assert_eq!(fetched.slug, tenant.slug);
+    }
+
+    #[tokio::test]
+    async fn membership_query_and_list_tenants_for_user() {
+        let pool = test_pool().await;
+        seed_user(&pool, "u1").await;
+        seed_user(&pool, "u2").await;
+
+        let t = new_tenant("u1");
+        insert_tenant(&pool, &t).await.unwrap();
+        insert_tenant_member(
+            &pool,
+            &TenantMember {
+                tenant_id: t.id.clone(),
+                user_id: "u1".to_string(),
+                joined_at: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(is_tenant_member(&pool, &t.id, "u1").await.unwrap());
+        assert!(!is_tenant_member(&pool, &t.id, "u2").await.unwrap());
+
+        let u1_tenants = list_tenants_for_user(&pool, "u1").await.unwrap();
+        assert_eq!(u1_tenants.len(), 1);
+        assert_eq!(u1_tenants[0].id, t.id);
+
+        let u2_tenants = list_tenants_for_user(&pool, "u2").await.unwrap();
+        assert!(u2_tenants.is_empty());
+    }
+
+    #[tokio::test]
+    async fn installation_and_project_crud() {
+        let pool = test_pool().await;
+        seed_user(&pool, "u1").await;
+        let t = new_tenant("u1");
+        insert_tenant(&pool, &t).await.unwrap();
+
+        let install = GitHubAppInstallation {
+            id: Uuid::new_v4().to_string(),
+            tenant_id: t.id.clone(),
+            install_id: 42,
+            account_login: "acme".to_string(),
+            account_type: GitHubAccountType::Organization,
+            created_at: Utc::now(),
+        };
+        insert_github_app_installation(&pool, &install, Some("ciphertext"))
+            .await
+            .unwrap();
+
+        let installs = list_github_app_installations_for_tenant(&pool, &t.id)
+            .await
+            .unwrap();
+        assert_eq!(installs.len(), 1);
+        assert_eq!(installs[0].install_id, 42);
+
+        let project = Project {
+            id: Uuid::new_v4().to_string(),
+            tenant_id: t.id.clone(),
+            github_app_installation_id: install.id.clone(),
+            repo_owner: "acme".to_string(),
+            repo_name: "widgets".to_string(),
+            default_branch: "main".to_string(),
+            created_at: Utc::now(),
+        };
+        insert_project(&pool, &project).await.unwrap();
+
+        let projects = list_projects_for_tenant(&pool, &t.id).await.unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].repo_name, "widgets");
+    }
+
+    #[tokio::test]
+    async fn delete_project_blocks_on_live_sessions() {
+        let pool = test_pool().await;
+        seed_user(&pool, "u1").await;
+        let t = new_tenant("u1");
+        insert_tenant(&pool, &t).await.unwrap();
+
+        let install = GitHubAppInstallation {
+            id: Uuid::new_v4().to_string(),
+            tenant_id: t.id.clone(),
+            install_id: 7,
+            account_login: "acme".to_string(),
+            account_type: GitHubAccountType::Organization,
+            created_at: Utc::now(),
+        };
+        insert_github_app_installation(&pool, &install, None)
+            .await
+            .unwrap();
+
+        let project = Project {
+            id: Uuid::new_v4().to_string(),
+            tenant_id: t.id.clone(),
+            github_app_installation_id: install.id.clone(),
+            repo_owner: "acme".to_string(),
+            repo_name: "widgets".to_string(),
+            default_branch: "main".to_string(),
+            created_at: Utc::now(),
+        };
+        insert_project(&pool, &project).await.unwrap();
+
+        let session = Session {
+            id: Uuid::new_v4().to_string(),
+            task_id: Uuid::new_v4().to_string(),
+            node_id: "node-1".to_string(),
+            state: SessionState::Running,
+            prompt: "hello".to_string(),
+            output: None,
+            working_dir: None,
+            artifact_id: None,
+            artifact_version: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        insert_session_with_user_and_project(&pool, &session, Some("u1"), Some(&project.id))
+            .await
+            .unwrap();
+
+        let live = count_live_sessions_for_project(&pool, &project.id)
+            .await
+            .unwrap();
+        assert_eq!(live, 1);
+
+        // Transition to a terminal state — live count should drop to zero.
+        update_session_state(&pool, &session.id, SessionState::Done)
+            .await
+            .unwrap();
+        let live = count_live_sessions_for_project(&pool, &project.id)
+            .await
+            .unwrap();
+        assert_eq!(live, 0);
+
+        delete_project(&pool, &project.id).await.unwrap();
+        assert!(get_project(&pool, &project.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn list_projects_for_user_follows_membership() {
+        let pool = test_pool().await;
+        seed_user(&pool, "u1").await;
+        seed_user(&pool, "u2").await;
+
+        let t1 = new_tenant("u1");
+        insert_tenant(&pool, &t1).await.unwrap();
+        insert_tenant_member(
+            &pool,
+            &TenantMember {
+                tenant_id: t1.id.clone(),
+                user_id: "u1".to_string(),
+                joined_at: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let install = GitHubAppInstallation {
+            id: Uuid::new_v4().to_string(),
+            tenant_id: t1.id.clone(),
+            install_id: 1,
+            account_login: "acme".to_string(),
+            account_type: GitHubAccountType::User,
+            created_at: Utc::now(),
+        };
+        insert_github_app_installation(&pool, &install, None)
+            .await
+            .unwrap();
+        let project = Project {
+            id: Uuid::new_v4().to_string(),
+            tenant_id: t1.id.clone(),
+            github_app_installation_id: install.id.clone(),
+            repo_owner: "acme".to_string(),
+            repo_name: "widgets".to_string(),
+            default_branch: "main".to_string(),
+            created_at: Utc::now(),
+        };
+        insert_project(&pool, &project).await.unwrap();
+
+        let u1_projects = list_projects_for_user(&pool, "u1").await.unwrap();
+        assert_eq!(u1_projects.len(), 1);
+
+        let u2_projects = list_projects_for_user(&pool, "u2").await.unwrap();
+        assert!(u2_projects.is_empty());
+    }
 }
