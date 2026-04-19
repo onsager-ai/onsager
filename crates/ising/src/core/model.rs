@@ -257,6 +257,66 @@ impl FactoryModel {
             .collect()
     }
 
+    /// Per-`Kind` average shaping attempts per artifact within `window`,
+    /// alongside the count of distinct artifacts contributing and a recent
+    /// evidence event-id list. Filters out kinds with fewer than
+    /// `min_artifacts` distinct artifacts so a single rework-heavy artifact
+    /// can't libel a kind on its own.
+    ///
+    /// "Retry spike" here means high *average* rework, not just one pathological
+    /// artifact — a kind whose decomposer or shaping rules are systematically
+    /// underspecified shows up as elevated rework across many artifacts at
+    /// once. The numerator counts every shaping attempt (Completed, Failed,
+    /// Partial, Aborted alike) because all of them indicate the agent had to
+    /// reshape the artifact at least once.
+    pub fn retry_spike_by_kind(
+        &self,
+        window: Duration,
+        min_artifacts: usize,
+    ) -> HashMap<Kind, (f64, usize, Vec<i64>)> {
+        let cutoff = Utc::now() - window;
+        let mut buckets: HashMap<Kind, HashMap<String, Vec<&ShapingRecord>>> = HashMap::new();
+
+        for record in &self.shaping_records {
+            if record.recorded_at < cutoff {
+                continue;
+            }
+            let Some(artifact) = self.artifacts.get(record.artifact_id.as_str()) else {
+                continue;
+            };
+            buckets
+                .entry(artifact.kind.clone())
+                .or_default()
+                .entry(record.artifact_id.as_str().to_owned())
+                .or_default()
+                .push(record);
+        }
+
+        buckets
+            .into_iter()
+            .filter_map(|(kind, by_artifact)| {
+                let artifact_count = by_artifact.len();
+                if artifact_count < min_artifacts {
+                    return None;
+                }
+                let total_shapings: usize = by_artifact.values().map(|recs| recs.len()).sum();
+                let avg = total_shapings as f64 / artifact_count as f64;
+
+                // Evidence: most recent shaping event ids across all artifacts
+                // of this kind. Sorted by id desc (monotonic on the spine) so
+                // the dashboard surfaces the freshest rework first.
+                let mut evidence: Vec<i64> = by_artifact
+                    .values()
+                    .flat_map(|recs| recs.iter().map(|r| r.event_id))
+                    .collect();
+                evidence.sort_unstable_by(|a, b| b.cmp(a));
+                evidence.truncate(5);
+
+                Some((kind, (avg, artifact_count, evidence)))
+            })
+            .collect()
+    }
+
     /// Get shaping records for a specific artifact kind.
     pub fn shaping_history_by_kind(
         &self,
@@ -500,6 +560,119 @@ mod tests {
         // But a wide-enough window should pick them back up.
         let rates_wide = model.override_rate_by_kind(Duration::days(60), 3);
         assert!(rates_wide.contains_key(&Kind::Code));
+    }
+
+    #[test]
+    fn retry_spike_groups_by_kind_and_respects_min_artifacts() {
+        let mut model = FactoryModel::new();
+        let mut seq = 1i64;
+
+        // Kind::Code: 3 artifacts × 5 shapings = avg 5.0 (meets min_artifacts=2).
+        for n in 0..3 {
+            let id = ArtifactId::new(format!("art_code_{n}"));
+            model.ingest(
+                seq,
+                &FactoryEventKind::ArtifactRegistered {
+                    artifact_id: id.clone(),
+                    kind: Kind::Code,
+                    name: "svc".into(),
+                    owner: "marvin".into(),
+                },
+            );
+            seq += 1;
+            for _ in 0..5 {
+                model.ingest(
+                    seq,
+                    &FactoryEventKind::ForgeShapingReturned {
+                        request_id: format!("req_{seq}"),
+                        artifact_id: id.clone(),
+                        outcome: ShapingOutcome::Partial,
+                    },
+                );
+                seq += 1;
+            }
+        }
+
+        // Kind::Document: 1 artifact only — under min_artifacts=2, must drop.
+        let doc = ArtifactId::new("art_doc_0");
+        model.ingest(
+            seq,
+            &FactoryEventKind::ArtifactRegistered {
+                artifact_id: doc.clone(),
+                kind: Kind::Document,
+                name: "readme".into(),
+                owner: "marvin".into(),
+            },
+        );
+        seq += 1;
+        for _ in 0..10 {
+            model.ingest(
+                seq,
+                &FactoryEventKind::ForgeShapingReturned {
+                    request_id: format!("req_{seq}"),
+                    artifact_id: doc.clone(),
+                    outcome: ShapingOutcome::Partial,
+                },
+            );
+            seq += 1;
+        }
+
+        let spikes = model.retry_spike_by_kind(Duration::days(7), 2);
+        assert!(spikes.contains_key(&Kind::Code), "code must be present");
+        assert!(
+            !spikes.contains_key(&Kind::Document),
+            "document under min_artifacts must be dropped",
+        );
+        let (avg, artifact_count, evidence) = &spikes[&Kind::Code];
+        assert!((avg - 5.0).abs() < 1e-9);
+        assert_eq!(*artifact_count, 3);
+        assert!(!evidence.is_empty() && evidence.len() <= 5);
+        assert!(
+            evidence.windows(2).all(|w| w[0] >= w[1]),
+            "evidence must be sorted by event_id desc",
+        );
+    }
+
+    #[test]
+    fn retry_spike_window_excludes_stale_records() {
+        // Mirrors override_rate_window_uses_event_time — historical records
+        // re-ingested with explicit timestamps must be excluded from a
+        // tighter window.
+        let mut model = FactoryModel::new();
+        let stale = Utc::now() - Duration::days(30);
+        let mut seq = 1i64;
+        for n in 0..3 {
+            let id = ArtifactId::new(format!("art_code_old_{n}"));
+            model.ingest_at(
+                seq,
+                stale,
+                &FactoryEventKind::ArtifactRegistered {
+                    artifact_id: id.clone(),
+                    kind: Kind::Code,
+                    name: "svc".into(),
+                    owner: "marvin".into(),
+                },
+            );
+            seq += 1;
+            for _ in 0..5 {
+                model.ingest_at(
+                    seq,
+                    stale,
+                    &FactoryEventKind::ForgeShapingReturned {
+                        request_id: format!("req_{seq}"),
+                        artifact_id: id.clone(),
+                        outcome: ShapingOutcome::Partial,
+                    },
+                );
+                seq += 1;
+            }
+        }
+
+        let recent = model.retry_spike_by_kind(Duration::days(7), 2);
+        assert!(recent.is_empty(), "stale shapings must be dropped");
+
+        let wide = model.retry_spike_by_kind(Duration::days(60), 2);
+        assert!(wide.contains_key(&Kind::Code));
     }
 
     #[test]
