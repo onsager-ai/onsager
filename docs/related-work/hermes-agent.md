@@ -5,7 +5,7 @@ Onsager positioning. Not a product review.*
 
 ## Summary
 
-Hermes Agent (Nous Research, MIT, released Feb 2026) is an open-source
+Hermes Agent (Nous Research, MIT-licensed, released Feb 2026) is an open-source
 self-improving personal agent that lives on a server, hooks into 15+
 messaging platforms through a single gateway, and accumulates both
 episodic memory and procedural skills across sessions. Its design
@@ -31,7 +31,7 @@ and which surface as concrete backlog items.
 | Gateway              | 15+ messaging platforms, single process                          | External consumer surface (e.g. Telegramable, outside the monorepo) |
 | Target user          | Individual operator                                              | Team / factory operator                                             |
 | Cost model           | Per-user OpenRouter / local                                      | Per-session `TokenUsage` on spine, aggregatable                     |
-| Scheduling           | Natural-language cron                                            | Forge `SchedulingKernel` trait + WorldState                         |
+| Scheduling           | Natural-language cron                                            | Forge `SchedulingKernel` trait + `WorldState`                       |
 | Intent layer         | None (user prompts directly)                                     | Refract (`Intent` → artifact tree via `Decomposer`)                 |
 
 ## Where Onsager already solves a Hermes pain point
@@ -56,7 +56,7 @@ and which surface as concrete backlog items.
    orders of magnitude with no factory-level aggregation. Onsager has
    `StiglabSessionCompleted.token_usage` on the spine and a `SpendCard`
    in the dashboard; the budget primitive (#39) is scoped but not yet
-   first-class. See the tracking issue on elevating this.
+   first-class. See #55 for the tracking issue on elevating this.
 
 ## Non-overlap (deliberately)
 
@@ -78,9 +78,10 @@ and which surface as concrete backlog items.
    `WorldState.insights` inside the Forge kernel when the insight set
    grows beyond trivial: index in `decide()`'s input, body fetched
    lazily by analyzer.
-1. **FTS5 + LLM summarization for event recall.** A lightweight recall
-   layer over `events_ext` — full-text index + LLM-summarized chunks —
-   is a natural addition to Ising as an analyzer when the event volume
+1. **Postgres full-text search or an external recall index + LLM
+   summarization for event recall.** A lightweight recall layer over
+   `events_ext` — full-text index + LLM-summarized chunks — is a
+   natural addition to Ising as an analyzer when the event volume
    outgrows in-memory scans.
 1. **Honcho-style passive user modeling.** Not applicable at the
    factory layer, but worth considering inside a single Stiglab session
@@ -88,7 +89,7 @@ and which surface as concrete backlog items.
 
 ## Watch items
 
-- **`agentskills.io` as de-facto standard.** If the skill exchange
+- **`agentskills.io` as de facto standard.** If the skill exchange
   format stabilizes, Onsager's `skills/` artifacts (and the
   `skill-evolver` outputs) should emit in a compatible schema to stay
   interoperable.
@@ -108,7 +109,8 @@ and which surface as concrete backlog items.
   as an external consumer of the spine, not as a subsystem.
 - ADR 0001 sync-RPC retirement is parked as a parallel track behind
   the #36 feedback-loop work. New cross-subsystem request/response
-  types must not land in `onsager-protocol`; see the tracking issue.
+  types must not land in `onsager-protocol`; see #53 for the tracking
+  issue.
 
 ## References
 
