@@ -59,9 +59,12 @@ pub struct TrackedArtifact {
 pub struct FactoryModel {
     /// Tracked artifacts by ID.
     pub artifacts: HashMap<String, TrackedArtifact>,
-    /// Recent shaping records (bounded by retention window).
+    /// Shaping records observed by the model (no retention trimming here —
+    /// the ingest caller is responsible for windowing, e.g. via the serve
+    /// loop's event-fetch cutoff).
     pub shaping_records: Vec<ShapingRecord>,
-    /// Recent gate verdict records (bounded by retention window).
+    /// Gate verdict records observed by the model (same retention contract
+    /// as `shaping_records`).
     pub gate_verdict_records: Vec<GateVerdictRecord>,
     /// Total events processed.
     pub events_processed: u64,
@@ -80,8 +83,24 @@ impl FactoryModel {
         }
     }
 
-    /// Ingest a factory event into the model.
+    /// Ingest a factory event into the model, using `Utc::now()` as the
+    /// record timestamp. Prefer [`Self::ingest_at`] when a source timestamp
+    /// is available (e.g. `events_ext.created_at`) so windowed analyzers
+    /// reflect event time, not ingest time.
     pub fn ingest(&mut self, event_id: i64, event: &FactoryEventKind) {
+        self.ingest_at(event_id, Utc::now(), event);
+    }
+
+    /// Ingest a factory event into the model with an explicit event-time
+    /// timestamp. Using the spine row's `created_at` keeps the 7-day
+    /// `override_rate_by_kind` window honest when the serve loop rebuilds
+    /// the model from historical `events_ext` rows.
+    pub fn ingest_at(
+        &mut self,
+        event_id: i64,
+        recorded_at: DateTime<Utc>,
+        event: &FactoryEventKind,
+    ) {
         self.events_processed += 1;
         self.last_event_id = Some(event_id);
 
@@ -100,8 +119,8 @@ impl FactoryModel {
                         current_state: ArtifactState::Draft,
                         version: 0,
                         shaping_count: 0,
-                        first_seen: Utc::now(),
-                        last_updated: Utc::now(),
+                        first_seen: recorded_at,
+                        last_updated: recorded_at,
                     },
                 );
             }
@@ -113,7 +132,7 @@ impl FactoryModel {
             } => {
                 if let Some(tracked) = self.artifacts.get_mut(artifact_id.as_str()) {
                     tracked.current_state = *to_state;
-                    tracked.last_updated = Utc::now();
+                    tracked.last_updated = recorded_at;
                 }
             }
 
@@ -124,7 +143,7 @@ impl FactoryModel {
             } => {
                 if let Some(tracked) = self.artifacts.get_mut(artifact_id.as_str()) {
                     tracked.version = *version;
-                    tracked.last_updated = Utc::now();
+                    tracked.last_updated = recorded_at;
                 }
             }
 
@@ -135,7 +154,7 @@ impl FactoryModel {
             } => {
                 if let Some(tracked) = self.artifacts.get_mut(artifact_id.as_str()) {
                     tracked.shaping_count += 1;
-                    tracked.last_updated = Utc::now();
+                    tracked.last_updated = recorded_at;
                 }
 
                 self.shaping_records.push(ShapingRecord {
@@ -144,7 +163,7 @@ impl FactoryModel {
                     artifact_id: artifact_id.clone(),
                     outcome: *outcome,
                     duration_ms: None,
-                    recorded_at: Utc::now(),
+                    recorded_at,
                 });
             }
 
@@ -158,7 +177,7 @@ impl FactoryModel {
                     artifact_id: artifact_id.clone(),
                     gate_point: *gate_point,
                     verdict: verdict.clone(),
-                    recorded_at: Utc::now(),
+                    recorded_at,
                 });
             }
 
@@ -438,6 +457,49 @@ mod tests {
         assert_eq!(model.gate_verdict_records.len(), 1);
         assert_eq!(model.gate_verdict_records[0].event_id, 2);
         assert_eq!(model.gate_verdict_records[0].verdict, VerdictSummary::Deny);
+    }
+
+    #[test]
+    fn override_rate_window_uses_event_time_not_ingest_time() {
+        // Regression: `ingest` used to stamp Utc::now() so historical rows
+        // re-ingested during a tick rebuild always appeared fresh, defeating
+        // the window filter. `ingest_at` must honor the caller's timestamp.
+        let mut model = FactoryModel::new();
+        let id = ArtifactId::new("art_code_old");
+        let stale = Utc::now() - Duration::days(30);
+
+        model.ingest_at(
+            1,
+            stale,
+            &FactoryEventKind::ArtifactRegistered {
+                artifact_id: id.clone(),
+                kind: Kind::Code,
+                name: "s".into(),
+                owner: "marvin".into(),
+            },
+        );
+        for i in 0..5 {
+            model.ingest_at(
+                i + 2,
+                stale,
+                &FactoryEventKind::ForgeGateVerdict {
+                    artifact_id: id.clone(),
+                    gate_point: GatePoint::PreDispatch,
+                    verdict: VerdictSummary::Deny,
+                },
+            );
+        }
+
+        // All verdicts fall outside a 7-day window — expect no entry.
+        let rates = model.override_rate_by_kind(Duration::days(7), 3);
+        assert!(
+            rates.is_empty(),
+            "stale verdicts must be excluded by the window"
+        );
+
+        // But a wide-enough window should pick them back up.
+        let rates_wide = model.override_rate_by_kind(Duration::days(60), 3);
+        assert!(rates_wide.contains_key(&Kind::Code));
     }
 
     #[test]

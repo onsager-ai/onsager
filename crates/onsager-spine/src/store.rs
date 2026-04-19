@@ -210,6 +210,22 @@ impl EventStore {
         .await
     }
 
+    /// Return the highest id present in either `events` or `events_ext`,
+    /// or `None` if both tables are empty. Callers use this as a
+    /// warm-start cursor so a [`Listener`] with `with_since` skips
+    /// backfill over history it doesn't need to replay.
+    pub async fn max_event_id(&self) -> Result<Option<i64>, sqlx::Error> {
+        let row: (Option<i64>,) = sqlx::query_as(
+            "SELECT GREATEST( \
+                (SELECT MAX(id) FROM events), \
+                (SELECT MAX(id) FROM events_ext) \
+             )",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
+    }
+
     /// Fetch a single extension event by id. Returns `None` if not found.
     pub async fn get_ext_event_by_id(
         &self,

@@ -60,27 +60,34 @@ pub fn run(database_url: &str, tick_ms: u64) {
         register_defaults(&mut registry);
         tracing::info!(analyzers = registry.len(), "ising: analyzer registry ready");
 
+        // Long-lived emitter: keeping the dedup window across ticks prevents
+        // the same insight pattern from being re-appended to `events_ext` on
+        // every rebuild as long as its fingerprint is unchanged. Without
+        // this the spine — and the dashboard reading from it — would get
+        // flooded with duplicates every `tick_ms` while the evidence
+        // remains inside the lookback window.
+        let mut emitter = InsightEmitter::new(EmitterConfig::default());
+
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(tick_ms));
         loop {
             interval.tick().await;
-            if let Err(e) = run_tick(&spine, &registry).await {
+            if let Err(e) = run_tick(&spine, &registry, &mut emitter).await {
                 tracing::error!("ising: tick failed: {e}");
             }
         }
     });
 }
 
-async fn run_tick(spine: &EventStore, registry: &AnalyzerRegistry) -> Result<(), anyhow::Error> {
+async fn run_tick(
+    spine: &EventStore,
+    registry: &AnalyzerRegistry,
+    emitter: &mut InsightEmitter,
+) -> Result<(), anyhow::Error> {
     let model = build_model(spine).await?;
     if model.events_processed == 0 {
         // No observable factory activity yet — nothing to reason about.
         return Ok(());
     }
-
-    // A fresh emitter per tick: dedup is tick-scoped, matching the
-    // "rebuild the world each time" loop. Persistent dedup against already-
-    // emitted insights is a v0.2 concern once we move to streaming.
-    let mut emitter = InsightEmitter::new(EmitterConfig::default());
 
     let mut emitted = 0usize;
     for (analyzer_name, insights) in registry.run_all(&model) {
@@ -119,16 +126,37 @@ async fn run_tick(spine: &EventStore, registry: &AnalyzerRegistry) -> Result<(),
 /// today — once events are emitted through a typed spine helper this parser
 /// collapses to `serde_json::from_value`.
 async fn build_model(spine: &EventStore) -> Result<FactoryModel, anyhow::Error> {
+    let cutoff = Utc::now() - LOOKBACK;
     let rows = spine
         .query_ext_events(None, Some("forge"), EVENT_FETCH_LIMIT)
         .await?;
+
+    // If we pulled the whole fetch cap and the oldest row we got is still
+    // inside the lookback window, there are events we didn't load. The
+    // override rate is then computed from a truncated slice — surface it
+    // loudly rather than silently under-count. A DB-side `created_at >=
+    // cutoff` filter is the structural fix and belongs in the EventStore
+    // API; this warning is the cheap forcing function to get us there.
+    if rows.len() as i64 >= EVENT_FETCH_LIMIT
+        && rows
+            .iter()
+            .map(|r| r.created_at)
+            .min()
+            .is_some_and(|oldest| oldest >= cutoff)
+    {
+        tracing::warn!(
+            event_fetch_limit = EVENT_FETCH_LIMIT,
+            lookback_days = LOOKBACK.num_days(),
+            "ising: forge event fetch cap reached before lookback cutoff; \
+             model window may be incomplete"
+        );
+    }
 
     // Rows come back newest-first; ingest oldest-first so event_id ordering
     // inside the model matches spine order.
     let mut rows = rows;
     rows.sort_by_key(|r| r.id);
 
-    let cutoff = Utc::now() - LOOKBACK;
     let mut model = FactoryModel::new();
     let mut seen_ids: HashSet<i64> = HashSet::new();
 
@@ -142,7 +170,10 @@ async fn build_model(spine: &EventStore) -> Result<FactoryModel, anyhow::Error> 
         let Some(event) = parse_forge_event(&row.event_type, &row.data) else {
             continue;
         };
-        model.ingest(row.id, &event);
+        // Use the spine row's `created_at` so windowed analyzers honor event
+        // time, not ingest time — otherwise every tick's rebuild makes old
+        // events look fresh.
+        model.ingest_at(row.id, row.created_at, &event);
     }
 
     Ok(model)
