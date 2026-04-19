@@ -21,6 +21,7 @@ use uuid::Uuid;
 use crate::core::{GitHubAccountType, GitHubAppInstallation, Project, Tenant, TenantMember};
 use crate::server::auth::{encrypt_credential, AuthUser};
 use crate::server::db;
+use crate::server::github_app;
 use crate::server::state::AppState;
 
 // ── Auth helper ──
@@ -425,13 +426,32 @@ pub async fn add_project(
             .into_response();
     }
 
-    let default_branch = body
+    // If the caller supplied a branch, trust it. Otherwise try the GitHub
+    // API (when the App is configured), then fall back to "main" on any
+    // failure — onboarding must never block on a network hiccup.
+    let supplied = body
         .default_branch
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or("main")
-        .to_string();
+        .map(str::to_string);
+    let default_branch = match supplied {
+        Some(b) => b,
+        None => match installation_token_for(&state.db, &body.github_app_installation_id).await {
+            Ok(Some(token)) => {
+                match github_app::get_repo_default_branch(&token, repo_owner, repo_name).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(
+                            "default_branch inference failed for {repo_owner}/{repo_name}: {e}"
+                        );
+                        "main".to_string()
+                    }
+                }
+            }
+            _ => "main".to_string(),
+        },
+    };
 
     let project = Project {
         id: Uuid::new_v4().to_string(),
@@ -588,4 +608,263 @@ pub async fn assert_tenant_member(
     tenant_id: &str,
 ) -> Result<(), Response> {
     require_tenant_member(pool, user_id, tenant_id).await
+}
+
+// ── Accessible-repos picker + GitHub App install flow ──
+//
+// These close the remaining Phase 0 / #59 items: the OAuth callback
+// (modal workspace picker) and the "Add Project" dropdown scoped to the
+// installation's accessible repos. The App flow is opt-in via env — when
+// not configured, the pre-existing manual-entry path still works.
+
+/// Mint a per-installation access token from DB metadata. Returns `None`
+/// when the App is not configured or the installation row is missing.
+async fn installation_token_for(
+    pool: &AnyPool,
+    onsager_install_id: &str,
+) -> anyhow::Result<Option<github_app::InstallationToken>> {
+    let Some(cfg) = github_app::AppConfig::from_env() else {
+        return Ok(None);
+    };
+    let Some(install) = db::get_github_app_installation(pool, onsager_install_id).await? else {
+        return Ok(None);
+    };
+    let jwt = github_app::mint_app_jwt(&cfg)?;
+    let token = github_app::mint_installation_token(&jwt, install.install_id).await?;
+    Ok(Some(token))
+}
+
+/// GET /api/tenants/:id/github-installations/:install_id/accessible-repos —
+/// list repos this installation can access, so "Add Project" can show a
+/// dropdown instead of free-text `repo_owner/repo_name` inputs.
+pub async fn list_accessible_repos(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path((tenant_id, install_id)): Path<(String, String)>,
+) -> Response {
+    let user_id = match require_auth_user(&auth_user) {
+        Ok(id) => id.to_string(),
+        Err(r) => return r,
+    };
+    if let Err(r) = require_tenant_member(&state.db, &user_id, &tenant_id).await {
+        return r;
+    }
+    // Confirm the install row belongs to this tenant before burning a token.
+    match db::get_github_app_installation(&state.db, &install_id).await {
+        Ok(Some(inst)) if inst.tenant_id == tenant_id => {}
+        Ok(_) => return not_found("installation not found"),
+        Err(e) => {
+            tracing::error!("failed to get installation: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    }
+
+    match installation_token_for(&state.db, &install_id).await {
+        Ok(Some(token)) => match github_app::list_installation_repos(&token).await {
+            Ok(repos) => Json(serde_json::json!({ "repos": repos })).into_response(),
+            Err(e) => {
+                tracing::warn!("list_installation_repos failed: {e}");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({ "error": "GitHub API request failed" })),
+                )
+                    .into_response()
+            }
+        },
+        Ok(None) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "GitHub App is not configured on this server"
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!("failed to mint installation token: {e}");
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": "GitHub App auth failed" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ── Install-flow routes ──
+
+#[derive(Debug, Deserialize)]
+pub struct InstallStartQuery {
+    pub tenant_id: String,
+}
+
+/// GET /api/github-app/install-start?tenant_id=... — Redirect the user
+/// to GitHub's App installation page, carrying the target workspace in
+/// the OAuth `state` param. The callback will re-read it to link the new
+/// installation to the workspace without a separate modal round-trip.
+pub async fn github_app_install_start(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    axum::extract::Query(query): axum::extract::Query<InstallStartQuery>,
+) -> Response {
+    use axum::http::header;
+    use axum::response::Redirect;
+
+    let user_id = match require_auth_user(&auth_user) {
+        Ok(id) => id.to_string(),
+        Err(r) => return r,
+    };
+    if let Err(r) = require_tenant_member(&state.db, &user_id, &query.tenant_id).await {
+        return r;
+    }
+
+    let Some(cfg) = github_app::AppConfig::from_env() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "GitHub App is not configured on this server"
+            })),
+        )
+            .into_response();
+    };
+
+    // state = "{tenant_id}.{csrf_random}" — cookie stores the same thing so
+    // the callback can verify it came from this browser session.
+    let csrf = crate::server::auth::generate_state();
+    let state_param = format!("{}.{}", query.tenant_id, csrf);
+    let sec = if state
+        .config
+        .public_url
+        .as_deref()
+        .is_some_and(|u| u.starts_with("https://"))
+    {
+        "; Secure"
+    } else {
+        ""
+    };
+    let cookie = format!(
+        "stiglab_github_app_state={state_param}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600{sec}"
+    );
+    let url = format!(
+        "https://github.com/apps/{slug}/installations/new?state={state_param}",
+        slug = cfg.slug,
+    );
+    ([(header::SET_COOKIE, cookie)], Redirect::temporary(&url)).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InstallCallbackQuery {
+    pub installation_id: i64,
+    pub setup_action: Option<String>,
+    pub state: Option<String>,
+}
+
+/// GET /api/github-app/install-callback?installation_id=N&setup_action=install&state=...
+///
+/// GitHub redirects here after the user installs the App. We verify the
+/// state cookie, mint an App JWT to look up the install's account, persist
+/// the installation row under the originating tenant, and redirect the
+/// browser back to `/settings?github_app_linked={id}`.
+pub async fn github_app_install_callback(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    headers: axum::http::HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<InstallCallbackQuery>,
+) -> Response {
+    use axum::http::header;
+
+    let user_id = match require_auth_user(&auth_user) {
+        Ok(id) => id.to_string(),
+        Err(r) => return r,
+    };
+
+    let cookie_header = headers
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let cookie_state = crate::server::auth::parse_cookie(cookie_header, "stiglab_github_app_state");
+    let query_state = query.state.as_deref().unwrap_or_default();
+    if cookie_state != Some(query_state) || query_state.is_empty() {
+        return (StatusCode::BAD_REQUEST, "invalid OAuth state").into_response();
+    }
+    let tenant_id = match query_state.split_once('.') {
+        Some((t, _)) if !t.is_empty() => t.to_string(),
+        _ => return (StatusCode::BAD_REQUEST, "malformed state").into_response(),
+    };
+    if let Err(r) = require_tenant_member(&state.db, &user_id, &tenant_id).await {
+        return r;
+    }
+
+    let Some(cfg) = github_app::AppConfig::from_env() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "GitHub App is not configured on this server",
+        )
+            .into_response();
+    };
+
+    let jwt = match github_app::mint_app_jwt(&cfg) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::error!("mint_app_jwt failed: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "GitHub App auth failed").into_response();
+        }
+    };
+    let info = match github_app::get_installation(&jwt, query.installation_id).await {
+        Ok(i) => i,
+        Err(e) => {
+            tracing::error!("get_installation {} failed: {e}", query.installation_id);
+            return (StatusCode::BAD_GATEWAY, "GitHub installation lookup failed").into_response();
+        }
+    };
+
+    let install = GitHubAppInstallation {
+        id: Uuid::new_v4().to_string(),
+        tenant_id: tenant_id.clone(),
+        install_id: query.installation_id,
+        account_login: info.account_login,
+        account_type: info.account_type,
+        created_at: Utc::now(),
+    };
+
+    // No webhook secret here — the App-managed shared secret is a server
+    // env var (portal reads it); per-install override remains the manual
+    // endpoint's job.
+    if let Err(e) = db::insert_github_app_installation(&state.db, &install, None).await {
+        // If the install was already linked (e.g. user re-ran the flow),
+        // surface a friendly redirect rather than a 500.
+        tracing::warn!("insert_github_app_installation returned error: {e}");
+    }
+
+    let sec = if state
+        .config
+        .public_url
+        .as_deref()
+        .is_some_and(|u| u.starts_with("https://"))
+    {
+        "; Secure"
+    } else {
+        ""
+    };
+    let clear =
+        format!("stiglab_github_app_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}");
+    let location = format!(
+        "/settings?github_app_linked={}&tenant_id={}",
+        query.installation_id, tenant_id
+    );
+
+    axum::response::Response::builder()
+        .status(StatusCode::FOUND)
+        .header(header::LOCATION, location)
+        .header(header::SET_COOKIE, clear)
+        .body(axum::body::Body::empty())
+        .unwrap()
+        .into_response()
+}
+
+/// GET /api/github-app/config — Tiny discovery endpoint so the dashboard
+/// can decide whether to render the "Install via GitHub App" button or
+/// fall back to the manual-entry form.
+pub async fn github_app_config() -> Response {
+    let enabled = github_app::AppConfig::from_env().is_some();
+    let slug = std::env::var("GITHUB_APP_SLUG").ok();
+    Json(serde_json::json!({ "enabled": enabled, "slug": slug })).into_response()
 }
