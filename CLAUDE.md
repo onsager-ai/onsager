@@ -27,15 +27,27 @@ subsystem binaries on PATH.
 
 ```
 crates/
-  onsager-spine/   <- event bus client library
-  onsager/         <- dispatcher CLI (~100 LOC, no business deps)
-  forge/           <- production line — drives artifacts through their lifecycle (lib + bin)
-  ising/           <- continuous improvement engine — observes and surfaces insights (lib + bin)
-  stiglab/         <- distributed AI agent session orchestration (lib + bin)
-  synodic/         <- AI agent governance (lib + bin)
+  onsager-artifact/    <- domain value objects (Artifact, ArtifactId, BundleId, Kind, lineage, quality)
+  onsager-spine/       <- event bus client (EventStore, Listener, Namespace, FactoryEvent)
+  onsager-warehouse/   <- bundle sealing + Warehouse trait (depends on artifact)
+  onsager-delivery/    <- consumer routing (depends on artifact, warehouse)
+  onsager-registry/    <- type registry, seed catalog, evaluators (depends on artifact, spine)
+  onsager-protocol/    <- sync-RPC DTOs; deleted when ADR 0001 migration completes
+  onsager/             <- dispatcher CLI (~100 LOC, no business deps)
+  forge/               <- production line — drives artifacts through their lifecycle (lib + bin)
+  ising/               <- continuous improvement engine — observes and surfaces insights (lib + bin)
+  stiglab/             <- distributed AI agent session orchestration (lib + bin)
+  synodic/             <- AI agent governance (lib + bin)
 apps/
-  dashboard/       <- React UI (sessions, nodes, governance, factory views)
+  dashboard/           <- React UI (sessions, nodes, governance, factory views)
 ```
+
+Subsystem → support-crate dependencies (as of #33):
+
+- `forge`   → `onsager-{artifact, warehouse, protocol, spine}`
+- `stiglab` → `onsager-{artifact, protocol, spine}`
+- `synodic` → `onsager-{artifact, protocol, spine}`
+- `ising`   → `onsager-{artifact, protocol, spine}` (no warehouse/delivery/registry)
 
 ## Getting Started
 

@@ -5,10 +5,9 @@
 //! `specs/forge-v0.1.md §5-7` for the detailed contracts.
 
 use chrono::{DateTime, Utc};
+use onsager_artifact::{ArtifactId, ArtifactState, ContentRef, Kind, QualitySignal};
+use onsager_spine::{GatePoint, InsightKind, InsightScope, ShapingOutcome};
 use serde::{Deserialize, Serialize};
-
-use crate::artifact::{ArtifactId, ArtifactState, ContentRef, Kind, QualitySignal};
-use crate::factory_event::{GatePoint, InsightKind, InsightScope, ShapingOutcome};
 
 // ===========================================================================
 // Forge → Stiglab: Imperative dispatch protocol

@@ -27,58 +27,42 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use chrono::{DateTime, SubsecRound, Utc};
+use onsager_artifact::{ArtifactId, BundleId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use std::fmt;
-
-use crate::artifact::ArtifactId;
 
 // ---------------------------------------------------------------------------
-// Identity
+// BundleId hashing helper
 // ---------------------------------------------------------------------------
 
-/// Content-addressed bundle identifier.
+/// Derive a deterministic [`BundleId`] from the canonical manifest, artifact
+/// id, and version. Two seals of the same artifact at the same version with
+/// identical manifests produce the same id (the `(artifact_id, version)`
+/// UNIQUE then rejects the reseal as `VersionConflict`); two different
+/// artifacts with identical files produce different ids, so they do not
+/// collide.
 ///
-/// Format: `bnd_<64-char-hex>`, where the hex is the SHA-256 of
-/// `(artifact_id, version, canonical_manifest_bytes)`. Two seals of the same
-/// artifact at the same version with identical file contents produce the same
-/// id (idempotent reseal → `VersionConflict`). Two different artifacts with
-/// identical files produce different ids, so they do not collide.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct BundleId(String);
-
-impl BundleId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    fn from_manifest(manifest: &Manifest, artifact_id: &ArtifactId, version: u32) -> Self {
-        // Hash over (artifact_id, version, canonical manifest bytes). Including
-        // artifact_id + version ensures two artifacts that happen to ship
-        // identical files don't collide on the same BundleId; identical reseals
-        // of the same artifact at the same version do collide (which the
-        // (artifact_id, version) UNIQUE then rejects as VersionConflict).
-        let mut hasher = Sha256::new();
-        hasher.update(artifact_id.as_str().as_bytes());
-        hasher.update([0u8]);
-        hasher.update(version.to_be_bytes());
-        hasher.update([0u8]);
-        let canonical =
-            serde_json::to_vec(manifest).expect("Manifest must be serialisable as JSON");
-        hasher.update(&canonical);
-        Self(format!("bnd_{}", hex::encode(hasher.finalize())))
-    }
-}
-
-impl fmt::Display for BundleId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
+/// The [`BundleId`] type itself lives in `onsager-artifact`; only the hashing
+/// rule (which depends on [`Manifest`]) lives here.
+fn bundle_id_from_manifest(
+    manifest: &Manifest,
+    artifact_id: &ArtifactId,
+    version: u32,
+) -> BundleId {
+    // Hash over (artifact_id, version, canonical manifest bytes). Including
+    // artifact_id + version ensures two artifacts that happen to ship
+    // identical files don't collide on the same BundleId; identical reseals
+    // of the same artifact at the same version do collide (which the
+    // (artifact_id, version) UNIQUE then rejects as VersionConflict).
+    let mut hasher = Sha256::new();
+    hasher.update(artifact_id.as_str().as_bytes());
+    hasher.update([0u8]);
+    hasher.update(version.to_be_bytes());
+    hasher.update([0u8]);
+    let canonical = serde_json::to_vec(manifest).expect("Manifest must be serialisable as JSON");
+    hasher.update(&canonical);
+    BundleId::new(format!("bnd_{}", hex::encode(hasher.finalize())))
 }
 
 // ---------------------------------------------------------------------------
@@ -351,7 +335,7 @@ impl Warehouse for FilesystemWarehouse {
             None => (0u32, None),
         };
         let version = prior_version + 1;
-        let bundle_id = BundleId::from_manifest(&manifest, &artifact_id, version);
+        let bundle_id = bundle_id_from_manifest(&manifest, &artifact_id, version);
 
         // 3. Write blobs to disk. Content-addressed — safe to retry.
         for entry in &manifest.entries {
@@ -554,23 +538,23 @@ mod tests {
             }],
         };
         let artifact_id = ArtifactId::new("art_test");
-        let a = BundleId::from_manifest(&manifest, &artifact_id, 1);
-        let b = BundleId::from_manifest(&manifest, &artifact_id, 1);
+        let a = bundle_id_from_manifest(&manifest, &artifact_id, 1);
+        let b = bundle_id_from_manifest(&manifest, &artifact_id, 1);
         assert_eq!(a, b);
 
         // Different version => different id.
-        let c = BundleId::from_manifest(&manifest, &artifact_id, 2);
+        let c = bundle_id_from_manifest(&manifest, &artifact_id, 2);
         assert_ne!(a, c);
 
         // Different artifact id => different id.
-        let d = BundleId::from_manifest(&manifest, &ArtifactId::new("art_other"), 1);
+        let d = bundle_id_from_manifest(&manifest, &ArtifactId::new("art_other"), 1);
         assert_ne!(a, d);
     }
 
     #[test]
     fn bundle_id_format() {
         let manifest = Manifest { entries: vec![] };
-        let id = BundleId::from_manifest(&manifest, &ArtifactId::new("art_x"), 1);
+        let id = bundle_id_from_manifest(&manifest, &ArtifactId::new("art_x"), 1);
         assert!(id.as_str().starts_with("bnd_"));
         assert_eq!(id.as_str().len(), 68); // "bnd_" + 64 hex chars
     }

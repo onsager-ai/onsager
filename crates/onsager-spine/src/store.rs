@@ -419,8 +419,8 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
-    use crate::artifact::{ArtifactId, Kind};
     use crate::factory_event::{FactoryEvent, FactoryEventKind};
+    use onsager_artifact::{ArtifactId, Kind};
 
     fn db_url() -> Option<String> {
         std::env::var("DATABASE_URL").ok()

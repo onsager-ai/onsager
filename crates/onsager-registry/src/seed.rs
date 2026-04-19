@@ -11,14 +11,15 @@
 //! goes through the normal propose/approve flow.
 
 use chrono::Utc;
+use onsager_spine::{
+    append_factory_event_tx, EventMetadata, EventStore, FactoryEvent, FactoryEventKind,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Transaction};
 
-use crate::factory_event::{FactoryEvent, FactoryEventKind};
 use crate::registry::{
     AgentProfile, RegistryStatus, TypeDefinition, DEFAULT_WORKSPACE, SEED_ACTOR,
 };
-use crate::store::{append_factory_event_tx, EventMetadata, EventStore};
 
 /// An adapter catalog entry as it appears in a seed file.
 #[derive(Debug, Clone, Serialize, Deserialize)]

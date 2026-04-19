@@ -6,9 +6,9 @@
 //! Signal: if an artifact has accumulated more than `max_shapings` shaping
 //! attempts without reaching a terminal or release state, emit a Waste insight.
 
-use onsager_spine::artifact::ArtifactState;
+use onsager_artifact::ArtifactState;
+use onsager_protocol::{FactoryEventRef, Insight};
 use onsager_spine::factory_event::{InsightKind, InsightScope};
-use onsager_spine::protocol::{FactoryEventRef, Insight};
 
 use crate::core::analyzer::Analyzer;
 use crate::core::model::FactoryModel;
@@ -114,7 +114,7 @@ impl Analyzer for StuckArtifactsAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use onsager_spine::artifact::{ArtifactId, Kind};
+    use onsager_artifact::{ArtifactId, Kind};
     use onsager_spine::factory_event::{FactoryEventKind, ShapingOutcome};
 
     fn build_model_with_shapings(count: u32) -> FactoryModel {

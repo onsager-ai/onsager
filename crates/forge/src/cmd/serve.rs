@@ -8,17 +8,17 @@ use axum::response::IntoResponse;
 use chrono::Utc;
 use tokio::sync::RwLock;
 
-use onsager_spine::artifact::{ArtifactState, Kind};
+use onsager_artifact::{ArtifactState, Kind};
+use onsager_protocol::{
+    EscalationContext, GateRequest, GateVerdict, ShapingRequest, ShapingResult,
+};
 use onsager_spine::factory_event::ShapingOutcome;
-use onsager_spine::protocol::ShapingResult;
 use onsager_spine::EventStore;
 
 use crate::core::artifact_store::ArtifactStore;
 use crate::core::kernel::BaselineKernel;
 use crate::core::pipeline::{ForgePipeline, PipelineEvent, StiglabDispatcher, SynodicGate};
 use crate::core::session_listener::{self, SessionCompleted, SessionCompletedHandler};
-
-use onsager_spine::protocol::{EscalationContext, GateRequest, GateVerdict, ShapingRequest};
 
 /// Default Forge → upstream HTTP timeout. Bounds the worst case for both the
 /// Stiglab dispatcher and the Synodic gate so a single hung upstream cannot
@@ -149,7 +149,7 @@ impl StiglabDispatcher for HttpStiglabDispatcher {
                     quality_signals: vec![],
                     session_id: String::new(),
                     duration_ms: 0,
-                    error: Some(onsager_spine::protocol::ErrorDetail {
+                    error: Some(onsager_protocol::ErrorDetail {
                         code: "dispatch_error".into(),
                         message: e.to_string(),
                         retriable: Some(true),
@@ -659,7 +659,7 @@ async fn get_artifact(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl axum::response::IntoResponse {
     let state = shared.read().await;
-    let aid = onsager_spine::artifact::ArtifactId::new(&id);
+    let aid = onsager_artifact::ArtifactId::new(&id);
     match state.pipeline.store.get(&aid) {
         Some(a) => axum::Json(serde_json::json!({
             "artifact": {

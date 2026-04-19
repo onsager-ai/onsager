@@ -9,12 +9,12 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 
-use onsager_spine::artifact::{
-    Artifact, ArtifactId, ArtifactState, ArtifactVersion, ContentRef, Kind, VerticalLineage,
+use onsager_artifact::{
+    Artifact, ArtifactId, ArtifactState, ArtifactVersion, BundleId, ContentRef, Kind,
+    VerticalLineage,
 };
-use onsager_spine::bundle::BundleId;
+use onsager_protocol::ShapingResult;
 use onsager_spine::factory_event::ShapingOutcome;
-use onsager_spine::protocol::ShapingResult;
 
 /// In-memory artifact store. Production implementations would back this
 /// with PostgreSQL; this provides the domain logic and invariant enforcement.
@@ -187,7 +187,7 @@ pub enum ArtifactStoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use onsager_spine::artifact::Kind;
+    use onsager_artifact::Kind;
 
     fn make_result(outcome: ShapingOutcome) -> ShapingResult {
         ShapingResult {

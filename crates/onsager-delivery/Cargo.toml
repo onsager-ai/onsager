@@ -1,0 +1,17 @@
+[package]
+name = "onsager-delivery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Delivery model and Consumer trait — hand sealed bundles to external sinks."
+
+[dependencies]
+onsager-artifact = { path = "../onsager-artifact" }
+onsager-warehouse = { path = "../onsager-warehouse" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+async-trait = "0.1"
+ulid = { version = "1", features = ["serde"] }

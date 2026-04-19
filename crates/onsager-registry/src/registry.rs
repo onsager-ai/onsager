@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::artifact::ArtifactId;
+use onsager_artifact::ArtifactId;
 
 /// Default workspace id used when no explicit workspace is provided.
 pub const DEFAULT_WORKSPACE: &str = "default";
@@ -232,7 +232,7 @@ pub struct GateContext {
 
 /// Verdict returned by a gate evaluator.
 ///
-/// This mirrors the coarser [`crate::factory_event::VerdictSummary`] used for
+/// This mirrors the coarser `onsager_spine::factory_event::VerdictSummary` used for
 /// event auditing, but carries a reason so the event envelope can be populated
 /// directly from the verdict.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/onsager-artifact",
+    "crates/onsager-warehouse",
+    "crates/onsager-delivery",
+    "crates/onsager-registry",
+    "crates/onsager-protocol",
     "crates/onsager-spine",
     "crates/onsager",
     "crates/forge",

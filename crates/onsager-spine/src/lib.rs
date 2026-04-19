@@ -16,50 +16,48 @@
 //!
 //! This library does **not** manage database schema. The contract lives in
 //! `migrations/001_initial.sql`; downstream services apply it themselves.
+//!
+//! ## Split layout
+//!
+//! Value objects, storage backends, and protocols that used to live here have
+//! moved into focused sibling crates:
+//!
+//! - `onsager-artifact` — `Artifact`, `ArtifactId`, `BundleId`, lineage, quality.
+//! - `onsager-warehouse` — `Bundle`, `Warehouse`, `FilesystemWarehouse`.
+//! - `onsager-delivery` — `Consumer`, `Delivery`, `Receipt`.
+//! - `onsager-registry` — type catalog, adapters, gate evaluators, seed loader.
+//! - `onsager-protocol` — inter-subsystem request/response types.
+//!
+//! Spine keeps what every subsystem needs to speak to the event bus: the
+//! `EventStore`, the `Listener`, `Namespace`, and the `FactoryEvent`
+//! envelope. Artifact value objects are re-exported here for backward
+//! compatibility.
 
-pub mod artifact;
-pub mod bundle;
-pub mod catalog;
-pub mod delivery;
-pub mod evaluators;
 pub mod extension_event;
 pub mod factory_event;
 pub mod listener;
 pub mod namespace;
-pub mod protocol;
-pub mod registry;
-pub mod registry_store;
-pub mod seed;
 pub mod store;
 
-pub use artifact::{
-    Artifact, ArtifactId, ArtifactState, ArtifactVersion, Consumer, ConsumerType, ContentRef,
-    GitContext, HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue,
+// Backward-compat re-exports of the artifact value objects. Spine depends on
+// `onsager-artifact` because `FactoryEvent` references `ArtifactId`, `Kind`,
+// `ArtifactState`, `BundleId`, and `QualitySignal`. These re-exports let
+// existing callers keep using `onsager_spine::{ArtifactId, BundleId, ...}`
+// without pulling in the warehouse/delivery/registry/protocol crates.
+pub use onsager_artifact as artifact;
+pub use onsager_artifact::{
+    Artifact, ArtifactId, ArtifactState, ArtifactVersion, BundleId, Consumer, ConsumerType,
+    ContentRef, GitContext, HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue,
     VerticalLineage,
 };
-pub use bundle::{
-    sha256_hex, Bundle, BundleId, FetchError as BundleFetchError, FilesystemWarehouse, Manifest,
-    ManifestEntry, Outputs, SealError, SealRequest, Warehouse,
-};
-pub use catalog::{engineering_types, register_engineering_catalog, CatalogOutcome, CATALOG_ACTOR};
-pub use delivery::{
-    ConfigError as DeliveryConfigError, Consumer as DeliveryConsumer, ConsumerId, ConsumerKind,
-    ConsumerSink, Delivery, DeliveryError, DeliveryId, DeliveryKind, DeliveryStatus, Receipt,
-    RetryPolicy,
-};
-pub use evaluators::{CiGreen, HumanApproval, ReviewApproved};
+
 pub use extension_event::ExtensionEventRecord;
-pub use factory_event::{FactoryEvent, FactoryEventKind};
+pub use factory_event::{
+    EscalationResolution, FactoryEvent, FactoryEventKind, ForgeProcessState, GatePoint,
+    InsightKind, InsightScope, LineageType, ShapingOutcome, VerdictSummary,
+};
 pub use listener::{EventHandler, Listener};
 pub use namespace::{Namespace, NamespaceError};
-pub use protocol::{GateRequest, Insight, ShapingDecision, ShapingRequest, ShapingResult};
-pub use registry::{
-    AdapterMaterial, AdapterResult, AgentProfile, ArtifactAdapter, CompositeGate, ExternalRef,
-    GateContext, GateEvaluator, GateVerdict, RegisteredType, RegistryId, RegistryStatus,
-    TypeDefinition, DEFAULT_WORKSPACE, SEED_ACTOR,
-};
-pub use registry_store::{RegistryKind, RegistryRecord, RegistryStore};
-pub use seed::{apply_seed, SeedCatalog, SeedOutcome};
 pub use store::{
     append_factory_event_tx, EventMetadata, EventNotification, EventRecord, EventStore,
 };

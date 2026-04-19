@@ -9,9 +9,9 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use onsager_spine::artifact::{Artifact, ArtifactState};
+use onsager_artifact::{Artifact, ArtifactState};
+use onsager_protocol::{Insight, ShapingDecision};
 use onsager_spine::factory_event::FactoryEvent;
-use onsager_spine::protocol::{Insight, ShapingDecision};
 
 /// The world state visible to the scheduling kernel (forge-v0.1 §4.2).
 #[derive(Debug, Default)]
@@ -187,7 +187,7 @@ impl SchedulingKernel for BaselineKernel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use onsager_spine::artifact::{Artifact, Kind};
+    use onsager_artifact::{Artifact, Kind};
 
     fn make_artifact(name: &str, state: ArtifactState, version: u32) -> Artifact {
         let mut art = Artifact::new(Kind::Code, name, "test-owner", "system", vec![]);
