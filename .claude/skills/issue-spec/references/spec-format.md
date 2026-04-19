@@ -1,6 +1,6 @@
 # Spec Format Reference
 
-Section-by-section guide for writing lean-spec style GitHub issue specs. Based on the [lean-spec SDD methodology](https://github.com/codervisor/lean-spec), adapted to use GitHub issues as the sole spec medium.
+Section-by-section guide for writing lean-spec style GitHub issue specs on Onsager. Based on the [lean-spec SDD methodology](https://github.com/codervisor/lean-spec), adapted to use GitHub issues as the sole spec medium.
 
 ## Metadata via GitHub Issue Features
 
@@ -10,7 +10,7 @@ No YAML frontmatter — all metadata lives in native GitHub features:
 |----------------|-------------------|---------|
 | `status` | Labels | `draft`, `planned`, `in-progress` |
 | `priority` | Labels | `priority:high` |
-| `tags` | Labels | `area:core`, `feat` |
+| `tags` | Labels | `area:stiglab`, `feat` |
 | `depends_on` | Issue body reference | `depends on #42` |
 | `parent/child` | Sub-issues | Created via `mcp__github__sub_issue_write` |
 | `assignee` | Issue assignee | `@username` |
@@ -30,11 +30,18 @@ Apply labels when creating the issue:
 - `refactor` — restructuring without behavior change
 - `perf` — performance improvement
 
-**Area** (pick one or more):
-- `area:core` — `stiglab-core` crate
-- `area:server` — `stiglab-server` crate
-- `area:agent` — `stiglab-agent` crate
-- `area:ui` — `stiglab-ui` package
+**Area** (pick one or more, aligned with `crates/` and `apps/`):
+- `area:spine` — `onsager-spine` (event bus client library)
+- `area:forge` — production line / artifact lifecycle
+- `area:ising` — continuous improvement engine
+- `area:stiglab` — agent session orchestration
+- `area:synodic` — agent governance
+- `area:dashboard` — React UI under `apps/dashboard`
+- `area:onsager` — the `onsager` dispatcher CLI
+- `area:infra` — CI, migrations, docker-compose, justfile, workflows
+- `area:docs` — README, CLAUDE.md, specs
+
+Respect the architectural invariant: a spec that crosses subsystem boundaries (other than via the spine event bus) must be split into per-subsystem child specs with a shared parent.
 
 **Priority** (pick one):
 - `priority:critical` — blocks other work, needs immediate attention
@@ -45,7 +52,7 @@ Apply labels when creating the issue:
 **Status** (pick one, update as lifecycle progresses):
 - `draft` — initial state, AI-generated, human review pending
 - `planned` — human reviewed, decisions made, ready for implementation
-- `in-progress` — actively being worked on
+- `in-progress` — actively being worked on (PR open)
 
 ### Status Lifecycle
 
@@ -57,6 +64,10 @@ The `draft → planned` transition is the **human-AI alignment gate**. Only a hu
 - Open questions are resolved
 - Design approach is approved
 - Scope and priority are accepted
+
+`planned → in-progress` happens automatically when a PR referencing the issue is opened (see the `pr-opened-progress` Claude Routine in `.claude/routines/`). If you're working without routines, flip the label manually when you open the PR.
+
+`in-progress → closed` happens automatically on PR merge with a `Closes #N` keyword. `Part of #N` PRs don't close the parent; the routine updates the parent's Plan checkboxes instead.
 
 ## Sections
 
@@ -111,6 +122,7 @@ Per-session overrides are out of scope for now.
 - Include what's explicitly **out of scope** to prevent scope creep.
 - If design is complex, create child sub-issues for subsections.
 - Reference existing architecture when relevant.
+- Cross-subsystem designs must route through the spine event bus, not direct imports.
 
 ### Plan
 
@@ -121,7 +133,7 @@ Per-session overrides are out of scope for now.
 
 - [ ] Add `STIGLAB_SESSION_TIMEOUT` env var to server config (default: 30m)
 - [ ] Implement per-session inactivity timer in `SessionManager`
-- [ ] Add `SessionTimeoutWarning` event type to `stiglab-core`
+- [ ] Add `SessionTimeoutWarning` event type to `stiglab`
 - [ ] Emit warning event 5 minutes before timeout
 - [ ] Transition `WaitingInput → Failed` on timeout expiry
 - [ ] Preserve session output on timeout (no data deletion)
@@ -133,7 +145,7 @@ Per-session overrides are out of scope for now.
 - Items should be small enough to verify in isolation.
 - Order reflects implementation sequence.
 - If a plan has more than ~10 items, the spec is too big — split into sub-issues.
-- Checkboxes serve as progress tracking on the issue itself.
+- Checkboxes serve as progress tracking on the issue itself; the `pr-merged-progress` routine ticks them as `Part of #N` PRs merge.
 
 ### Test
 
@@ -228,10 +240,10 @@ Smaller specs produce better results — for both AI implementation and human re
 
 **Example:**
 ```
-#50 spec(server): session lifecycle improvements       ← parent
-  ├── #51 spec(core): session timeout mechanism        ← sub-issue
-  ├── #52 spec(core): session retry on failure         ← sub-issue
-  └── #53 spec(ui): timeout warning indicator          ← sub-issue
+#50 spec(stiglab): session lifecycle improvements      ← parent
+  ├── #51 spec(stiglab): session timeout mechanism     ← sub-issue
+  ├── #52 spec(stiglab): session retry on failure      ← sub-issue
+  └── #53 spec(dashboard): timeout warning indicator   ← sub-issue
 ```
 
 ## Title Convention
@@ -241,7 +253,8 @@ spec(<area>): <short description in imperative mood>
 ```
 
 Examples:
-- `spec(core): add session timeout for idle sessions`
-- `spec(server): handle WebSocket reconnection gracefully`
-- `spec(ui): show real-time node heartbeat status`
-- `spec(agent): retry failed session dispatch`
+- `spec(stiglab): add session timeout for idle sessions`
+- `spec(stiglab): handle WebSocket reconnection gracefully`
+- `spec(dashboard): show real-time node heartbeat status`
+- `spec(forge): retry failed synodic verdict dispatch`
+- `spec(spine): add backpressure on events_ext ingestion`
