@@ -238,6 +238,30 @@ pub struct ProbeResult {
     pub created_at: DateTime<Utc>,
 }
 
+/// Cache key for the compiled `InterceptEngine` (issue #32).
+///
+/// Two revisions compare equal iff no enabled-rule mutation has happened
+/// between the calls that produced them. The exact encoding is opaque —
+/// callers must treat it as a token, not a numeric counter.
+///
+/// Implementations should derive this from a small SQL aggregate
+/// (e.g. `(COUNT(*), MAX(updated_at))`) so the per-request cost is a
+/// single round-trip.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct RulesRevision {
+    pub count: i64,
+    pub max_updated_at: String,
+}
+
+impl RulesRevision {
+    pub fn new(count: i64, max_updated_at: impl Into<String>) -> Self {
+        Self {
+            count,
+            max_updated_at: max_updated_at.into(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Storage trait
 // ---------------------------------------------------------------------------
@@ -251,6 +275,13 @@ pub trait Storage: Send + Sync {
 
     /// Get all rules, optionally filtered to active-only.
     async fn get_rules(&self, active_only: bool) -> Result<Vec<Rule>>;
+
+    /// Cheap revision token for the rule set, used for engine caching
+    /// (issue #32). Two calls return the same `RulesRevision` iff no rule
+    /// matching `active_only` was created, updated, or deleted between
+    /// them. Implemented as a single SQL aggregate so the per-`/gate`-call
+    /// cost is one round-trip instead of a full rule fetch.
+    async fn get_rules_revision(&self, active_only: bool) -> Result<RulesRevision>;
 
     /// Get a single rule by ID.
     async fn get_rule(&self, id: &str) -> Result<Option<Rule>>;

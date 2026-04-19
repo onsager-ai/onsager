@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::extract::{Path, Query, State};
+use axum::extract::{FromRef, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, patch, post};
@@ -17,8 +17,8 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tower_http::services::{ServeDir, ServeFile};
 
+use crate::core::engine_cache::EngineCache;
 use crate::core::gate_adapter;
-use crate::core::intercept::{InterceptEngine, InterceptRule};
 use crate::core::storage::pool::{create_storage, resolve_database_url};
 use crate::core::storage::{
     CreateGovernanceEvent, GovernanceEvent, GovernanceEventFilters, Storage,
@@ -36,14 +36,43 @@ pub struct ServeCmd {
     dashboard_dir: Option<String>,
 }
 
-type AppState = Arc<dyn Storage>;
+/// HTTP application state.
+///
+/// Bundles the durable [`Storage`] handle with an in-process
+/// [`EngineCache`] so the `/gate` handler avoids rebuilding the full
+/// `InterceptEngine` on every call (issue #32). Cloning `AppState` is
+/// cheap — it's two `Arc` clones.
+///
+/// `FromRef` impls let handlers extract just the slice they need —
+/// existing handlers continue to take `State<Arc<dyn Storage>>` while
+/// `gate_handler` takes both.
+#[derive(Clone)]
+struct AppState {
+    storage: Arc<dyn Storage>,
+    engine_cache: Arc<EngineCache>,
+}
+
+impl FromRef<AppState> for Arc<dyn Storage> {
+    fn from_ref(state: &AppState) -> Self {
+        Arc::clone(&state.storage)
+    }
+}
+
+impl FromRef<AppState> for Arc<EngineCache> {
+    fn from_ref(state: &AppState) -> Self {
+        Arc::clone(&state.engine_cache)
+    }
+}
 
 impl ServeCmd {
     pub async fn run(self) -> Result<()> {
         let db_url = resolve_database_url();
         eprintln!("Connecting to database...");
         let storage = create_storage(&db_url).await?;
-        let state: AppState = Arc::from(storage);
+        let state = AppState {
+            storage: Arc::from(storage),
+            engine_cache: Arc::new(EngineCache::new()),
+        };
 
         let api = Router::new()
             .route("/health", get(health))
@@ -95,7 +124,7 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn list_events(
-    State(store): State<AppState>,
+    State(store): State<Arc<dyn Storage>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Vec<GovernanceEvent>>, AppError> {
     let filters = GovernanceEventFilters {
@@ -106,7 +135,7 @@ async fn list_events(
 }
 
 async fn get_event(
-    State(store): State<AppState>,
+    State(store): State<Arc<dyn Storage>>,
     Path(id): Path<String>,
 ) -> Result<Json<GovernanceEvent>, AppError> {
     let event = store
@@ -117,7 +146,7 @@ async fn get_event(
 }
 
 async fn create_event(
-    State(store): State<AppState>,
+    State(store): State<Arc<dyn Storage>>,
     Json(body): Json<CreateGovernanceEvent>,
 ) -> Result<(StatusCode, Json<GovernanceEvent>), AppError> {
     if let Some(ref sev) = body.severity {
@@ -138,7 +167,7 @@ struct ResolveBody {
 }
 
 async fn resolve_event(
-    State(store): State<AppState>,
+    State(store): State<Arc<dyn Storage>>,
     Path(id): Path<String>,
     Json(body): Json<ResolveBody>,
 ) -> Result<StatusCode, AppError> {
@@ -158,7 +187,7 @@ struct Stats {
     by_severity: HashMap<String, usize>,
 }
 
-async fn get_stats(State(store): State<AppState>) -> Result<Json<Stats>, AppError> {
+async fn get_stats(State(store): State<Arc<dyn Storage>>) -> Result<Json<Stats>, AppError> {
     let events = store
         .get_governance_events(GovernanceEventFilters::default())
         .await?;
@@ -193,7 +222,7 @@ struct ApiRule {
     enabled: bool,
 }
 
-async fn list_rules(State(store): State<AppState>) -> Result<Json<Vec<ApiRule>>, AppError> {
+async fn list_rules(State(store): State<Arc<dyn Storage>>) -> Result<Json<Vec<ApiRule>>, AppError> {
     let rules = store.get_rules(false).await?;
     let categories = store.get_threat_categories().await?;
 
@@ -228,14 +257,15 @@ async fn list_rules(State(store): State<AppState>) -> Result<Json<Vec<ApiRule>>,
 // ---------------------------------------------------------------------------
 
 async fn gate_handler(
-    State(store): State<AppState>,
+    State(store): State<Arc<dyn Storage>>,
+    State(engine_cache): State<Arc<EngineCache>>,
     Json(req): Json<onsager_protocol::GateRequest>,
 ) -> Result<Json<onsager_protocol::GateVerdict>, AppError> {
-    // Load active rules from storage and convert to InterceptRules
-    let storage_rules = store.get_rules(true).await?;
-    let rules: Vec<InterceptRule> = storage_rules.iter().map(InterceptRule::from).collect();
+    // Cached: if no rule has been added/updated/deleted since the last call,
+    // we reuse the compiled `InterceptEngine` (issue #32). The only DB cost
+    // on a hit is one cheap `(COUNT, MAX(updated_at))` aggregate.
+    let engine = engine_cache.get_or_refresh(&*store).await?;
 
-    let engine = InterceptEngine::new(rules);
     let intercept_req = gate_adapter::gate_request_to_intercept(&req);
     let resp = engine.evaluate(&intercept_req);
     let verdict = gate_adapter::intercept_to_gate_verdict(&resp);

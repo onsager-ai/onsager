@@ -195,6 +195,40 @@ mod tests {
         assert_eq!(rules.len(), 4);
     }
 
+    #[tokio::test]
+    async fn rules_revision_changes_on_mutation() {
+        // Cache invalidation contract for issue #32: every mutation that the
+        // gate handler cares about must shift the revision token returned by
+        // get_rules_revision so the cache rebuilds.
+        let store = test_store().await;
+        let v0 = store.get_rules_revision(true).await.unwrap();
+
+        // Sleep enough that the RFC3339 timestamp definitely advances on
+        // SQLite (which truncates to seconds).
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        store
+            .update_rule(
+                "destructive-git",
+                UpdateRule {
+                    lifecycle: Some(Lifecycle::Tuned),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let v1 = store.get_rules_revision(true).await.unwrap();
+        assert_ne!(v0, v1, "update should shift the revision");
+
+        // Reading without mutating should NOT shift the revision.
+        let v1b = store.get_rules_revision(true).await.unwrap();
+        assert_eq!(v1, v1b);
+
+        // Deleting an enabled rule shifts both the count and the timestamp.
+        store.delete_rule("dangerous-rm").await.unwrap();
+        let v2 = store.get_rules_revision(true).await.unwrap();
+        assert_ne!(v1, v2, "delete should shift the revision");
+    }
+
     // -- Feedback events ----------------------------------------------------
 
     #[tokio::test]
