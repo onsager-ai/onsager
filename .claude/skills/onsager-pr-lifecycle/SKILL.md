@@ -151,6 +151,12 @@ non-standard checklist shape the routine didn't recognize.
 
 ## CI triage
 
+For classification taxonomy (`regression` / `flake` / `infra` / `needs-human`),
+suspect-commit identification, and the rolling `main-red` issue convention,
+use the [`ci-triage` skill](../ci-triage/SKILL.md). This section covers the
+PR-side specifics — reproducing locally and the repo's common failure
+patterns.
+
 ### Accessing logs
 
 `WebFetch` **cannot read authenticated GitHub Actions logs** — both
@@ -270,3 +276,4 @@ commit message in chat — the user can see it on the PR.
 | [`issue-spec`](../issue-spec/SKILL.md) | Creates the spec issue this PR links to. |
 | [`onsager-pre-push`](../onsager-pre-push/SKILL.md) | Runs before `git push`; enforces the spec-link check locally. |
 | [`.claude/routines/`](../../routines/README.md) | Automates the label transitions this skill describes manually. |
+| [`ci-triage`](../ci-triage/SKILL.md) | Shared failure taxonomy + `main-red` issue convention; called from `main-ci-failure` routine and from this skill's CI triage flow. |

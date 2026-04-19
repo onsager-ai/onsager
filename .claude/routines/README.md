@@ -35,6 +35,7 @@ Install the Claude GitHub App on `onsager-ai/onsager` if prompted.
 | [`pr-merged-progress.md`](pr-merged-progress.md) | `pull_request.closed` merged=true | Tick Plan checkboxes on parent spec for `Part of #N` merges; refresh umbrella trackers that reference the closed issues; flag issues mentioned only in commits (no `Closes` line) so implicit acceptance doesn't silently leave them open. |
 | [`pr-closed-unmerged.md`](pr-closed-unmerged.md) | `pull_request.closed` merged=false | Revert linked spec back to `planned` if no other PR is in flight. |
 | [`spec-planned-review.md`](spec-planned-review.md) | `issues.labeled` = `planned` | Sanity-check the spec before a human/agent picks it up (open questions, plan items, test items). |
+| [`main-ci-failure.md`](main-ci-failure.md) | `workflow_run.completed` on `main` | Maintain one rolling `main-red` issue when L1 CI (`rust` / `frontend` / `e2e`) fails post-merge; close it when main goes green again. Delegates classification to the `ci-triage` skill. |
 
 ## Updating a routine
 
@@ -51,7 +52,11 @@ prompt drift auditable and reviewable like any other code change.
   all three and run under the account that owns the subscription.
 - **onsager-pr-lifecycle skill** covers the interactive, human-present case
   (triaging CI, replying to review comments). The routines cover the
-  unattended, mechanical case (label alignment).
+  unattended, mechanical case (label alignment, main-red bookkeeping).
+- **ci-triage skill** is shared logic: `main-ci-failure` calls it
+  unattended; humans call it via `onsager-pr-lifecycle` when looking at a
+  red PR check. Keeping the taxonomy in one place avoids two definitions
+  of "flake" drifting apart.
 
 The two are complementary. If you don't want to set up routines, read
 `onsager-pr-lifecycle` and flip labels manually — the skill documents the
@@ -63,3 +68,10 @@ Routines count against your daily run allowance (Pro: 5/day, Max: 15/day,
 Team/Enterprise: 25/day). For a project with steady PR flow, budget
 ~2 runs per PR (open + merge) and consider combining triggers on one
 routine if you're pressed for allowance.
+
+`main-ci-failure` fires once per workflow completion on main, so a flaky
+main burns allowance fast. The routine's first step filters the event to
+the three L1 workflows and only the `push` event — that keeps nightly +
+manual triggers out of the budget. If the allowance still hurts, drop the
+green-close path (manually close the `main-red` issue) before dropping the
+red-file path.
