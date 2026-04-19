@@ -32,7 +32,7 @@ Install the Claude GitHub App on `onsager-ai/onsager` if prompted.
 | File | Trigger | Purpose |
 |------|---------|---------|
 | [`pr-opened-progress.md`](pr-opened-progress.md) | `pull_request.opened` | Flip linked spec issue `planned`/`draft` → `in-progress`; verify PR body links a spec. |
-| [`pr-merged-progress.md`](pr-merged-progress.md) | `pull_request.closed` merged=true | Tick Plan checkboxes on parent spec for `Part of #N` merges. |
+| [`pr-merged-progress.md`](pr-merged-progress.md) | `pull_request.closed` merged=true | Tick Plan checkboxes on parent spec for `Part of #N` merges; refresh umbrella trackers that reference the closed issues; flag issues mentioned only in commits (no `Closes` line) so implicit acceptance doesn't silently leave them open. |
 | [`pr-closed-unmerged.md`](pr-closed-unmerged.md) | `pull_request.closed` merged=false | Revert linked spec back to `planned` if no other PR is in flight. |
 | [`spec-planned-review.md`](spec-planned-review.md) | `issues.labeled` = `planned` | Sanity-check the spec before a human/agent picks it up (open questions, plan items, test items). |
 
