@@ -203,9 +203,10 @@ mod tests {
         let store = test_store().await;
         let v0 = store.get_rules_revision(true).await.unwrap();
 
-        // Sleep enough that the RFC3339 timestamp definitely advances on
-        // SQLite (which truncates to seconds).
-        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        // SQLite rule timestamps are millisecond-precision (PR #42 review
+        // fix for #32); 20ms is well beyond clock resolution and keeps
+        // the test fast.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         store
             .update_rule(
                 "destructive-git",

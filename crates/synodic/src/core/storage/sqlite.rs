@@ -4,7 +4,15 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
+
+/// Format for timestamps written to rule columns. Uses millisecond precision
+/// so `get_rules_revision` can distinguish updates landing within the same
+/// second (issue #32 / PR #42 review): the cache keys off `MAX(updated_at)`
+/// and second-precision collisions silently serve stale rules.
+fn rule_ts_now() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use uuid::Uuid;
 
@@ -153,7 +161,7 @@ impl Storage for SqliteStorage {
 
     async fn create_rule(&self, rule: CreateRule) -> Result<Rule> {
         let tools_json = serde_json::to_string(&rule.tools)?;
-        let now = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let now = rule_ts_now();
         let lifecycle = rule.lifecycle.as_str();
 
         sqlx::query(
@@ -184,7 +192,7 @@ impl Storage for SqliteStorage {
     }
 
     async fn update_rule(&self, id: &str, update: UpdateRule) -> Result<()> {
-        let now = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let now = rule_ts_now();
 
         if let Some(desc) = &update.description {
             sqlx::query("UPDATE rules SET description = ?, updated_at = ? WHERE id = ?")
@@ -839,10 +847,16 @@ impl GovEventRow {
 }
 
 fn parse_datetime(s: &str) -> Result<DateTime<Utc>> {
-    chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%SZ")
-        .map(|dt| dt.and_utc())
+    // Try RFC3339 first — this handles both second-precision `...HH:MM:SSZ`
+    // and millisecond-precision `...HH:MM:SS.fffZ` forms written by
+    // different code paths in this file, plus any other offset variant that
+    // ends up in the TEXT column.
+    DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
         .or_else(|_| {
-            // Try alternative format
+            chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%SZ").map(|dt| dt.and_utc())
+        })
+        .or_else(|_| {
             chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").map(|dt| dt.and_utc())
         })
         .with_context(|| format!("parsing datetime: {s}"))

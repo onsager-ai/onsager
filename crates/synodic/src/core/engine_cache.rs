@@ -89,14 +89,49 @@ impl EngineCache {
                 return Ok(Arc::clone(&entry.engine));
             }
         }
-        let storage_rules = store.get_rules(true).await?;
-        let rules: Vec<InterceptRule> = storage_rules.iter().map(InterceptRule::from).collect();
+
+        // Fetch rules and bracket them with a second revision read to catch
+        // mutations that land between the outer `current` read and the fetch.
+        // If the revision is stable around the fetch, store (rev, rules) as a
+        // consistent snapshot; otherwise adopt the later revision and retry
+        // on the next call (bounded so we don't spin under heavy mutation
+        // pressure).
+        let (stable_revision, rules) = Self::fetch_consistent(store).await?;
         let engine = Arc::new(InterceptEngine::new(rules));
         *guard = Some(CachedEngine {
-            revision: current,
+            revision: stable_revision,
             engine: Arc::clone(&engine),
         });
         Ok(engine)
+    }
+
+    /// Fetch (revision, rules) as a consistent snapshot. Uses a bracketed
+    /// read — `get_rules_revision` before and after `get_rules` — and
+    /// retries on mismatch. Up to [`MAX_SNAPSHOT_ATTEMPTS`] tries, then
+    /// accepts the last pair so the caller always makes progress.
+    async fn fetch_consistent(store: &dyn Storage) -> Result<(RulesRevision, Vec<InterceptRule>)> {
+        const MAX_SNAPSHOT_ATTEMPTS: usize = 3;
+
+        let mut last_before = store.get_rules_revision(true).await?;
+        let mut last_rules = store.get_rules(true).await?;
+        let mut last_after = store.get_rules_revision(true).await?;
+
+        for _ in 0..MAX_SNAPSHOT_ATTEMPTS {
+            if last_before == last_after {
+                let compiled: Vec<InterceptRule> =
+                    last_rules.iter().map(InterceptRule::from).collect();
+                return Ok((last_after, compiled));
+            }
+            // Mutation raced the fetch; read again.
+            last_before = last_after;
+            last_rules = store.get_rules(true).await?;
+            last_after = store.get_rules_revision(true).await?;
+        }
+
+        // Couldn't stabilise — commit the most recent pair and let the next
+        // call's revision check trigger another rebuild if needed.
+        let compiled: Vec<InterceptRule> = last_rules.iter().map(InterceptRule::from).collect();
+        Ok((last_after, compiled))
     }
 
     /// Drop the cached engine, forcing the next `get_or_refresh` to rebuild.
@@ -128,17 +163,29 @@ mod tests {
 
     #[derive(Default)]
     struct TestStore {
-        revision: Mutex<RulesRevision>,
+        /// (count, label) — paired so the `TestStore` can build a
+        /// `RulesRevision` via its public constructor.
+        revision_state: Mutex<(i64, String)>,
         rules: Mutex<Vec<Rule>>,
         get_rules_calls: Mutex<usize>,
         get_revision_calls: Mutex<usize>,
+        /// Number of upcoming `get_rules` calls that should bump the
+        /// revision as a side effect. Simulates a concurrent mutation
+        /// landing between the bracketed revision reads in
+        /// `EngineCache::fetch_consistent`.
+        mutations_during_fetch: Mutex<usize>,
     }
 
     impl TestStore {
         fn bump(&self, label: &str) {
-            let mut r = self.revision.lock().unwrap();
-            r.count += 1;
-            r.max_updated_at = label.into();
+            let mut r = self.revision_state.lock().unwrap();
+            r.0 += 1;
+            r.1 = label.into();
+        }
+
+        fn current_revision(&self) -> RulesRevision {
+            let r = self.revision_state.lock().unwrap();
+            RulesRevision::new(r.0, r.1.clone())
         }
 
         fn get_rules_count(&self) -> usize {
@@ -157,11 +204,21 @@ mod tests {
         }
         async fn get_rules(&self, _active_only: bool) -> Result<Vec<Rule>> {
             *self.get_rules_calls.lock().unwrap() += 1;
-            Ok(self.rules.lock().unwrap().clone())
+            let snapshot = self.rules.lock().unwrap().clone();
+            // Side effect: if the test armed a pending mutation, bump the
+            // revision *after* snapshotting the rules so the `after` read
+            // in `fetch_consistent` sees the change.
+            let mut pending = self.mutations_during_fetch.lock().unwrap();
+            if *pending > 0 {
+                *pending -= 1;
+                drop(pending);
+                self.bump("mid-fetch");
+            }
+            Ok(snapshot)
         }
         async fn get_rules_revision(&self, _active_only: bool) -> Result<RulesRevision> {
             *self.get_revision_calls.lock().unwrap() += 1;
-            Ok(self.revision.lock().unwrap().clone())
+            Ok(self.current_revision())
         }
         async fn get_rule(&self, _id: &str) -> Result<Option<Rule>> {
             Ok(None)
@@ -264,8 +321,11 @@ mod tests {
 
         let _e = cache.get_or_refresh(&store).await.unwrap();
         assert!(cache.is_warm().await);
-        assert_eq!(store.get_revision_count(), 1);
+        // One rule fetch on the first call. Revision reads are
+        // implementation-detail (we bracket the fetch for consistency);
+        // tests assert the observable contract, not the exact count.
         assert_eq!(store.get_rules_count(), 1);
+        assert!(store.get_revision_count() >= 1);
     }
 
     #[tokio::test]
@@ -274,10 +334,14 @@ mod tests {
         let cache = EngineCache::new();
 
         let e1 = cache.get_or_refresh(&store).await.unwrap();
+        let fetches_after_first = store.get_rules_count();
         let e2 = cache.get_or_refresh(&store).await.unwrap();
         assert!(Arc::ptr_eq(&e1, &e2), "cache should hand back the same Arc");
-        assert_eq!(store.get_revision_count(), 2);
-        assert_eq!(store.get_rules_count(), 1, "no second fetch on hit");
+        assert_eq!(
+            store.get_rules_count(),
+            fetches_after_first,
+            "no second fetch on hit"
+        );
     }
 
     #[tokio::test]
@@ -311,6 +375,51 @@ mod tests {
             store.get_rules_count(),
             2,
             "invalidate should drop the cached engine"
+        );
+    }
+
+    #[tokio::test]
+    async fn bracketed_read_retries_on_mid_fetch_mutation() {
+        // Arrange: one pending mid-fetch bump. fetch_consistent should
+        // detect the mismatch on the first attempt, retry, and commit the
+        // post-mutation revision to the cache.
+        let store = TestStore::default();
+        *store.mutations_during_fetch.lock().unwrap() = 1;
+        let cache = EngineCache::new();
+
+        cache.get_or_refresh(&store).await.unwrap();
+
+        // The first get_or_refresh burned: 1 current read + 1 before + 1
+        // fetch (which bumped) + 1 after (mismatch) + 1 fetch + 1 after =
+        // 4 revision reads and 2 rule fetches before stabilising.
+        assert_eq!(store.get_rules_count(), 2);
+
+        // A subsequent call with no pending mutation must hit cache:
+        // if the stored revision were stale (pre-mutation), it would
+        // mismatch the current revision and force a third fetch.
+        cache.get_or_refresh(&store).await.unwrap();
+        assert_eq!(
+            store.get_rules_count(),
+            2,
+            "cache should be consistent with the post-mutation revision"
+        );
+    }
+
+    #[tokio::test]
+    async fn bracketed_read_eventually_commits_under_sustained_mutation() {
+        // Every fetch bumps the revision, so no snapshot is ever stable.
+        // fetch_consistent must still commit something after the retry
+        // budget rather than looping forever.
+        let store = TestStore::default();
+        *store.mutations_during_fetch.lock().unwrap() = 1000;
+        let cache = EngineCache::new();
+
+        cache.get_or_refresh(&store).await.unwrap();
+        // We should have given up after a bounded number of rule fetches.
+        assert!(
+            store.get_rules_count() <= 5,
+            "expected bounded retries, got {} fetches",
+            store.get_rules_count()
         );
     }
 

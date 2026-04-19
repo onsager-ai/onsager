@@ -132,7 +132,8 @@ impl Storage for PostgresStorage {
     async fn get_rules_revision(&self, active_only: bool) -> Result<RulesRevision> {
         // Single round-trip: COUNT plus MAX(updated_at) cast to text so the
         // value is portable across drivers and small enough to compare as a
-        // string. No row scan.
+        // string. The rules table is small in practice (tens to low
+        // thousands), so the aggregate's scan cost is bounded.
         let row: (i64, Option<String>) = if active_only {
             sqlx::query_as(
                 "SELECT COUNT(*)::BIGINT, MAX(updated_at)::TEXT \

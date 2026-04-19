@@ -240,17 +240,21 @@ pub struct ProbeResult {
 
 /// Cache key for the compiled `InterceptEngine` (issue #32).
 ///
-/// Two revisions compare equal iff no enabled-rule mutation has happened
-/// between the calls that produced them. The exact encoding is opaque —
-/// callers must treat it as a token, not a numeric counter.
+/// Treat the value as an opaque token: the public API only supports
+/// equality / hashing, not inspection of the component fields. The exact
+/// encoding (currently `(COUNT(*), MAX(updated_at))`) is an implementation
+/// detail and may change.
 ///
-/// Implementations should derive this from a small SQL aggregate
-/// (e.g. `(COUNT(*), MAX(updated_at))`) so the per-request cost is a
-/// single round-trip.
+/// Contract: implementations MUST shift this token when a rule matching
+/// `active_only` is created, updated, or deleted. Two equal revisions are
+/// best-effort evidence that no such change happened — a backend with
+/// coarse `updated_at` precision can in principle collide, so this is not
+/// a linearizability guarantee. The current SQLite backend writes
+/// millisecond-precision timestamps; Postgres writes microsecond TIMESTAMPTZ.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct RulesRevision {
-    pub count: i64,
-    pub max_updated_at: String,
+    count: i64,
+    max_updated_at: String,
 }
 
 impl RulesRevision {
@@ -277,10 +281,15 @@ pub trait Storage: Send + Sync {
     async fn get_rules(&self, active_only: bool) -> Result<Vec<Rule>>;
 
     /// Cheap revision token for the rule set, used for engine caching
-    /// (issue #32). Two calls return the same `RulesRevision` iff no rule
-    /// matching `active_only` was created, updated, or deleted between
-    /// them. Implemented as a single SQL aggregate so the per-`/gate`-call
-    /// cost is one round-trip instead of a full rule fetch.
+    /// (issue #32). Implementations MUST shift this token when a rule
+    /// matching `active_only` is created, updated, or deleted. Equal
+    /// revisions are best-effort evidence that no such change happened —
+    /// backends with coarse `updated_at` precision may produce the same
+    /// token for distinct states. See [`RulesRevision`] for the full
+    /// contract.
+    ///
+    /// Implemented as a single SQL aggregate so the per-`/gate`-call cost
+    /// is one round-trip instead of a full rule fetch.
     async fn get_rules_revision(&self, active_only: bool) -> Result<RulesRevision>;
 
     /// Get a single rule by ID.

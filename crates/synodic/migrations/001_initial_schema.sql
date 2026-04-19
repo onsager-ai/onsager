@@ -30,8 +30,11 @@ CREATE TABLE IF NOT EXISTS rules (
     -- Metadata
     enabled INTEGER NOT NULL DEFAULT 1,      -- SQLite boolean
     project_id TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    -- Millisecond precision: `get_rules_revision` keys off MAX(updated_at)
+    -- and second-precision collisions silently serve stale rules
+    -- (issue #32 / PR #42 review).
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
 
     -- Crystallization metadata
     crystallized_at TEXT,
