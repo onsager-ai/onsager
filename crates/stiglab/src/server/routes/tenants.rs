@@ -116,9 +116,16 @@ pub async fn create_tenant(
         created_by: user_id.clone(),
         created_at: now,
     };
+    let member = TenantMember {
+        tenant_id: tenant.id.clone(),
+        user_id: user_id.clone(),
+        joined_at: now,
+    };
 
-    if let Err(e) = db::insert_tenant(&state.db, &tenant).await {
-        tracing::error!("failed to insert tenant: {e}");
+    // Transactional so a failed member insert can't leave an orphan
+    // tenant row that permanently consumes the slug.
+    if let Err(e) = db::insert_tenant_with_creator(&state.db, &tenant, &member).await {
+        tracing::error!("failed to insert tenant + creator-member: {e}");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(
@@ -126,16 +133,6 @@ pub async fn create_tenant(
             ),
         )
             .into_response();
-    }
-
-    let member = TenantMember {
-        tenant_id: tenant.id.clone(),
-        user_id: user_id.clone(),
-        joined_at: now,
-    };
-    if let Err(e) = db::insert_tenant_member(&state.db, &member).await {
-        tracing::error!("failed to auto-insert creator as member: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
 
     (
@@ -239,6 +236,15 @@ pub async fn register_installation(
         return r;
     }
 
+    let account_login = body.account_login.trim();
+    if account_login.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "account_login is required" })),
+        )
+            .into_response();
+    }
+
     let secret_cipher = match body.webhook_secret.as_deref() {
         None | Some("") => None,
         Some(plaintext) => {
@@ -266,7 +272,7 @@ pub async fn register_installation(
         id: Uuid::new_v4().to_string(),
         tenant_id: tenant_id.clone(),
         install_id: body.install_id,
-        account_login: body.account_login.clone(),
+        account_login: account_login.to_string(),
         account_type: body.account_type,
         created_at: Utc::now(),
     };
@@ -317,8 +323,10 @@ pub async fn list_installations(
 }
 
 /// DELETE /api/tenants/:id/github-installations/:install_id — Unlink an
-/// installation. Projects that reference it are blocked from deletion
-/// via FK — callers should delete projects first in v1.
+/// installation. Blocked with 409 when projects still reference it
+/// (app-layer check — the tables do not declare FK constraints, in
+/// keeping with the rest of stiglab's schema). Callers must delete the
+/// projects first in v1.
 pub async fn delete_installation(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -337,6 +345,26 @@ pub async fn delete_installation(
         Ok(_) => return not_found("installation not found"),
         Err(e) => {
             tracing::error!("failed to get installation: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    }
+
+    match db::count_projects_for_installation(&state.db, &install_id).await {
+        Ok(n) if n > 0 => {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": format!(
+                        "cannot unlink installation: {n} project(s) still reference it. \
+                         Delete the projects first."
+                    )
+                })),
+            )
+                .into_response();
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("failed to count projects for installation: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     }
