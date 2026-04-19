@@ -24,7 +24,8 @@ pub enum RuntimeError {
 
 /// The Refract runtime — holds a [`DecomposerRegistry`] and an optional
 /// [`EventStore`] handle. When the spine handle is present, every intent
-/// submission emits the four-step lifecycle events; when absent, only the
+/// submission emits `refract.intent_submitted` and then either
+/// `refract.decomposed` or `refract.failed`; when absent, only the
 /// decomposer's return value is available.
 pub struct Refract {
     registry: DecomposerRegistry,

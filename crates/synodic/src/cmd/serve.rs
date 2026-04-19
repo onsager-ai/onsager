@@ -50,6 +50,12 @@ pub struct ServeCmd {
 struct AppState {
     storage: Arc<dyn Storage>,
     engine_cache: Arc<EngineCache>,
+    /// Shared handle to the event spine. `None` when Synodic is running
+    /// against a non-spine-capable backend (SQLite today). Handlers that
+    /// need to emit events check this and return an error when it's absent
+    /// rather than constructing a fresh pool per request (which would
+    /// churn Postgres connections under load).
+    spine: Option<Arc<onsager_spine::EventStore>>,
 }
 
 impl FromRef<AppState> for Arc<dyn Storage> {
@@ -64,14 +70,61 @@ impl FromRef<AppState> for Arc<EngineCache> {
     }
 }
 
+impl FromRef<AppState> for Option<Arc<onsager_spine::EventStore>> {
+    fn from_ref(state: &AppState) -> Self {
+        state.spine.clone()
+    }
+}
+
+/// The event spine is PostgreSQL-only (`EventStore::connect` opens a
+/// `PgPool`). Synodic itself supports both Postgres and SQLite for its
+/// own storage, so we only attempt to attach a spine when the URL scheme
+/// is Postgres. This avoids a noisy connect failure on every SQLite
+/// dev setup.
+fn is_postgres_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.starts_with("postgres://") || lower.starts_with("postgresql://")
+}
+
 impl ServeCmd {
     pub async fn run(self) -> Result<()> {
         let db_url = resolve_database_url();
         eprintln!("Connecting to database...");
         let storage = create_storage(&db_url).await?;
+
+        // Attach a shared event-spine handle when the database URL is
+        // Postgres. Kept in `AppState` so per-request handlers and the
+        // background listener share one `PgPool` (issue #36 Step 2, #37).
+        let spine = match std::env::var("DATABASE_URL") {
+            Ok(spine_url) if is_postgres_url(&spine_url) => {
+                match onsager_spine::EventStore::connect(&spine_url).await {
+                    Ok(store) => Some(Arc::new(store)),
+                    Err(e) => {
+                        tracing::warn!(
+                            "synodic: spine connection failed ({e}); event-emitting routes and \
+                             rule_proposed listener disabled"
+                        );
+                        None
+                    }
+                }
+            }
+            Ok(_) => {
+                tracing::info!(
+                    "synodic: non-postgres DATABASE_URL; spine integration requires postgres, \
+                     rule_proposed listener disabled"
+                );
+                None
+            }
+            Err(_) => {
+                tracing::info!("synodic: DATABASE_URL not set; rule_proposed listener disabled");
+                None
+            }
+        };
+
         let state = AppState {
             storage: Arc::from(storage),
             engine_cache: Arc::new(EngineCache::new()),
+            spine: spine.clone(),
         };
 
         let api = Router::new()
@@ -91,30 +144,21 @@ impl ServeCmd {
                 post(propose_escalation_resolution),
             );
 
-        // Spawn the ising.rule_proposed listener so Synodic consumes
-        // proposals off the spine in real time (issue #36 Step 2). A spine
-        // connection failure here is non-fatal — the HTTP API stays up and
-        // operators can retry via backfill on the next restart.
-        if let Ok(spine_url) = std::env::var("DATABASE_URL") {
+        // Spawn the ising.rule_proposed listener on the shared spine
+        // handle (issue #36 Step 2). A missing spine handle is non-fatal —
+        // the HTTP API stays up and operators can attach the spine later
+        // by restarting with a postgres `DATABASE_URL`.
+        if let Some(spine_arc) = spine {
             let listener_storage = Arc::clone(&state.storage);
+            let spine_for_listener = (*spine_arc).clone();
             tokio::spawn(async move {
-                match onsager_spine::EventStore::connect(&spine_url).await {
-                    Ok(spine) => {
-                        if let Err(e) =
-                            crate::core::proposal_listener::run(spine, listener_storage, None).await
-                        {
-                            tracing::error!("synodic: rule_proposed listener exited: {e}");
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "synodic: rule_proposed listener disabled (spine connect failed: {e})"
-                        );
-                    }
+                if let Err(e) =
+                    crate::core::proposal_listener::run(spine_for_listener, listener_storage, None)
+                        .await
+                {
+                    tracing::error!("synodic: rule_proposed listener exited: {e}");
                 }
             });
-        } else {
-            tracing::info!("synodic: DATABASE_URL not set; rule_proposed listener disabled");
         }
 
         let mut app = Router::new().nest("/api", api).with_state(state);
@@ -316,11 +360,30 @@ async fn resolve_rule_proposal(
             body.status
         )));
     }
-    store
+    match store
         .resolve_rule_proposal(&id, &body.status, body.notes)
         .await
-        .map_err(|e| AppError::BadRequest(e.to_string()))?;
-    Ok(StatusCode::NO_CONTENT)
+    {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(e) => Err(classify_resolve_error(e)),
+    }
+}
+
+/// Turn the storage layer's combined "not found / already resolved" error
+/// string into the HTTP response the client expects. 404 when the id is
+/// absent, 409 when the row is already terminal, 400 for anything else.
+/// Matches the UX of the existing `/events/:id/resolve` endpoint, which
+/// distinguishes missing ids up front with a separate lookup.
+fn classify_resolve_error(err: anyhow::Error) -> AppError {
+    let msg = err.to_string();
+    let lower = msg.to_ascii_lowercase();
+    if lower.contains("not found") {
+        AppError::NotFound(msg)
+    } else if lower.contains("already resolved") {
+        AppError::Conflict(msg)
+    } else {
+        AppError::BadRequest(msg)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -342,7 +405,11 @@ struct ProposeResolutionBody {
 /// proposed resolution on the spine as `synodic.gate_resolution_proposed`.
 /// The proposal is not applied; Forge/Synodic wiring converts accepted
 /// proposals into a final verdict on a separate path.
+///
+/// The spine handle is pulled from `AppState` so we reuse one `PgPool`
+/// across all requests instead of building a fresh pool per call.
 async fn propose_escalation_resolution(
+    State(spine): State<Option<Arc<onsager_spine::EventStore>>>,
     Path(escalation_id): Path<String>,
     Json(body): Json<ProposeResolutionBody>,
 ) -> Result<StatusCode, AppError> {
@@ -358,14 +425,13 @@ async fn propose_escalation_resolution(
         }
     };
 
-    let Ok(spine_url) = std::env::var("DATABASE_URL") else {
-        return Err(AppError::Internal(anyhow::anyhow!(
-            "DATABASE_URL not set; can't emit spine event"
-        )));
+    let Some(spine) = spine else {
+        return Err(AppError::ServiceUnavailable(
+            "spine not attached; Synodic must be run with a postgres DATABASE_URL \
+             to emit gate_resolution_proposed events"
+                .into(),
+        ));
     };
-    let spine = onsager_spine::EventStore::connect(&spine_url)
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("spine connect: {e}")))?;
 
     let event = onsager_spine::factory_event::FactoryEventKind::SynodicGateResolutionProposed {
         escalation_id: escalation_id.clone(),
@@ -423,6 +489,8 @@ enum AppError {
     Internal(anyhow::Error),
     NotFound(String),
     BadRequest(String),
+    Conflict(String),
+    ServiceUnavailable(String),
 }
 
 impl From<anyhow::Error> for AppError {
@@ -449,6 +517,16 @@ impl IntoResponse for AppError {
                 .into_response(),
             Self::BadRequest(msg) => (
                 StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": msg })),
+            )
+                .into_response(),
+            Self::Conflict(msg) => (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({ "error": msg })),
+            )
+                .into_response(),
+            Self::ServiceUnavailable(msg) => (
+                StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({ "error": msg })),
             )
                 .into_response(),

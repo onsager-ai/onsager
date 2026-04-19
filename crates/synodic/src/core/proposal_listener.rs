@@ -184,7 +184,12 @@ mod tests {
     use crate::core::storage::pool::create_storage;
 
     async fn test_storage() -> Arc<dyn Storage> {
-        let url = "sqlite://:memory:";
+        // Match the URL convention used by the rest of the Synodic storage
+        // tests — `sqlite::memory:` is unambiguously interpreted as an
+        // in-memory database by sqlx, whereas `sqlite://:memory:` can be
+        // parsed as a path to a file literally named `:memory:` on some
+        // driver versions.
+        let url = "sqlite::memory:";
         let storage = create_storage(url)
             .await
             .expect("in-memory sqlite storage must connect");
@@ -283,6 +288,22 @@ mod tests {
             .await
             .expect_err("second resolve must error");
         assert!(err.to_string().contains("already resolved"));
+    }
+
+    #[tokio::test]
+    async fn resolve_missing_id_surfaces_not_found() {
+        // Storage disambiguates between missing-id and already-terminal so
+        // the HTTP layer can return 404 vs 409. If this test starts
+        // matching the "already resolved" branch the disambiguation
+        // regressed.
+        let storage = test_storage().await;
+        let err = storage
+            .resolve_rule_proposal("does-not-exist", "approved", None)
+            .await
+            .expect_err("missing id must error");
+        let msg = err.to_string().to_ascii_lowercase();
+        assert!(msg.contains("not found"), "got: {msg}");
+        assert!(!msg.contains("already resolved"), "got: {msg}");
     }
 
     #[tokio::test]

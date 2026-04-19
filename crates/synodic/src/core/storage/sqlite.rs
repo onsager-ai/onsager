@@ -699,7 +699,18 @@ impl Storage for SqliteStorage {
         .execute(&self.pool)
         .await?;
         if result.rows_affected() == 0 {
-            anyhow::bail!("proposal not found or already resolved: {id}");
+            // Disambiguate "absent" from "already terminal" with a cheap
+            // status lookup. The HTTP layer maps these to 404 vs 409
+            // instead of collapsing both to 400.
+            let row: Option<(String,)> =
+                sqlx::query_as("SELECT status FROM rule_proposals WHERE id = ?")
+                    .bind(id)
+                    .fetch_optional(&self.pool)
+                    .await?;
+            match row {
+                None => anyhow::bail!("proposal not found: {id}"),
+                Some((s,)) => anyhow::bail!("proposal already resolved ({s}): {id}"),
+            }
         }
         Ok(())
     }
