@@ -1019,6 +1019,36 @@ pub async fn insert_tenant(pool: &AnyPool, tenant: &Tenant) -> anyhow::Result<()
     Ok(())
 }
 
+/// Atomically insert a tenant and its creator-as-member row. Either both
+/// rows land or neither does — prevents a failed `tenant_members` insert
+/// from leaving an orphan workspace that permanently consumes its slug.
+pub async fn insert_tenant_with_creator(
+    pool: &AnyPool,
+    tenant: &Tenant,
+    member: &TenantMember,
+) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO tenants (id, slug, name, created_by, created_at) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(&tenant.id)
+    .bind(&tenant.slug)
+    .bind(&tenant.name)
+    .bind(&tenant.created_by)
+    .bind(tenant.created_at.to_rfc3339())
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO tenant_members (tenant_id, user_id, joined_at) VALUES ($1, $2, $3)")
+        .bind(&member.tenant_id)
+        .bind(&member.user_id)
+        .bind(member.joined_at.to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn get_tenant(pool: &AnyPool, tenant_id: &str) -> anyhow::Result<Option<Tenant>> {
     let row = sqlx::query_as::<_, TenantRow>(
         "SELECT id, slug, name, created_by, created_at FROM tenants WHERE id = $1",
@@ -1141,6 +1171,25 @@ pub async fn delete_github_app_installation(
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// Count projects that still reference a given installation. Used by the
+/// delete-installation route for an app-layer referential-integrity check:
+/// the tables do not declare FK constraints (consistent with the rest of
+/// stiglab, which uses AnyPool across SQLite/Postgres — SQLite needs
+/// `PRAGMA foreign_keys = ON` to enforce FKs and the rest of the schema
+/// matches this convention), so callers must gate destructive operations
+/// explicitly.
+pub async fn count_projects_for_installation(
+    pool: &AnyPool,
+    install_id: &str,
+) -> anyhow::Result<i64> {
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE github_app_installation_id = $1")
+            .bind(install_id)
+            .fetch_one(pool)
+            .await?;
+    Ok(count)
 }
 
 pub async fn insert_project(pool: &AnyPool, project: &Project) -> anyhow::Result<()> {
@@ -1520,6 +1569,82 @@ mod tests {
 
         delete_project(&pool, &project.id).await.unwrap();
         assert!(get_project(&pool, &project.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn insert_tenant_with_creator_is_atomic() {
+        let pool = test_pool().await;
+        seed_user(&pool, "u1").await;
+        let t = new_tenant("u1");
+        let m = TenantMember {
+            tenant_id: t.id.clone(),
+            user_id: "u1".to_string(),
+            joined_at: Utc::now(),
+        };
+        insert_tenant_with_creator(&pool, &t, &m).await.unwrap();
+        assert!(get_tenant(&pool, &t.id).await.unwrap().is_some());
+        assert!(is_tenant_member(&pool, &t.id, "u1").await.unwrap());
+
+        // Reusing the same slug must fail and — because the helper uses a
+        // transaction — must not create a new member row either.
+        let t2 = Tenant {
+            id: Uuid::new_v4().to_string(),
+            slug: t.slug.clone(),
+            ..new_tenant("u1")
+        };
+        let m2 = TenantMember {
+            tenant_id: t2.id.clone(),
+            user_id: "u1".to_string(),
+            joined_at: Utc::now(),
+        };
+        assert!(insert_tenant_with_creator(&pool, &t2, &m2).await.is_err());
+        assert!(get_tenant(&pool, &t2.id).await.unwrap().is_none());
+        assert!(!is_tenant_member(&pool, &t2.id, "u1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn count_projects_for_installation_blocks_delete() {
+        let pool = test_pool().await;
+        seed_user(&pool, "u1").await;
+        let t = new_tenant("u1");
+        insert_tenant(&pool, &t).await.unwrap();
+
+        let install = GitHubAppInstallation {
+            id: Uuid::new_v4().to_string(),
+            tenant_id: t.id.clone(),
+            install_id: 99,
+            account_login: "acme".to_string(),
+            account_type: GitHubAccountType::Organization,
+            created_at: Utc::now(),
+        };
+        insert_github_app_installation(&pool, &install, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            count_projects_for_installation(&pool, &install.id)
+                .await
+                .unwrap(),
+            0
+        );
+
+        let project = Project {
+            id: Uuid::new_v4().to_string(),
+            tenant_id: t.id.clone(),
+            github_app_installation_id: install.id.clone(),
+            repo_owner: "acme".to_string(),
+            repo_name: "widgets".to_string(),
+            default_branch: "main".to_string(),
+            created_at: Utc::now(),
+        };
+        insert_project(&pool, &project).await.unwrap();
+
+        assert_eq!(
+            count_projects_for_installation(&pool, &install.id)
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]
