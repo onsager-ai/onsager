@@ -107,7 +107,11 @@ continuing.
 Trigger `onsager-pre-push` (or say "ready to push"). It runs:
 
 1. Sync `origin/main` into the branch (CI tests a merge preview, not the
-   branch alone).
+   branch alone). If that surfaces merge conflicts, `onsager-pre-push`
+   owns the resolution walkthrough — inventory, pattern-match against
+   the repo's recurring collisions (migrations, enum variants, event
+   envelope, lockfiles), verify, then commit. Resolve locally, never on
+   the PR web editor.
 2. `RUSTFLAGS="-D warnings" cargo build --workspace`.
 3. `RUSTFLAGS="-D warnings" cargo test --workspace --lib`.
 4. `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings`.
@@ -116,6 +120,10 @@ Trigger `onsager-pre-push` (or say "ready to push"). It runs:
    no-PR-without-spec rule locally).
 
 Fix any blocker; don't paper over with `#[allow(dead_code)]` or `--no-verify`.
+
+If a PR is already open and GitHub later flags "This branch has
+conflicts", don't use the web editor — `onsager-pr-lifecycle` covers
+the checkout-and-rerun flow that re-uses the same pre-push walkthrough.
 
 ### 5. Open the PR
 

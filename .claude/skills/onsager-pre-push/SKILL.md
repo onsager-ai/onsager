@@ -1,6 +1,6 @@
 ---
 name: onsager-pre-push
-description: Run before pushing code to the Onsager repo to catch what CI would fail on, and confirm the branch has a linked spec issue in a valid state. Reproduces CI's merge preview + strict-warnings environment and renumbers colliding migrations. Triggers include "before push", "ready to push", "pre-push check", "push readiness", "prep for PR", or proactively before any git push on an Onsager branch.
+description: Run before pushing code to the Onsager repo to catch what CI would fail on, and confirm the branch has a linked spec issue in a valid state. Reproduces CI's merge preview + strict-warnings environment, renumbers colliding migrations, and walks through the repo's common merge-conflict patterns. Triggers include "before push", "ready to push", "pre-push check", "push readiness", "prep for PR", "resolve merge conflict", "merge conflict", "branch has conflicts", "sync with main", or proactively before any git push on an Onsager branch.
 ---
 
 # onsager-pre-push
@@ -32,20 +32,96 @@ git fetch origin main
 git merge origin/main --no-edit
 ```
 
-If there are conflicts, resolve them **now**, not on the PR page. Common
-collision patterns in this repo:
+Resolve conflicts **locally**, before push — never on the PR "Resolve
+conflicts" web editor (it bypasses `cargo build`/`clippy` and routinely
+lands broken states). If the merge aborts cleanly, skip to step 2.
 
-- **Migrations**: both branches added `NNN_foo.sql`. Renumber yours to the
-  next unused N, then update all three reference sites:
-  `justfile` (`db-migrate`), `docker-compose.yml` (`migrate` service's
-  `entrypoint`), `.github/workflows/rust.yml` (`Apply database migrations`
-  step).
-- **Enum variants**: main removed `Kind::{Report, Dataset, Config, ApiCall}`
-  in favour of `Kind::PullRequest` once. If you see `variant not found`,
-  grep for the old variant names and update each `match` arm.
-- **Event envelope variants**: both branches added variants to
-  `FactoryEventKind` — the auto-merge succeeds textually but duplicates or
-  re-orders arms. Build verifies.
+#### Resolving conflicts
+
+1. **Inventory** what conflicted:
+
+   ```bash
+   git status --short                   # U* lines = unresolved paths
+   git diff --name-only --diff-filter=U
+   ```
+
+2. **Work by pattern, not by file.** A single logical conflict (e.g. an
+   enum variant change) usually spans several files. Match what you see
+   against the patterns below before touching conflict markers — the
+   right fix is often "take main's version and re-apply your change on
+   top", not a line-by-line merge.
+
+3. **Resolve**, then stage each resolved path with `git add <path>`.
+   Re-run `git status` until no `U*` entries remain.
+
+4. **Verify before committing the merge.** A passing merge means:
+
+   ```bash
+   RUSTFLAGS="-D warnings" cargo build --workspace
+   RUSTFLAGS="-D warnings" cargo test --workspace --lib
+   cargo fmt --all -- --check
+   ```
+
+   Only then:
+
+   ```bash
+   git commit --no-edit                 # default "Merge branch 'main' ..." message
+   ```
+
+5. **If you get lost**, bail and retry:
+
+   ```bash
+   git merge --abort
+   ```
+
+   This restores pre-merge state. Never `git reset --hard` or
+   `git checkout --` without confirming nothing is staged you care
+   about — the merge carries uncommitted resolutions.
+
+   Prefer `merge` over `rebase` for syncing main here: the branch is
+   likely already pushed, rebase rewrites history, and force-push is a
+   destructive action per repo policy.
+
+#### Common collision patterns in this repo
+
+Match the symptom in `git status` / build output to the pattern:
+
+- **Migrations (`migrations/NNN_*.sql`)**: both branches added the same
+  `NNN`. Keep main's file at `NNN`, renumber yours to the next unused
+  `NNN+k`, then update **all three** reference sites or the CI migrate
+  step will skip it:
+  - `justfile` — the `db-migrate` recipe.
+  - `docker-compose.yml` — the `migrate` service's `entrypoint`.
+  - `.github/workflows/rust.yml` — the `Apply database migrations` step.
+
+  Sanity check: `git grep -n '<old-NNN>_'` should return zero hits
+  after renumber.
+
+- **Enum variants** (e.g. `Kind::{Report,Dataset,Config,ApiCall}` →
+  `Kind::PullRequest`): main removed variants your branch still uses.
+  Build reports `variant not found`. `git grep` each removed variant
+  and update every `match` arm; don't add a catch-all `_ =>` just to
+  silence the compiler — the exhaustive check is load-bearing.
+
+- **Event envelope variants** (`FactoryEventKind`, `FactoryEvent`):
+  both branches added arms. Textual merge succeeds but may duplicate
+  or re-order variants. After merge, open the enum, dedupe, and
+  re-run `cargo build`; serde-renamed variants sharing a tag will
+  cause runtime dispatch errors that compile fine.
+
+- **`Cargo.lock`**: always resolve by re-running `cargo build --workspace`
+  after accepting either side — don't hand-edit. If both branches
+  bumped the same dep differently, prefer main's version and let your
+  change re-request an update.
+
+- **`pnpm-lock.yaml` / `package.json`**: take main's `pnpm-lock.yaml`,
+  re-apply your `package.json` edits, then `pnpm install` to
+  regenerate the lockfile deterministically.
+
+- **Spine event schema (`crates/onsager-spine/src/events/`)**: schema
+  drift between branches silently changes wire format. After resolving,
+  run `cargo test -p onsager-spine --lib` to catch serde round-trip
+  failures before CI does.
 
 ### 2. Build with CI's flags
 

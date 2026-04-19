@@ -1,6 +1,6 @@
 ---
 name: onsager-pr-lifecycle
-description: Manage an Onsager PR after it's been pushed — spec-issue linking, CI triage, review-comment discipline, webhook subscription, and label alignment. Triggers include "CI is failing", "check is red", "link this issue", "Closes vs Part of", "respond to review", "subscribe to PR", "triage PR", "the PR is ready" or when a github-webhook-activity event arrives. Paired with `onsager-dev-process` (overall loop), `issue-spec` (spec creation), and the GitHub-triggered Claude Routines under `.claude/routines/`.
+description: Manage an Onsager PR after it's been pushed — spec-issue linking, CI triage, review-comment discipline, merge-conflict recovery on open PRs, webhook subscription, and label alignment. Triggers include "CI is failing", "check is red", "link this issue", "Closes vs Part of", "respond to review", "subscribe to PR", "triage PR", "the PR is ready", "PR has conflicts", "branch has conflicts with main", "merge conflict on the PR", or when a github-webhook-activity event arrives. Paired with `onsager-dev-process` (overall loop), `issue-spec` (spec creation), `onsager-pre-push` (which owns the pre-push conflict walkthrough), and the GitHub-triggered Claude Routines under `.claude/routines/`.
 ---
 
 # onsager-pr-lifecycle
@@ -129,6 +129,44 @@ error page. Don't waste time on them. Work instead from:
 
 Main and PR both add `NNN_foo.sql` → rename yours to the next unused `NNN`.
 Update **all three**: `justfile`, `docker-compose.yml`, `.github/workflows/rust.yml`.
+
+## Merge conflicts on an open PR
+
+When GitHub shows "This branch has conflicts that must be resolved" or the
+red banner appears on `mcp__github__pull_request_read` (`mergeable: false`),
+resolve **locally** — the GitHub web editor bypasses `cargo build` and
+routinely lands broken merges.
+
+1. **Don't** use `mcp__github__update_pull_request_branch` to auto-merge
+   main in via GitHub. That surfaces the same conflicts without giving
+   you the resolution workspace, then commits a broken merge if you
+   accept the default.
+
+2. Check out the branch locally and run the full conflict walkthrough
+   in [`onsager-pre-push`](../onsager-pre-push/SKILL.md) (step 1,
+   "Resolving conflicts") — inventory, pattern-match, resolve, verify,
+   commit. That section owns the repo's recurring patterns (migrations,
+   enum variants, event envelope, `Cargo.lock`, `pnpm-lock.yaml`, spine
+   event schema); don't duplicate them here.
+
+3. After the merge commit lands, continue with steps 2–5 of
+   `onsager-pre-push` (build, test, clippy, fmt) before pushing.
+   CI's `pull_request` job tests the new merge preview — if you didn't
+   rebuild locally, CI finds out first.
+
+4. Push the merge commit to the same branch with
+   `git push` (no `--force`). The existing PR updates in place; the
+   conflict banner clears when GitHub re-evaluates.
+
+5. If the PR is tied to a `Closes #N` / `Part of #N` line and the merge
+   touched the spec's surface area (enum variants, event schema), comment
+   on the spec flagging what drifted, so the parent stays accurate.
+
+If the branch is so far behind main that the conflict set is large
+(>10 files or crosses subsystem boundaries), close the PR, rebase the
+work into a fresh branch from `origin/main`, and open a new PR with the
+same linking line. This is cheaper than a multi-hour merge and keeps the
+audit trail clean — note the close reason on the old PR.
 
 ## Review comments
 
