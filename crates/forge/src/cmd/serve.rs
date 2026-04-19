@@ -425,39 +425,44 @@ pub fn run(database_url: &str, tick_ms: u64) {
                 // audit-log event so a crash between the two leaves the
                 // durable state ahead of (not behind) the event stream —
                 // replay can catch up, but a state behind the event stream
-                // is silent drift (issue #30).
+                // is silent drift (issue #30). Dedupe: a single tick can
+                // emit both ArtifactAdvanced and BundleSealed for the same
+                // artifact; one UPDATE covers both since we snapshot
+                // state + version + bundle_id together.
                 if let Some(ref spine) = spine {
+                    let mut seen = std::collections::HashSet::new();
                     for event in &output.events {
                         let artifact_id = match event {
                             PipelineEvent::ArtifactAdvanced { artifact_id, .. }
                             | PipelineEvent::BundleSealed { artifact_id, .. } => Some(artifact_id),
                             _ => None,
                         };
-                        if let Some(aid) = artifact_id {
-                            let snapshot = {
-                                let state = tick_shared.read().await;
-                                state
-                                    .pipeline
-                                    .store
-                                    .get(&onsager_artifact::ArtifactId::new(aid))
-                                    .cloned()
-                            };
-                            if let Some(artifact) = snapshot {
-                                if let Err(e) =
-                                    persistence::persist_artifact_state(spine.pool(), &artifact)
-                                        .await
-                                {
-                                    tracing::error!(
-                                        artifact_id = %aid,
-                                        "forge: failed to persist state transition: {e}"
-                                    );
-                                }
-                            } else {
-                                tracing::warn!(
+                        let Some(aid) = artifact_id else { continue };
+                        if !seen.insert(aid.clone()) {
+                            continue;
+                        }
+                        let snapshot = {
+                            let state = tick_shared.read().await;
+                            state
+                                .pipeline
+                                .store
+                                .get(&onsager_artifact::ArtifactId::new(aid))
+                                .cloned()
+                        };
+                        if let Some(artifact) = snapshot {
+                            if let Err(e) =
+                                persistence::persist_artifact_state(spine.pool(), &artifact).await
+                            {
+                                tracing::error!(
                                     artifact_id = %aid,
-                                    "forge: state transition event references unknown artifact"
+                                    "forge: failed to persist state transition: {e}"
                                 );
                             }
+                        } else {
+                            tracing::warn!(
+                                artifact_id = %aid,
+                                "forge: state transition event references unknown artifact"
+                            );
                         }
                     }
                 }
@@ -644,12 +649,16 @@ async fn register_artifact(
         )
         .await
         {
-            tracing::error!("forge: failed to register artifact in spine: {e}");
+            // Full sqlx::Error goes to the server log (which may carry
+            // constraint names, column types, etc.); the HTTP client
+            // only sees a stable, opaque error tag plus the artifact ID
+            // it submitted for correlation.
+            tracing::error!(artifact_id = %id, "forge: failed to register artifact in spine: {e}");
             return (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(serde_json::json!({
                     "error": "failed to persist artifact",
-                    "detail": e.to_string(),
+                    "artifact_id": id.as_str(),
                 })),
             )
                 .into_response();

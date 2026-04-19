@@ -84,10 +84,22 @@ pub async fn load_artifact_store(pool: &PgPool) -> Result<ArtifactStore, sqlx::E
         let version: i32 = row.get("current_version");
         let bundle_id: Option<String> = row.get("current_bundle_id");
 
+        // DB schema is INTEGER with no non-negative CHECK, so defend
+        // against a negative value sneaking in rather than wrapping to
+        // a huge u32 that would look like a catastrophic version jump.
+        let version_u32 = u32::try_from(version).unwrap_or_else(|_| {
+            tracing::warn!(
+                artifact_id = %id,
+                version,
+                "forge: current_version is negative in DB, clamping to 0"
+            );
+            0
+        });
+
         let mut artifact = Artifact::new(kind_from_db(&kind), name, owner, "forge", vec![]);
         artifact.artifact_id = ArtifactId::new(&id);
         artifact.state = state_from_db(&state_str);
-        artifact.current_version = version as u32;
+        artifact.current_version = version_u32;
         artifact.current_bundle_id = bundle_id.map(BundleId::new);
         store.insert(artifact);
     }
@@ -97,11 +109,11 @@ pub async fn load_artifact_store(pool: &PgPool) -> Result<ArtifactStore, sqlx::E
 
 /// Register a new artifact in the spine database.
 ///
-/// Runs the INSERT inside an explicit transaction so the row and any
-/// caller-supplied extensions (e.g. a factory event emit) either commit
-/// together or not at all. The in-memory store is updated only after the
-/// transaction commits — no partial state is visible to subsequent
-/// requests.
+/// Wraps the INSERT in an explicit transaction so the row commits
+/// atomically — on `Err`, no row is visible and the caller can skip
+/// the in-memory write, which is how `register_artifact` in
+/// `cmd/serve.rs` preserves the "no divergent state" property
+/// required by issue #30.
 pub async fn insert_artifact_row(
     pool: &PgPool,
     artifact_id: &str,

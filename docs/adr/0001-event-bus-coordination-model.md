@@ -91,7 +91,7 @@ the vocabulary.
   (shaping is minutes, gate evaluation is seconds).
 - Correlation requires request IDs on every event pair. We already do
   this via `correlation_id`, but every new request/response pair must
-  adopt it discipline.
+  enforce this consistently.
 - Debugging shifts from "read an HTTP trace" to "replay the event
   stream". This is strictly more powerful but needs Dashboard support
   (an event stream viewer) to be ergonomic for operators.
