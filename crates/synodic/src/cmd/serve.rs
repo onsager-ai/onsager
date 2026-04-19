@@ -21,7 +21,7 @@ use crate::core::engine_cache::EngineCache;
 use crate::core::gate_adapter;
 use crate::core::storage::pool::{create_storage, resolve_database_url};
 use crate::core::storage::{
-    CreateGovernanceEvent, GovernanceEvent, GovernanceEventFilters, Storage,
+    CreateGovernanceEvent, GovernanceEvent, GovernanceEventFilters, RuleProposal, Storage,
 };
 
 /// Run the Synodic web server (dashboard + API)
@@ -81,7 +81,41 @@ impl ServeCmd {
             .route("/events/{id}/resolve", patch(resolve_event))
             .route("/stats", get(get_stats))
             .route("/rules", get(list_rules))
-            .route("/gate", post(gate_handler));
+            .route("/gate", post(gate_handler))
+            // Rule proposal queue (issue #36 Step 2)
+            .route("/rule-proposals", get(list_rule_proposals))
+            .route("/rule-proposals/{id}/resolve", patch(resolve_rule_proposal))
+            // Escalation resolution proposals (issue #37)
+            .route(
+                "/escalations/{id}/propose-resolution",
+                post(propose_escalation_resolution),
+            );
+
+        // Spawn the ising.rule_proposed listener so Synodic consumes
+        // proposals off the spine in real time (issue #36 Step 2). A spine
+        // connection failure here is non-fatal — the HTTP API stays up and
+        // operators can retry via backfill on the next restart.
+        if let Ok(spine_url) = std::env::var("DATABASE_URL") {
+            let listener_storage = Arc::clone(&state.storage);
+            tokio::spawn(async move {
+                match onsager_spine::EventStore::connect(&spine_url).await {
+                    Ok(spine) => {
+                        if let Err(e) =
+                            crate::core::proposal_listener::run(spine, listener_storage, None).await
+                        {
+                            tracing::error!("synodic: rule_proposed listener exited: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "synodic: rule_proposed listener disabled (spine connect failed: {e})"
+                        );
+                    }
+                }
+            });
+        } else {
+            tracing::info!("synodic: DATABASE_URL not set; rule_proposed listener disabled");
+        }
 
         let mut app = Router::new().nest("/api", api).with_state(state);
 
@@ -250,6 +284,114 @@ async fn list_rules(State(store): State<Arc<dyn Storage>>) -> Result<Json<Vec<Ap
         .collect();
 
     Ok(Json(api_rules))
+}
+
+// ---------------------------------------------------------------------------
+// Rule proposal queue (issue #36 Step 2)
+// ---------------------------------------------------------------------------
+
+async fn list_rule_proposals(
+    State(store): State<Arc<dyn Storage>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Vec<RuleProposal>>, AppError> {
+    let status = params.get("status").map(String::as_str);
+    let proposals = store.list_rule_proposals(status).await?;
+    Ok(Json(proposals))
+}
+
+#[derive(Deserialize)]
+struct ResolveProposalBody {
+    status: String,
+    notes: Option<String>,
+}
+
+async fn resolve_rule_proposal(
+    State(store): State<Arc<dyn Storage>>,
+    Path(id): Path<String>,
+    Json(body): Json<ResolveProposalBody>,
+) -> Result<StatusCode, AppError> {
+    if body.status != "approved" && body.status != "rejected" {
+        return Err(AppError::BadRequest(format!(
+            "status must be approved or rejected, got {}",
+            body.status
+        )));
+    }
+    store
+        .resolve_rule_proposal(&id, &body.status, body.notes)
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Escalation resolution proposals (issue #37)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct ProposeResolutionBody {
+    artifact_id: String,
+    /// Identity of the proposer: `"supervisor"`, `"human:<id>"`, or any
+    /// free-form string representing the delegate.
+    proposer: String,
+    /// One of `"allow" | "deny" | "modify" | "escalate"`.
+    proposed_verdict: String,
+    rationale: String,
+}
+
+/// POST `/api/escalations/{id}/propose-resolution` — record a delegate's
+/// proposed resolution on the spine as `synodic.gate_resolution_proposed`.
+/// The proposal is not applied; Forge/Synodic wiring converts accepted
+/// proposals into a final verdict on a separate path.
+async fn propose_escalation_resolution(
+    Path(escalation_id): Path<String>,
+    Json(body): Json<ProposeResolutionBody>,
+) -> Result<StatusCode, AppError> {
+    let verdict = match body.proposed_verdict.to_ascii_lowercase().as_str() {
+        "allow" => onsager_spine::factory_event::VerdictSummary::Allow,
+        "deny" => onsager_spine::factory_event::VerdictSummary::Deny,
+        "modify" => onsager_spine::factory_event::VerdictSummary::Modify,
+        "escalate" => onsager_spine::factory_event::VerdictSummary::Escalate,
+        other => {
+            return Err(AppError::BadRequest(format!(
+                "proposed_verdict must be allow|deny|modify|escalate, got {other}"
+            )));
+        }
+    };
+
+    let Ok(spine_url) = std::env::var("DATABASE_URL") else {
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "DATABASE_URL not set; can't emit spine event"
+        )));
+    };
+    let spine = onsager_spine::EventStore::connect(&spine_url)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("spine connect: {e}")))?;
+
+    let event = onsager_spine::factory_event::FactoryEventKind::SynodicGateResolutionProposed {
+        escalation_id: escalation_id.clone(),
+        artifact_id: onsager_artifact::ArtifactId::new(&body.artifact_id),
+        proposer: body.proposer,
+        proposed_verdict: verdict,
+        rationale: body.rationale,
+    };
+    let data = serde_json::to_value(&event).expect("FactoryEventKind must serialize");
+    let metadata = onsager_spine::EventMetadata {
+        actor: "synodic".into(),
+        ..Default::default()
+    };
+    spine
+        .append_ext(
+            &escalation_id,
+            "synodic",
+            event.event_type(),
+            data,
+            &metadata,
+            None,
+        )
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("append_ext: {e}")))?;
+
+    Ok(StatusCode::ACCEPTED)
 }
 
 // ---------------------------------------------------------------------------

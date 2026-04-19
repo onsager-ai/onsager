@@ -5,6 +5,7 @@ pub mod intercept;
 pub mod llm;
 pub mod pipeline;
 pub mod probing;
+pub mod proposal_listener;
 pub mod scoring;
 pub mod storage;
 pub mod ui;

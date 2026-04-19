@@ -107,6 +107,23 @@ impl Storage for SqliteStorage {
             }
         }
 
+        // Run rule proposals migration (issue #36 Step 2)
+        let proposals = include_str!("../../../migrations/005_rule_proposals.sql");
+        for statement in proposals.split(';') {
+            let stmt = statement.trim();
+            if !stmt.is_empty() {
+                sqlx::query(stmt)
+                    .execute(&self.pool)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "rule proposals migration statement failed: {}",
+                            &stmt[..stmt.len().min(80)]
+                        )
+                    })?;
+            }
+        }
+
         // Run seed data
         let seed = include_str!("../../../migrations/002_seed_data.sql");
         for statement in seed.split(';') {
@@ -595,6 +612,97 @@ impl Storage for SqliteStorage {
 
         Ok(())
     }
+
+    // -- Rule proposals (issue #36 Step 2) ----------------------------------
+
+    async fn list_rule_proposals(&self, status: Option<&str>) -> Result<Vec<RuleProposal>> {
+        let rows = if let Some(s) = status {
+            sqlx::query_as::<_, ProposalRow>(
+                "SELECT * FROM rule_proposals WHERE status = ? ORDER BY created_at DESC",
+            )
+            .bind(s)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, ProposalRow>(
+                "SELECT * FROM rule_proposals ORDER BY created_at DESC",
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+        rows.into_iter().map(|r| r.into_proposal()).collect()
+    }
+
+    async fn create_rule_proposal(&self, proposal: CreateRuleProposal) -> Result<RuleProposal> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let status = proposal
+            .initial_status
+            .as_deref()
+            .unwrap_or("pending")
+            .to_string();
+        let action_json = serde_json::to_string(&proposal.proposed_action)?;
+
+        // ON CONFLICT keeps the first proposal per insight — redelivery is a
+        // no-op. SQLite returns rowcount 0 when the conflict path fires;
+        // either way, the SELECT below resolves to the current row.
+        sqlx::query(
+            "INSERT INTO rule_proposals (id, insight_id, signal_kind, subject_ref, \
+             proposed_action, class, rationale, confidence, status, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             ON CONFLICT(insight_id) DO NOTHING",
+        )
+        .bind(&id)
+        .bind(&proposal.insight_id)
+        .bind(&proposal.signal_kind)
+        .bind(&proposal.subject_ref)
+        .bind(&action_json)
+        .bind(&proposal.class)
+        .bind(&proposal.rationale)
+        .bind(proposal.confidence)
+        .bind(&status)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .context("inserting rule proposal")?;
+
+        let row =
+            sqlx::query_as::<_, ProposalRow>("SELECT * FROM rule_proposals WHERE insight_id = ?")
+                .bind(&proposal.insight_id)
+                .fetch_one(&self.pool)
+                .await
+                .context("reading back rule proposal")?;
+        row.into_proposal()
+    }
+
+    async fn resolve_rule_proposal(
+        &self,
+        id: &str,
+        status: &str,
+        notes: Option<String>,
+    ) -> Result<()> {
+        if status != "approved" && status != "rejected" {
+            anyhow::bail!("invalid proposal status: {status}");
+        }
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        // Guard against double-resolution: only transition rows still
+        // pending, so a repeated PATCH can't overwrite the original
+        // resolver's notes.
+        let result = sqlx::query(
+            "UPDATE rule_proposals SET status = ?, resolution_notes = ?, resolved_at = ? \
+             WHERE id = ? AND status = 'pending'",
+        )
+        .bind(status)
+        .bind(&notes)
+        .bind(&now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            anyhow::bail!("proposal not found or already resolved: {id}");
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -835,6 +943,46 @@ impl GovEventRow {
             source: self.source,
             metadata: serde_json::from_str(&self.metadata).unwrap_or_default(),
             resolved: self.resolved,
+            resolution_notes: self.resolution_notes,
+            created_at: parse_datetime(&self.created_at)?,
+            resolved_at: self
+                .resolved_at
+                .as_deref()
+                .map(parse_datetime)
+                .transpose()?,
+        })
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct ProposalRow {
+    id: String,
+    insight_id: String,
+    signal_kind: String,
+    subject_ref: String,
+    proposed_action: String,
+    class: String,
+    rationale: String,
+    confidence: f64,
+    status: String,
+    resolution_notes: Option<String>,
+    created_at: String,
+    resolved_at: Option<String>,
+}
+
+impl ProposalRow {
+    fn into_proposal(self) -> Result<RuleProposal> {
+        Ok(RuleProposal {
+            id: self.id,
+            insight_id: self.insight_id,
+            signal_kind: self.signal_kind,
+            subject_ref: self.subject_ref,
+            proposed_action: serde_json::from_str(&self.proposed_action)
+                .unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+            class: self.class,
+            rationale: self.rationale,
+            confidence: self.confidence,
+            status: self.status,
             resolution_notes: self.resolution_notes,
             created_at: parse_datetime(&self.created_at)?,
             resolved_at: self

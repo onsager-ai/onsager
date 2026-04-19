@@ -288,6 +288,26 @@ mod tests {
         async fn resolve_governance_event(&self, _id: &str, _notes: Option<String>) -> Result<()> {
             Ok(())
         }
+        async fn list_rule_proposals(
+            &self,
+            _status: Option<&str>,
+        ) -> Result<Vec<crate::core::storage::RuleProposal>> {
+            Ok(vec![])
+        }
+        async fn create_rule_proposal(
+            &self,
+            _proposal: crate::core::storage::CreateRuleProposal,
+        ) -> Result<crate::core::storage::RuleProposal> {
+            unimplemented!()
+        }
+        async fn resolve_rule_proposal(
+            &self,
+            _id: &str,
+            _status: &str,
+            _notes: Option<String>,
+        ) -> Result<()> {
+            Ok(())
+        }
     }
 
     fn sample_rule(id: &str) -> Rule {

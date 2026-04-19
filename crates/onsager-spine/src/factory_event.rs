@@ -241,6 +241,11 @@ pub enum FactoryEventKind {
         /// meaningless id.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         artifact_id: Option<String>,
+        /// LLM token usage for this session (issue #39). Optional so
+        /// pre-accounting sessions and mock dispatchers don't fabricate a
+        /// zero bill — `None` means "not reported", not "cost nothing".
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token_usage: Option<TokenUsage>,
     },
 
     /// A session terminated with an error.
@@ -313,6 +318,20 @@ pub enum FactoryEventKind {
         artifact_id: ArtifactId,
     },
 
+    /// A delegate (human or supervisor agent) proposed a resolution for an
+    /// active escalation (issue #37). The resolution is not applied until
+    /// accepted — this event is the proposal itself, not the final verdict.
+    SynodicGateResolutionProposed {
+        escalation_id: String,
+        artifact_id: ArtifactId,
+        /// Who's proposing the resolution (`"supervisor"`, `"human:<id>"`).
+        proposer: String,
+        /// The verdict being proposed.
+        proposed_verdict: VerdictSummary,
+        /// Free-form justification for the audit trail.
+        rationale: String,
+    },
+
     /// A crystallization candidate rule was created.
     SynodicRuleProposed {
         rule_id: String,
@@ -364,10 +383,30 @@ pub enum FactoryEventKind {
     /// An insight was deduplicated or fell below confidence threshold (audit trail).
     IsingInsightSuppressed { insight_id: String, reason: String },
 
-    /// An insight was packaged as a rule proposal for Synodic.
+    /// An insight was packaged as a rule proposal for Synodic (issue #36
+    /// Step 2). Unlike the legacy form, this variant carries enough
+    /// structure that a Synodic consumer can route it without looking up
+    /// the original insight — `signal_kind` + `subject_ref` identify the
+    /// evidence, `proposed_action` names what rule change is being asked
+    /// for, and `class` decides whether the proposal auto-activates
+    /// (`safe_auto`) or enters the review queue (`review_required`).
     IsingRuleProposed {
+        /// ID of the insight that motivated the proposal.
         insight_id: String,
-        proposed_rule_description: String,
+        /// Copy of the producing analyzer's signal kind (e.g.
+        /// `"repeated_gate_override"`) so consumers can dedupe against the
+        /// `insight_emitted` stream.
+        signal_kind: String,
+        /// What the proposal is about (artifact kind, rule id, etc.).
+        subject_ref: String,
+        /// Kind of change being proposed.
+        proposed_action: RuleProposalAction,
+        /// How the proposal should be handled downstream.
+        class: RuleProposalClass,
+        /// Human-readable justification for the audit trail.
+        rationale: String,
+        /// Confidence copied from the backing insight (0.0..=1.0).
+        confidence: f64,
     },
 
     /// An analyzer encountered an error during its run.
@@ -375,6 +414,39 @@ pub enum FactoryEventKind {
 
     /// Ising finished catching up from a lag position.
     IsingCatchupCompleted { events_processed: u64 },
+
+    // -- Refract events (issue #35 — intent decomposition) ------------------
+    /// A new intent was submitted for decomposition. Intents are the
+    /// high-level units of work a Refract decomposer expands into artifact
+    /// trees (e.g. `"migrate all legacy auth callers to the new SDK"` →
+    /// one artifact per file-touchpoint).
+    IntentSubmitted {
+        /// Opaque unique id — used as the correlation handle for every
+        /// downstream `refract.*` event.
+        intent_id: String,
+        /// Stable class identifier — maps 1:1 to a registered decomposer
+        /// (e.g. `"file_migration"`, `"spec_rollout"`).
+        intent_class: String,
+        /// Free-form description of the intent, shown in the UI and
+        /// preserved as audit trail.
+        description: String,
+        /// Who or what submitted the intent.
+        submitter: String,
+    },
+
+    /// A decomposer produced an artifact tree for an intent.
+    RefractDecomposed {
+        intent_id: String,
+        /// Name of the decomposer that handled the intent (the Refract
+        /// equivalent of Ising's `signal_kind`).
+        decomposer: String,
+        /// Newly registered artifact ids produced by the decomposition.
+        artifact_ids: Vec<String>,
+    },
+
+    /// Decomposition failed — either no decomposer matched, or the matched
+    /// decomposer errored out.
+    RefractFailed { intent_id: String, reason: String },
 
     // -- Registry events (factory pipeline foundations, issue #14) ----------
     /// A new artifact type was proposed (not yet active).
@@ -486,6 +558,7 @@ impl FactoryEventKind {
             Self::SynodicEscalationStarted { .. } => "synodic.escalation_started",
             Self::SynodicEscalationResolved { .. } => "synodic.escalation_resolved",
             Self::SynodicEscalationTimedOut { .. } => "synodic.escalation_timed_out",
+            Self::SynodicGateResolutionProposed { .. } => "synodic.gate_resolution_proposed",
             Self::SynodicRuleProposed { .. } => "synodic.rule_proposed",
             Self::SynodicRuleApproved { .. } => "synodic.rule_approved",
             Self::SynodicRuleDisabled { .. } => "synodic.rule_disabled",
@@ -496,6 +569,9 @@ impl FactoryEventKind {
             Self::IsingRuleProposed { .. } => "ising.rule_proposed",
             Self::IsingAnalyzerError { .. } => "ising.analyzer_error",
             Self::IsingCatchupCompleted { .. } => "ising.catchup_completed",
+            Self::IntentSubmitted { .. } => "refract.intent_submitted",
+            Self::RefractDecomposed { .. } => "refract.decomposed",
+            Self::RefractFailed { .. } => "refract.failed",
             Self::TypeProposed { .. } => "registry.type_proposed",
             Self::TypeApproved { .. } => "registry.type_approved",
             Self::TypeDeprecated { .. } => "registry.type_deprecated",
@@ -551,6 +627,7 @@ impl FactoryEventKind {
             | Self::SynodicEscalationStarted { .. }
             | Self::SynodicEscalationResolved { .. }
             | Self::SynodicEscalationTimedOut { .. }
+            | Self::SynodicGateResolutionProposed { .. }
             | Self::SynodicRuleProposed { .. }
             | Self::SynodicRuleApproved { .. }
             | Self::SynodicRuleDisabled { .. }
@@ -561,6 +638,9 @@ impl FactoryEventKind {
             | Self::IsingRuleProposed { .. }
             | Self::IsingAnalyzerError { .. }
             | Self::IsingCatchupCompleted { .. } => "ising",
+            Self::IntentSubmitted { .. }
+            | Self::RefractDecomposed { .. }
+            | Self::RefractFailed { .. } => "refract",
             Self::TypeProposed { .. }
             | Self::TypeApproved { .. }
             | Self::TypeDeprecated { .. }
@@ -618,6 +698,7 @@ impl FactoryEventKind {
             Self::SynodicEscalationStarted { escalation_id, .. } => escalation_id.clone(),
             Self::SynodicEscalationResolved { escalation_id, .. } => escalation_id.clone(),
             Self::SynodicEscalationTimedOut { escalation_id, .. } => escalation_id.clone(),
+            Self::SynodicGateResolutionProposed { escalation_id, .. } => escalation_id.clone(),
             Self::SynodicRuleProposed { rule_id, .. } => rule_id.clone(),
             Self::SynodicRuleApproved { rule_id, .. } => rule_id.clone(),
             Self::SynodicRuleDisabled { rule_id, .. } => rule_id.clone(),
@@ -628,6 +709,9 @@ impl FactoryEventKind {
             Self::IsingRuleProposed { insight_id, .. } => insight_id.clone(),
             Self::IsingAnalyzerError { analyzer, .. } => analyzer.clone(),
             Self::IsingCatchupCompleted { .. } => "ising".to_string(),
+            Self::IntentSubmitted { intent_id, .. }
+            | Self::RefractDecomposed { intent_id, .. }
+            | Self::RefractFailed { intent_id, .. } => intent_id.clone(),
             Self::TypeProposed { type_id, .. }
             | Self::TypeApproved { type_id, .. }
             | Self::TypeDeprecated { type_id, .. } => format!("type:{type_id}"),
@@ -733,6 +817,60 @@ pub struct EventRef {
     /// The `event_type` string (e.g. `"forge.gate_verdict"`), for quick
     /// consumer-side filtering without a second lookup.
     pub event_type: String,
+}
+
+/// LLM token usage carried on [`FactoryEventKind::StiglabSessionCompleted`]
+/// (issue #39). Accounting primitives only — USD cost is resolved downstream
+/// by the budget consumer, not on the event, so we don't have to version the
+/// pricing table every time a model changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    /// Cache-read input tokens (Anthropic-style prompt caching). Zero for
+    /// providers without a cache concept.
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    /// Cache-creation input tokens.
+    #[serde(default)]
+    pub cache_write_tokens: u64,
+    /// Model identifier (`"claude-sonnet-4-6"`, etc.) so the downstream
+    /// pricing table can resolve cost without guessing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// What kind of rule change an [`FactoryEventKind::IsingRuleProposed`] is
+/// asking Synodic to make.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum RuleProposalAction {
+    /// Disable or retire an existing rule — typically when override rate is
+    /// so high the rule is more friction than value.
+    Retire { rule_id: String },
+    /// Rewrite an existing rule's condition — typically when the rule is
+    /// tripping on false positives.
+    Rewrite {
+        rule_id: String,
+        suggested_condition: Option<String>,
+    },
+    /// Register a new rule for a subject that currently has none.
+    Introduce {
+        subject_ref: String,
+        suggested_condition: Option<String>,
+    },
+}
+
+/// How a rule proposal should be handled by Synodic.
+///
+/// `SafeAuto` proposals carry a narrow, reversible change with enough
+/// confidence that blocking on a human is pure friction. `ReviewRequired`
+/// proposals land in the review queue on the dashboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleProposalClass {
+    SafeAuto,
+    ReviewRequired,
 }
 
 // ---------------------------------------------------------------------------
@@ -844,6 +982,115 @@ mod tests {
 
         let back: FactoryEventKind = serde_json::from_value(json).unwrap();
         assert_eq!(back, event);
+    }
+
+    #[test]
+    fn ising_rule_proposed_carries_routing_fields() {
+        // Issue #36 Step 2 contract: a Synodic consumer must be able to
+        // route the proposal without looking up the producing insight. The
+        // event_type / stream_type / stream_id triple pins the dashboard
+        // query path.
+        let event = FactoryEventKind::IsingRuleProposed {
+            insight_id: "ins_spine_101".into(),
+            signal_kind: "repeated_gate_override".into(),
+            subject_ref: "code".into(),
+            proposed_action: RuleProposalAction::Retire {
+                rule_id: "noisy-rule".into(),
+            },
+            class: RuleProposalClass::ReviewRequired,
+            rationale: "80% override rate over 40 verdicts".into(),
+            confidence: 0.85,
+        };
+        assert_eq!(event.event_type(), "ising.rule_proposed");
+        assert_eq!(event.stream_type(), "ising");
+        assert_eq!(event.stream_id(), "ins_spine_101");
+
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["class"], "review_required");
+        assert_eq!(json["proposed_action"]["action"], "retire");
+        let back: FactoryEventKind = serde_json::from_value(json).unwrap();
+        assert_eq!(back, event);
+    }
+
+    #[test]
+    fn refract_events_round_trip() {
+        let submitted = FactoryEventKind::IntentSubmitted {
+            intent_id: "int_abc".into(),
+            intent_class: "file_migration".into(),
+            description: "Migrate auth callers".into(),
+            submitter: "marvin".into(),
+        };
+        assert_eq!(submitted.event_type(), "refract.intent_submitted");
+        assert_eq!(submitted.stream_type(), "refract");
+        assert_eq!(submitted.stream_id(), "int_abc");
+
+        let decomposed = FactoryEventKind::RefractDecomposed {
+            intent_id: "int_abc".into(),
+            decomposer: "file_migration".into(),
+            artifact_ids: vec!["art_1".into(), "art_2".into()],
+        };
+        assert_eq!(decomposed.event_type(), "refract.decomposed");
+        assert_eq!(decomposed.stream_type(), "refract");
+
+        let failed = FactoryEventKind::RefractFailed {
+            intent_id: "int_abc".into(),
+            reason: "no decomposer matched".into(),
+        };
+        assert_eq!(failed.event_type(), "refract.failed");
+    }
+
+    #[test]
+    fn gate_resolution_proposed_round_trip() {
+        let event = FactoryEventKind::SynodicGateResolutionProposed {
+            escalation_id: "esc_42".into(),
+            artifact_id: ArtifactId::new("art_ri"),
+            proposer: "supervisor".into(),
+            proposed_verdict: VerdictSummary::Allow,
+            rationale: "supervisor reviewed the evidence".into(),
+        };
+        assert_eq!(event.event_type(), "synodic.gate_resolution_proposed");
+        assert_eq!(event.stream_type(), "synodic");
+        assert_eq!(event.stream_id(), "esc_42");
+        let back: FactoryEventKind =
+            serde_json::from_value(serde_json::to_value(&event).unwrap()).expect("round trip");
+        assert_eq!(back, event);
+    }
+
+    #[test]
+    fn token_usage_on_session_completed_is_optional() {
+        // Without token_usage (legacy shape)
+        let without = FactoryEventKind::StiglabSessionCompleted {
+            session_id: "sess_1".into(),
+            request_id: "req_1".into(),
+            duration_ms: 123,
+            artifact_id: None,
+            token_usage: None,
+        };
+        let json = serde_json::to_value(&without).unwrap();
+        assert!(
+            !json.as_object().unwrap().contains_key("token_usage"),
+            "None token_usage must be omitted for wire compatibility"
+        );
+
+        // With token_usage populated
+        let with = FactoryEventKind::StiglabSessionCompleted {
+            session_id: "sess_2".into(),
+            request_id: "req_2".into(),
+            duration_ms: 42,
+            artifact_id: Some("art_x".into()),
+            token_usage: Some(TokenUsage {
+                input_tokens: 1_000,
+                output_tokens: 500,
+                cache_read_tokens: 200,
+                cache_write_tokens: 100,
+                model: Some("claude-sonnet-4-6".into()),
+            }),
+        };
+        let json = serde_json::to_value(&with).unwrap();
+        assert_eq!(json["token_usage"]["input_tokens"], 1_000);
+        assert_eq!(json["token_usage"]["model"], "claude-sonnet-4-6");
+        let back: FactoryEventKind = serde_json::from_value(json).unwrap();
+        assert_eq!(back, with);
     }
 
     #[test]

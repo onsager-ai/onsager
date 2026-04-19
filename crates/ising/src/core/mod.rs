@@ -6,6 +6,6 @@ pub mod emitter;
 pub mod model;
 
 pub use analyzer::{Analyzer, AnalyzerRegistry};
-pub use emission::insight_to_emitted_event;
+pub use emission::{insight_to_emitted_event, insight_to_rule_proposal};
 pub use emitter::InsightEmitter;
 pub use model::FactoryModel;

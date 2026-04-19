@@ -84,6 +84,23 @@ impl Storage for PostgresStorage {
             }
         }
 
+        // Run rule proposals migration (issue #36 Step 2)
+        let proposals = include_str!("../../../migrations/pg/005_rule_proposals.sql");
+        for statement in proposals.split(';') {
+            let stmt = statement.trim();
+            if !stmt.is_empty() {
+                sqlx::query(stmt)
+                    .execute(&self.pool)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "rule proposals migration statement failed: {}",
+                            &stmt[..stmt.len().min(80)]
+                        )
+                    })?;
+            }
+        }
+
         // Run seed data
         let seed = include_str!("../../../migrations/pg/002_seed_data.sql");
         for statement in seed.split(';') {
@@ -590,6 +607,91 @@ impl Storage for PostgresStorage {
 
         Ok(())
     }
+
+    // -- Rule proposals (issue #36 Step 2) ----------------------------------
+
+    async fn list_rule_proposals(&self, status: Option<&str>) -> Result<Vec<RuleProposal>> {
+        let rows = if let Some(s) = status {
+            sqlx::query_as::<_, PgProposalRow>(
+                "SELECT * FROM rule_proposals WHERE status = $1 ORDER BY created_at DESC",
+            )
+            .bind(s)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, PgProposalRow>(
+                "SELECT * FROM rule_proposals ORDER BY created_at DESC",
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+        Ok(rows.into_iter().map(|r| r.into_proposal()).collect())
+    }
+
+    async fn create_rule_proposal(&self, proposal: CreateRuleProposal) -> Result<RuleProposal> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let status = proposal
+            .initial_status
+            .as_deref()
+            .unwrap_or("pending")
+            .to_string();
+
+        sqlx::query(
+            "INSERT INTO rule_proposals (id, insight_id, signal_kind, subject_ref, \
+             proposed_action, class, rationale, confidence, status, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+             ON CONFLICT (insight_id) DO NOTHING",
+        )
+        .bind(&id)
+        .bind(&proposal.insight_id)
+        .bind(&proposal.signal_kind)
+        .bind(&proposal.subject_ref)
+        .bind(&proposal.proposed_action)
+        .bind(&proposal.class)
+        .bind(&proposal.rationale)
+        .bind(proposal.confidence)
+        .bind(&status)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .context("inserting rule proposal")?;
+
+        let row = sqlx::query_as::<_, PgProposalRow>(
+            "SELECT * FROM rule_proposals WHERE insight_id = $1",
+        )
+        .bind(&proposal.insight_id)
+        .fetch_one(&self.pool)
+        .await
+        .context("reading back rule proposal")?;
+        Ok(row.into_proposal())
+    }
+
+    async fn resolve_rule_proposal(
+        &self,
+        id: &str,
+        status: &str,
+        notes: Option<String>,
+    ) -> Result<()> {
+        if status != "approved" && status != "rejected" {
+            anyhow::bail!("invalid proposal status: {status}");
+        }
+        let now = Utc::now();
+        let result = sqlx::query(
+            "UPDATE rule_proposals SET status = $1, resolution_notes = $2, resolved_at = $3 \
+             WHERE id = $4 AND status = 'pending'",
+        )
+        .bind(status)
+        .bind(&notes)
+        .bind(now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            anyhow::bail!("proposal not found or already resolved: {id}");
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -830,5 +932,40 @@ impl PgGovEventRow {
             created_at: self.created_at,
             resolved_at: self.resolved_at,
         })
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct PgProposalRow {
+    id: String,
+    insight_id: String,
+    signal_kind: String,
+    subject_ref: String,
+    proposed_action: serde_json::Value,
+    class: String,
+    rationale: String,
+    confidence: f64,
+    status: String,
+    resolution_notes: Option<String>,
+    created_at: DateTime<Utc>,
+    resolved_at: Option<DateTime<Utc>>,
+}
+
+impl PgProposalRow {
+    fn into_proposal(self) -> RuleProposal {
+        RuleProposal {
+            id: self.id,
+            insight_id: self.insight_id,
+            signal_kind: self.signal_kind,
+            subject_ref: self.subject_ref,
+            proposed_action: self.proposed_action,
+            class: self.class,
+            rationale: self.rationale,
+            confidence: self.confidence,
+            status: self.status,
+            resolution_notes: self.resolution_notes,
+            created_at: self.created_at,
+            resolved_at: self.resolved_at,
+        }
     }
 }
