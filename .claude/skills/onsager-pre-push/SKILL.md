@@ -102,8 +102,10 @@ is explicitly trivial). This is the local counterpart to the
    whose title or body matches the branch's purpose:
 
    ```
-   mcp__github__list_issues  labels=[spec, planned]   state=open
+   mcp__github__list_issues  labels=[spec]   state=open
    ```
+
+   Then filter in memory for `planned` or `in-progress` status labels.
 
    Or read your commit messages (`git log origin/main..HEAD`) for a
    `#N` reference. The SDD loop assumes you already know which spec this

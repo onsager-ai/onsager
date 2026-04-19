@@ -7,9 +7,10 @@ description: The end-to-end spec-issue-driven dev loop for Onsager — spec → 
 
 The spec-issue-driven development (SDD) loop on Onsager. Every non-trivial
 change starts as a GitHub spec issue, proceeds through a PR that references
-it, and closes when the PR merges. Status labels on the issue track progress
-automatically via Claude Routines; humans only touch the `draft → planned`
-alignment gate.
+it, and closes when the PR merges. When Claude Routines are configured,
+status labels on the issue track progress automatically; otherwise follow
+the manual fallback documented in `onsager-pr-lifecycle`. Humans only touch
+the `draft → planned` alignment gate.
 
 ## The loop
 
