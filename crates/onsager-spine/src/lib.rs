@@ -53,7 +53,7 @@ pub use onsager_artifact::{
 
 pub use extension_event::ExtensionEventRecord;
 pub use factory_event::{
-    EscalationResolution, FactoryEvent, FactoryEventKind, ForgeProcessState, GatePoint,
+    EscalationResolution, EventRef, FactoryEvent, FactoryEventKind, ForgeProcessState, GatePoint,
     InsightKind, InsightScope, LineageType, ShapingOutcome, VerdictSummary,
 };
 pub use listener::{EventHandler, Listener};

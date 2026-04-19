@@ -99,6 +99,18 @@ export interface GovernanceRule {
   enabled: boolean;
 }
 
+// Ising insight surface (issue #36). The emitter writes events to the spine
+// as `ising.insight_emitted`; the dashboard reads them back via the spine
+// events endpoint and presents the structured fields directly.
+export interface IsingInsightEmittedEvent {
+  id: number;
+  created_at: string;
+  signal_kind: string;
+  subject_ref: string;
+  confidence: number;
+  evidence: { event_id: number; event_type: string }[];
+}
+
 // Spine types (direct from stiglab)
 export interface SpineEvent {
   id: number;
@@ -201,6 +213,30 @@ export const api = {
     request<GovernanceEvent[]>(`/governance/events${type ? `?type=${type}` : ''}`),
   getGovernanceStats: () => request<GovernanceStats>('/governance/stats'),
   getGovernanceRules: () => request<GovernanceRule[]>('/governance/rules'),
+  // Ising insights — backed by the spine events endpoint (issue #36).
+  // Returns a typed view of the `ising.insight_emitted` events so the
+  // governance UI doesn't have to reach into each event's `data` blob.
+  getIsingInsights: async (limit = 20): Promise<IsingInsightEmittedEvent[]> => {
+    const res = await request<{ events: SpineEvent[] }>(
+      `/spine/events?event_type=ising.insight_emitted&limit=${limit}`,
+    );
+    return res.events.map((e) => {
+      const d = e.data as {
+        signal_kind?: string;
+        subject_ref?: string;
+        confidence?: number;
+        evidence?: { event_id: number; event_type: string }[];
+      };
+      return {
+        id: e.id,
+        created_at: e.created_at,
+        signal_kind: d.signal_kind ?? 'unknown',
+        subject_ref: d.subject_ref ?? '',
+        confidence: typeof d.confidence === 'number' ? d.confidence : 0,
+        evidence: Array.isArray(d.evidence) ? d.evidence : [],
+      };
+    });
+  },
   resolveGovernanceEvent: (id: string, notes?: string) =>
     request<void>(`/governance/events/${id}/resolve`, {
       method: 'PATCH',
