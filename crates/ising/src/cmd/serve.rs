@@ -18,7 +18,7 @@ use std::collections::HashSet;
 
 use chrono::{Duration, Utc};
 use onsager_artifact::{ArtifactId, Kind};
-use onsager_spine::factory_event::{FactoryEventKind, GatePoint, VerdictSummary};
+use onsager_spine::factory_event::{FactoryEventKind, GatePoint, ShapingOutcome, VerdictSummary};
 use onsager_spine::{EventMetadata, EventStore};
 
 use crate::analyzers::register_defaults;
@@ -230,6 +230,19 @@ fn parse_forge_event(event_type: &str, data: &serde_json::Value) -> Option<Facto
                 verdict,
             })
         }
+        "forge.shaping_returned" => {
+            // Required for the `shape_retry_spike` analyzer — without ingest
+            // here, `FactoryModel.shaping_records` stays empty and the
+            // analyzer never fires in production.
+            let request_id = data.get("request_id")?.as_str()?.to_string();
+            let artifact_id = data.get("artifact_id")?.as_str()?;
+            let outcome = parse_shaping_outcome(data.get("outcome")?.as_str()?)?;
+            Some(FactoryEventKind::ForgeShapingReturned {
+                request_id,
+                artifact_id: ArtifactId::new(artifact_id),
+                outcome,
+            })
+        }
         _ => None,
     }
 }
@@ -261,6 +274,19 @@ fn parse_verdict(s: &str) -> Option<VerdictSummary> {
         "Deny" | "deny" => Some(VerdictSummary::Deny),
         "Modify" | "modify" => Some(VerdictSummary::Modify),
         "Escalate" | "escalate" => Some(VerdictSummary::Escalate),
+        _ => None,
+    }
+}
+
+fn parse_shaping_outcome(s: &str) -> Option<ShapingOutcome> {
+    // Forge emits via `format!("{:?}", outcome)` (Debug), so strings arrive
+    // as CamelCase. A future typed emitter would use serde snake_case —
+    // accept both, like `parse_gate_point` / `parse_verdict`.
+    match s {
+        "Completed" | "completed" => Some(ShapingOutcome::Completed),
+        "Failed" | "failed" => Some(ShapingOutcome::Failed),
+        "Partial" | "partial" => Some(ShapingOutcome::Partial),
+        "Aborted" | "aborted" => Some(ShapingOutcome::Aborted),
         _ => None,
     }
 }
@@ -416,6 +442,59 @@ mod tests {
     #[test]
     fn ignores_unknown_event_types() {
         let data = json!({});
+        assert!(parse_forge_event("forge.unknown", &data).is_none());
+    }
+
+    #[test]
+    fn parses_shaping_returned_debug_format() {
+        // Forge emits the outcome via `format!("{:?}", outcome)` — pin the
+        // CamelCase parse so the `shape_retry_spike` analyzer actually sees
+        // shaping records in production.
+        let data = json!({
+            "request_id": "req_x",
+            "artifact_id": "art_x",
+            "outcome": "Completed",
+        });
+        let parsed = parse_forge_event("forge.shaping_returned", &data).expect("parses");
+        match parsed {
+            FactoryEventKind::ForgeShapingReturned {
+                request_id,
+                artifact_id,
+                outcome,
+            } => {
+                assert_eq!(request_id, "req_x");
+                assert_eq!(artifact_id.as_str(), "art_x");
+                assert_eq!(outcome, ShapingOutcome::Completed);
+            }
+            _ => panic!("expected ForgeShapingReturned"),
+        }
+    }
+
+    #[test]
+    fn parses_shaping_returned_snake_case_format() {
+        // A future typed emitter would use serde snake_case — accept that
+        // too, mirroring `parse_gate_verdict_snake_case_format`.
+        let data = json!({
+            "request_id": "req_y",
+            "artifact_id": "art_y",
+            "outcome": "failed",
+        });
+        let parsed = parse_forge_event("forge.shaping_returned", &data).expect("parses");
+        match parsed {
+            FactoryEventKind::ForgeShapingReturned { outcome, .. } => {
+                assert_eq!(outcome, ShapingOutcome::Failed);
+            }
+            _ => panic!("expected ForgeShapingReturned"),
+        }
+    }
+
+    #[test]
+    fn shaping_returned_with_unknown_outcome_returns_none() {
+        let data = json!({
+            "request_id": "req_z",
+            "artifact_id": "art_z",
+            "outcome": "WeirdNewVariant",
+        });
         assert!(parse_forge_event("forge.shaping_returned", &data).is_none());
     }
 }
