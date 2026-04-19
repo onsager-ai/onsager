@@ -107,6 +107,13 @@ export interface Project {
   created_at: string;
 }
 
+export interface AccessibleRepo {
+  owner: string;
+  name: string;
+  default_branch: string | null;
+  private: boolean;
+}
+
 // Governance types (proxied to synodic via /api/governance/*)
 export interface GovernanceEvent {
   id: string;
@@ -341,6 +348,14 @@ export const api = {
     request<{ ok: boolean }>(`/projects/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
+  // GitHub App install flow + accessible-repos picker (closes the last
+  // Phase 0 items from #59: OAuth callback and the repo dropdown).
+  getGitHubAppConfig: () =>
+    request<{ enabled: boolean; slug?: string | null }>('/github-app/config'),
+  listInstallationRepos: (tenantId: string, installId: string) =>
+    request<{ repos: AccessibleRepo[] }>(
+      `/tenants/${encodeURIComponent(tenantId)}/github-installations/${encodeURIComponent(installId)}/accessible-repos`,
+    ),
   // Governance (proxied to synodic)
   getGovernanceEvents: (type?: string) =>
     request<GovernanceEvent[]>(`/governance/events${type ? `?type=${type}` : ''}`),

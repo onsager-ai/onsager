@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod config;
 pub mod db;
+pub mod github_app;
 pub mod handler;
 pub mod routes;
 pub mod spine;
@@ -70,6 +71,22 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route(
             "/api/tenants/{id}/github-installations/{install_id}",
             axum::routing::delete(routes::tenants::delete_installation),
+        )
+        .route(
+            "/api/tenants/{id}/github-installations/{install_id}/accessible-repos",
+            get(routes::tenants::list_accessible_repos),
+        )
+        .route(
+            "/api/github-app/config",
+            get(routes::tenants::github_app_config),
+        )
+        .route(
+            "/api/github-app/install-start",
+            get(routes::tenants::github_app_install_start),
+        )
+        .route(
+            "/api/github-app/install-callback",
+            get(routes::tenants::github_app_install_callback),
         )
         .route(
             "/api/tenants/{id}/projects",

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api, type Workspace, type GitHubAppInstallation, type Project } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -211,6 +211,33 @@ function InstallationsSection({
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
+  const { data: appConfig } = useQuery({
+    queryKey: ["github-app-config"],
+    queryFn: api.getGitHubAppConfig,
+    staleTime: 5 * 60_000,
+  })
+
+  // GitHub redirects back with ?github_app_linked=N&tenant_id=... after a
+  // successful install. Refresh this workspace's installations and strip
+  // the query so a page reload doesn't loop.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const linkedTenant = params.get("tenant_id")
+    if (params.has("github_app_linked") && linkedTenant === workspaceId) {
+      queryClient.invalidateQueries({
+        queryKey: ["workspace-installations", workspaceId],
+      })
+      params.delete("github_app_linked")
+      params.delete("tenant_id")
+      const q = params.toString()
+      window.history.replaceState(
+        {},
+        "",
+        window.location.pathname + (q ? `?${q}` : ""),
+      )
+    }
+  }, [workspaceId, queryClient])
+
   const add = useMutation({
     mutationFn: () =>
       api.registerWorkspaceInstallation(workspaceId, {
@@ -249,17 +276,29 @@ function InstallationsSection({
           GitHub installations ({installations.length})
         </p>
         {!adding && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setAdding(true)
-              setError(null)
-            }}
-          >
-            <Plus className="mr-1 h-3 w-3" />
-            Link installation
-          </Button>
+          <div className="flex items-center gap-2">
+            {appConfig?.enabled && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  window.location.href = `/api/github-app/install-start?tenant_id=${encodeURIComponent(workspaceId)}`
+                }}
+              >
+                <Plus className="mr-1 h-3 w-3" />
+                Install via GitHub App
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setAdding(true)
+                setError(null)
+              }}
+            >
+              Link manually
+            </Button>
+          </div>
         )}
       </div>
 
@@ -374,8 +413,24 @@ function ProjectsSection({
   const [repoOwner, setRepoOwner] = useState("")
   const [repoName, setRepoName] = useState("")
   const [defaultBranch, setDefaultBranch] = useState("")
+  const [manualEntry, setManualEntry] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  // Accessible-repos dropdown population. Only queried when the user has
+  // started adding a project and selected an installation — the endpoint
+  // returns 503 when the App isn't configured, which falls us through to
+  // manual entry automatically.
+  const { data: reposData, isLoading: reposLoading, isError: reposError } = useQuery({
+    queryKey: ["installation-repos", workspaceId, installationId],
+    queryFn: () =>
+      installationId
+        ? api.listInstallationRepos(workspaceId, installationId)
+        : Promise.resolve({ repos: [] }),
+    enabled: adding && !!installationId && !manualEntry,
+    retry: false,
+  })
+  const repos = reposData?.repos ?? []
 
   const add = useMutation({
     mutationFn: () =>
@@ -395,6 +450,7 @@ function ProjectsSection({
       setRepoOwner("")
       setRepoName("")
       setDefaultBranch("")
+      setManualEntry(false)
       setError(null)
     },
     onError: (err) => setError(err instanceof Error ? err.message : "Failed"),
@@ -490,20 +546,63 @@ function ProjectsSection({
               ))}
             </SelectContent>
           </Select>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <Input
-              placeholder="Repo owner"
-              value={repoOwner}
-              onChange={(e) => setRepoOwner(e.target.value)}
-            />
-            <Input
-              placeholder="Repo name"
-              value={repoName}
-              onChange={(e) => setRepoName(e.target.value)}
-            />
-          </div>
+          {!manualEntry && !reposError && repos.length > 0 ? (
+            <Select
+              value={repoOwner && repoName ? `${repoOwner}/${repoName}` : ""}
+              onValueChange={(v) => {
+                const picked = repos.find((r) => `${r.owner}/${r.name}` === v)
+                if (picked) {
+                  setRepoOwner(picked.owner)
+                  setRepoName(picked.name)
+                  setDefaultBranch(picked.default_branch ?? "")
+                }
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a repository" />
+              </SelectTrigger>
+              <SelectContent>
+                {repos.map((r) => (
+                  <SelectItem key={`${r.owner}/${r.name}`} value={`${r.owner}/${r.name}`}>
+                    {r.owner}/{r.name}
+                    {r.private ? " (private)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Input
+                placeholder="Repo owner"
+                value={repoOwner}
+                onChange={(e) => setRepoOwner(e.target.value)}
+              />
+              <Input
+                placeholder="Repo name"
+                value={repoName}
+                onChange={(e) => setRepoName(e.target.value)}
+              />
+            </div>
+          )}
+          {!manualEntry && reposLoading && (
+            <p className="text-xs text-muted-foreground">Loading repositories…</p>
+          )}
+          {!manualEntry && reposError && (
+            <p className="text-xs text-muted-foreground">
+              Could not load accessible repositories — enter repo details manually.
+            </p>
+          )}
+          {!manualEntry && !reposLoading && !reposError && repos.length > 0 && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground underline"
+              onClick={() => setManualEntry(true)}
+            >
+              enter repo manually instead
+            </button>
+          )}
           <Input
-            placeholder="Default branch (optional, defaults to main)"
+            placeholder="Default branch (optional — inferred from GitHub)"
             value={defaultBranch}
             onChange={(e) => setDefaultBranch(e.target.value)}
           />
