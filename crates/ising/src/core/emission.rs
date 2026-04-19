@@ -51,11 +51,15 @@ pub fn insight_to_emitted_event(signal_kind: &str, insight: &Insight) -> Factory
 /// rule-proposal mapping or the confidence is below
 /// [`RULE_PROPOSAL_MIN_CONFIDENCE`].
 ///
-/// The only signal wired in this step is `repeated_gate_override`, which
-/// maps to a `Retire` proposal: when a rule fires and is overridden more
-/// often than it's respected, the policy is costing more than it buys.
-/// Future signals (shape-retry spike, cross-project divergence) add their
-/// own arm to the match below without changing the event contract.
+/// Wired signals:
+/// - `repeated_gate_override` → `Retire` the kind-scoped rule (the policy is
+///   costing more than it buys).
+/// - `shape_retry_spike` → `Introduce` a rework-budget rule for the kind
+///   (issue #36 follow-up — second wired signal).
+///
+/// New signal kinds add their own arm here; the unknown-signal branch keeps
+/// the unmapped path silent so analyzers can ship in observation-only mode
+/// before being promoted to rule-proposal producers.
 pub fn insight_to_rule_proposal(signal_kind: &str, insight: &Insight) -> Option<FactoryEventKind> {
     if insight.confidence < RULE_PROPOSAL_MIN_CONFIDENCE {
         return None;
@@ -71,6 +75,17 @@ pub fn insight_to_rule_proposal(signal_kind: &str, insight: &Insight) -> Option<
             // that keeps the proposal self-contained — Synodic resolves it
             // at queue time rather than the producer embedding a join.
             rule_id: subject_ref.clone(),
+        },
+        "shape_retry_spike" => RuleProposalAction::Introduce {
+            // Rework spikes are kind-wide friction; the `Introduce` action
+            // tells Synodic to draft a new rule rather than mutate an
+            // existing one. `suggested_condition` is a free-form hint —
+            // the proposal listener currently treats it as a no-op apply,
+            // so the proposal lands in the review queue regardless of class.
+            subject_ref: subject_ref.clone(),
+            suggested_condition: Some(format!(
+                "cap rework on `{subject_ref}` artifacts (e.g. max_shapings_per_artifact)"
+            )),
         },
         _ => return None,
     };
@@ -228,6 +243,64 @@ mod tests {
         // routing. Silent passthrough would let a noisy signal auto-mutate
         // rules without an author thinking about the mapping.
         let proposal = insight_to_rule_proposal("totally_new_signal", &insight_with_conf(0.99));
+        assert!(proposal.is_none());
+    }
+
+    #[test]
+    fn shape_retry_spike_maps_to_introduce() {
+        // Issue #36 follow-up: a kind-scoped rework spike must propose
+        // introducing a new rule (not retiring an existing one), with the
+        // subject_ref carried verbatim so Synodic can route by kind.
+        let proposal = insight_to_rule_proposal("shape_retry_spike", &insight_with_conf(0.85))
+            .expect("above threshold");
+        match proposal {
+            FactoryEventKind::IsingRuleProposed {
+                signal_kind,
+                subject_ref,
+                proposed_action,
+                class,
+                ..
+            } => {
+                assert_eq!(signal_kind, "shape_retry_spike");
+                assert_eq!(subject_ref, "code");
+                assert_eq!(class, RuleProposalClass::ReviewRequired);
+                match proposed_action {
+                    RuleProposalAction::Introduce {
+                        subject_ref: subj,
+                        suggested_condition,
+                    } => {
+                        assert_eq!(subj, "code");
+                        let hint = suggested_condition.expect("condition hint must be set");
+                        assert!(
+                            hint.contains("`code`"),
+                            "hint should reference the kind subject_ref"
+                        );
+                    }
+                    other => panic!("expected Introduce, got {other:?}"),
+                }
+            }
+            _ => panic!("expected IsingRuleProposed"),
+        }
+    }
+
+    #[test]
+    fn shape_retry_spike_safe_auto_at_high_confidence() {
+        let proposal = insight_to_rule_proposal("shape_retry_spike", &insight_with_conf(0.95))
+            .expect("above threshold");
+        match proposal {
+            FactoryEventKind::IsingRuleProposed { class, .. } => {
+                assert_eq!(class, RuleProposalClass::SafeAuto);
+            }
+            _ => panic!("expected IsingRuleProposed"),
+        }
+    }
+
+    #[test]
+    fn shape_retry_spike_below_threshold_skipped() {
+        // Same confidence floor as every other signal — the analyzer can
+        // still emit on the observation track at low confidence, but no
+        // rule proposal escapes.
+        let proposal = insight_to_rule_proposal("shape_retry_spike", &insight_with_conf(0.65));
         assert!(proposal.is_none());
     }
 }
