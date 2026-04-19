@@ -22,14 +22,14 @@ project does not yet publish numbered releases.
   rule proposal into Synodic's review queue. `parse_forge_event` now
   ingests `forge.shaping_returned` so the analyzer has data in
   production. Part of #40. <!-- sha: 223b821, fe5eb57 -->
-- **Ising + Synodic**: second-wave #40 sweep. `IsingRuleProposed` gains
-  `signal_kind`, `subject_ref`, `proposed_action`, `class`, `rationale`,
-  `confidence`; Synodic gains a `rule_proposals` table and listener;
-  new `refract` stream-type events (`IntentSubmitted`,
-  `RefractDecomposed`, `RefractFailed`); `SynodicGateResolutionProposed`
-  event; optional `TokenUsage` on `StiglabSessionCompleted`
-  (wire-compatible). Closes #35, #37, #38, #39. Part of #36, #40.
-  <!-- sha: b673f21 -->
+- **Ising + Synodic**: second-wave #40 sweep. `ising.rule_proposed`
+  gains `signal_kind`, `subject_ref`, `proposed_action`, `class`,
+  `rationale`, `confidence`; Synodic gains a `rule_proposals` table
+  and listener; new `refract` stream-type events
+  (`refract.intent_submitted`, `refract.decomposed`, `refract.failed`);
+  new `synodic.gate_resolution_proposed` event; optional `TokenUsage`
+  on `stiglab.session_completed` (wire-compatible).
+  Closes #35, #37, #38, #39. Part of #36, #40. <!-- sha: b673f21 -->
 - **Stiglab + Dashboard**: Phase 0 multi-tenant scaffolding —
   `tenants`, `tenant_members`, `github_app_installations`, `projects`
   tables plus `sessions.project_id`. Webhook secrets encrypted via the
