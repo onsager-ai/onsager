@@ -85,7 +85,7 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             get(routes::tenants::github_app_install_start),
         )
         .route(
-            "/api/github-app/install-callback",
+            "/api/github-app/callback",
             get(routes::tenants::github_app_install_callback),
         )
         .route(

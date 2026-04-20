@@ -763,12 +763,14 @@ pub struct InstallCallbackQuery {
     pub state: Option<String>,
 }
 
-/// GET /api/github-app/install-callback?installation_id=N&setup_action=install&state=...
+/// GET /api/github-app/callback?installation_id=N&setup_action=install&state=...
 ///
-/// GitHub redirects here after the user installs the App. We verify the
-/// state cookie, mint an App JWT to look up the install's account, persist
-/// the installation row under the originating tenant, and redirect the
-/// browser back to `/settings?github_app_linked={id}`.
+/// GitHub redirects here after the user installs the App (this path is the
+/// App's Setup URL on GitHub). We verify the state cookie, mint an App JWT
+/// to look up the install's account, persist the installation row under
+/// the originating tenant, and redirect the browser back to
+/// `/workspaces?github_app_linked={id}` so `WorkspaceCard`'s useEffect can
+/// invalidate the installations query without a manual refresh.
 pub async fn github_app_install_callback(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -891,7 +893,7 @@ pub async fn github_app_install_callback(
     let clear =
         format!("stiglab_github_app_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}");
     let location = format!(
-        "/settings?github_app_linked={}&tenant_id={}",
+        "/workspaces?github_app_linked={}&tenant_id={}",
         query.installation_id, tenant_id
     );
 
