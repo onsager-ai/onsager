@@ -67,7 +67,10 @@ export function AppSidebar() {
   const location = useLocation()
   const { user, authEnabled } = useAuth()
   const { isMobile, setOpenMobile } = useSidebar()
-  const { hasWorkspace, loading: progressLoading } = useSetupProgress()
+  // Call the progress hook once at the sidebar root and thread the result
+  // down — avoids a second observer/render path when SetupChecklist mounts.
+  const setupProgress = useSetupProgress()
+  const { hasWorkspace, workspacesLoading } = setupProgress
 
   // The Organization section (workspaces) requires authentication; /api/tenants
   // returns 401 otherwise. Hide the group entirely in anonymous/L1 mode.
@@ -76,8 +79,10 @@ export function AppSidebar() {
   // the Organization + System groups. Anonymous users see everything except
   // Organization (same as before). Once the first workspace is created the
   // full nav unlocks — and the SetupChecklist takes over as outer-loop
-  // guidance until GitHub is connected and a project is added.
-  const gateNav = authed && !progressLoading && !hasWorkspace
+  // guidance until GitHub is connected and a project is added. Gate on
+  // workspacesLoading only (not the aggregate `loading`) so the nav decision
+  // doesn't wait for the slower projects/installs queries.
+  const gateNav = authed && !workspacesLoading && !hasWorkspace
   const visibleSections = navSections.filter((s) => {
     if (s.label === "Organization" && !authed) return false
     if (gateNav && !PRE_WORKSPACE_SECTIONS.has(s.label)) return false
@@ -121,7 +126,7 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
-        <SetupChecklist />
+        <SetupChecklist progress={setupProgress} />
         {!gateNav && (
           <SidebarGroup>
             <SidebarGroupContent>

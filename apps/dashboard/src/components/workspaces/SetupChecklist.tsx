@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Link } from "react-router-dom"
 import { Check, ChevronRight, Circle, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { useSetupProgress } from "@/hooks/useSetupProgress"
+import type { SetupProgress } from "@/hooks/useSetupProgress"
 
 // Session-scoped dismissal — the user chose to hide the checklist for this
 // session; we still re-show it on the next session so unfinished setup isn't
@@ -15,17 +15,13 @@ const DISMISS_KEY = "onsager.setup_checklist_dismissed"
  * Complements the progressive nav disclosure: pre-workspace users only see
  * "Workspaces" in the sidebar, but once they've created a workspace the full
  * nav unlocks and this checklist takes over as outer-loop guidance.
+ *
+ * Progress is passed in from `AppSidebar` rather than read via the hook to
+ * keep a single observer/render path across sidebar + checklist.
  */
-export function SetupChecklist() {
-  const {
-    authed,
-    loading,
-    hasWorkspace,
-    hasInstall,
-    hasProject,
-    complete,
-    firstWorkspaceSlug,
-  } = useSetupProgress()
+export function SetupChecklist({ progress }: { progress: SetupProgress }) {
+  const { authed, loading, hasWorkspace, hasInstall, hasProject, complete } =
+    progress
   const [dismissed, setDismissed] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -41,26 +37,21 @@ export function SetupChecklist() {
     }
   }
 
-  const steps: { done: boolean; title: string; href: string; active?: boolean }[] = [
-    {
-      done: hasWorkspace,
-      title: "Create a workspace",
-      href: "/workspaces?welcome=1",
-    },
-    {
-      done: hasInstall,
-      title: "Connect GitHub",
-      href: firstWorkspaceSlug ? `/workspaces#${firstWorkspaceSlug}` : "/workspaces",
-    },
-    {
-      done: hasProject,
-      title: "Add a project",
-      href: firstWorkspaceSlug ? `/workspaces#${firstWorkspaceSlug}` : "/workspaces",
-    },
+  // All steps link to /workspaces — the page owns the setup flow (create
+  // workspace, connect GitHub App, pick a repo). Deep-linking to a specific
+  // workspace would need the page to read `location.hash` and scroll, which
+  // it doesn't today; plain routes stay honest.
+  const steps: { done: boolean; title: string; active?: boolean }[] = [
+    { done: hasWorkspace, title: "Create a workspace" },
+    { done: hasInstall, title: "Connect GitHub" },
+    { done: hasProject, title: "Add a project" },
   ]
   const activeIndex = steps.findIndex((s) => !s.done)
   if (activeIndex >= 0) steps[activeIndex].active = true
   const doneCount = steps.filter((s) => s.done).length
+  // Zero-workspace users land on /workspaces?welcome=1 to get the full hero;
+  // everyone else just needs the page itself.
+  const href = hasWorkspace ? "/workspaces" : "/workspaces?welcome=1"
 
   return (
     <div className="mx-2 mb-2 rounded-md border bg-sidebar-accent/40 p-3">
@@ -85,7 +76,7 @@ export function SetupChecklist() {
         {steps.map((step, i) => (
           <li key={i}>
             <Link
-              to={step.href}
+              to={href}
               className={
                 "group flex items-center gap-2 rounded px-1.5 py-1 text-xs transition-colors " +
                 (step.active
