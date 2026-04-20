@@ -1135,6 +1135,64 @@ pub async fn list_tenant_members(
     rows.into_iter().map(|r| r.try_into()).collect()
 }
 
+/// `TenantMember` enriched with the member's GitHub profile so the
+/// dashboard can render `@login` + avatar instead of the opaque user UUID.
+/// `LEFT JOIN` so a member row whose `users` row was somehow removed still
+/// surfaces (with nullable GitHub fields) rather than silently disappearing
+/// from the workspace's member list.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TenantMemberWithUser {
+    pub tenant_id: String,
+    pub user_id: String,
+    pub joined_at: chrono::DateTime<Utc>,
+    pub github_login: Option<String>,
+    pub github_name: Option<String>,
+    pub github_avatar_url: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct TenantMemberWithUserRow {
+    tenant_id: String,
+    user_id: String,
+    joined_at: String,
+    github_login: Option<String>,
+    github_name: Option<String>,
+    github_avatar_url: Option<String>,
+}
+
+impl TryFrom<TenantMemberWithUserRow> for TenantMemberWithUser {
+    type Error = anyhow::Error;
+
+    fn try_from(row: TenantMemberWithUserRow) -> anyhow::Result<Self> {
+        Ok(TenantMemberWithUser {
+            tenant_id: row.tenant_id,
+            user_id: row.user_id,
+            joined_at: chrono::DateTime::parse_from_rfc3339(&row.joined_at)?.with_timezone(&Utc),
+            github_login: row.github_login,
+            github_name: row.github_name,
+            github_avatar_url: row.github_avatar_url,
+        })
+    }
+}
+
+pub async fn list_tenant_members_with_users(
+    pool: &AnyPool,
+    tenant_id: &str,
+) -> anyhow::Result<Vec<TenantMemberWithUser>> {
+    let rows = sqlx::query_as::<_, TenantMemberWithUserRow>(
+        "SELECT m.tenant_id, m.user_id, m.joined_at, \
+                u.github_login, u.github_name, u.github_avatar_url \
+         FROM tenant_members m \
+         LEFT JOIN users u ON u.id = m.user_id \
+         WHERE m.tenant_id = $1 \
+         ORDER BY m.joined_at ASC",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
 pub async fn insert_github_app_installation(
     pool: &AnyPool,
     install: &GitHubAppInstallation,
@@ -1503,6 +1561,31 @@ mod tests {
 
         let u2_tenants = list_tenants_for_user(&pool, "u2").await.unwrap();
         assert!(u2_tenants.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_tenant_members_with_users_joins_github_profile() {
+        let pool = test_pool().await;
+        seed_user(&pool, "u1").await;
+        let t = new_tenant("u1");
+        insert_tenant(&pool, &t).await.unwrap();
+        insert_tenant_member(
+            &pool,
+            &TenantMember {
+                tenant_id: t.id.clone(),
+                user_id: "u1".to_string(),
+                joined_at: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let members = list_tenant_members_with_users(&pool, &t.id).await.unwrap();
+        assert_eq!(members.len(), 1);
+        // `seed_user` writes `github_login = user_id`, so this exercises the
+        // JOIN without needing to fixture a realistic avatar URL.
+        assert_eq!(members[0].user_id, "u1");
+        assert_eq!(members[0].github_login.as_deref(), Some("u1"));
     }
 
     #[tokio::test]

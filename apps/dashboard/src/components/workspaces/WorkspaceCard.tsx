@@ -14,6 +14,7 @@ import {
   type Workspace,
   type GitHubAppInstallation,
   type Project,
+  type WorkspaceMember,
 } from "@/lib/api"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -326,18 +327,71 @@ function SetupProgress({
 function MembersSection({
   members,
 }: {
-  members: { user_id: string }[]
+  members: WorkspaceMember[]
 }) {
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         <Users className="h-3 w-3" />
         Members ({members.length})
       </p>
-      <p className="text-xs text-muted-foreground">
-        {members.map((m) => m.user_id).join(", ") || "—"}
-      </p>
+      {members.length === 0 ? (
+        <p className="text-xs text-muted-foreground">—</p>
+      ) : (
+        <ul className="flex flex-wrap gap-2">
+          {members.map((m) => (
+            <li key={m.user_id}>
+              <MemberChip member={m} />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
+  )
+}
+
+function MemberChip({ member }: { member: WorkspaceMember }) {
+  const label = member.github_login ?? member.user_id
+  const href = member.github_login
+    ? `https://github.com/${member.github_login}`
+    : undefined
+  const inner = (
+    <>
+      {member.github_avatar_url ? (
+        <img
+          src={member.github_avatar_url}
+          alt=""
+          className="h-5 w-5 rounded-full"
+        />
+      ) : (
+        <span
+          aria-hidden
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium uppercase text-muted-foreground"
+        >
+          {label.slice(0, 1)}
+        </span>
+      )}
+      <span className="truncate font-mono">
+        {member.github_login ? `@${member.github_login}` : member.user_id}
+      </span>
+    </>
+  )
+  const className =
+    "inline-flex items-center gap-1.5 rounded-full border bg-muted/50 py-0.5 pr-2 pl-0.5 text-xs"
+  return href ? (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(className, "hover:bg-muted")}
+      title={member.github_name ?? member.github_login ?? undefined}
+    >
+      {inner}
+    </a>
+  ) : (
+    <span className={className} title={member.user_id}>
+      {inner}
+    </span>
   )
 }
 
@@ -622,7 +676,19 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
             onValueChange={(v) => setInstallationId(v ?? "")}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select installation" />
+              {/* Base UI's `<Select.Value>` renders the raw `value` (here an
+                  installation UUID) unless given an explicit mapping. Pass a
+                  render function so the trigger shows `{account_login}
+                  ({account_type})` even before the popup has registered its
+                  items. */}
+              <SelectValue placeholder="Select installation">
+                {(value) => {
+                  const inst = installations.find((i) => i.id === value)
+                  return inst
+                    ? `${inst.account_login} (${inst.account_type})`
+                    : ""
+                }}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {installations.map((i) => (
