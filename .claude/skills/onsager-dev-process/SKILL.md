@@ -223,6 +223,15 @@ merge. If the merged-progress routine is disabled, the
   spec, split the PR.
 - **Skipping `onsager-pre-push`.** CI failures cost more time than the
   checklist does.
+- **Shipping a primitive without its discovery surface.** Specs that
+  introduce a new user-facing resource (workspace, project, credential —
+  anything a user must create to use) must scope in navigation entry,
+  first-run flow, empty-state CTAs, and auth gating in the *same* spec.
+  Deferring the surface to a follow-up ships dead code in the interim
+  and usually costs more overall. See `issue-spec`'s
+  [reach-checklist](../issue-spec/references/reach-checklist.md).
+  The cheap option (ship CRUD behind a hidden Settings card) is almost
+  always the wrong one.
 
 ## Delegation map
 

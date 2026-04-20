@@ -177,3 +177,50 @@ on desktop, and definitely not on mobile.
 
 When in doubt, open Railway/Vercel, walk through the analogous flow, and
 copy the pattern.
+
+## New primitive = new surface
+
+When the dashboard grows a new user-facing resource (workspace, project,
+credential, node type — anything a user can create), shipping just the
+CRUD UI isn't enough. A primitive without entry points is functionally
+invisible: users land on empty pages with no hint that the resource
+exists, and the feature ships as dead code.
+
+**This is the product-side complement to the `issue-spec` "Reach ships
+with the primitive" principle** — the spec scopes these in, the UI
+implementation checks them off. If a spec lands on your desk without
+them, push back at the spec stage. Don't quietly defer.
+
+**Before a PR that introduces a new primitive is ready:**
+
+- [ ] **Sidebar entry** in `AppSidebar.tsx` under the right group. Create
+  a new group (e.g. "Organization") if the category doesn't exist —
+  don't bury under "System" or "Settings."
+- [ ] **Dedicated page** at `/<primitive>s`, not just a card inside
+  Settings. Lists, create flow, and the empty state all live here.
+- [ ] **First-run redirect** for authenticated users with zero
+  instances. Pattern: `OnboardingGate` in `App.tsx`. Session-scoped
+  dismissal via `sessionStorage` so navigating away doesn't loop.
+- [ ] **Stepped onboarding hero** on the dedicated page when empty.
+  Two or three numbered steps, active CTA on step one.
+- [ ] **Empty-state CTA** on *other* pages that expect instances to
+  exist (e.g. a workspace-setup banner on Factory Overview). Always a
+  button linking to the primitive's page — never a paragraph of
+  instructions.
+- [ ] **`QuickCreateMenu` entry** if the resource is create-intensive.
+- [ ] **Auth gating on every query and entry point**
+  (`enabled: authEnabled && !!user`). Anonymous / L1-smoke contexts
+  must not 401 or render a dead CTA. If the primitive requires auth,
+  hide the sidebar entry too — a visible link to a broken page is
+  worse than no link.
+- [ ] **Client validation mirrors server rules** (slug regex, length,
+  etc.). Normalize on input or show an inline error before submit —
+  helper text that can't prevent a 400 is a lie.
+
+**The cheap option is usually wrong.** It's tempting to ship just the
+list + create card inside Settings and plan the surface as a follow-up.
+In practice the follow-up PR is bigger than building it up front, the
+primitive is invisible in the meantime, and reviewers/users start
+reporting "there's no way to do X" despite the code being live.
+See #70 / `/workspaces` as the canonical example of what this shape
+looks like when done right.
