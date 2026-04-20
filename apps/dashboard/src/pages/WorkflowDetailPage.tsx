@@ -29,13 +29,14 @@ export function WorkflowDetailPage() {
     enabled: !!id,
   })
   // Live view of artifacts flowing through stages. The spine bus emits
-  // `forge.stage_*` events — since we don't have a WebSocket in the
-  // dashboard today, poll at 2s (consistent with the rest of the app).
+  // `forge.stage_*` events. Until a push channel (WebSocket/SSE) lands,
+  // poll at 5s — matches the rest of the dashboard's fast-refresh cadence
+  // without waking the mobile radio every 2s.
   const { data: runsData } = useQuery({
     queryKey: ["workflow-runs", id],
     queryFn: () => api.getWorkflowRuns(id, 50),
     enabled: !!id,
-    refetchInterval: 2000,
+    refetchInterval: 5000,
   })
   const workflow = data?.workflow
   const runs = runsData?.runs ?? []

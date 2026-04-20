@@ -7,9 +7,15 @@ export interface GateKindToggleProps {
   onChange: (value: WorkflowGateKind) => void
 }
 
+// Rendered as a row of independently-focusable toggle buttons with
+// `aria-pressed`. We deliberately avoid ARIA `radiogroup`/`radio` — those
+// roles require roving tabindex + arrow-key navigation that a plain
+// `<Button>` doesn't provide. Toggle-button semantics still convey the
+// mutually-exclusive selection (only one is pressed at a time) without
+// misleading assistive tech about keyboard behavior.
 export function GateKindToggle({ value, onChange }: GateKindToggleProps) {
   return (
-    <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Gate kind">
+    <div className="grid grid-cols-2 gap-2" role="group" aria-label="Gate kind">
       {GATE_KINDS.map((g) => {
         const active = g.value === value
         return (
@@ -17,8 +23,7 @@ export function GateKindToggle({ value, onChange }: GateKindToggleProps) {
             key={g.value}
             type="button"
             variant={active ? "default" : "outline"}
-            role="radio"
-            aria-checked={active}
+            aria-pressed={active}
             className="h-auto flex-col items-start gap-1 whitespace-normal px-3 py-2 text-left"
             onClick={() => onChange(g.value)}
           >

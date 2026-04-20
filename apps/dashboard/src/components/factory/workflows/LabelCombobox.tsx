@@ -21,11 +21,6 @@ export interface LabelComboboxProps {
   value: string | null
   onChange: (label: string) => void
   placeholder?: string
-  /** Rendered-by-test prop hook: when provided, bypass the query and use
-   *  these labels directly. Unused in production. */
-  labelsOverride?: GitHubLabel[]
-  /** Also a test hook — skip the react-query fetch. */
-  disableFetch?: boolean
 }
 
 /**
@@ -41,19 +36,12 @@ export function LabelCombobox({
   value,
   onChange,
   placeholder = "Select a label…",
-  labelsOverride,
-  disableFetch,
 }: LabelComboboxProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
 
   const fetchEnabled =
-    !disableFetch &&
-    !labelsOverride &&
-    !!tenantId &&
-    !!installId &&
-    !!repoOwner &&
-    !!repoName
+    !!tenantId && !!installId && !!repoOwner && !!repoName
   const { data, isLoading, isError } = useQuery({
     queryKey: ["repo-labels", tenantId, installId, repoOwner, repoName],
     queryFn: () => api.listRepoLabels(tenantId, installId, repoOwner, repoName),
@@ -62,7 +50,7 @@ export function LabelCombobox({
     retry: false,
   })
 
-  const labels: GitHubLabel[] = labelsOverride ?? data?.labels ?? []
+  const labels: GitHubLabel[] = data?.labels ?? []
   const trimmed = query.trim()
   const exactMatch = labels.some(
     (l) => l.name.toLowerCase() === trimmed.toLowerCase(),
@@ -107,12 +95,12 @@ export function LabelCombobox({
             onValueChange={setQuery}
           />
           <CommandList>
-            {isLoading && !labelsOverride && (
+            {isLoading && (
               <div className="px-3 py-6 text-center text-sm text-muted-foreground">
                 Loading labels…
               </div>
             )}
-            {isError && !labelsOverride && (
+            {isError && (
               <div className="px-3 py-6 text-center text-sm text-destructive">
                 Couldn&apos;t load labels. Check the GitHub install.
               </div>

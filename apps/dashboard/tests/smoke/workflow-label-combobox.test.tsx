@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import type { ReactNode } from "react"
 import { LabelCombobox } from "@/components/factory/workflows/LabelCombobox"
 import type { GitHubLabel } from "@/lib/api"
 
@@ -10,8 +11,13 @@ const labels: GitHubLabel[] = [
   { name: "chore", color: "cccccc", description: null },
 ]
 
-function mount(node: React.ReactNode) {
+function mount(node: ReactNode, labelsSeed: GitHubLabel[] = labels) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // Pre-seed the label query so the component reads cached data without
+  // issuing a network request.
+  qc.setQueryData(["repo-labels", "t1", "i1", "onsager-ai", "onsager"], {
+    labels: labelsSeed,
+  })
   return render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>)
 }
 
@@ -25,8 +31,6 @@ describe("LabelCombobox", () => {
         repoName="onsager"
         value={null}
         onChange={vi.fn()}
-        labelsOverride={labels}
-        disableFetch
       />,
     )
     fireEvent.click(screen.getByRole("combobox"))
@@ -44,8 +48,6 @@ describe("LabelCombobox", () => {
         repoName="onsager"
         value={null}
         onChange={vi.fn()}
-        labelsOverride={labels}
-        disableFetch
       />,
     )
     fireEvent.click(screen.getByRole("combobox"))
@@ -66,8 +68,6 @@ describe("LabelCombobox", () => {
         repoName="onsager"
         value={null}
         onChange={onChange}
-        labelsOverride={labels}
-        disableFetch
       />,
     )
     fireEvent.click(screen.getByRole("combobox"))

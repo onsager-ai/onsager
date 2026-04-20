@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Bot, CheckSquare, ChevronRight, Gavel, ShieldCheck, Trash2 } from "lucide-react"
+import { ChevronRight, Trash2 } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -12,23 +12,20 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import type { WorkflowGateKind, WorkflowStage } from "@/lib/api"
+import type { WorkflowStage } from "@/lib/api"
 import { ArtifactKindSelect } from "./ArtifactKindSelect"
 import { GateKindToggle } from "./GateKindToggle"
+import { GATE_KINDS } from "./workflow-meta"
 
-const GATE_ICONS: Record<WorkflowGateKind, typeof Bot> = {
-  "agent-session": Bot,
-  "external-check": CheckSquare,
-  governance: Gavel,
-  "manual-approval": ShieldCheck,
-}
-
-const GATE_LABELS: Record<WorkflowGateKind, string> = {
-  "agent-session": "Agent session",
-  "external-check": "External check",
-  governance: "Governance",
-  "manual-approval": "Manual approval",
-}
+// Single source of truth for gate kind metadata lives in
+// `workflow-meta.ts`; derive per-gate lookups from there so the stage
+// card can't drift out of sync with the toggle control.
+const GATE_META = Object.fromEntries(
+  GATE_KINDS.map((g) => [g.value, { icon: g.icon, label: g.label }]),
+) as Record<
+  WorkflowStage["gate_kind"],
+  { icon: (typeof GATE_KINDS)[number]["icon"]; label: string }
+>
 
 export interface StageCardProps {
   stage: WorkflowStage
@@ -40,7 +37,8 @@ export interface StageCardProps {
 export function StageCard({ stage, index, onChange, onRemove }: StageCardProps) {
   const [editing, setEditing] = useState(false)
   const isMobile = useIsMobile()
-  const Icon = GATE_ICONS[stage.gate_kind]
+  const meta = GATE_META[stage.gate_kind]
+  const Icon = meta.icon
 
   return (
     <>
@@ -64,7 +62,7 @@ export function StageCard({ stage, index, onChange, onRemove }: StageCardProps) 
             </div>
             <div className="min-w-0">
               <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                Stage {index + 1} — {GATE_LABELS[stage.gate_kind]}
+                Stage {index + 1} — {meta.label}
               </div>
               <div className="truncate text-sm font-medium">{stage.name}</div>
               <div className="truncate text-xs text-muted-foreground">

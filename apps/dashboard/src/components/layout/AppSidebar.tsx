@@ -29,7 +29,9 @@ const navSections = [
     label: "Factory",
     items: [
       { title: "Overview", icon: Factory, path: "/" },
-      { title: "Workflows", icon: GitBranch, path: "/workflows" },
+      // Workflows are workspace-scoped, so they only make sense when
+      // there's an authenticated user to own them.
+      { title: "Workflows", icon: GitBranch, path: "/workflows", requiresAuth: true },
       { title: "Artifacts", icon: Package, path: "/artifacts" },
       { title: "Event Spine", icon: Activity, path: "/spine" },
     ],
@@ -100,30 +102,36 @@ export function AppSidebar() {
         </Link>
       </SidebarHeader>
       <SidebarContent>
-        {visibleSections.map((section) => (
-          <SidebarGroup key={section.label}>
-            <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {section.items.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      render={<Link to={item.path} onClick={closeMobile} />}
-                      isActive={
-                        item.path === "/"
-                          ? location.pathname === "/"
-                          : location.pathname.startsWith(item.path)
-                      }
-                    >
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
+        {visibleSections.map((section) => {
+          const visibleItems = section.items.filter(
+            (item) => !("requiresAuth" in item && item.requiresAuth) || authed,
+          )
+          if (visibleItems.length === 0) return null
+          return (
+            <SidebarGroup key={section.label}>
+              <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {visibleItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        render={<Link to={item.path} onClick={closeMobile} />}
+                        isActive={
+                          item.path === "/"
+                            ? location.pathname === "/"
+                            : location.pathname.startsWith(item.path)
+                        }
+                      >
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.title}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )
+        })}
         <SetupChecklist progress={setupProgress} />
       </SidebarContent>
       <SidebarFooter className="border-t p-4">

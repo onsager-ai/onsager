@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
+import type { ReactNode } from "react"
 import { StageCard } from "@/components/factory/workflows/StageCard"
 import { TriggerCard } from "@/components/factory/workflows/TriggerCard"
 import type { WorkflowStage } from "@/lib/api"
@@ -11,7 +12,7 @@ import {
   isTriggerReady,
 } from "@/components/factory/workflows/workflow-draft"
 
-function mount(node: React.ReactNode) {
+function mount(node: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
@@ -33,7 +34,7 @@ describe("Stage card editor", () => {
     const onChange = vi.fn()
     mount(<StageCard stage={base} index={0} onChange={onChange} onRemove={() => {}} />)
     fireEvent.click(screen.getByRole("button", { name: /Edit stage/i }))
-    fireEvent.click(screen.getByRole("radio", { name: /External check/i }))
+    fireEvent.click(screen.getByRole("button", { name: /External check/i }))
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ gate_kind: "external-check" }),
     )

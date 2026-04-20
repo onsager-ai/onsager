@@ -27,7 +27,7 @@ export function WorkflowsPage() {
         <div>
           <h1 className="text-xl font-bold tracking-tight md:text-2xl">Workflows</h1>
           <p className="text-sm text-muted-foreground">
-            Triggers that drive artifacts through stages. Tap a workflow to edit.
+            Triggers that drive artifacts through stages. Tap a workflow to view.
           </p>
         </div>
         <Button onClick={() => setCreating(true)} size="sm" className="shrink-0">

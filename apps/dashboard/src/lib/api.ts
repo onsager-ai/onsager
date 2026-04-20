@@ -250,75 +250,75 @@ export interface ArtifactLineageEntry {
 //
 // The CRUD API is delivered by a parallel sibling sub-issue of #79; this
 // client is the typed surface the dashboard UI talks to.
-export type WorkflowArtifactKind = 'github-issue' | 'github-pr'
+export type WorkflowArtifactKind = 'github-issue' | 'github-pr';
 
 export interface WorkflowTrigger {
-  kind: 'github-label'
-  install_id: string
-  repo_owner: string
-  repo_name: string
-  label: string
+  kind: 'github-label';
+  install_id: string;
+  repo_owner: string;
+  repo_name: string;
+  label: string;
 }
 
 export type WorkflowGateKind =
   | 'agent-session'
   | 'external-check'
   | 'governance'
-  | 'manual-approval'
+  | 'manual-approval';
 
 export interface WorkflowStage {
-  id: string
-  name: string
-  gate_kind: WorkflowGateKind
-  artifact_kind: WorkflowArtifactKind
-  config: Record<string, unknown>
+  id: string;
+  name: string;
+  gate_kind: WorkflowGateKind;
+  artifact_kind: WorkflowArtifactKind;
+  config: Record<string, unknown>;
 }
 
-export type WorkflowStatus = 'draft' | 'active' | 'paused' | 'archived'
+export type WorkflowStatus = 'draft' | 'active' | 'paused' | 'archived';
 
 export interface Workflow {
-  id: string
-  tenant_id: string
-  name: string
-  preset?: string | null
-  status: WorkflowStatus
-  trigger: WorkflowTrigger
-  stages: WorkflowStage[]
-  created_at: string
-  updated_at: string
+  id: string;
+  tenant_id: string;
+  name: string;
+  preset?: string | null;
+  status: WorkflowStatus;
+  trigger: WorkflowTrigger;
+  stages: WorkflowStage[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CreateWorkflowRequest {
-  tenant_id?: string
-  name: string
-  preset?: string
-  trigger: WorkflowTrigger
-  stages: WorkflowStage[]
-  activate?: boolean
+  tenant_id?: string;
+  name: string;
+  preset?: string;
+  trigger: WorkflowTrigger;
+  stages: WorkflowStage[];
+  activate?: boolean;
 }
 
-export type StageRunStatus = 'pending' | 'blocked' | 'passed' | 'failed'
+export type StageRunStatus = 'pending' | 'blocked' | 'passed' | 'failed';
 
 export interface WorkflowRunStage {
-  stage_id: string
-  status: StageRunStatus
-  updated_at: string
+  stage_id: string;
+  status: StageRunStatus;
+  updated_at: string;
 }
 
 export interface WorkflowRun {
-  id: string
-  workflow_id: string
-  artifact_id: string | null
-  status: StageRunStatus
-  stages: WorkflowRunStage[]
-  started_at: string
-  updated_at: string
+  id: string;
+  workflow_id: string;
+  artifact_id: string | null;
+  status: StageRunStatus;
+  stages: WorkflowRunStage[];
+  started_at: string;
+  updated_at: string;
 }
 
 export interface GitHubLabel {
-  name: string
-  color: string | null
-  description: string | null
+  name: string;
+  color: string | null;
+  description: string | null;
 }
 
 export interface RegisterArtifactRequest {

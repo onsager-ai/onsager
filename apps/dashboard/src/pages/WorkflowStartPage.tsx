@@ -51,14 +51,21 @@ export function WorkflowStartPage() {
     staleTime: 30_000,
   })
 
+  // Resolve the tenant that owns the given install id. If we can't match,
+  // return "" and let the UI render an error — guessing a tenant would
+  // run later mutations against the wrong workspace.
   const resolvedTenantId = useMemo(() => {
     if (tenantIdParam) return tenantIdParam
     if (!tenantInstallsData) return ""
     const hit = tenantInstallsData.find((e) =>
       e.installations.some((i) => i.id === installId),
     )
-    return hit?.tenantId ?? workspaces[0]?.id ?? ""
-  }, [tenantIdParam, tenantInstallsData, installId, workspaces])
+    return hit?.tenantId ?? ""
+  }, [tenantIdParam, tenantInstallsData, installId])
+
+  const installLookupDone = !!tenantIdParam || !!tenantInstallsData
+  const installUnresolved =
+    !!installId && installLookupDone && !resolvedTenantId
 
   const { data: reposData, isLoading: reposLoading } = useQuery({
     queryKey: ["installation-repos", resolvedTenantId, installId],
@@ -91,6 +98,11 @@ export function WorkflowStartPage() {
         <CardContent className="space-y-3 px-4 pb-4 md:px-6">
           {!installId ? (
             <EmptyInstall />
+          ) : installUnresolved ? (
+            <p className="text-sm text-destructive">
+              Couldn&apos;t find the workspace that owns this install. Try
+              re-running the install flow from Workspaces.
+            </p>
           ) : reposLoading ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
