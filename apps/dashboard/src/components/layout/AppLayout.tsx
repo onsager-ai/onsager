@@ -26,6 +26,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <header className="hidden h-14 items-center gap-2 border-b px-6 md:flex">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-6" />
+          <div className="ml-auto flex items-center gap-2">
+            <QuickCreateMenu />
+            <UserMenu />
+          </div>
         </header>
         <main className="flex-1 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:p-6 md:pb-6">
           {children}
