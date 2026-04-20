@@ -158,9 +158,10 @@ describe("WorkspaceCard — step-by-step NextStepCallout", () => {
   it("shows a Connect GitHub CTA when no installations are linked yet", async () => {
     await primeMocks({ repos: [], installations: [] })
     renderCard()
-    expect(
-      await screen.findByRole("button", { name: /install github app/i }),
-    ).toBeInTheDocument()
+    const link = await screen.findByRole("link", { name: /install github app/i })
+    expect(link.getAttribute("href")).toBe(
+      "/api/github-app/install-start?tenant_id=ws1",
+    )
     expect(screen.getByText(/step 2 of 3/i)).toBeInTheDocument()
   })
 
@@ -171,7 +172,7 @@ describe("WorkspaceCard — step-by-step NextStepCallout", () => {
       await screen.findByText(/setup blocked: github app unavailable/i),
     ).toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: /install github app/i }),
+      screen.queryByRole("link", { name: /install github app/i }),
     ).not.toBeInTheDocument()
   })
 
