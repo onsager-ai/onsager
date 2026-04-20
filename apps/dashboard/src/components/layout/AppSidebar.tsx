@@ -14,7 +14,6 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { ThemeToggle } from "./ThemeToggle"
 import { useAuth } from "@/lib/auth"
 import { CreateArtifactSheet } from "@/components/factory/CreateArtifactSheet"
 import { Button } from "@/components/ui/button"
@@ -140,36 +139,8 @@ export function AppSidebar() {
           </SidebarGroup>
         )}
       </SidebarContent>
-      <SidebarFooter className="border-t p-4 space-y-3">
-        {authEnabled && user && (
-          <div className="flex items-center gap-2">
-            {user.github_avatar_url ? (
-              <img
-                src={user.github_avatar_url}
-                alt={user.github_login}
-                className="h-7 w-7 rounded-full"
-              />
-            ) : (
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium uppercase">
-                {user.github_name?.[0] ?? user.github_login[0]}
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">
-                {user.github_name ?? user.github_login}
-              </p>
-              {user.github_name && (
-                <p className="truncate text-xs text-muted-foreground">
-                  @{user.github_login}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">v0.1.0</span>
-          <ThemeToggle />
-        </div>
+      <SidebarFooter className="border-t p-4">
+        <span className="text-xs text-muted-foreground">v0.1.0</span>
       </SidebarFooter>
     </Sidebar>
   )
