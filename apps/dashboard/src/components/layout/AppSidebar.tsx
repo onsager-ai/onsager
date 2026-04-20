@@ -60,6 +60,13 @@ export function AppSidebar() {
   const { user, authEnabled } = useAuth()
   const { isMobile, setOpenMobile } = useSidebar()
 
+  // The Organization section (workspaces) requires authentication; /api/tenants
+  // returns 401 otherwise. Hide the group entirely in anonymous/L1 mode.
+  const authed = authEnabled && !!user
+  const visibleSections = navSections.filter(
+    (s) => s.label !== "Organization" || authed,
+  )
+
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false)
   }
@@ -73,7 +80,7 @@ export function AppSidebar() {
         </Link>
       </SidebarHeader>
       <SidebarContent>
-        {navSections.map((section) => (
+        {visibleSections.map((section) => (
           <SidebarGroup key={section.label}>
             <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
             <SidebarGroupContent>

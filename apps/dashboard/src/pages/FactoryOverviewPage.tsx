@@ -26,6 +26,7 @@ import { Link } from "react-router-dom"
 import type { SessionSpend, SpineArtifact, SpineEvent } from "@/lib/api"
 import { Building2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/lib/auth"
 
 const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -90,6 +91,9 @@ function PipelineStats({ artifacts }: { artifacts: SpineArtifact[] }) {
 }
 
 export function FactoryOverviewPage() {
+  const { user, authEnabled } = useAuth()
+  const canLoadWorkspaces = Boolean(authEnabled && user)
+
   const { data: artifactsData } = useQuery({
     queryKey: ["artifacts"],
     queryFn: api.getArtifacts,
@@ -122,8 +126,10 @@ export function FactoryOverviewPage() {
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
     staleTime: 30_000,
+    enabled: canLoadWorkspaces,
   })
-  const noWorkspaces = (workspacesData?.tenants?.length ?? 0) === 0
+  const noWorkspaces =
+    canLoadWorkspaces && (workspacesData?.tenants?.length ?? 0) === 0
 
   const artifacts = artifactsData?.artifacts ?? []
   const events = spineData?.events ?? []

@@ -1,3 +1,4 @@
+import type { ComponentType } from "react"
 import { Building2, GitBranch, Package, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -71,7 +72,7 @@ function Step({
   n: number
   title: string
   description: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: ComponentType<{ className?: string }>
   active?: boolean
 }) {
   return (
