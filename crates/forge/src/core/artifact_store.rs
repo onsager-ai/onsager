@@ -55,6 +55,16 @@ impl ArtifactStore {
         self.artifacts.get(id.as_str())
     }
 
+    /// Mutable access — used by the workflow stage runner (issue #80) to
+    /// update `workflow_id`, `current_stage_index`,
+    /// `workflow_parked_reason`, and the artifact state when a stage
+    /// declares a `target_state`. Version/bundle/lineage mutations still
+    /// go through `advance` and `record_bundle` so the state-machine and
+    /// invariants stay enforced.
+    pub fn get_mut(&mut self, id: &ArtifactId) -> Option<&mut Artifact> {
+        self.artifacts.get_mut(id.as_str())
+    }
+
     /// List all artifacts in non-terminal states.
     pub fn active_artifacts(&self) -> Vec<&Artifact> {
         self.artifacts
