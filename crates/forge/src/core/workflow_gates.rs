@@ -14,6 +14,7 @@
 //!   `dashboard_approve`).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use onsager_artifact::Artifact;
@@ -27,6 +28,10 @@ use super::workflow::{GateOutcome, GateSpec, Workflow};
 /// Signal kind used to mark the completion of an agent-session gate.
 /// The session listener writes `SignalOutcome::Success` under this kind
 /// on `stiglab.session_completed` for the matching artifact.
+///
+/// The stage runner clears this key on every stage advance so a prior
+/// session's signal can't satisfy a later `agent-session` gate for the
+/// same artifact (issue #80 copilot-review).
 pub const AGENT_SESSION_SIGNAL: &str = "agent_session";
 
 /// Signal-kind prefix for external CI checks. Full kind is
@@ -34,6 +39,11 @@ pub const AGENT_SESSION_SIGNAL: &str = "agent_session";
 pub fn external_check_signal_kind(check_name: &str) -> String {
     format!("ci:{check_name}")
 }
+
+/// Default cap on agent-session dispatches per stage-runner pass. Keeps
+/// a burst of new workflow artifacts from synchronously hammering
+/// Stiglab under the Forge write lock (issue #80 copilot-review).
+pub const DEFAULT_DISPATCH_BUDGET_PER_TICK: u32 = 4;
 
 /// Live gate evaluator that backs the stage runner in production.
 pub struct LiveGateEvaluator<S, G>
@@ -52,6 +62,13 @@ where
     /// agent-session dispatched so we don't fire the same session
     /// multiple times across ticks.
     dispatched: Mutex<HashMap<(String, u32), ()>>,
+    /// Remaining agent-session dispatches allowed this tick. The caller
+    /// resets this via [`reset_dispatch_budget`] once per pass so a
+    /// burst of new workflow artifacts can't synchronously hammer
+    /// Stiglab under the Forge write lock.
+    dispatch_budget: AtomicU32,
+    /// Budget ceiling refilled by [`reset_dispatch_budget`].
+    dispatch_budget_per_tick: u32,
 }
 
 impl<S, G> LiveGateEvaluator<S, G>
@@ -60,12 +77,48 @@ where
     G: SynodicGate,
 {
     pub fn new(signals: SignalCache, stiglab: S, synodic: G) -> Self {
+        Self::with_budget(signals, stiglab, synodic, DEFAULT_DISPATCH_BUDGET_PER_TICK)
+    }
+
+    pub fn with_budget(
+        signals: SignalCache,
+        stiglab: S,
+        synodic: G,
+        dispatch_budget_per_tick: u32,
+    ) -> Self {
         Self {
             signals,
             stiglab,
             synodic,
             dispatched: Mutex::new(HashMap::new()),
+            dispatch_budget: AtomicU32::new(dispatch_budget_per_tick),
+            dispatch_budget_per_tick,
         }
+    }
+
+    /// Refill the per-tick dispatch budget. Call once at the top of each
+    /// stage-runner pass.
+    pub fn reset_dispatch_budget(&self) {
+        self.dispatch_budget
+            .store(self.dispatch_budget_per_tick, Ordering::SeqCst);
+    }
+
+    fn try_consume_dispatch(&self) -> bool {
+        // Relaxed `fetch_update`: only one tick task runs the runner at
+        // a time (under the Forge write lock), so no CAS races.
+        let mut current = self.dispatch_budget.load(Ordering::SeqCst);
+        while current > 0 {
+            match self.dispatch_budget.compare_exchange(
+                current,
+                current - 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => return true,
+                Err(actual) => current = actual,
+            }
+        }
+        false
     }
 
     fn already_dispatched(&self, artifact_id: &str, stage_index: u32) -> bool {
@@ -97,7 +150,20 @@ where
 
         // First observation: dispatch a shaping request. Subsequent ticks
         // will find the signal (set by the session listener) and resolve.
+        //
+        // Budget-gated so a burst of new workflow artifacts can't fire
+        // N synchronous Stiglab requests under the Forge write lock. If
+        // the budget is exhausted this tick, return Pending and retry
+        // next tick — the artifact stays at this stage.
         if !self.already_dispatched(artifact.artifact_id.as_str(), stage_index) {
+            if !self.try_consume_dispatch() {
+                tracing::debug!(
+                    artifact_id = %artifact.artifact_id,
+                    stage_index,
+                    "workflow gate: agent-session dispatch budget exhausted this tick"
+                );
+                return GateOutcome::Pending;
+            }
             let request = onsager_protocol::ShapingRequest {
                 request_id: ulid::Ulid::new().to_string(),
                 artifact_id: artifact.artifact_id.clone(),
@@ -189,6 +255,17 @@ where
                 self.evaluate_manual_approval(artifact, signal_kind)
             }
         }
+    }
+
+    fn on_stage_advanced(&self, artifact_id: &onsager_artifact::ArtifactId, stage_index: u32) {
+        // Clear the agent-session signal so a completed session can't
+        // satisfy a later stage's `agent-session` gate for the same
+        // artifact. Also drop the "already dispatched" marker for this
+        // stage so a revise cycle (if any) redispatches.
+        self.signals
+            .clear(artifact_id.as_str(), AGENT_SESSION_SIGNAL);
+        let mut map = self.dispatched.lock().expect("dispatched map poisoned");
+        map.remove(&(artifact_id.as_str().to_string(), stage_index));
     }
 }
 
@@ -414,6 +491,60 @@ mod tests {
             evaluator.evaluate(&artifact, &wf, 0, &gate),
             GateOutcome::Pass
         );
+    }
+
+    #[test]
+    fn dispatch_budget_caps_agent_session_per_tick() {
+        let cache = SignalCache::new();
+        let stiglab = CountingStiglab::new();
+        let evaluator = LiveGateEvaluator::with_budget(cache.clone(), stiglab, AllowSynodic, 2);
+        let wf = make_workflow();
+        let gate = GateSpec::AgentSession {
+            shaping_intent: serde_json::Value::Null,
+        };
+
+        // Three distinct artifacts competing for the budget.
+        let a1 = Artifact::new(onsager_artifact::Kind::Code, "a1", "m", "forge", vec![]);
+        let a2 = Artifact::new(onsager_artifact::Kind::Code, "a2", "m", "forge", vec![]);
+        let a3 = Artifact::new(onsager_artifact::Kind::Code, "a3", "m", "forge", vec![]);
+
+        evaluator.evaluate(&a1, &wf, 0, &gate);
+        evaluator.evaluate(&a2, &wf, 0, &gate);
+        evaluator.evaluate(&a3, &wf, 0, &gate);
+        // Budget 2 → only 2 dispatches even though 3 artifacts asked.
+        assert_eq!(evaluator.stiglab.dispatches.load(Ordering::SeqCst), 2);
+
+        // Next tick: budget refills, a3 finally gets dispatched.
+        evaluator.reset_dispatch_budget();
+        evaluator.evaluate(&a3, &wf, 0, &gate);
+        assert_eq!(evaluator.stiglab.dispatches.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn on_stage_advanced_clears_agent_session_signal() {
+        // After a stage advances, the next stage's agent-session gate
+        // must not be satisfied by the prior stage's signal.
+        let cache = SignalCache::new();
+        let evaluator = LiveGateEvaluator::new(cache.clone(), CountingStiglab::new(), AllowSynodic);
+        let artifact = make_artifact();
+
+        cache.push(
+            artifact.artifact_id.as_str(),
+            crate::core::signal_cache::Signal {
+                kind: AGENT_SESSION_SIGNAL.into(),
+                outcome: SignalOutcome::Success,
+            },
+        );
+        assert!(cache
+            .get(artifact.artifact_id.as_str(), AGENT_SESSION_SIGNAL)
+            .is_some());
+
+        // Runner signals advance.
+        use crate::core::stage_runner::GateEvaluator;
+        evaluator.on_stage_advanced(&artifact.artifact_id, 0);
+        assert!(cache
+            .get(artifact.artifact_id.as_str(), AGENT_SESSION_SIGNAL)
+            .is_none());
     }
 
     #[test]

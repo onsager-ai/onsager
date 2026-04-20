@@ -56,23 +56,69 @@ pub async fn load_workflows(pool: &PgPool) -> Result<HashMap<String, Workflow>, 
         .fetch_all(pool)
         .await?;
 
-        let mut stages = Vec::with_capacity(stage_rows.len());
+        // Build stages keyed by stage_order and validate that indices are
+        // contiguous starting at 0 — artifacts persist current_stage_index
+        // as an index into this Vec, so any gap silently desyncs DB and
+        // in-memory state. Fail closed: skip the whole workflow.
+        let mut indexed: Vec<(i32, StageSpec)> = Vec::with_capacity(stage_rows.len());
+        let mut bad_gates = false;
         for srow in stage_rows {
+            let stage_order: i32 = srow.get("stage_order");
             let stage_name: String = srow.get("name");
             let target_state_raw: Option<String> = srow.get("target_state");
             let gates_raw: serde_json::Value = srow.get("gates");
             let params: serde_json::Value = srow.get("params");
 
             let target_state = target_state_raw.as_deref().and_then(state_from_db_str);
-            let gates: Vec<GateSpec> = serde_json::from_value(gates_raw).unwrap_or_default();
+            let gates: Vec<GateSpec> = match serde_json::from_value(gates_raw) {
+                Ok(g) => g,
+                Err(e) => {
+                    tracing::error!(
+                        workflow_id = %id,
+                        stage_order,
+                        "workflow stage has unparseable gates JSON ({e}); skipping workflow to \
+                         avoid bypassing required checks"
+                    );
+                    bad_gates = true;
+                    break;
+                }
+            };
 
-            stages.push(StageSpec {
-                name: stage_name,
-                target_state,
-                gates,
-                params,
-            });
+            indexed.push((
+                stage_order,
+                StageSpec {
+                    name: stage_name,
+                    target_state,
+                    gates,
+                    params,
+                },
+            ));
         }
+
+        if bad_gates {
+            continue;
+        }
+
+        // Validate contiguity: [0, 1, 2, ...] with no gaps or duplicates.
+        indexed.sort_by_key(|(o, _)| *o);
+        let mut contiguous = true;
+        for (expected, (actual, _)) in indexed.iter().enumerate() {
+            if *actual != expected as i32 {
+                tracing::error!(
+                    workflow_id = %id,
+                    expected = expected,
+                    actual,
+                    "workflow stage_order is not contiguous from 0; skipping workflow"
+                );
+                contiguous = false;
+                break;
+            }
+        }
+        if !contiguous {
+            continue;
+        }
+
+        let stages: Vec<StageSpec> = indexed.into_iter().map(|(_, s)| s).collect();
 
         workflows.insert(
             id.clone(),

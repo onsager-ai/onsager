@@ -788,7 +788,7 @@ impl FactoryEventKind {
             Self::StageEntered { artifact_id, .. }
             | Self::StageGatePassed { artifact_id, .. }
             | Self::StageGateFailed { artifact_id, .. }
-            | Self::StageAdvanced { artifact_id, .. } => artifact_id.to_string(),
+            | Self::StageAdvanced { artifact_id, .. } => format!("workflow:{artifact_id}"),
             Self::TypeProposed { type_id, .. }
             | Self::TypeApproved { type_id, .. }
             | Self::TypeDeprecated { type_id, .. } => format!("type:{type_id}"),

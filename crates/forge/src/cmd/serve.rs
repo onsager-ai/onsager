@@ -489,7 +489,10 @@ pub fn run(database_url: &str, tick_ms: u64) {
                     // workflow-tagged artifact one step per tick. Runs
                     // under the same write lock as the pipeline so
                     // advancement decisions see a consistent artifact
-                    // snapshot.
+                    // snapshot. Refill the per-tick dispatch budget
+                    // before the pass so a burst of new artifacts can't
+                    // synchronously hammer Stiglab under the lock.
+                    gate_evaluator.reset_dispatch_budget();
                     let workflows_snapshot = state.workflows.clone();
                     let stage_events = stage_runner::advance_workflow_artifacts(
                         &workflows_snapshot,
@@ -777,9 +780,22 @@ impl TriggerHandler for WorkflowTriggerHandler {
                 );
                 return Ok(());
             }
-            let _ = persistence::persist_artifact_state(spine.pool(), &artifact).await;
-            let _ = workflow_persistence::persist_artifact_workflow_state(spine.pool(), &artifact)
-                .await;
+            if let Err(e) = persistence::persist_artifact_state(spine.pool(), &artifact).await {
+                tracing::error!(
+                    artifact_id = %artifact.artifact_id,
+                    "forge: failed to persist trigger-registered artifact state: {e}"
+                );
+                return Ok(());
+            }
+            if let Err(e) =
+                workflow_persistence::persist_artifact_workflow_state(spine.pool(), &artifact).await
+            {
+                tracing::error!(
+                    artifact_id = %artifact.artifact_id,
+                    "forge: failed to persist trigger-registered artifact workflow state: {e}"
+                );
+                return Ok(());
+            }
             emit_stage_event(&spine, &stage_event).await;
         }
         Ok(())
