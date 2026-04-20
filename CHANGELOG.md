@@ -20,8 +20,44 @@ project does not yet publish numbered releases.
   already has one. Fixes the four GitHub-integration bugs reported on
   the Railway deploy (callback 404 → install never recorded, duplicate
   CTAs, no post-install redirect, stale "not installed" state).
+  <!-- sha: cf6ee7b -->
+- **Dashboard**: `WorkspaceCard` no longer surfaces raw UUIDs. Members
+  render as avatar + `@github_login` chips backed by a new
+  `list_tenant_members_with_users` query + `TenantMemberWithUser` DTO
+  that LEFT JOINs `users` (falls back to the raw `user_id` when the join
+  row is null). The Add Project installation `Select` trigger renders
+  `{account_login} ({account_type})` via an explicit `<Select.Value>`
+  children function instead of echoing the installation UUID.
+  <!-- sha: 69da8eb -->
+- **Dashboard**: `DropdownMenuLabel` renders as a styled `div` instead
+  of Base UI's `Menu.GroupLabel` — using the label outside a
+  `Menu.Group` parent threw Base UI error #31 and blanked the page on
+  user-avatar click. <!-- sha: 43811c2 -->
 
 ### Added
+- **Dashboard**: `/workspaces` as a first-class onboarding route —
+  replaces the Settings → Workspaces card with a stepped welcome hero
+  for zero-workspace users, `OnboardingGate` redirect on first visit,
+  a top-level "Organization → Workspaces" sidebar entry, and a
+  `QuickCreateMenu` "New Workspace" action backed by a dialog with
+  auto-derived slug. Factory Overview renders a workspace-setup CTA
+  banner when the user has no workspaces; Settings keeps a link-out to
+  `/workspaces` for discoverability. <!-- sha: 4c3f5b7 -->
+- **Dashboard**: sidebar `SetupChecklist` + progressive nav disclosure.
+  Authenticated users with zero workspaces only see Organization +
+  System in the sidebar; Factory/Governance/Infrastructure groups and
+  the Register Artifact CTA unlock once the first workspace is created.
+  A compact three-step checklist (workspace → GitHub → project) is
+  pinned under the nav, session-dismissible, and auto-hides on
+  completion. Sidebar + checklist share one React Query cache via a
+  new `useSetupProgress` hook. <!-- sha: dedd788 -->
+- **Dashboard**: `NextStepCallout` in the `WorkspaceCard` header
+  surfaces the single next onboarding action — Install GitHub App, Add
+  project, or Start a session — as a primary CTA with step-of-3
+  framing and a distinct success state. When the GitHub App is
+  unavailable server-side, an amber "Setup blocked" callout names the
+  unblocking action instead of leaving the user in dead silence.
+  <!-- sha: eb54ffd -->
 - **Architecture**: ADR 0002 frames design as two loops — inner
   (spec → PR → merge) and outer (observe drift → propose rule → activate
   rule → modify inner loop) — and commits the repo to process ↔ product
@@ -114,6 +150,30 @@ project does not yet publish numbered releases.
   consolidated `railway` skill, and updated session-start hook docs.
 
 ### Changed
+- **Dashboard**: Add Project and `InstallationsSection` switch to an
+  OAuth-only repo onboarding flow — a Popover + cmdk (`Command`)
+  combobox with typeahead replaces manual owner/name entry, and the
+  "Link manually" installation form is gone. When an install has no
+  accessible repos, the empty state deep-links to the GitHub
+  installation settings instead of falling back to paste. The
+  underlying UX principle — linkable fields (repo owner/name,
+  installation IDs, project slugs) must be solved with OAuth pickers
+  or deep-links-out, never typed inputs — is persisted in the
+  `dashboard-ui` skill. <!-- sha: 2d788f1 -->
+- **Dashboard**: account menu consolidated into the top-right header.
+  `ThemeToggle` and the account info block are removed from the
+  sidebar footer; desktop now mirrors mobile with `QuickCreateMenu` +
+  `UserMenu` on the right, and the sidebar footer is down to just the
+  version string. <!-- sha: 82dff89 -->
+- **Deploy**: `onsager-portal` is co-deployed inside the unified
+  stiglab container instead of running as its own Railway service. The
+  entrypoint supervises `onsager-portal serve` on `PORTAL_PORT`
+  (default `3002`) and shares `STIGLAB_CREDENTIAL_KEY`; stiglab
+  reverse-proxies `/webhooks/github` through to it so HMAC-SHA256
+  verification still works against the raw body. `railway.toml`
+  documents the three-process layout, adds `PORTAL_PORT` +
+  `GITHUB_TOKEN`, and extends `watchPatterns` to trigger redeploys on
+  portal / artifact / refract changes. <!-- sha: 8620d71 -->
 - **Synodic**: cache `InterceptEngine` across `/gate` calls. A new
   `RulesRevision` token (`(count, MAX(updated_at))`) on the `Storage`
   trait (SQLite + Postgres) backs an `EngineCache` that skips the
