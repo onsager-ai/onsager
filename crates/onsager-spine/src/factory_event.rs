@@ -521,6 +521,39 @@ pub enum FactoryEventKind {
         workspace_id: String,
         reason: String,
     },
+
+    // -- Workflow events (issue #81 — stiglab workflow CRUD + webhook) ------
+    /// A configured workflow trigger matched an incoming webhook payload and
+    /// an artifact should be registered downstream. `workflow_id` identifies
+    /// the persisted workflow row; `trigger_kind` is the enum string of the
+    /// trigger that fired (e.g. `"github-issue-webhook"`); `payload` carries
+    /// the event-specific fields that the forge runtime needs to register
+    /// the artifact (repo, issue number, title, labels…).
+    TriggerFired {
+        workflow_id: String,
+        trigger_kind: String,
+        payload: serde_json::Value,
+    },
+
+    /// A GitHub `check_suite`, `check_run`, or `status` event arrived for a
+    /// PR we care about. Forge's external-check gate consumes this to advance
+    /// or block artifacts whose current stage is `external-check`.
+    GateCheckUpdated {
+        repo_owner: String,
+        repo_name: String,
+        pr_number: u64,
+        check_name: String,
+        conclusion: String,
+    },
+
+    /// A manual-approval gate received a signal (e.g. the PR was merged).
+    /// Forge's manual-approval gate advances when this arrives.
+    GateManualApprovalSignal {
+        repo_owner: String,
+        repo_name: String,
+        pr_number: u64,
+        source: String,
+    },
 }
 
 impl FactoryEventKind {
@@ -591,6 +624,9 @@ impl FactoryEventKind {
             Self::GateDeprecated { .. } => "registry.gate_deprecated",
             Self::ProfileRegistered { .. } => "registry.profile_registered",
             Self::ProfileDeprecated { .. } => "registry.profile_deprecated",
+            Self::TriggerFired { .. } => "workflow.trigger_fired",
+            Self::GateCheckUpdated { .. } => "gate.check_updated",
+            Self::GateManualApprovalSignal { .. } => "gate.manual_approval_signal",
         }
     }
 
@@ -660,6 +696,8 @@ impl FactoryEventKind {
             | Self::GateDeprecated { .. }
             | Self::ProfileRegistered { .. }
             | Self::ProfileDeprecated { .. } => "registry",
+            Self::TriggerFired { .. } => "workflow",
+            Self::GateCheckUpdated { .. } | Self::GateManualApprovalSignal { .. } => "gate",
         }
     }
 
@@ -731,6 +769,19 @@ impl FactoryEventKind {
             | Self::GateDeprecated { evaluator_id, .. } => format!("gate:{evaluator_id}"),
             Self::ProfileRegistered { profile_id, .. }
             | Self::ProfileDeprecated { profile_id, .. } => format!("profile:{profile_id}"),
+            Self::TriggerFired { workflow_id, .. } => workflow_id.clone(),
+            Self::GateCheckUpdated {
+                repo_owner,
+                repo_name,
+                pr_number,
+                ..
+            }
+            | Self::GateManualApprovalSignal {
+                repo_owner,
+                repo_name,
+                pr_number,
+                ..
+            } => format!("{repo_owner}/{repo_name}#{pr_number}"),
         }
     }
 }
