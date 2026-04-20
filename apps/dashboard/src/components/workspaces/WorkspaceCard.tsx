@@ -1,4 +1,12 @@
-import { useEffect, useState } from "react"
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
+import { Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   api,
@@ -31,6 +39,7 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import {
+  ArrowRight,
   Building2,
   Check,
   ChevronsUpDown,
@@ -38,6 +47,7 @@ import {
   GitBranch,
   Package,
   Plus,
+  Sparkles,
   Trash2,
   Users,
 } from "lucide-react"
@@ -70,6 +80,21 @@ export function WorkspaceCard({ workspace }: { workspace: Workspace }) {
   const hasProjects = projects.length > 0
   const fullySetUp = hasInstalls && hasProjects
 
+  const projectsScrollRef = useRef<HTMLDivElement>(null)
+  const projectsSectionRef = useRef<ProjectsSectionHandle>(null)
+
+  const handleAddProject = () => {
+    projectsSectionRef.current?.openAdd()
+    requestAnimationFrame(() => {
+      const el = projectsScrollRef.current
+      // jsdom (used in unit tests) doesn't implement scrollIntoView; production
+      // browsers do. Feature-detect rather than prototype-pollute the test env.
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ behavior: "smooth", block: "center" })
+      }
+    })
+  }
+
   return (
     <Card>
       <CardHeader className="gap-3">
@@ -100,6 +125,13 @@ export function WorkspaceCard({ workspace }: { workspace: Workspace }) {
           hasInstalls={hasInstalls}
           hasProjects={hasProjects}
         />
+
+        <NextStepCallout
+          workspaceId={workspace.id}
+          hasInstalls={hasInstalls}
+          hasProjects={hasProjects}
+          onAddProject={handleAddProject}
+        />
       </CardHeader>
       <CardContent className="space-y-5">
         <MembersSection members={members} />
@@ -109,13 +141,147 @@ export function WorkspaceCard({ workspace }: { workspace: Workspace }) {
           installations={installations}
         />
 
-        <ProjectsSection
-          workspaceId={workspace.id}
-          installations={installations}
-          projects={projects}
-        />
+        <div ref={projectsScrollRef}>
+          <ProjectsSection
+            ref={projectsSectionRef}
+            workspaceId={workspace.id}
+            installations={installations}
+            projects={projects}
+          />
+        </div>
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Step-by-step CTA: surfaces the single next action the user needs to take
+ * to drive a workspace from "Setup needed" to running an agent session.
+ * Replaces the previous experience where the only progress signal was the
+ * dotted SetupProgress checklist with no buttons attached.
+ */
+function NextStepCallout({
+  workspaceId,
+  hasInstalls,
+  hasProjects,
+  onAddProject,
+}: {
+  workspaceId: string
+  hasInstalls: boolean
+  hasProjects: boolean
+  onAddProject: () => void
+}) {
+  const { data: appConfig } = useQuery({
+    queryKey: ["github-app-config"],
+    queryFn: api.getGitHubAppConfig,
+    staleTime: 5 * 60_000,
+  })
+
+  if (!hasInstalls) {
+    if (appConfig && !appConfig.enabled) {
+      return (
+        <div
+          className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3"
+          role="status"
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+            Setup blocked: GitHub App unavailable
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Ask an administrator to register the Onsager GitHub App on this
+            server before continuing setup.
+          </p>
+        </div>
+      )
+    }
+    return (
+      <NextStepRow
+        label="Step 2 of 3 · Connect GitHub"
+        description="Install the Onsager GitHub App on a user or org you own so this workspace can read its repositories."
+        action={
+          <Button
+            size="sm"
+            onClick={() => {
+              window.location.href = `/api/github-app/install-start?tenant_id=${encodeURIComponent(workspaceId)}`
+            }}
+            disabled={!appConfig?.enabled}
+          >
+            <GitBranch className="mr-1 h-3 w-3" />
+            Install GitHub App
+            <ArrowRight className="ml-1 h-3 w-3" />
+          </Button>
+        }
+      />
+    )
+  }
+
+  if (!hasProjects) {
+    return (
+      <NextStepRow
+        label="Step 3 of 3 · Add a project"
+        description="Pick a repository the App can see — agent sessions will run against it."
+        action={
+          <Button size="sm" onClick={onAddProject}>
+            <Package className="mr-1 h-3 w-3" />
+            Add project
+            <ArrowRight className="ml-1 h-3 w-3" />
+          </Button>
+        }
+      />
+    )
+  }
+
+  return (
+    <NextStepRow
+      tone="success"
+      label="You're set up"
+      description="Start your first agent session against a project in this workspace."
+      action={
+        <Link to="/sessions" className={buttonVariants({ size: "sm" })}>
+          <Sparkles className="mr-1 h-3 w-3" />
+          Start a session
+          <ArrowRight className="ml-1 h-3 w-3" />
+        </Link>
+      }
+    />
+  )
+}
+
+function NextStepRow({
+  label,
+  description,
+  action,
+  tone = "primary",
+}: {
+  label: string
+  description: string
+  action: ReactNode
+  tone?: "primary" | "success"
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3",
+        tone === "primary"
+          ? "border-primary/30 bg-primary/5"
+          : "border-emerald-500/30 bg-emerald-500/5",
+      )}
+    >
+      <div className="min-w-0">
+        <p
+          className={cn(
+            "text-xs font-semibold uppercase tracking-wide",
+            tone === "primary"
+              ? "text-primary"
+              : "text-emerald-700 dark:text-emerald-400",
+          )}
+        >
+          {label}
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div className="shrink-0 self-start sm:self-auto">{action}</div>
+    </div>
   )
 }
 
@@ -284,15 +450,23 @@ function InstallationsSection({
   )
 }
 
-function ProjectsSection({
-  workspaceId,
-  installations,
-  projects,
-}: {
+/**
+ * Imperative handle the parent's NextStepCallout uses to open the add-project
+ * form without having to lift every form field upward. Keeps form state local
+ * to the section while letting the step-by-step CTA drive the user forward.
+ */
+export interface ProjectsSectionHandle {
+  openAdd: () => void
+}
+
+interface ProjectsSectionProps {
   workspaceId: string
   installations: GitHubAppInstallation[]
   projects: Project[]
-}) {
+}
+
+const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
+  function ProjectsSection({ workspaceId, installations, projects }, ref) {
   const [adding, setAdding] = useState(false)
   const [installationId, setInstallationId] = useState("")
   const [repoOwner, setRepoOwner] = useState("")
@@ -300,6 +474,19 @@ function ProjectsSection({
   const [defaultBranch, setDefaultBranch] = useState("")
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openAdd: () => {
+        if (installations.length === 0) return
+        setAdding(true)
+        setError(null)
+        setInstallationId((current) => current || installations[0]?.id || "")
+      },
+    }),
+    [installations],
+  )
 
   const { data: reposData, isLoading: reposLoading, isError: reposError } = useQuery({
     queryKey: ["installation-repos", workspaceId, installationId],
@@ -361,7 +548,11 @@ function ProjectsSection({
           <Package className="h-3 w-3" />
           Projects ({projects.length})
         </p>
-        {!adding && canAdd && (
+        {/* Empty state is driven by the parent's NextStepCallout; this
+            section button only appears once the user has at least one project
+            and wants to add another. Keeps the empty-state CTA single and
+            unambiguous. */}
+        {!adding && canAdd && projects.length > 0 && (
           <Button
             size="sm"
             variant="outline"
@@ -372,7 +563,7 @@ function ProjectsSection({
             }}
           >
             <Plus className="mr-1 h-3 w-3" />
-            Add project
+            Add another project
           </Button>
         )}
       </div>
@@ -381,13 +572,6 @@ function ProjectsSection({
         <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
           Link a GitHub installation first — projects are picked from repos the
           Onsager GitHub App can see.
-        </p>
-      )}
-
-      {canAdd && projects.length === 0 && !adding && (
-        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-          No projects yet. Add a repo to start running agent sessions against
-          it.
         </p>
       )}
 
@@ -511,7 +695,7 @@ function ProjectsSection({
       )}
     </div>
   )
-}
+})
 
 function RepoCombobox({
   repos,

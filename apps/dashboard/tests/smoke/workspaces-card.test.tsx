@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { MemoryRouter } from "react-router-dom"
 import { WorkspaceCard } from "@/components/workspaces/WorkspaceCard"
 
 vi.mock("@/lib/api", () => ({
@@ -38,6 +39,7 @@ const orgInstall = {
 async function primeMocks(opts: {
   repos: unknown[]
   installations?: unknown[]
+  projects?: unknown[]
   appEnabled?: boolean
 }) {
   const { api } = await import("@/lib/api")
@@ -46,7 +48,9 @@ async function primeMocks(opts: {
   vi.mocked(api.listWorkspaceInstallations).mockResolvedValue({
     installations: (opts.installations ?? [orgInstall]) as never,
   })
-  vi.mocked(api.listWorkspaceProjects).mockResolvedValue({ projects: [] })
+  vi.mocked(api.listWorkspaceProjects).mockResolvedValue({
+    projects: (opts.projects ?? []) as never,
+  })
   vi.mocked(api.listInstallationRepos).mockResolvedValue({
     repos: opts.repos as never,
   })
@@ -58,9 +62,11 @@ async function primeMocks(opts: {
 function renderCard() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <QueryClientProvider client={qc}>
-      <WorkspaceCard workspace={ws} />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <WorkspaceCard workspace={ws} />
+      </QueryClientProvider>
+    </MemoryRouter>,
   )
 }
 
@@ -143,5 +149,88 @@ describe("WorkspaceCard — OAuth-first Add project flow", () => {
     expect(
       screen.queryByRole("button", { name: /link manually/i }),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe("WorkspaceCard — step-by-step NextStepCallout", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("shows a Connect GitHub CTA when no installations are linked yet", async () => {
+    await primeMocks({ repos: [], installations: [] })
+    renderCard()
+    expect(
+      await screen.findByRole("button", { name: /install github app/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/step 2 of 3/i)).toBeInTheDocument()
+  })
+
+  it("blocks setup with an admin-action callout when the GitHub App is unavailable", async () => {
+    await primeMocks({ repos: [], installations: [], appEnabled: false })
+    renderCard()
+    expect(
+      await screen.findByText(/setup blocked: github app unavailable/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /install github app/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows an Add project CTA once GitHub is connected but no project is linked", async () => {
+    await primeMocks({
+      repos: [
+        { owner: "onsager-ai", name: "onsager", default_branch: "main", private: false },
+      ],
+    })
+    renderCard()
+    const cta = await screen.findByRole("button", { name: /^add project/i })
+    expect(cta).toBeInTheDocument()
+    expect(screen.getByText(/step 3 of 3/i)).toBeInTheDocument()
+    // The empty-state button in the section is suppressed; only the callout
+    // CTA drives the user forward.
+    expect(
+      screen.queryByRole("button", { name: /add another project/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("clicking the Add project CTA opens the add-project form", async () => {
+    await primeMocks({
+      repos: [
+        { owner: "onsager-ai", name: "onsager", default_branch: "main", private: false },
+      ],
+    })
+    renderCard()
+    const cta = await screen.findByRole("button", { name: /^add project/i })
+    fireEvent.click(cta)
+    await waitFor(() =>
+      expect(screen.getByTestId("add-project-form")).toBeInTheDocument(),
+    )
+    expect(
+      await screen.findByRole("button", { name: /select a repository/i }),
+    ).toBeInTheDocument()
+  })
+
+  it("invites the user to start a session once setup is complete", async () => {
+    await primeMocks({
+      repos: [],
+      projects: [
+        {
+          id: "p1",
+          tenant_id: "ws1",
+          github_app_installation_id: "inst1",
+          repo_owner: "onsager-ai",
+          repo_name: "onsager",
+          default_branch: "main",
+          created_at: "2026-01-01",
+        },
+      ],
+    })
+    renderCard()
+    const link = await screen.findByRole("link", { name: /start a session/i })
+    expect(link.getAttribute("href")).toBe("/sessions")
+    expect(screen.getByText(/you're set up/i)).toBeInTheDocument()
+    // "Add another project" appears now that there's an existing project.
+    expect(
+      screen.getByRole("button", { name: /add another project/i }),
+    ).toBeInTheDocument()
   })
 })
