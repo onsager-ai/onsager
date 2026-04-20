@@ -189,13 +189,17 @@ pub async fn find_active_github_workflows_for_label(
     repo_name: &str,
     label: &str,
 ) -> anyhow::Result<Vec<Workflow>> {
+    // Bind the trigger-kind string via the enum's `Display` so the SQL
+    // doesn't drift if the string representation ever changes.
+    let trigger_kind = TriggerKind::GithubIssueWebhook.to_string();
     let rows = sqlx::query_as::<_, WorkflowRow>(
         "SELECT id, tenant_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
                 install_id, preset_id, active, created_by, created_at, updated_at \
          FROM workflows \
-         WHERE active = 1 AND trigger_kind = 'github-issue-webhook' \
-           AND repo_owner = $1 AND repo_name = $2 AND trigger_label = $3",
+         WHERE active = 1 AND trigger_kind = $1 \
+           AND repo_owner = $2 AND repo_name = $3 AND trigger_label = $4",
     )
+    .bind(&trigger_kind)
     .bind(repo_owner)
     .bind(repo_name)
     .bind(label)

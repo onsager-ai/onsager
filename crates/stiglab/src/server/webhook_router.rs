@@ -88,6 +88,10 @@ pub fn route_issues_labeled(payload: &Value, matched: &[Workflow]) -> Vec<Routed
 
 /// Inspect a `check_suite`, `check_run`, or `status` payload and produce a
 /// `gate.check_updated` event when a PR number can be resolved.
+///
+/// For `check_suite` / `check_run` we only act on `action == "completed"` —
+/// `requested` / `rerequested` / `created` / `in_progress` carry no verdict
+/// and shouldn't advance or block a gate.
 pub fn route_check_event(event: &str, payload: &Value) -> Option<RoutedEvent> {
     let repo = payload.get("repository")?;
     let repo_owner = repo
@@ -98,6 +102,9 @@ pub fn route_check_event(event: &str, payload: &Value) -> Option<RoutedEvent> {
 
     let (check_name, conclusion, pr_number) = match event {
         "check_suite" => {
+            if payload.get("action").and_then(Value::as_str) != Some("completed") {
+                return None;
+            }
             let cs = payload.get("check_suite")?;
             // Pull the first PR number; GitHub includes the full PR array on
             // check_suite deliveries for the head sha.
@@ -122,6 +129,9 @@ pub fn route_check_event(event: &str, payload: &Value) -> Option<RoutedEvent> {
             )
         }
         "check_run" => {
+            if payload.get("action").and_then(Value::as_str) != Some("completed") {
+                return None;
+            }
             let cr = payload.get("check_run")?;
             let pr_number = cr
                 .get("pull_requests")
@@ -266,6 +276,7 @@ mod tests {
     #[test]
     fn check_run_emits_check_updated() {
         let payload = json!({
+            "action": "completed",
             "check_run": {
                 "name": "ci",
                 "conclusion": "success",
@@ -292,10 +303,39 @@ mod tests {
     #[test]
     fn check_run_without_pr_is_ignored() {
         let payload = json!({
+            "action": "completed",
             "check_run": {"name": "ci", "conclusion": "success", "pull_requests": []},
             "repository": {"name": "widgets", "owner": {"login": "acme"}},
         });
         assert!(route_check_event("check_run", &payload).is_none());
+    }
+
+    #[test]
+    fn check_run_rerequested_is_ignored() {
+        let payload = json!({
+            "action": "rerequested",
+            "check_run": {
+                "name": "ci",
+                "conclusion": "success",
+                "pull_requests": [{"number": 7}],
+            },
+            "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        });
+        assert!(route_check_event("check_run", &payload).is_none());
+    }
+
+    #[test]
+    fn check_suite_requested_is_ignored() {
+        let payload = json!({
+            "action": "requested",
+            "check_suite": {
+                "id": 1,
+                "conclusion": null,
+                "pull_requests": [{"number": 7}],
+            },
+            "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        });
+        assert!(route_check_event("check_suite", &payload).is_none());
     }
 
     #[test]

@@ -170,11 +170,23 @@ async fn route_event(state: &AppState, event: &str, payload: &Value) -> Vec<Rout
             {
                 return Vec::new();
             }
-            let matched = workflow_db::find_active_github_workflows_for_label(
+            let matched = match workflow_db::find_active_github_workflows_for_label(
                 &state.db, repo_owner, repo_name, label,
             )
             .await
-            .unwrap_or_default();
+            {
+                Ok(matched) => matched,
+                Err(e) => {
+                    tracing::error!(
+                        repo_owner = repo_owner,
+                        repo_name = repo_name,
+                        label = label,
+                        error = %e,
+                        "failed to query active github workflows for labeled-issue webhook"
+                    );
+                    return Vec::new();
+                }
+            };
             route_issues_labeled(payload, &matched)
         }
         "check_suite" | "check_run" | "status" => {

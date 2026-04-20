@@ -111,8 +111,14 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route("/webhooks/github", any(routes::portal::proxy))
         // Workflow runtime webhook receiver (issue #81). Distinct from the
         // legacy `/webhooks/github` portal proxy — this endpoint feeds the
-        // workflow runtime on stiglab directly.
-        .route("/api/webhooks/github", post(routes::webhooks::handle))
+        // workflow runtime on stiglab directly. GitHub caps webhook payloads
+        // at 25 MiB; a 1 MiB cap here is generous for the events we handle
+        // (`issues`, `pull_request`, `check_*`, `status`) while blunting
+        // DoS-via-giant-body.
+        .route(
+            "/api/webhooks/github",
+            post(routes::webhooks::handle).layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)),
+        )
         // Workflow CRUD (issue #81).
         .route(
             "/api/workflows",

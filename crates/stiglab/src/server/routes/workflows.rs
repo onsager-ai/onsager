@@ -101,6 +101,10 @@ pub struct CreateStageBody {
 pub fn validate_create_body(
     body: &CreateWorkflowBody,
 ) -> Result<(TriggerKind, Vec<WorkflowStage>), String> {
+    if body.name.trim().is_empty() {
+        return Err("name is required".into());
+    }
+
     let trigger_kind = body
         .trigger_kind
         .parse::<TriggerKind>()
@@ -118,6 +122,12 @@ pub fn validate_create_body(
                 return Err("install_id is required".into());
             }
         }
+    }
+
+    // Reject requests that ship both a preset and explicit stages — the
+    // two are mutually exclusive and silently preferring one is surprising.
+    if body.preset_id.is_some() && body.stages.as_ref().is_some_and(|s| !s.is_empty()) {
+        return Err("provide either preset_id or stages, not both".into());
     }
 
     let stages = if let Some(preset_id) = body.preset_id.as_deref() {
@@ -587,5 +597,25 @@ mod tests {
         body.install_id = 0;
         let err = validate_create_body(&body).unwrap_err();
         assert!(err.contains("install_id"));
+    }
+
+    #[test]
+    fn validate_rejects_empty_name() {
+        let mut body = base_body();
+        body.name = "  ".into();
+        let err = validate_create_body(&body).unwrap_err();
+        assert!(err.contains("name"));
+    }
+
+    #[test]
+    fn validate_rejects_both_preset_and_stages() {
+        let mut body = base_body();
+        body.preset_id = Some("github-issue-to-pr".into());
+        body.stages = Some(vec![CreateStageBody {
+            gate_kind: "agent-session".into(),
+            params: None,
+        }]);
+        let err = validate_create_body(&body).unwrap_err();
+        assert!(err.contains("preset_id or stages"));
     }
 }

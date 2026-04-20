@@ -17,7 +17,7 @@
 
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::server::github_app::{list_installation_repos, InstallationToken};
@@ -85,9 +85,18 @@ pub async fn ensure_label_exists(
     repo: &str,
     label: &str,
 ) -> Result<(), ActivationError> {
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/labels/{label}");
+    // Label names may legitimately contain spaces or other characters that
+    // need percent-encoding when interpolated into the URL path. Build the
+    // URL with `reqwest::Url::path_segments_mut` rather than raw `format!`.
+    let mut url = reqwest::Url::parse(&format!(
+        "https://api.github.com/repos/{owner}/{repo}/labels"
+    ))
+    .map_err(|e| ActivationError::GitHub(e.to_string()))?;
+    url.path_segments_mut()
+        .map_err(|_| ActivationError::GitHub("invalid GitHub label lookup URL".into()))?
+        .push(label);
     let resp = gh_client()
-        .get(&url)
+        .get(url)
         .bearer_auth(&token.token)
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "onsager-stiglab/0.1")
@@ -134,13 +143,6 @@ pub async fn ensure_label_exists(
     )))
 }
 
-#[derive(Debug, Deserialize)]
-struct HookRow {
-    id: i64,
-    #[serde(default)]
-    config: serde_json::Value,
-}
-
 #[derive(Debug, Serialize)]
 struct CreateHookBody<'a> {
     name: &'a str,
@@ -158,8 +160,10 @@ struct CreateHookConfig<'a> {
 }
 
 /// Register a repository webhook for the required events. Idempotent by
-/// `config.url`: if a hook with the same URL already exists, no new hook is
-/// created. Returns the hook id (new or existing).
+/// `config.url`: if a hook with the same URL already exists, it is reused.
+/// When the existing hook is disabled or missing any of `REQUIRED_WEBHOOK_EVENTS`
+/// we `PATCH` it in place so the workflow runtime doesn't silently miss
+/// deliveries. Returns the hook id (new, patched, or unchanged).
 pub async fn ensure_webhook_registered(
     token: &InstallationToken,
     owner: &str,
@@ -184,18 +188,60 @@ pub async fn ensure_webhook_registered(
             "list hooks failed ({status}): {body}"
         )));
     }
-    let hooks: Vec<HookRow> = resp
+    let hooks: Vec<serde_json::Value> = resp
         .json()
         .await
         .map_err(|e| ActivationError::GitHub(e.to_string()))?;
+    let required_events: std::collections::BTreeSet<&str> =
+        REQUIRED_WEBHOOK_EVENTS.iter().copied().collect();
     if let Some(existing) = hooks.iter().find(|h| {
-        h.config
-            .get("url")
+        h.get("config")
+            .and_then(|v| v.get("url"))
             .and_then(|v| v.as_str())
             .map(|u| u == url)
             .unwrap_or(false)
     }) {
-        return Ok(existing.id);
+        let existing_id = existing
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| ActivationError::GitHub("existing hook missing numeric id".into()))?;
+        let is_active = existing
+            .get("active")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let existing_events: std::collections::BTreeSet<&str> = existing
+            .get("events")
+            .and_then(|v| v.as_array())
+            .map(|events| events.iter().filter_map(|e| e.as_str()).collect())
+            .unwrap_or_default();
+        if is_active && existing_events == required_events {
+            return Ok(existing_id);
+        }
+
+        // Hook exists but is disabled or missing events — PATCH it in place.
+        let patch_url = format!("{list_url}/{existing_id}");
+        let patch_body = serde_json::json!({
+            "active": true,
+            "events": REQUIRED_WEBHOOK_EVENTS,
+        });
+        let resp = gh_client()
+            .patch(&patch_url)
+            .bearer_auth(&token.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "onsager-stiglab/0.1")
+            .timeout(Duration::from_secs(10))
+            .json(&patch_body)
+            .send()
+            .await
+            .map_err(|e| ActivationError::GitHub(e.to_string()))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ActivationError::GitHub(format!(
+                "update hook failed ({status}): {body}"
+            )));
+        }
+        return Ok(existing_id);
     }
 
     let body = CreateHookBody {
@@ -226,11 +272,14 @@ pub async fn ensure_webhook_registered(
             "create hook failed ({status}): {body}"
         )));
     }
-    let created: HookRow = resp
+    let created: serde_json::Value = resp
         .json()
         .await
         .map_err(|e| ActivationError::GitHub(e.to_string()))?;
-    Ok(created.id)
+    created
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| ActivationError::GitHub("created hook missing numeric id".into()))
 }
 
 /// Remove the repository webhook pointing at our URL. No-op if nothing
@@ -255,15 +304,20 @@ pub async fn deregister_webhook(
     if !resp.status().is_success() {
         return Ok(());
     }
-    let hooks: Vec<HookRow> = match resp.json().await {
+    let hooks: Vec<serde_json::Value> = match resp.json().await {
         Ok(h) => h,
         Err(_) => return Ok(()),
     };
-    for h in hooks
-        .iter()
-        .filter(|h| h.config.get("url").and_then(|v| v.as_str()) == Some(url.as_str()))
-    {
-        let del_url = format!("https://api.github.com/repos/{owner}/{repo}/hooks/{}", h.id);
+    for h in hooks.iter().filter(|h| {
+        h.get("config")
+            .and_then(|v| v.get("url"))
+            .and_then(|v| v.as_str())
+            == Some(url.as_str())
+    }) {
+        let Some(hook_id) = h.get("id").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        let del_url = format!("https://api.github.com/repos/{owner}/{repo}/hooks/{hook_id}");
         let _ = gh_client()
             .delete(&del_url)
             .bearer_auth(&token.token)
@@ -290,14 +344,45 @@ fn gh_client() -> &'static reqwest::Client {
 mod tests {
     use super::*;
 
+    /// Global lock guarding tests that mutate process-wide env vars. Cargo
+    /// runs integration tests in parallel by default, so anything reading the
+    /// same env keys must serialize through here.
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        ENV_LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    struct ScopedEnvVar {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
     #[test]
     fn webhook_url_respects_base_env() {
-        std::env::set_var("STIGLAB_WEBHOOK_BASE_URL", "https://stig.example.com/");
+        let _env_guard = env_lock().lock().expect("env lock poisoned");
+        let _base_url = ScopedEnvVar::set("STIGLAB_WEBHOOK_BASE_URL", "https://stig.example.com/");
         assert_eq!(
             webhook_url(),
             "https://stig.example.com/api/webhooks/github"
         );
-        std::env::remove_var("STIGLAB_WEBHOOK_BASE_URL");
     }
 
     #[test]
