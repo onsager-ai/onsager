@@ -18,6 +18,8 @@ import { ThemeToggle } from "./ThemeToggle"
 import { useAuth } from "@/lib/auth"
 import { CreateArtifactSheet } from "@/components/factory/CreateArtifactSheet"
 import { Button } from "@/components/ui/button"
+import { SetupChecklist } from "@/components/workspaces/SetupChecklist"
+import { useSetupProgress } from "@/hooks/useSetupProgress"
 
 const navSections = [
   {
@@ -55,17 +57,32 @@ const navSections = [
   },
 ]
 
+// Sections kept visible before the user has created their first workspace.
+// Everything else (factory, governance, infrastructure) shows empty tables in
+// that state and distracts from the setup path, so we hide it until the user
+// has at least one workspace.
+const PRE_WORKSPACE_SECTIONS = new Set(["Organization", "System"])
+
 export function AppSidebar() {
   const location = useLocation()
   const { user, authEnabled } = useAuth()
   const { isMobile, setOpenMobile } = useSidebar()
+  const { hasWorkspace, loading: progressLoading } = useSetupProgress()
 
   // The Organization section (workspaces) requires authentication; /api/tenants
   // returns 401 otherwise. Hide the group entirely in anonymous/L1 mode.
   const authed = authEnabled && !!user
-  const visibleSections = navSections.filter(
-    (s) => s.label !== "Organization" || authed,
-  )
+  // Progressive disclosure: authenticated users with zero workspaces only see
+  // the Organization + System groups. Anonymous users see everything except
+  // Organization (same as before). Once the first workspace is created the
+  // full nav unlocks — and the SetupChecklist takes over as outer-loop
+  // guidance until GitHub is connected and a project is added.
+  const gateNav = authed && !progressLoading && !hasWorkspace
+  const visibleSections = navSections.filter((s) => {
+    if (s.label === "Organization" && !authed) return false
+    if (gateNav && !PRE_WORKSPACE_SECTIONS.has(s.label)) return false
+    return true
+  })
 
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false)
@@ -104,16 +121,19 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <CreateArtifactSheet>
-              <Button variant="outline" className="w-full justify-start gap-2">
-                <Plus className="h-4 w-4" />
-                <span>Register Artifact</span>
-              </Button>
-            </CreateArtifactSheet>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <SetupChecklist />
+        {!gateNav && (
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <CreateArtifactSheet>
+                <Button variant="outline" className="w-full justify-start gap-2">
+                  <Plus className="h-4 w-4" />
+                  <span>Register Artifact</span>
+                </Button>
+              </CreateArtifactSheet>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter className="border-t p-4 space-y-3">
         {authEnabled && user && (
