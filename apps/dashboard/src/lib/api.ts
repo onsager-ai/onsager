@@ -84,6 +84,9 @@ export interface WorkspaceMember {
   tenant_id: string;
   user_id: string;
   joined_at: string;
+  github_login: string | null;
+  github_name: string | null;
+  github_avatar_url: string | null;
 }
 
 export type GitHubAccountType = 'user' | 'organization';

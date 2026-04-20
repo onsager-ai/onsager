@@ -194,7 +194,7 @@ pub async fn list_members(
     if let Err(r) = require_tenant_member(&state.db, user_id, &tenant_id).await {
         return r;
     }
-    match db::list_tenant_members(&state.db, &tenant_id).await {
+    match db::list_tenant_members_with_users(&state.db, &tenant_id).await {
         Ok(members) => Json(serde_json::json!({ "members": members })).into_response(),
         Err(e) => {
             tracing::error!("failed to list members: {e}");

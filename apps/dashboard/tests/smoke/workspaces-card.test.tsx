@@ -41,10 +41,13 @@ async function primeMocks(opts: {
   installations?: unknown[]
   projects?: unknown[]
   appEnabled?: boolean
+  members?: unknown[]
 }) {
   const { api } = await import("@/lib/api")
   vi.mocked(api.listWorkspaces).mockResolvedValue({ tenants: [ws] })
-  vi.mocked(api.listWorkspaceMembers).mockResolvedValue({ members: [] })
+  vi.mocked(api.listWorkspaceMembers).mockResolvedValue({
+    members: (opts.members ?? []) as never,
+  })
   vi.mocked(api.listWorkspaceInstallations).mockResolvedValue({
     installations: (opts.installations ?? [orgInstall]) as never,
   })
@@ -244,5 +247,75 @@ describe("WorkspaceCard — step-by-step NextStepCallout", () => {
     expect(
       screen.getByRole("button", { name: /add another project/i }),
     ).toBeInTheDocument()
+  })
+})
+
+describe("WorkspaceCard — human-readable member + installation labels", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("renders members as @login links to GitHub, not raw user UUIDs", async () => {
+    await primeMocks({
+      repos: [],
+      members: [
+        {
+          tenant_id: "ws1",
+          user_id: "133d228a-be10-492b-8035-bdb984d20721",
+          joined_at: "2026-01-01",
+          github_login: "octocat",
+          github_name: "Octo Cat",
+          github_avatar_url: "https://example.test/octocat.png",
+        },
+      ],
+    })
+    renderCard()
+    const link = await screen.findByRole("link", { name: /@octocat/i })
+    expect(link.getAttribute("href")).toBe("https://github.com/octocat")
+    expect(link.getAttribute("target")).toBe("_blank")
+    expect(
+      screen.queryByText(/133d228a-be10-492b-8035-bdb984d20721/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("falls back to user_id when the joined users row has no github profile", async () => {
+    await primeMocks({
+      repos: [],
+      members: [
+        {
+          tenant_id: "ws1",
+          user_id: "orphaned-user-id",
+          joined_at: "2026-01-01",
+          github_login: null,
+          github_name: null,
+          github_avatar_url: null,
+        },
+      ],
+    })
+    renderCard()
+    // No @login → no link; chip renders a plain span with the raw user_id
+    // so operators can still see something instead of an empty box.
+    await screen.findByText(/orphaned-user-id/)
+    expect(
+      screen.queryByRole("link", { name: /orphaned-user-id/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows the installation account_login in the Select trigger, not the UUID", async () => {
+    await primeMocks({
+      repos: [
+        { owner: "onsager-ai", name: "onsager", default_branch: "main", private: false },
+      ],
+    })
+    const { container } = renderCard()
+    fireEvent.click(await screen.findByRole("button", { name: /add project/i }))
+    await screen.findByTestId("add-project-form")
+    // Grab the SelectValue span inside the Select trigger (the [data-slot]
+    // attribute is stamped by the shadcn wrapper). It must render the
+    // installation's account_login after the form auto-selects the first
+    // installation, not the raw installation UUID `inst1`.
+    await waitFor(() => {
+      const selectValue = container.querySelector('[data-slot="select-value"]')
+      expect(selectValue?.textContent).toMatch(/onsager-ai/i)
+      expect(selectValue?.textContent).not.toMatch(/inst1/)
+    })
   })
 })
