@@ -194,22 +194,25 @@ function NextStepCallout({
         </div>
       )
     }
+    // Use a real anchor so keyboard activation, right-click → "open in new
+    // tab", and screen-reader semantics match user expectations for what is
+    // ultimately a server-rendered redirect to GitHub. The disabled-while-
+    // loading case from the previous Button impl is handled by the early
+    // return above — by the time we get here, appConfig is either still
+    // loading (treat optimistically) or has confirmed `enabled: true`.
     return (
       <NextStepRow
         label="Step 2 of 3 · Connect GitHub"
         description="Install the Onsager GitHub App on a user or org you own so this workspace can read its repositories."
         action={
-          <Button
-            size="sm"
-            onClick={() => {
-              window.location.href = `/api/github-app/install-start?tenant_id=${encodeURIComponent(workspaceId)}`
-            }}
-            disabled={!appConfig?.enabled}
+          <a
+            href={`/api/github-app/install-start?tenant_id=${encodeURIComponent(workspaceId)}`}
+            className={buttonVariants({ size: "sm" })}
           >
             <GitBranch className="mr-1 h-3 w-3" />
             Install GitHub App
             <ArrowRight className="ml-1 h-3 w-3" />
-          </Button>
+          </a>
         }
       />
     )
