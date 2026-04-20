@@ -30,6 +30,14 @@ Three principles from lean-spec:
 2. **Intent Over Implementation** — Document the *why* and *what*, not the *how*. Implementation details belong in PRs, not spec issues. The spec captures human intent that isn't in the code.
 3. **Living Documents** — Specs evolve via issue comments and edits. Status labels track lifecycle. The issue thread becomes the decision record.
 
+Plus one Onsager-specific principle:
+
+4. **Reach ships with the primitive.** A spec that introduces a new user-facing resource (workspace, project, credential, session type — anything a user must create to use) must scope in the discovery surface: primary navigation entry, first-run flow for zero-instance users, empty-state CTAs on pages that expect instances, and auth gating on every touchpoint. Without those, the primitive is functionally present but invisible — users land in dead-empty states with no way to recover. This principle also applies to backend primitives that are only usable via a UI affordance (e.g. a new governance action needs the button that triggers it).
+
+   **The "minimal v1" trap.** It's tempting to defer the surface ("we'll add the sidebar entry later"). That choice is almost always wrong. The cheap option — ship CRUD behind a Settings card, call it done — looks complete and is functionally invisible. The follow-up spec to add the surface ends up bigger than building it up front, and between the two PRs the feature ships as dead code. **Most of the time the cheap option is the bad decision.** Explicitly-scoped-out UX (a workspace switcher, role editor, invite flow) is fine to defer; *discoverability is not deferrable*.
+
+   See [references/reach-checklist.md](references/reach-checklist.md) for the per-spec Plan items this implies.
+
 ## When to use this skill
 
 Use when:
