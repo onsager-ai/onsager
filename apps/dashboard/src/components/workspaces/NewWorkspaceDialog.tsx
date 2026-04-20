@@ -98,7 +98,7 @@ export function NewWorkspaceDialog({
             <Input
               placeholder="acme"
               value={slug}
-              onChange={(e) => setCustomSlug(e.target.value.toLowerCase())}
+              onChange={(e) => setCustomSlug(slugify(e.target.value))}
               className="font-mono"
             />
             <span className="text-xs text-muted-foreground">

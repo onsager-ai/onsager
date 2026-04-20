@@ -2,7 +2,9 @@ import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useSearchParams } from "react-router-dom"
 import { api } from "@/lib/api"
+import { useAuth } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Plus } from "lucide-react"
 import { WorkspaceCard } from "@/components/workspaces/WorkspaceCard"
@@ -14,9 +16,12 @@ import { NewWorkspaceDialog } from "@/components/workspaces/NewWorkspaceDialog"
  * first-run onboarding hero. Replaces the former Settings → Workspaces card.
  */
 export function WorkspacesPage() {
+  const { user, authEnabled } = useAuth()
+  const canLoadWorkspaces = Boolean(authEnabled && user)
   const { data, isLoading } = useQuery({
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
+    enabled: canLoadWorkspaces,
   })
   const workspaces = useMemo(() => data?.tenants ?? [], [data])
   const [createOpen, setCreateOpen] = useState(false)
@@ -31,7 +36,7 @@ export function WorkspacesPage() {
   }
 
   const showOnboarding =
-    !isLoading && (workspaces.length === 0 || welcome)
+    canLoadWorkspaces && !isLoading && (workspaces.length === 0 || welcome)
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -46,7 +51,7 @@ export function WorkspacesPage() {
             auto-mirror repos — projects are opt-in per repo.
           </p>
         </div>
-        {workspaces.length > 0 && (
+        {canLoadWorkspaces && workspaces.length > 0 && (
           <Button
             onClick={() => {
               setCreateOpen(true)
@@ -59,7 +64,16 @@ export function WorkspacesPage() {
         )}
       </div>
 
-      {isLoading && (
+      {!canLoadWorkspaces && (
+        <Card>
+          <CardContent className="p-6 text-sm text-muted-foreground">
+            Workspaces require authentication. Sign in to create one and
+            manage GitHub installations, projects, and members.
+          </CardContent>
+        </Card>
+      )}
+
+      {canLoadWorkspaces && isLoading && (
         <div className="space-y-3">
           <Skeleton className="h-24 w-full" />
           <Skeleton className="h-24 w-full" />
@@ -75,7 +89,8 @@ export function WorkspacesPage() {
         />
       )}
 
-      {!isLoading &&
+      {canLoadWorkspaces &&
+        !isLoading &&
         workspaces.map((ws) => <WorkspaceCard key={ws.id} workspace={ws} />)}
 
       <NewWorkspaceDialog
