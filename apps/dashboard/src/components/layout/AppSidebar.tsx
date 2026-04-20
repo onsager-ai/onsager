@@ -1,4 +1,4 @@
-import { Building2, Factory, Plus, Server, Terminal, Settings, Shield, Package, Activity } from "lucide-react"
+import { Building2, Factory, GitBranch, Server, Terminal, Settings, Shield, Package, Activity } from "lucide-react"
 import { OnsagerLogo } from "./OnsagerLogo"
 import { Link, useLocation } from "react-router-dom"
 import {
@@ -15,8 +15,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { useAuth } from "@/lib/auth"
-import { CreateArtifactSheet } from "@/components/factory/CreateArtifactSheet"
-import { Button } from "@/components/ui/button"
 import { SetupChecklist } from "@/components/workspaces/SetupChecklist"
 import { useSetupProgress } from "@/hooks/useSetupProgress"
 
@@ -31,6 +29,7 @@ const navSections = [
     label: "Factory",
     items: [
       { title: "Overview", icon: Factory, path: "/" },
+      { title: "Workflows", icon: GitBranch, path: "/workflows" },
       { title: "Artifacts", icon: Package, path: "/artifacts" },
       { title: "Event Spine", icon: Activity, path: "/spine" },
     ],
@@ -126,18 +125,6 @@ export function AppSidebar() {
           </SidebarGroup>
         ))}
         <SetupChecklist progress={setupProgress} />
-        {!gateNav && (
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <CreateArtifactSheet>
-                <Button variant="outline" className="w-full justify-start gap-2">
-                  <Plus className="h-4 w-4" />
-                  <span>Register Artifact</span>
-                </Button>
-              </CreateArtifactSheet>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
       </SidebarContent>
       <SidebarFooter className="border-t p-4">
         <span className="text-xs text-muted-foreground">v0.1.0</span>
