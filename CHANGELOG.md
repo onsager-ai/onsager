@@ -6,6 +6,21 @@ project does not yet publish numbered releases.
 
 ## [Unreleased]
 
+### Fixed
+- **Stiglab + Dashboard**: GitHub App install callback now registers at
+  `/api/github-app/callback` (was `/api/github-app/install-callback`),
+  matching the Setup URL typically configured on the GitHub App. Post-
+  install redirect lands on `/workspaces?github_app_linked=…` instead of
+  `/settings` so `WorkspaceCard`'s existing effect can invalidate the
+  installations query and the workspace reflects the new installation
+  without a manual refresh. The redundant "Install via GitHub App"
+  button in `InstallationsSection` is suppressed on the empty state —
+  the `NextStepCallout` now owns the sole install CTA, and the section
+  only renders an "Add another installation" button once the workspace
+  already has one. Fixes the four GitHub-integration bugs reported on
+  the Railway deploy (callback 404 → install never recorded, duplicate
+  CTAs, no post-install redirect, stale "not installed" state).
+
 ### Added
 - **Architecture**: ADR 0002 frames design as two loops — inner
   (spec → PR → merge) and outer (observe drift → propose rule → activate

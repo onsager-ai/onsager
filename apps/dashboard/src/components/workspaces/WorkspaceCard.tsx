@@ -395,15 +395,19 @@ function InstallationsSection({
           <GitBranch className="h-3 w-3" />
           GitHub installations ({installations.length})
         </p>
-        {appConfig?.enabled && (
+        {/* Empty state is driven by the parent's NextStepCallout so the
+            primary CTA stays unambiguous. Only offer the "add another"
+            button once the workspace already has an installation. */}
+        {appConfig?.enabled && installations.length > 0 && (
           <Button
             size="sm"
+            variant="outline"
             onClick={() => {
               window.location.href = `/api/github-app/install-start?tenant_id=${encodeURIComponent(workspaceId)}`
             }}
           >
             <Plus className="mr-1 h-3 w-3" />
-            Install via GitHub App
+            Add another installation
           </Button>
         )}
       </div>

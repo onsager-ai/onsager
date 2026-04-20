@@ -126,7 +126,7 @@ describe("WorkspaceCard — OAuth-first Add project flow", () => {
   it("never renders a 'Link manually' button", async () => {
     await primeMocks({ repos: [] })
     renderCard()
-    await screen.findByRole("button", { name: /install via github app/i })
+    await screen.findByRole("button", { name: /add another installation/i })
     expect(
       screen.queryByRole("button", { name: /link manually/i }),
     ).not.toBeInTheDocument()
@@ -147,6 +147,9 @@ describe("WorkspaceCard — OAuth-first Add project flow", () => {
       screen.queryByRole("button", { name: /install via github app/i }),
     ).not.toBeInTheDocument()
     expect(
+      screen.queryByRole("button", { name: /add another installation/i }),
+    ).not.toBeInTheDocument()
+    expect(
       screen.queryByRole("button", { name: /link manually/i }),
     ).not.toBeInTheDocument()
   })
@@ -163,6 +166,14 @@ describe("WorkspaceCard — step-by-step NextStepCallout", () => {
       "/api/github-app/install-start?tenant_id=ws1",
     )
     expect(screen.getByText(/step 2 of 3/i)).toBeInTheDocument()
+    // Empty-state CTA must be unambiguous — the InstallationsSection
+    // must not duplicate the callout's install button.
+    expect(
+      screen.queryByRole("button", { name: /install via github app/i }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /add another installation/i }),
+    ).not.toBeInTheDocument()
   })
 
   it("blocks setup with an admin-action callout when the GitHub App is unavailable", async () => {
