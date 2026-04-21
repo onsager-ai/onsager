@@ -55,4 +55,10 @@ fi
 
 # Drop from root to unprivileged user and start stiglab.
 # Claude Code CLI refuses --permission-mode bypassPermissions under root.
+echo "==> pre-exec: binaries present"
+ls -la /app/stiglab /app/synodic /app/onsager-portal
+echo "==> pre-exec: gosu version"
+gosu --version || true
+echo "==> pre-exec: PORT=${PORT:-unset} STIGLAB_PORT=${STIGLAB_PORT:-unset}"
+echo "==> exec-ing stiglab..."
 exec gosu onsager /app/stiglab "$@"
