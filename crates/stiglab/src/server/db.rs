@@ -42,7 +42,7 @@ pub async fn init_pool(database_url: &str) -> anyhow::Result<AnyPool> {
     Ok(pool)
 }
 
-async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
+pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS nodes (
             id TEXT PRIMARY KEY,
@@ -291,6 +291,69 @@ async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_pr_branch_links_lookup \
          ON pr_branch_links (project_id, branch)",
+    )
+    .execute(pool)
+    .await?;
+
+    // ── Workflows (issue #81) ──────────────────────────────────────────
+    //
+    // `workflows` — declarative blueprint persisted per tenant. The
+    // trigger is currently GitHub-specific so `repo_owner`, `repo_name`,
+    // `trigger_label`, and `install_id` are stored inline; a second
+    // trigger kind would factor these out.
+    //
+    // `workflow_stages` — ordered stage chain; stages walk in ascending
+    // `seq` order, never reorder. `params` holds kind-specific config as
+    // free-form JSON (TEXT for SQLite/Postgres portability through
+    // AnyPool).
+    //
+    // No FK declarations — the rest of the stiglab schema uses app-layer
+    // referential checks for the same SQLite/Postgres-portability reasons
+    // documented above.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS workflows (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            trigger_kind TEXT NOT NULL,
+            repo_owner TEXT NOT NULL,
+            repo_name TEXT NOT NULL,
+            trigger_label TEXT NOT NULL,
+            install_id BIGINT NOT NULL,
+            preset_id TEXT,
+            active INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_workflows_tenant_id ON workflows (tenant_id)")
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_workflows_repo_active \
+         ON workflows (repo_owner, repo_name, active)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS workflow_stages (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            gate_kind TEXT NOT NULL,
+            params TEXT NOT NULL,
+            UNIQUE(workflow_id, seq)
+        )",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_stages_workflow_id \
+         ON workflow_stages (workflow_id, seq)",
     )
     .execute(pool)
     .await?;
