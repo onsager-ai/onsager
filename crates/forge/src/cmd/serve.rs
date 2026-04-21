@@ -22,6 +22,15 @@ use crate::core::kernel::BaselineKernel;
 use crate::core::persistence;
 use crate::core::pipeline::{ForgePipeline, PipelineEvent, StiglabDispatcher, SynodicGate};
 use crate::core::session_listener::{self, SessionCompleted, SessionCompletedHandler};
+use crate::core::signal_cache::SignalCache;
+use crate::core::stage_runner::{self, StageEvent};
+use crate::core::trigger_subscriber::{
+    self, register_artifact_from_trigger, TriggerFired, TriggerHandler,
+};
+use crate::core::workflow::Workflow;
+use crate::core::workflow_gates::LiveGateEvaluator;
+use crate::core::workflow_persistence;
+use crate::core::workflow_signal_listener;
 
 /// Default Forge → upstream HTTP timeout. Bounds the worst case for both the
 /// Stiglab dispatcher and the Synodic gate so a single hung upstream cannot
@@ -326,6 +335,14 @@ struct ForgeSharedState {
     pipeline: ForgePipeline<HttpStiglabDispatcher, HttpSynodicGate>,
     kernel: BaselineKernel,
     spine: Option<EventStore>,
+    /// Active + in-flight workflows (issue #80). Keyed by workflow_id.
+    workflows: std::collections::HashMap<String, Workflow>,
+    /// Shared signal cache populated by the workflow signal listener and
+    /// consumed by the gate evaluator on each stage-runner tick. Held
+    /// here so the HTTP API can introspect pending gates if a future
+    /// endpoint exposes them.
+    #[allow(dead_code)]
+    signals: SignalCache,
 }
 
 type SharedForge = Arc<RwLock<ForgeSharedState>>;
@@ -392,6 +409,19 @@ pub fn run(database_url: &str, tick_ms: u64) {
             stiglab_url: stiglab_url.clone(),
         };
         let synodic = HttpSynodicGate {
+            client: client.clone(),
+            synodic_url: synodic_url.clone(),
+            fail_policy,
+        };
+        // A second pair for the workflow gate evaluator (issue #80). It
+        // lives inside the spawned tick task and uses its own reqwest
+        // handles so the pipeline and the stage runner can dispatch in
+        // parallel without sharing mutable state.
+        let evaluator_stiglab = HttpStiglabDispatcher {
+            client: client.clone(),
+            stiglab_url: stiglab_url.clone(),
+        };
+        let evaluator_synodic = HttpSynodicGate {
             client,
             synodic_url: synodic_url.clone(),
             fail_policy,
@@ -402,10 +432,29 @@ pub fn run(database_url: &str, tick_ms: u64) {
             ForgePipeline::new(stiglab, synodic).with_insight_cache(insight_cache.clone());
         pipeline.store = artifact_store;
 
+        // Load workflows (issue #80). Absent spine → empty registry.
+        let workflows = match spine.as_ref() {
+            Some(s) => match workflow_persistence::load_workflows(s.pool()).await {
+                Ok(w) => {
+                    tracing::info!("forge: loaded {} workflows from spine", w.len());
+                    w
+                }
+                Err(e) => {
+                    tracing::error!("forge: failed to load workflows: {e}");
+                    std::collections::HashMap::new()
+                }
+            },
+            None => std::collections::HashMap::new(),
+        };
+
+        let signals = SignalCache::new();
+
         let shared = Arc::new(RwLock::new(ForgeSharedState {
             pipeline,
             kernel: BaselineKernel::new(),
             spine,
+            workflows,
+            signals: signals.clone(),
         }));
 
         // Start HTTP API.
@@ -422,6 +471,8 @@ pub fn run(database_url: &str, tick_ms: u64) {
 
         // Spawn the tick loop.
         let tick_shared = shared.clone();
+        let gate_evaluator =
+            LiveGateEvaluator::new(signals.clone(), evaluator_stiglab, evaluator_synodic);
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_millis(tick_ms));
             loop {
@@ -429,12 +480,37 @@ pub fn run(database_url: &str, tick_ms: u64) {
 
                 // Run the pipeline tick under the write lock, then release it
                 // before emitting spine events so HTTP reads aren't starved.
-                let (output, spine) = {
+                let (output, spine, stage_events, stage_touched_ids) = {
                     let mut state = tick_shared.write().await;
                     let kernel = state.kernel.clone();
                     let output = state.pipeline.tick(&kernel);
+
+                    // Workflow stage runner (issue #80) — walks every
+                    // workflow-tagged artifact one step per tick. Runs
+                    // under the same write lock as the pipeline so
+                    // advancement decisions see a consistent artifact
+                    // snapshot. Refill the per-tick dispatch budget
+                    // before the pass so a burst of new artifacts can't
+                    // synchronously hammer Stiglab under the lock.
+                    gate_evaluator.reset_dispatch_budget();
+                    let workflows_snapshot = state.workflows.clone();
+                    let stage_events = stage_runner::advance_workflow_artifacts(
+                        &workflows_snapshot,
+                        &mut state.pipeline.store,
+                        &gate_evaluator,
+                    );
+                    let stage_touched_ids: std::collections::HashSet<String> = stage_events
+                        .iter()
+                        .map(|e| match e {
+                            StageEvent::StageEntered { artifact_id, .. }
+                            | StageEvent::GatePassed { artifact_id, .. }
+                            | StageEvent::GateFailed { artifact_id, .. }
+                            | StageEvent::StageAdvanced { artifact_id, .. } => artifact_id.clone(),
+                        })
+                        .collect();
+
                     let spine = state.spine.clone();
-                    (output, spine)
+                    (output, spine, stage_events, stage_touched_ids)
                 };
 
                 // Mirror state transitions to the artifacts row before the
@@ -492,6 +568,51 @@ pub fn run(database_url: &str, tick_ms: u64) {
                         PipelineEvent::IdleTick => {}
                         _ => tracing::info!("forge tick: {event:?}"),
                     }
+                }
+
+                // Persist workflow columns for every artifact the stage
+                // runner touched this tick. Same pattern as the pipeline
+                // state snapshot above — DB ahead of event stream.
+                if let Some(ref spine) = spine {
+                    for aid in &stage_touched_ids {
+                        let snapshot = {
+                            let state = tick_shared.read().await;
+                            state
+                                .pipeline
+                                .store
+                                .get(&onsager_artifact::ArtifactId::new(aid))
+                                .cloned()
+                        };
+                        if let Some(artifact) = snapshot {
+                            if let Err(e) =
+                                persistence::persist_artifact_state(spine.pool(), &artifact).await
+                            {
+                                tracing::error!(
+                                    artifact_id = %aid,
+                                    "forge: failed to persist stage state: {e}"
+                                );
+                            }
+                            if let Err(e) = workflow_persistence::persist_artifact_workflow_state(
+                                spine.pool(),
+                                &artifact,
+                            )
+                            .await
+                            {
+                                tracing::error!(
+                                    artifact_id = %aid,
+                                    "forge: failed to persist workflow state: {e}"
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // Emit stage lifecycle events to the spine.
+                for event in &stage_events {
+                    if let Some(ref spine) = spine {
+                        emit_stage_event(spine, event).await;
+                    }
+                    tracing::info!("forge stage: {event:?}");
                 }
             }
         });
@@ -556,9 +677,129 @@ pub fn run(database_url: &str, tick_ms: u64) {
             }
         });
 
+        // Spawn the workflow trigger subscriber (issue #80). Handles
+        // `trigger.fired` events: resolves the workflow, registers a new
+        // artifact, enters stage 0.
+        let trigger_shared = shared.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = trigger_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: trigger subscriber disabled (no spine connection)");
+                return;
+            };
+            let handler = WorkflowTriggerHandler {
+                shared: trigger_shared,
+            };
+            if let Err(e) = trigger_subscriber::run(store, handler, None).await {
+                tracing::error!("forge: trigger subscriber exited: {e}");
+            }
+        });
+
+        // Spawn the workflow signal listener (issue #80). Translates
+        // `git.ci_completed`, `git.pr_merged`, `git.pr_closed`, and
+        // `stiglab.session_completed` events into SignalCache entries so
+        // the stage runner's external-check / manual-approval /
+        // agent-session gates resolve.
+        let signals_for_listener = signals.clone();
+        let signal_listener_shared = shared.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = signal_listener_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: workflow signal listener disabled (no spine connection)");
+                return;
+            };
+            if let Err(e) = workflow_signal_listener::run(store, signals_for_listener, None).await {
+                tracing::error!("forge: workflow signal listener exited: {e}");
+            }
+        });
+
         // Run the HTTP server.
         axum::serve(listener, app).await.unwrap();
     });
+}
+
+/// Handler for `trigger.fired` events — registers an artifact against the
+/// referenced workflow and enters stage 0.
+struct WorkflowTriggerHandler {
+    shared: SharedForge,
+}
+
+#[async_trait]
+impl TriggerHandler for WorkflowTriggerHandler {
+    async fn on_trigger_fired(&self, event: TriggerFired) -> anyhow::Result<()> {
+        let (spine, workflow_opt) = {
+            let state = self.shared.read().await;
+            (
+                state.spine.clone(),
+                state.workflows.get(&event.workflow_id).cloned(),
+            )
+        };
+        let Some(workflow) = workflow_opt else {
+            tracing::warn!(
+                workflow_id = %event.workflow_id,
+                "trigger.fired for unknown workflow"
+            );
+            return Ok(());
+        };
+
+        // Perform the registration under the write lock and capture the
+        // resulting StageEntered event.
+        let emitted = {
+            let mut state = self.shared.write().await;
+            register_artifact_from_trigger(&mut state.pipeline.store, &workflow, &event)
+        };
+
+        let Some((artifact, stage_event)) = emitted else {
+            tracing::info!(
+                workflow_id = %event.workflow_id,
+                "trigger.fired dropped (workflow inactive)"
+            );
+            return Ok(());
+        };
+
+        if let Some(spine) = spine {
+            // Mirror both the base artifact row and the workflow tagging.
+            if let Err(e) = persistence::insert_artifact_row(
+                spine.pool(),
+                artifact.artifact_id.as_str(),
+                &artifact.kind.to_string(),
+                &artifact.name,
+                &artifact.owner,
+            )
+            .await
+            {
+                tracing::error!(
+                    artifact_id = %artifact.artifact_id,
+                    "forge: failed to insert trigger-registered artifact row: {e}"
+                );
+                return Ok(());
+            }
+            if let Err(e) = persistence::persist_artifact_state(spine.pool(), &artifact).await {
+                tracing::error!(
+                    artifact_id = %artifact.artifact_id,
+                    "forge: failed to persist trigger-registered artifact state: {e}"
+                );
+                return Ok(());
+            }
+            if let Err(e) =
+                workflow_persistence::persist_artifact_workflow_state(spine.pool(), &artifact).await
+            {
+                tracing::error!(
+                    artifact_id = %artifact.artifact_id,
+                    "forge: failed to persist trigger-registered artifact workflow state: {e}"
+                );
+                return Ok(());
+            }
+            emit_stage_event(&spine, &stage_event).await;
+        }
+        Ok(())
+    }
 }
 
 /// Event-driven handler that links completed Stiglab sessions back to the
@@ -893,6 +1134,89 @@ async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
         .await
     {
         tracing::warn!("failed to emit forge event: {e}");
+    }
+}
+
+/// Emit a workflow stage event to the spine (issue #80). Uses the
+/// `workflow` namespace so the dashboard's live view can subscribe with
+/// a single filter.
+async fn emit_stage_event(spine: &EventStore, event: &StageEvent) {
+    let metadata = onsager_spine::EventMetadata {
+        correlation_id: None,
+        causation_id: None,
+        actor: "forge".to_string(),
+    };
+
+    let (stream_id, event_type, data) = match event {
+        StageEvent::StageEntered {
+            artifact_id,
+            workflow_id,
+            stage_index,
+            stage_name,
+        } => (
+            format!("workflow:{artifact_id}"),
+            "stage.entered",
+            serde_json::json!({
+                "artifact_id": artifact_id,
+                "workflow_id": workflow_id,
+                "stage_index": stage_index,
+                "stage_name": stage_name,
+            }),
+        ),
+        StageEvent::GatePassed {
+            artifact_id,
+            workflow_id,
+            stage_index,
+            gate_kind,
+        } => (
+            format!("workflow:{artifact_id}"),
+            "stage.gate_passed",
+            serde_json::json!({
+                "artifact_id": artifact_id,
+                "workflow_id": workflow_id,
+                "stage_index": stage_index,
+                "gate_kind": gate_kind,
+            }),
+        ),
+        StageEvent::GateFailed {
+            artifact_id,
+            workflow_id,
+            stage_index,
+            gate_kind,
+            reason,
+        } => (
+            format!("workflow:{artifact_id}"),
+            "stage.gate_failed",
+            serde_json::json!({
+                "artifact_id": artifact_id,
+                "workflow_id": workflow_id,
+                "stage_index": stage_index,
+                "gate_kind": gate_kind,
+                "reason": reason,
+            }),
+        ),
+        StageEvent::StageAdvanced {
+            artifact_id,
+            workflow_id,
+            from_stage_index,
+            to_stage_index,
+        } => (
+            format!("workflow:{artifact_id}"),
+            "stage.advanced",
+            serde_json::json!({
+                "artifact_id": artifact_id,
+                "workflow_id": workflow_id,
+                "from_stage_index": from_stage_index,
+                "to_stage_index": to_stage_index,
+            }),
+        ),
+    };
+
+    if let Err(e) = spine
+        .append_ext(&stream_id, "workflow", event_type, data, &metadata, None)
+        .await
+    {
+        tracing::warn!("failed to emit workflow stage event: {e}");
     }
 }
 

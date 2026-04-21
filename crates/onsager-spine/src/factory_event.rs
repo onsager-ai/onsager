@@ -458,6 +458,58 @@ pub enum FactoryEventKind {
     /// decomposer errored out.
     RefractFailed { intent_id: String, reason: String },
 
+    // -- Workflow runtime events (issue #80) --------------------------------
+    /// A trigger (e.g. a GitHub issue webhook) fired and produced a payload
+    /// the trigger subscriber will translate into an artifact registration.
+    /// Emitted by the stiglab webhook receiver; consumed by forge.
+    TriggerFired {
+        /// Workflow whose trigger fired.
+        workflow_id: String,
+        /// Trigger classification (matches the `workflows.trigger_kind`
+        /// column). v1 always `"github_issue_webhook"`.
+        trigger_kind: String,
+        /// Free-form payload the subscriber needs to translate the trigger
+        /// into an artifact (e.g. issue number, title, body, repo).
+        payload: serde_json::Value,
+    },
+
+    /// A workflow-tagged artifact entered a new stage.
+    StageEntered {
+        artifact_id: ArtifactId,
+        workflow_id: String,
+        stage_index: u32,
+        stage_name: String,
+    },
+
+    /// A gate on the current stage resolved successfully.
+    StageGatePassed {
+        artifact_id: ArtifactId,
+        workflow_id: String,
+        stage_index: u32,
+        gate_kind: String,
+    },
+
+    /// A gate on the current stage failed. The artifact is parked in
+    /// `under_review` until the gate-failure condition is cleared (e.g. a
+    /// new CI run succeeds, a reviewer approves).
+    StageGateFailed {
+        artifact_id: ArtifactId,
+        workflow_id: String,
+        stage_index: u32,
+        gate_kind: String,
+        reason: String,
+    },
+
+    /// All gates on a stage resolved and the artifact advanced to the next
+    /// stage (or reached terminal state when this was the last stage).
+    StageAdvanced {
+        artifact_id: ArtifactId,
+        workflow_id: String,
+        from_stage_index: u32,
+        /// `None` when the artifact has just completed the final stage.
+        to_stage_index: Option<u32>,
+    },
+
     // -- Registry events (factory pipeline foundations, issue #14) ----------
     /// A new artifact type was proposed (not yet active).
     TypeProposed {
@@ -615,6 +667,11 @@ impl FactoryEventKind {
             Self::IntentSubmitted { .. } => "refract.intent_submitted",
             Self::RefractDecomposed { .. } => "refract.decomposed",
             Self::RefractFailed { .. } => "refract.failed",
+            Self::TriggerFired { .. } => "trigger.fired",
+            Self::StageEntered { .. } => "stage.entered",
+            Self::StageGatePassed { .. } => "stage.gate_passed",
+            Self::StageGateFailed { .. } => "stage.gate_failed",
+            Self::StageAdvanced { .. } => "stage.advanced",
             Self::TypeProposed { .. } => "registry.type_proposed",
             Self::TypeApproved { .. } => "registry.type_approved",
             Self::TypeDeprecated { .. } => "registry.type_deprecated",
@@ -687,6 +744,11 @@ impl FactoryEventKind {
             Self::IntentSubmitted { .. }
             | Self::RefractDecomposed { .. }
             | Self::RefractFailed { .. } => "refract",
+            Self::TriggerFired { .. }
+            | Self::StageEntered { .. }
+            | Self::StageGatePassed { .. }
+            | Self::StageGateFailed { .. }
+            | Self::StageAdvanced { .. } => "workflow",
             Self::TypeProposed { .. }
             | Self::TypeApproved { .. }
             | Self::TypeDeprecated { .. }
@@ -760,6 +822,11 @@ impl FactoryEventKind {
             Self::IntentSubmitted { intent_id, .. }
             | Self::RefractDecomposed { intent_id, .. }
             | Self::RefractFailed { intent_id, .. } => intent_id.clone(),
+            Self::TriggerFired { workflow_id, .. } => format!("workflow:{workflow_id}"),
+            Self::StageEntered { artifact_id, .. }
+            | Self::StageGatePassed { artifact_id, .. }
+            | Self::StageGateFailed { artifact_id, .. }
+            | Self::StageAdvanced { artifact_id, .. } => format!("workflow:{artifact_id}"),
             Self::TypeProposed { type_id, .. }
             | Self::TypeApproved { type_id, .. }
             | Self::TypeDeprecated { type_id, .. } => format!("type:{type_id}"),

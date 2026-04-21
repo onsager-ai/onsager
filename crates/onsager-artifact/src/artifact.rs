@@ -330,6 +330,21 @@ pub struct Artifact {
     pub vertical_lineage: Vec<VerticalLineage>,
     pub horizontal_lineage: Vec<HorizontalLineage>,
     pub quality_signals: Vec<QualitySignal>,
+
+    // Workflow runtime tagging (issue #80).
+    //
+    // `workflow_id` attaches the artifact to a declared workflow's stage
+    // chain. `current_stage_index` is the 0-based stage the artifact is
+    // currently at; `None` means "no longer workflow-managed" (either
+    // unregistered or past the last stage). `workflow_parked_reason`
+    // carries the first gate-failure message when the stage runner parks
+    // an artifact in UnderReview waiting for the failing gate to recover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_stage_index: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_parked_reason: Option<String>,
 }
 
 impl Artifact {
@@ -365,6 +380,9 @@ impl Artifact {
             vertical_lineage: Vec::new(),
             horizontal_lineage: Vec::new(),
             quality_signals: Vec::new(),
+            workflow_id: None,
+            current_stage_index: None,
+            workflow_parked_reason: None,
         }
     }
 }

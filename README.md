@@ -29,6 +29,7 @@ discovers subsystem binaries on `PATH`.
 | `stiglab`       | Distributed AI agent session orchestration                    |
 | `synodic`       | AI agent governance (hooks + spine integration)               |
 | `ising`         | Continuous improvement engine — observes and surfaces insights|
+| `onsager-portal`| GitHub webhook ingress — verifies HMAC, materializes factory tasks, posts check-run verdicts |
 
 A single React app at `apps/dashboard/` surfaces sessions, nodes, governance,
 and factory views.

@@ -86,6 +86,13 @@ impl Namespace {
     pub fn telegramable() -> Self {
         Self::new("telegramable").unwrap()
     }
+
+    /// Namespace for workflow-runtime events (issue #80). Owned by forge
+    /// but consumed by the dashboard and stiglab too, so it gets its own
+    /// namespace instead of piggybacking on `forge:`.
+    pub fn workflow() -> Self {
+        Self::new("workflow").unwrap()
+    }
 }
 
 impl fmt::Display for Namespace {
