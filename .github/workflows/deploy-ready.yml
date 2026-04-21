@@ -48,6 +48,34 @@ jobs:
           done
           [ ! -f /tmp/deploy-ready-failures ] || exit 1
 
+      # Migration filenames must be sequentially numbered NNN_description.sql.
+      # Incident: sort -V is used to apply migrations; non-sequential or
+      # un-prefixed files apply in the wrong order and corrupt the schema.
+      - name: Migration filenames are sequentially numbered
+        run: |
+          set -euo pipefail
+          fail=0
+          for dir in crates/onsager-spine/migrations crates/synodic/migrations/pg; do
+            [ -d "$dir" ] || continue
+            prev=0
+            for f in $(ls "$dir"/*.sql | sort -V); do
+              base=$(basename "$f")
+              if ! echo "$base" | grep -qE '^[0-9]+_'; then
+                echo "::error file=$f::migration filename must start with NNN_ (e.g. 001_description.sql)"
+                fail=1; continue
+              fi
+              num=$(echo "$base" | sed 's/^0*\([0-9]*\)_.*/\1/')
+              num=${num:-0}
+              expected=$((prev + 1))
+              if [ "$num" -ne "$expected" ]; then
+                echo "::error file=$f::out of sequence — expected ${expected}, got ${num}"
+                fail=1
+              fi
+              prev=$num
+            done
+          done
+          [ "$fail" -eq 0 ] || exit 1
+
       # Spine migrations must be valid SQL.
       - name: Migrations are not empty
         run: |
