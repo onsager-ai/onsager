@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   Timer,
   AlertTriangle,
+  GitBranch,
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import type { SessionSpend, SpineArtifact, SpineEvent } from "@/lib/api"
@@ -116,6 +117,13 @@ export function FactoryOverviewPage() {
     queryFn: () => api.getSessionSpend(100),
     refetchInterval: 30000,
   })
+  // Issue #82 — empty-state CTA banner when no workflow has been set up yet.
+  const { data: workflowsData } = useQuery({
+    queryKey: ["workflows"],
+    queryFn: () => api.listWorkflows(),
+    staleTime: 30_000,
+  })
+  const workflowsCount = workflowsData?.workflows?.length ?? 0
 
   const artifacts = artifactsData?.artifacts ?? []
   const events = spineData?.events ?? []
@@ -160,6 +168,31 @@ export function FactoryOverviewPage() {
           Production pipeline overview — artifacts, events, and factory health.
         </p>
       </div>
+
+      {workflowsCount === 0 && (
+        <Card className="border-primary/40 bg-primary/5">
+          <CardContent className="flex flex-col items-start gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                <GitBranch className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Set up your first workflow</p>
+                <p className="text-xs text-muted-foreground">
+                  Workflows drive artifacts through stages — without one, the
+                  factory is idle.
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/workflows"
+              className="shrink-0 text-sm font-medium text-primary hover:underline"
+            >
+              Get started →
+            </Link>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
         {stats.map((stat) => (

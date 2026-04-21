@@ -243,6 +243,84 @@ export interface ArtifactLineageEntry {
   recorded_at: string;
 }
 
+// Workflows (issue #82). A workflow is a trigger + an ordered list of stage
+// cards. Triggers fire on external events (currently GitHub issue labels);
+// each stage runs a gate that moves artifacts along — agent sessions,
+// external checks, governance verdicts, or manual approvals.
+//
+// The CRUD API is delivered by a parallel sibling sub-issue of #79; this
+// client is the typed surface the dashboard UI talks to.
+export type WorkflowArtifactKind = 'github-issue' | 'github-pr';
+
+export interface WorkflowTrigger {
+  kind: 'github-label';
+  install_id: string;
+  repo_owner: string;
+  repo_name: string;
+  label: string;
+}
+
+export type WorkflowGateKind =
+  | 'agent-session'
+  | 'external-check'
+  | 'governance'
+  | 'manual-approval';
+
+export interface WorkflowStage {
+  id: string;
+  name: string;
+  gate_kind: WorkflowGateKind;
+  artifact_kind: WorkflowArtifactKind;
+  config: Record<string, unknown>;
+}
+
+export type WorkflowStatus = 'draft' | 'active' | 'paused' | 'archived';
+
+export interface Workflow {
+  id: string;
+  tenant_id: string;
+  name: string;
+  preset?: string | null;
+  status: WorkflowStatus;
+  trigger: WorkflowTrigger;
+  stages: WorkflowStage[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateWorkflowRequest {
+  tenant_id?: string;
+  name: string;
+  preset?: string;
+  trigger: WorkflowTrigger;
+  stages: WorkflowStage[];
+  activate?: boolean;
+}
+
+export type StageRunStatus = 'pending' | 'blocked' | 'passed' | 'failed';
+
+export interface WorkflowRunStage {
+  stage_id: string;
+  status: StageRunStatus;
+  updated_at: string;
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflow_id: string;
+  artifact_id: string | null;
+  status: StageRunStatus;
+  stages: WorkflowRunStage[];
+  started_at: string;
+  updated_at: string;
+}
+
+export interface GitHubLabel {
+  name: string;
+  color: string | null;
+  description: string | null;
+}
+
 export interface RegisterArtifactRequest {
   kind: string;
   name: string;
@@ -458,4 +536,37 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  // Workflows (issue #82) — CRUD + live runs. The API is provided by the
+  // stiglab sibling sub-issue; the dashboard is the only client today.
+  listWorkflows: (tenantId?: string) =>
+    request<{ workflows: Workflow[] }>(
+      `/workflows${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''}`,
+    ),
+  getWorkflow: (id: string) =>
+    request<{ workflow: Workflow }>(`/workflows/${encodeURIComponent(id)}`),
+  createWorkflow: (body: CreateWorkflowRequest) =>
+    request<{ workflow: Workflow }>('/workflows', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateWorkflow: (id: string, body: Partial<CreateWorkflowRequest>) =>
+    request<{ workflow: Workflow }>(`/workflows/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteWorkflow: (id: string) =>
+    request<{ ok: boolean }>(`/workflows/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+  getWorkflowRuns: (id: string, limit = 20) =>
+    request<{ runs: WorkflowRun[] }>(
+      `/workflows/${encodeURIComponent(id)}/runs?limit=${limit}`,
+    ),
+  // GitHub labels for a workspace install + repo. Used by the trigger card
+  // combobox so the user selects from existing labels (with an inline
+  // create-new affordance) instead of free-texting.
+  listRepoLabels: (tenantId: string, installId: string, owner: string, repo: string) =>
+    request<{ labels: GitHubLabel[] }>(
+      `/tenants/${encodeURIComponent(tenantId)}/github-installations/${encodeURIComponent(installId)}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/labels`,
+    ),
 };
