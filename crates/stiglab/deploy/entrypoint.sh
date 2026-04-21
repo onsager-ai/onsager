@@ -40,17 +40,12 @@ gosu onsager sh -c "while true; do DATABASE_URL=\"$ONSAGER_DATABASE_URL\" /app/s
 if [ -n "$ONSAGER_DATABASE_URL" ]; then
     PORTAL_PORT="${PORTAL_PORT:-3002}"
     PORTAL_BIND="${PORTAL_BIND:-127.0.0.1:${PORTAL_PORT}}"
+    # Resolve nested expansion before passing to gosu to avoid dash multi-line
+    # continuation bugs with complex parameter expansions inside "-quoted strings.
+    PORTAL_CREDENTIAL_KEY="${STIGLAB_CREDENTIAL_KEY:-${ONSAGER_CREDENTIAL_KEY:-}}"
+    PORTAL_SYNODIC_URL="${SYNODIC_URL:-http://127.0.0.1:${SYNODIC_PORT}}"
     echo "Starting onsager-portal on ${PORTAL_BIND}..."
-    gosu onsager sh -c "\
-        while true; do \
-            PORTAL_BIND=\"$PORTAL_BIND\" \
-            DATABASE_URL=\"$ONSAGER_DATABASE_URL\" \
-            ONSAGER_CREDENTIAL_KEY=\"${STIGLAB_CREDENTIAL_KEY:-${ONSAGER_CREDENTIAL_KEY:-}}\" \
-            SYNODIC_URL=\"${SYNODIC_URL:-http://127.0.0.1:$SYNODIC_PORT}\" \
-            /app/onsager-portal serve 2>&1; \
-            echo 'onsager-portal exited, restarting in 1s...'; \
-            sleep 1; \
-        done" &
+    gosu onsager sh -c "while true; do PORTAL_BIND=\"$PORTAL_BIND\" DATABASE_URL=\"$ONSAGER_DATABASE_URL\" ONSAGER_CREDENTIAL_KEY=\"$PORTAL_CREDENTIAL_KEY\" SYNODIC_URL=\"$PORTAL_SYNODIC_URL\" /app/onsager-portal serve 2>&1; echo 'onsager-portal exited, restarting in 1s...'; sleep 1; done" &
 fi
 
 # Drop from root to unprivileged user and start stiglab.
