@@ -4,6 +4,13 @@
 default:
     @just --list
 
+# ── Setup ────────────────────────────────────────────────────────────
+
+# One-time dev setup: point git at the committed hooks directory
+setup:
+    git config core.hooksPath .githooks
+    @echo "Git hooks installed from .githooks/"
+
 # ── Build ────────────────────────────────────────────────────────────
 build: build-rust build-ui
 

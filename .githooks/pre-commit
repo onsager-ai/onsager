@@ -1,0 +1,33 @@
+#!/bin/sh
+# Pre-commit hook — runs fast local checks before every commit.
+# Install once with: just setup
+set -e
+
+# ── Migration sequence check ─────────────────────────────────────────
+# Mirrors the deploy-ready CI check. Migration files must be named
+# NNN_description.sql with consecutive numbers starting from 1.
+# We check every time (not just when migrations are staged) because a
+# new migration that skips a number breaks the whole sequence.
+fail=0
+for dir in crates/onsager-spine/migrations crates/synodic/migrations/pg; do
+    [ -d "$dir" ] || continue
+    prev=0
+    for f in $(ls "$dir"/*.sql 2>/dev/null | sort -V); do
+        base=$(basename "$f")
+        if ! echo "$base" | grep -qE '^[0-9]+_'; then
+            echo "pre-commit: migration filename must start with NNN_: $f"
+            fail=1
+            continue
+        fi
+        num=$(echo "$base" | sed 's/^0*\([0-9]*\)_.*/\1/')
+        num=${num:-0}
+        expected=$((prev + 1))
+        if [ "$num" -ne "$expected" ]; then
+            echo "pre-commit: migration out of sequence in $dir — expected ${expected}, got ${num} ($base)"
+            fail=1
+        fi
+        prev=$num
+    done
+done
+
+[ "$fail" -eq 0 ] || exit 1
