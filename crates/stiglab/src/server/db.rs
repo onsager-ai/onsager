@@ -139,20 +139,10 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .await?;
 
     // Add user_id column to sessions if it doesn't exist.
-    // SQLite doesn't support IF NOT EXISTS on ALTER TABLE, so check first.
-    let has_user_id = sqlx::query_scalar::<_, String>(
-        "SELECT name FROM pragma_table_info('sessions') WHERE name = 'user_id'",
-    )
-    .fetch_optional(pool)
-    .await;
-
-    // For SQLite: use pragma check; for Postgres: use information_schema
-    if matches!(has_user_id, Ok(None) | Err(_)) {
-        // Try the ALTER — ignore error if column already exists (Postgres)
-        let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN user_id TEXT")
-            .execute(pool)
-            .await;
-    }
+    // Swallow duplicate-column errors on both SQLite and PostgreSQL.
+    let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN user_id TEXT")
+        .execute(pool)
+        .await;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id)")
         .execute(pool)
