@@ -8,7 +8,9 @@ if [ -n "$ONSAGER_DATABASE_URL" ] && [ -d /app/spine-migrations ]; then
     echo "Running onsager-spine migrations..."
     # sort -V orders by numeric segments so 001 < 002 < ... < 010
     # regardless of zero-padding; POSIX sh glob order is undefined.
-    ls /app/spine-migrations/*.sql | sort -V | while read -r f; do
+    # Use for+command-substitution (not pipe+while) so set -e propagates
+    # correctly and the loop runs in the current shell, not a subshell.
+    for f in $(ls /app/spine-migrations/*.sql | sort -V); do
         echo "  applying $(basename "$f")..."
         psql -X -v ON_ERROR_STOP=1 "$ONSAGER_DATABASE_URL" -f "$f"
     done
@@ -18,7 +20,7 @@ fi
 # Run synodic (governance) migrations.
 if [ -n "$ONSAGER_DATABASE_URL" ] && [ -d /app/synodic-migrations ]; then
     echo "Running synodic migrations..."
-    ls /app/synodic-migrations/*.sql | sort -V | while read -r f; do
+    for f in $(ls /app/synodic-migrations/*.sql | sort -V); do
         echo "  applying $(basename "$f")..."
         psql -X -v ON_ERROR_STOP=1 "$ONSAGER_DATABASE_URL" -f "$f"
     done
