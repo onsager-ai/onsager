@@ -67,7 +67,8 @@ fn kind_from_db(s: &str) -> Kind {
 /// artifacts only (forge-v0.1 §10).
 pub async fn load_artifact_store(pool: &PgPool) -> Result<ArtifactStore, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT artifact_id, kind, name, owner, state, current_version, current_bundle_id \
+        "SELECT artifact_id, kind, name, owner, state, current_version, current_bundle_id, \
+                workflow_id, current_stage_index, workflow_parked_reason \
          FROM artifacts \
          WHERE state != 'archived'",
     )
@@ -83,6 +84,9 @@ pub async fn load_artifact_store(pool: &PgPool) -> Result<ArtifactStore, sqlx::E
         let state_str: String = row.get("state");
         let version: i32 = row.get("current_version");
         let bundle_id: Option<String> = row.get("current_bundle_id");
+        let workflow_id: Option<String> = row.try_get("workflow_id").unwrap_or(None);
+        let stage_index_raw: Option<i32> = row.try_get("current_stage_index").unwrap_or(None);
+        let parked_reason: Option<String> = row.try_get("workflow_parked_reason").unwrap_or(None);
 
         // DB schema is INTEGER with no non-negative CHECK, so defend
         // against a negative value sneaking in rather than wrapping to
@@ -96,11 +100,28 @@ pub async fn load_artifact_store(pool: &PgPool) -> Result<ArtifactStore, sqlx::E
             0
         });
 
+        // Defensive cast — negative stage_index means "not workflow-tagged"
+        // rather than a catastrophic index past the end of the stage list.
+        let stage_index_u32 = stage_index_raw.and_then(|v| {
+            u32::try_from(v)
+                .map_err(|_| {
+                    tracing::warn!(
+                        artifact_id = %id,
+                        stage_index = v,
+                        "forge: current_stage_index is negative in DB, clearing"
+                    );
+                })
+                .ok()
+        });
+
         let mut artifact = Artifact::new(kind_from_db(&kind), name, owner, "forge", vec![]);
         artifact.artifact_id = ArtifactId::new(&id);
         artifact.state = state_from_db(&state_str);
         artifact.current_version = version_u32;
         artifact.current_bundle_id = bundle_id.map(BundleId::new);
+        artifact.workflow_id = workflow_id;
+        artifact.current_stage_index = stage_index_u32;
+        artifact.workflow_parked_reason = parked_reason;
         store.insert(artifact);
     }
 
