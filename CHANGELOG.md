@@ -6,6 +6,73 @@ project does not yet publish numbered releases.
 
 ## [Unreleased]
 
+### Added
+- **Forge + Stiglab + Dashboard**: workflow v1 — declarative, stage-driven
+  factory runtime. Forge ships a pure `stage_runner` with strict
+  declared-order enforcement across all four gate kinds (agent-session,
+  external-check, governance, manual-approval), a `LiveGateEvaluator`
+  wired to the signal cache + synodic gate + stiglab dispatcher, a
+  trigger subscriber that registers `github-issue` artifacts on
+  `trigger.fired`, and a `workflow_signal_listener` that classifies
+  `git.ci_completed` / `git.pr_merged` / `git.pr_closed` /
+  `stiglab.session_completed` into `SignalCache` entries. Spine gains
+  `TriggerFired` + `StageEntered` / `GatePassed` / `GateFailed` /
+  `StageAdvanced` variants on a new `workflow` namespace, plus
+  `workflow_id` / `current_stage_index` / `workflow_parked_reason`
+  persisted on `artifacts`. Migration 006 adds `workflows` +
+  `workflow_stages`. Stiglab adds `POST/GET/PATCH /api/workflows` with
+  tenant/auth guards, a `github-issue-to-pr` preset registry, and
+  `POST /api/webhooks/github` with HMAC-SHA256 verification,
+  1 MiB `DefaultBodyLimit`, label-match filtering, and idempotent
+  label + repo-webhook registration on activation (with dedup
+  deregister on deactivation). `onsager-registry` learns built-in
+  `github-issue` / `github-pr` kinds. Dashboard ships `/workflows`,
+  `/workflows/start` (60-second post-install card), and
+  `/workflows/:id` detail, a card-stack + chat builder
+  (`WorkflowBuilder`, `CardStackEditor`, `ChatBuilder`), OAuth-only
+  install/repo/label pickers (`LabelCombobox` reuses cmdk with an
+  inline create affordance), a constrained `ArtifactKindSelect`
+  (github-issue/github-pr), and a `GateKindToggle` with `aria-pressed`
+  semantics. Sidebar adds a Workflows entry under Factory; first-run
+  users are redirected to `/workflows`; the Register Artifact escape
+  hatch is gone from primary nav. Closes #80, #81, #82.
+  <!-- sha: 427ff64, 6c0741b, c4e891b -->
+- **Dev**: `just setup` one-time recipe + `.githooks/pre-commit` that
+  enforces sequential `NNN_` naming on every spine and synodic
+  migration file (no gaps, no duplicates). Claude Code sessions
+  auto-activate via a `UserPromptSubmit` hook that runs
+  `git config core.hooksPath .githooks` before every message.
+  <!-- sha: 890b3e5, bce6d0c -->
+- **CI**: `deploy-ready` gains a sequential-migration-naming check that
+  validates every `*.sql` under the spine + synodic migration dirs has
+  a leading `NNN_` prefix and that the numbers are consecutive from 1.
+  <!-- sha: dfb156e -->
+
+### Fixed
+- **Deploy**: migration ordering now uses `sort -V` (GNU version sort)
+  in both the e2e workflow and the container entrypoint so numeric
+  segments compare naturally (`001 < 002 < … < 009 < 010`) and new
+  migrations without zero-padding still land in sequence. The
+  entrypoint also switches from `ls | sort -V | while read` to
+  `for f in $(…)` so `set -e` actually propagates `psql` failures —
+  previously the subshell swallowed non-zero exits and the container
+  appeared to migrate silently while the health check died.
+  <!-- sha: 86e3486, eff83fa -->
+- **Deploy**: portal's `gosu` invocation in `entrypoint.sh` is now on a
+  single line with pre-expanded env vars so the trailing `&` actually
+  backgrounds the process under dash — multi-line `\` continuation
+  inside `sh -c` was running portal in the foreground and blocking
+  stiglab startup. <!-- sha: 7b12756 -->
+- **Stiglab + e2e**: `run_migrations` no longer calls SQLite-only
+  `pragma_table_info()` to probe for `sessions.user_id` — that errored
+  immediately against PostgreSQL. Switched to the unconditional
+  `ALTER` + swallow-error pattern already used for the other additive
+  column migrations. e2e also builds synodic with
+  `--features synodic/postgres` (the default `sqlite` feature crashed
+  on a `postgres://` URL with "PostgreSQL support not compiled in")
+  and the spine migration step now applies every `*.sql` file instead
+  of hard-coding the first two. <!-- sha: bfe9057 -->
+
 ### Fixed
 - **Stiglab + Dashboard**: GitHub App install callback now registers at
   `/api/github-app/callback` (was `/api/github-app/install-callback`),
