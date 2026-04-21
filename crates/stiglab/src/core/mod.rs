@@ -3,6 +3,7 @@ pub mod error;
 pub mod event;
 pub mod github_app_installation;
 pub mod node;
+pub mod preset;
 pub mod project;
 pub mod protocol;
 pub mod session;
@@ -10,6 +11,7 @@ pub mod task;
 pub mod tenant;
 pub mod tenant_member;
 pub mod user;
+pub mod workflow;
 
 pub use error::StiglabError;
 pub use event::Event;
@@ -22,6 +24,7 @@ pub use task::{Task, TaskRequest};
 pub use tenant::Tenant;
 pub use tenant_member::TenantMember;
 pub use user::User;
+pub use workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
 
 #[cfg(test)]
 mod tests {
@@ -130,5 +133,35 @@ mod tests {
         assert_eq!(json, "\"user\"");
         let parsed: GitHubAccountType = serde_json::from_str("\"organization\"").unwrap();
         assert_eq!(parsed, GitHubAccountType::Organization);
+    }
+
+    #[test]
+    fn test_trigger_kind_display_and_parse() {
+        assert_eq!(
+            TriggerKind::GithubIssueWebhook.to_string(),
+            "github-issue-webhook"
+        );
+        assert_eq!(
+            "github-issue-webhook".parse::<TriggerKind>().unwrap(),
+            TriggerKind::GithubIssueWebhook
+        );
+        assert!("polling".parse::<TriggerKind>().is_err());
+    }
+
+    #[test]
+    fn test_gate_kind_display_and_parse() {
+        assert_eq!(GateKind::AgentSession.to_string(), "agent-session");
+        assert_eq!(GateKind::ExternalCheck.to_string(), "external-check");
+        assert_eq!(GateKind::Governance.to_string(), "governance");
+        assert_eq!(GateKind::ManualApproval.to_string(), "manual-approval");
+        for s in [
+            "agent-session",
+            "external-check",
+            "governance",
+            "manual-approval",
+        ] {
+            assert_eq!(s.parse::<GateKind>().unwrap().to_string(), s);
+        }
+        assert!("bogus".parse::<GateKind>().is_err());
     }
 }

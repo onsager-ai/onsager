@@ -6,6 +6,9 @@ pub mod handler;
 pub mod routes;
 pub mod spine;
 pub mod state;
+pub mod webhook_router;
+pub mod workflow_activation;
+pub mod workflow_db;
 pub mod ws;
 
 pub use sqlx::AnyPool;
@@ -106,6 +109,25 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         // onsager-portal binary running on an internal port so the
         // Railway service exposes a single external origin.
         .route("/webhooks/github", any(routes::portal::proxy))
+        // Workflow runtime webhook receiver (issue #81). Distinct from the
+        // legacy `/webhooks/github` portal proxy — this endpoint feeds the
+        // workflow runtime on stiglab directly. GitHub caps webhook payloads
+        // at 25 MiB; a 1 MiB cap here is generous for the events we handle
+        // (`issues`, `pull_request`, `check_*`, `status`) while blunting
+        // DoS-via-giant-body.
+        .route(
+            "/api/webhooks/github",
+            post(routes::webhooks::handle).layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)),
+        )
+        // Workflow CRUD (issue #81).
+        .route(
+            "/api/workflows",
+            get(routes::workflows::list_workflows).post(routes::workflows::create_workflow),
+        )
+        .route(
+            "/api/workflows/{id}",
+            get(routes::workflows::get_workflow).patch(routes::workflows::patch_workflow),
+        )
         // Spine API — exposes shared event spine data to the dashboard
         .route("/api/spine/events", get(routes::spine::list_events))
         .route(
