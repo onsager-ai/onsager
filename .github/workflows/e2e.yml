@@ -61,7 +61,10 @@ jobs:
       # ── Database setup ──────────────────────────────────────
       - name: Run spine migrations
         run: |
-          for f in crates/onsager-spine/migrations/*.sql; do
+          # sort -V orders by numeric segments (001 < 002 < ... < 010),
+          # so new migration files land in the right sequence regardless
+          # of whether the filename is zero-padded.
+          ls crates/onsager-spine/migrations/*.sql | sort -V | while read -r f; do
             echo "  applying $(basename "$f")..."
             psql "$DATABASE_URL" -f "$f"
           done

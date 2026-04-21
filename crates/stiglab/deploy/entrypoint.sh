@@ -6,7 +6,9 @@ set -e
 # All migrations are idempotent (IF NOT EXISTS / OR REPLACE).
 if [ -n "$ONSAGER_DATABASE_URL" ] && [ -d /app/spine-migrations ]; then
     echo "Running onsager-spine migrations..."
-    for f in /app/spine-migrations/*.sql; do
+    # sort -V orders by numeric segments so 001 < 002 < ... < 010
+    # regardless of zero-padding; POSIX sh glob order is undefined.
+    ls /app/spine-migrations/*.sql | sort -V | while read -r f; do
         echo "  applying $(basename "$f")..."
         psql -X -v ON_ERROR_STOP=1 "$ONSAGER_DATABASE_URL" -f "$f"
     done
@@ -16,7 +18,7 @@ fi
 # Run synodic (governance) migrations.
 if [ -n "$ONSAGER_DATABASE_URL" ] && [ -d /app/synodic-migrations ]; then
     echo "Running synodic migrations..."
-    for f in /app/synodic-migrations/*.sql; do
+    ls /app/synodic-migrations/*.sql | sort -V | while read -r f; do
         echo "  applying $(basename "$f")..."
         psql -X -v ON_ERROR_STOP=1 "$ONSAGER_DATABASE_URL" -f "$f"
     done
