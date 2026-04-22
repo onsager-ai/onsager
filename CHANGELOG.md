@@ -7,6 +7,43 @@ project does not yet publish numbered releases.
 ## [Unreleased]
 
 ### Added
+- **Artifact + Registry + Dashboard**: Deliverable + registry-backed kinds
+  (issue #100, closes #101–#105). New `Deliverable` / `DeliverableId` /
+  `WorkflowRunId` / `KindId` value objects plus `DeliverableCreated` /
+  `DeliverableUpdated` spine events separate the run-scoped deliverable
+  from the workflow blueprint. `BundleId` → `ArtifactVersionId` (type
+  alias retained for one release); artifact columns
+  `current_bundle_id` / `bundle_history` → `current_version_id` /
+  `version_history` via migration 007, with serde aliases on the old
+  keys. `TypeDefinition` grows `intrinsic_schema` + `merge_rule`
+  (`Overwrite` / `MergeByKey` / `Append` / `DeepMerge`); canonical
+  kinds renamed to `Issue` + `PR` (legacy ids ship as `aliases`); `PR`
+  registers with `DeepMerge` and a schema covering commits / checks /
+  reviews / merged / closes_issue; `Deployment` + `Session` seeded with
+  their intrinsic schemas. Stiglab exposes `GET /api/workflow/kinds`;
+  the dashboard drops its hardcoded kind union, normalizes legacy ids
+  on read, ships a `DeliverablePanel` for typed PR cards, rewrites
+  `ArtifactFlowOverview` to render one pill per gate (fixing the
+  duplicate-PR pill on the Governed preset), and adds a `Merge → Deploy
+  staging` preset chaining `PR → Deployment`.
+  <!-- sha: 6268185, e0042e4 -->
+- **Deploy**: per-PR Railway preview environments. Every open PR gets
+  an ephemeral deploy at `onsager-pr-<N>.up.railway.app` with a forked
+  (empty-by-default) Postgres plugin, torn down automatically on PR
+  close. The workflow listens to Railway's `deployment_status` GitHub
+  App events — no Railway API token in CI — extracts PR number + URL
+  from the payload, smoke-tests the deploy, and upserts a sticky PR
+  comment with the result. `railway.toml` declares the
+  `[environments.preview]` overrides (smaller quota, `ONSAGER_PREVIEW`
+  flag); `docs/preview-environments.md` covers setup and failure
+  modes; fork PRs skip both jobs (read-only token, no secrets).
+  <!-- sha: 2c72757, 151d54e, c08d077, d8856c1, cc4cf50, d959492 -->
+- **Architecture**: ADR 0003 records the Deliverable + registry-backed
+  kinds decisions driving spec #100 and children #101–#105 —
+  `WorkflowRun` separated from `Deliverable`, artifact kinds live in
+  `onsager-registry` with `intrinsic_schema` + `merge_rule`,
+  `BundleId` renamed to `ArtifactVersionId`, MVP is GitHub-only.
+  <!-- sha: d3012d8, 8cc45a7 -->
 - **Forge + Stiglab + Dashboard**: workflow v1 — declarative, stage-driven
   factory runtime. Forge ships a pure `stage_runner` with strict
   declared-order enforcement across all four gate kinds (agent-session,
@@ -48,7 +85,71 @@ project does not yet publish numbered releases.
   a leading `NNN_` prefix and that the numbers are consecutive from 1.
   <!-- sha: dfb156e -->
 
+### Changed
+- **Dashboard + Stiglab**: compressed, code-split, skeleton-first
+  initial load (closes #95). Stiglab wraps static serving in gzip+br
+  and sets status-aware `Cache-Control` — `immutable` on hashed
+  `/assets/*` (2xx only, so a 404 during a bad deploy can't be cached
+  for a year), `no-cache` on `index.html`. Dashboard lazy-loads every
+  page route (login stays eager), isolates react / react-router /
+  react-query into stable vendor chunks via `manualChunks`, and
+  renders shimmer `AppShellSkeleton` + `PageSkeleton`
+  (list / detail / default) as Suspense fallbacks instead of the
+  three "Loading..." text placeholders. Onboarding-gate queries run
+  in parallel; `tower` promoted to a workspace dependency.
+  <!-- sha: ab6a083, be6f4d3 -->
+
 ### Fixed
+- **Stiglab**: workflow activate surfaces the missing GitHub App
+  permission as a `400` with an actionable message instead of a
+  dead-end `502 "github api error"`. A new
+  `ActivationError::MissingGithubPermission` variant carries the
+  required permission name per call site (`Issues` for labels,
+  `Repository webhooks` for hook endpoints) plus the upstream status
+  + body; any other non-2xx keeps the `502` but stops swallowing the
+  response so the failure is diagnosable from the client too.
+  <!-- sha: bdf7c93, c34cfb4 -->
+- **Stiglab**: `list_repo_labels` was never wired up — selecting a
+  label in the workflow trigger config's `LabelCombobox` always
+  showed "Couldn't load labels" even when the install was healthy.
+  Added a paginated wrapper in `github_app.rs`, a handler that
+  validates tenant membership + install ownership, and route
+  registration for
+  `/tenants/:id/github-installations/:install_id/repos/:owner/:repo/labels`.
+  <!-- sha: 9c611e6, 80f9b09 -->
+- **Stiglab**: renamed stiglab's tenant-scoped `workflows` /
+  `workflow_stages` to `tenant_workflows` / `tenant_workflow_stages`
+  so they no longer collide with spine migration `006_workflows.sql`
+  — stiglab's in-process `run_migrations()` was hitting
+  `IF NOT EXISTS` on the spine-created `workflows` table, skipping
+  silently, then dying at `CREATE INDEX ON workflows (tenant_id)`
+  with "column tenant_id does not exist" and taking the API down
+  on boot. <!-- sha: cd9c3e3 -->
+- **Dashboard**: workflow-create now matches stiglab's contract.
+  `createWorkflowRequestToBackend` + `workflowFromBackend` translate
+  between the UI draft and the wire shape stiglab validates (flat
+  `trigger_kind` / `repo_owner` / `repo_name` / `trigger_label` /
+  `install_id`, `active: bool`, stages as `{ gate_kind, params }`);
+  `draftToCreateRequest(draft, installations, tenantId, activate)`
+  resolves the numeric GitHub install id from the loaded
+  installations list instead of `parseInt`-ing the `inst_abc…` record
+  id. `useNodes` gates its 5s poll on resolved auth so logged-out
+  users stop seeing `/api/nodes` 401 spam. The placeholder
+  `ChatBuilder` is hidden from the workflow builder. A
+  `tests/smoke/workflow-create-contract.test.ts` pins the adapter
+  against stiglab's expected keys. <!-- sha: 27a118d, b6f5384 -->
+- **Dashboard**: workflow-builder mobile + flow-strip polish. Mobile
+  `Sheet` caps at `max-h-[90dvh]` with `min-h-0` so long content
+  scrolls instead of overflowing off-screen; a new `PresetPicker`
+  (issue → PR, agent only, CI → merge, governed pipeline) lets users
+  start from a template; `ArtifactBadge` + `ArtifactFlowOverview`
+  show each stage's input/output kind with an arrow separator,
+  labelling both sides when a stage transforms the kind (e.g.
+  agent-session issue → PR). Typed `ARTIFACT_META_BY_VALUE` as
+  `Partial<Record<…>>`, decorative icons get `aria-hidden` +
+  `focusable={false}`, and `GITHUB_ISSUE_TO_PR_PRESET` is shared
+  between the preset constant and the `WORKFLOW_PRESETS` entry.
+  <!-- sha: 88d755d, 48fd66d -->
 - **Deploy**: migration ordering now uses `sort -V` (GNU version sort)
   in both the e2e workflow and the container entrypoint so numeric
   segments compare naturally (`001 < 002 < … < 009 < 010`) and new
