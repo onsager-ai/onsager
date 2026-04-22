@@ -179,6 +179,24 @@ pub async fn set_workflow_active(
     Ok(())
 }
 
+/// Delete the workflow row and its ordered stage chain in a single
+/// transaction. Callers are expected to have deactivated the workflow
+/// first (the label-watcher side effect is undone before the row goes
+/// away); this helper only touches the database state.
+pub async fn delete_workflow(pool: &AnyPool, workflow_id: &str) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM tenant_workflow_stages WHERE workflow_id = $1")
+        .bind(workflow_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM tenant_workflows WHERE id = $1")
+        .bind(workflow_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Find every **active** workflow whose `github-issue-webhook` trigger
 /// targets this repo and matches the supplied label set. The webhook router
 /// calls this to decide which workflows should fire `trigger.fired` for a
@@ -376,6 +394,21 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn delete_workflow_drops_row_and_stages() {
+        let pool = pool().await;
+        let wf = sample_workflow("t1", "widgets", "spec", false);
+        insert_workflow_with_stages(&pool, &wf, std::slice::from_ref(&agent_stage(&wf.id)))
+            .await
+            .unwrap();
+
+        delete_workflow(&pool, &wf.id).await.unwrap();
+
+        assert!(get_workflow(&pool, &wf.id).await.unwrap().is_none());
+        let stages = list_stages_for_workflow(&pool, &wf.id).await.unwrap();
+        assert!(stages.is_empty());
     }
 
     #[tokio::test]

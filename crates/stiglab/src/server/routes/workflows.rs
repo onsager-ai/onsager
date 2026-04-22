@@ -356,6 +356,45 @@ pub async fn patch_workflow(
     Json(serde_json::json!({ "workflow": updated })).into_response()
 }
 
+/// DELETE /api/workflows/:id — remove the workflow row + stages. If the
+/// workflow is currently active the deactivation hook runs first, which
+/// flips `active=false` and drops the repo webhook when no sibling
+/// workflow still needs it. After that the row and stage chain go away
+/// in a single transaction so a partial delete can't leak.
+pub async fn delete_workflow(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(workflow_id): Path<String>,
+) -> Response {
+    let user_id = match require_auth_user(&auth_user) {
+        Ok(id) => id.to_string(),
+        Err(r) => return r,
+    };
+    let workflow = match workflow_db::get_workflow(&state.db, &workflow_id).await {
+        Ok(Some(w)) => w,
+        Ok(None) => return not_found("workflow not found"),
+        Err(e) => {
+            tracing::error!("failed to load workflow: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
+    if let Err(r) = require_tenant_member(&state.db, &user_id, &workflow.tenant_id).await {
+        return r;
+    }
+
+    if workflow.active {
+        if let Err(r) = deactivate_workflow(&state, &workflow_id).await {
+            return r;
+        }
+    }
+
+    if let Err(e) = workflow_db::delete_workflow(&state.db, &workflow_id).await {
+        tracing::error!("failed to delete workflow: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
 /// Run the activation pipeline against the live GitHub App install. Emits
 /// typed failure modes through `Response` so the caller can bubble the HTTP
 /// status directly.

@@ -134,7 +134,9 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         )
         .route(
             "/api/workflows/{id}",
-            get(routes::workflows::get_workflow).patch(routes::workflows::patch_workflow),
+            get(routes::workflows::get_workflow)
+                .patch(routes::workflows::patch_workflow)
+                .delete(routes::workflows::delete_workflow),
         )
         // Workflow artifact-kind catalog (issue #102). Runtime surface of
         // the registry's `workflow_builtin_types()` — lets the dashboard

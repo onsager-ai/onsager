@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArtifactBadge } from "@/components/factory/workflows/ArtifactBadge"
 import { ArtifactFlowOverview } from "@/components/factory/workflows/ArtifactFlowOverview"
+import { WorkflowActions } from "@/components/factory/workflows/WorkflowActions"
 import { outputArtifactKind } from "@/components/factory/workflows/workflow-meta"
 
 const STATUS_VARIANT: Record<StageRunStatus, "default" | "secondary" | "destructive" | "outline"> = {
@@ -79,6 +80,7 @@ export function WorkflowDetailPage() {
             {workflow.status}
           </Badge>
         </div>
+        <WorkflowActions workflow={workflow} />
       </div>
 
       <Card>
