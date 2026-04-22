@@ -514,6 +514,20 @@ fn map_activation_error(e: ActivationError) -> Response {
             )
                 .into_response()
         }
+        ActivationError::WebhookUrlNotReachable { url } => {
+            tracing::warn!(url = %url, "webhook URL is not publicly reachable");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": format!(
+                        "Webhook URL {url} is not reachable from GitHub. Set STIGLAB_WEBHOOK_BASE_URL (or STIGLAB_PUBLIC_BASE_URL) to a publicly reachable HTTPS URL (e.g. a tunnel like ngrok, or your production domain) and retry."
+                    ),
+                    "code": "webhook_url_not_reachable",
+                    "url": url,
+                })),
+            )
+                .into_response()
+        }
         ActivationError::Other(e) => {
             tracing::error!("activation unexpected error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
