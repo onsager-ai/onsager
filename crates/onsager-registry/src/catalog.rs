@@ -84,8 +84,7 @@ pub fn pr_intrinsic_schema() -> serde_json::Value {
                              },
                              "required": ["state"]
                          } },
-            "merged":  { "type": "object",
-                         "nullable": true,
+            "merged":  { "type": ["object", "null"],
                          "properties": {
                              "sha":       { "type": "string" },
                              "merged_at": { "type": "string",
@@ -229,12 +228,12 @@ pub fn deployment_intrinsic_schema() -> serde_json::Value {
             "status":       { "type": "string",
                               "enum": ["queued", "running", "success",
                                        "failed", "rolled_back"] },
-            "url":          { "type": "string", "nullable": true },
+            "url":          { "type": ["string", "null"] },
             "started_at":   { "type": "string", "format": "date-time" },
-            "completed_at": { "type": "string", "format": "date-time",
-                              "nullable": true },
-            "logs_ref":     { "type": "string", "nullable": true },
-            "from_pr":      { "type": "string", "nullable": true }
+            "completed_at": { "type": ["string", "null"],
+                              "format": "date-time" },
+            "logs_ref":     { "type": ["string", "null"] },
+            "from_pr":      { "type": ["string", "null"] }
         },
         "required": ["env", "sha", "status"]
     })
@@ -249,7 +248,7 @@ pub fn session_intrinsic_schema() -> serde_json::Value {
         "properties": {
             "session_id": { "type": "string" },
             "state":      { "type": "string" },
-            "works_on":   { "type": "string", "nullable": true },
+            "works_on":   { "type": ["string", "null"] },
             "produced":   { "type": "array",
                             "items": { "type": "string" } }
         },

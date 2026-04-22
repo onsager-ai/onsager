@@ -276,13 +276,25 @@ export type WorkflowGateKind =
 // `workflow-meta.ts` is only a fallback for offline/dev.
 export type WorkflowMergeRule = 'overwrite' | 'merge_by_key' | 'append' | 'deep_merge';
 
+// `intrinsic_schema` arrives as a `serde_json::Value`, which is any JSON
+// value — including `null`, arrays, and primitives. Modelling it as
+// `JsonValue` keeps the wire shape honest so consumers can't assume
+// "always an object".
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: JsonValue }
+  | JsonValue[];
+
 export interface WorkflowKindInfo {
   id: string;
   description: string;
   merge_rule: WorkflowMergeRule;
   external_kind?: string;
   aliases: string[];
-  intrinsic_schema: Record<string, unknown>;
+  intrinsic_schema: JsonValue;
 }
 
 export interface WorkflowStage {
