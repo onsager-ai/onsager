@@ -44,9 +44,9 @@ export function WorkflowBuilder({
     },
   })
 
-  const save = () => {
+  const save = (active: boolean) => {
     if (!canSave) return
-    create.mutate(draftToCreateRequest(draft, installations, tenantId, true))
+    create.mutate(draftToCreateRequest(draft, installations, tenantId, active))
   }
 
   return (
@@ -78,15 +78,27 @@ export function WorkflowBuilder({
         </p>
       )}
 
-      <Button
-        type="button"
-        size="lg"
-        className="w-full"
-        disabled={!canSave || create.isPending}
-        onClick={save}
-      >
-        {create.isPending ? "Saving…" : "Activate workflow"}
-      </Button>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          className="w-full sm:flex-1"
+          disabled={!canSave || create.isPending}
+          onClick={() => save(false)}
+        >
+          Save as draft
+        </Button>
+        <Button
+          type="button"
+          size="lg"
+          className="w-full sm:flex-1"
+          disabled={!canSave || create.isPending}
+          onClick={() => save(true)}
+        >
+          {create.isPending ? "Saving…" : "Activate workflow"}
+        </Button>
+      </div>
     </div>
   )
 }
