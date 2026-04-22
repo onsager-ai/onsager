@@ -60,10 +60,15 @@ provisioning in GitHub Actions.
 2. **Create a project-scoped Railway token**
    Dashboard → *this project* → Settings → Tokens → *New token*. Use a
    **project token**, not an account token — it's bound to this project
-   and can't touch others on the account. Railway doesn't expose a
-   read-only sub-scope; the workflow only reads (one GraphQL query per
-   poll), but the token itself can mutate project state, so treat it like
-   any other deploy secret and rotate on leak.
+   and can't touch others on the account. Leave the environment scope
+   **unset** (project-wide): the workflow queries ephemeral `pr-<N>`
+   environments that don't exist when the token is created, so a token
+   locked to `production` (or any single env) won't see them. Railway
+   doesn't expose a read-only sub-scope; the workflow only reads (one
+   GraphQL query per poll), but the token itself can mutate project
+   state, so treat it like any other deploy secret and rotate on leak.
+   A distinct name like `ci-preview-lookup` makes the blast radius
+   easier to reason about.
 
 3. **Set GitHub repo secrets**
 
