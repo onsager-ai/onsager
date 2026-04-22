@@ -45,6 +45,12 @@ pub enum ActivationError {
     },
     #[error("github api error: {0}")]
     GitHub(String),
+    /// The configured webhook URL points at a loopback/private host that
+    /// github.com cannot reach, so registering the hook would fail with a
+    /// 422. Surfacing this as a typed error lets the dashboard show an
+    /// operator-actionable message instead of the opaque GitHub 422.
+    #[error("webhook URL {url} is not reachable from GitHub")]
+    WebhookUrlNotReachable { url: String },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -95,6 +101,39 @@ pub fn webhook_url() -> String {
         .unwrap_or_else(|_| "http://localhost:3000".to_string());
     let base = base.trim_end_matches('/');
     format!("{base}/api/webhooks/github")
+}
+
+/// Whether a webhook URL can plausibly be reached by github.com. We reject
+/// loopback, unspecified, RFC1918 private, and link-local addresses plus
+/// the `localhost` hostname (and its reserved subdomains per RFC 6761).
+/// Everything else — including DNS names we can't resolve here — is
+/// optimistically accepted; GitHub itself is the final arbiter.
+fn is_public_webhook_url(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    // `host_str()` returns IPv6 literals wrapped in `[...]`; strip the
+    // brackets before handing the string to `IpAddr::from_str`.
+    let host_trimmed = host
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(host);
+    if let Ok(ip) = host_trimmed.parse::<std::net::IpAddr>() {
+        if ip.is_loopback() || ip.is_unspecified() {
+            return false;
+        }
+        if let std::net::IpAddr::V4(v4) = ip {
+            if v4.is_private() || v4.is_link_local() {
+                return false;
+            }
+        }
+        return true;
+    }
+    let host_lower = host.to_ascii_lowercase();
+    !(host_lower == "localhost" || host_lower.ends_with(".localhost"))
 }
 
 /// Verify a target repo is within an install's accessible-repo set.
@@ -219,6 +258,13 @@ pub async fn ensure_webhook_registered(
     secret: Option<&str>,
 ) -> Result<i64, ActivationError> {
     let url = webhook_url();
+    // Fail fast when the configured URL clearly can't be reached from
+    // github.com — otherwise we'd just proxy through a 422 and the
+    // dashboard would surface an opaque "github api error" instead of a
+    // message the operator can act on.
+    if !is_public_webhook_url(&url) {
+        return Err(ActivationError::WebhookUrlNotReachable { url });
+    }
     let list_url = format!("https://api.github.com/repos/{owner}/{repo}/hooks");
     let resp = gh_client()
         .get(&list_url)
@@ -524,6 +570,84 @@ mod tests {
                 assert!(msg.contains("rate limit"));
             }
             other => panic!("expected GitHub, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn public_webhook_url_accepts_https_dns_host() {
+        assert!(is_public_webhook_url(
+            "https://stig.example.com/api/webhooks/github"
+        ));
+        assert!(is_public_webhook_url(
+            "https://stig.example.com:8443/api/webhooks/github"
+        ));
+        assert!(is_public_webhook_url("https://8.8.8.8/api/webhooks/github"));
+    }
+
+    #[test]
+    fn public_webhook_url_rejects_localhost_family() {
+        assert!(!is_public_webhook_url(
+            "http://localhost:3000/api/webhooks/github"
+        ));
+        assert!(!is_public_webhook_url(
+            "http://LOCALHOST/api/webhooks/github"
+        ));
+        assert!(!is_public_webhook_url(
+            "http://foo.localhost/api/webhooks/github"
+        ));
+        assert!(!is_public_webhook_url(
+            "http://127.0.0.1:3000/api/webhooks/github"
+        ));
+        assert!(!is_public_webhook_url(
+            "http://127.1.2.3/api/webhooks/github"
+        ));
+        assert!(!is_public_webhook_url("http://[::1]/api/webhooks/github"));
+        assert!(!is_public_webhook_url(
+            "http://0.0.0.0:3000/api/webhooks/github"
+        ));
+    }
+
+    #[test]
+    fn public_webhook_url_rejects_private_and_link_local() {
+        assert!(!is_public_webhook_url(
+            "http://10.0.0.5/api/webhooks/github"
+        ));
+        assert!(!is_public_webhook_url(
+            "http://192.168.1.20/api/webhooks/github"
+        ));
+        assert!(!is_public_webhook_url(
+            "http://172.16.0.1/api/webhooks/github"
+        ));
+        assert!(!is_public_webhook_url(
+            "http://169.254.169.254/api/webhooks/github"
+        ));
+    }
+
+    #[test]
+    fn public_webhook_url_rejects_unparseable() {
+        assert!(!is_public_webhook_url("not a url"));
+    }
+
+    // Held across an await, but that's the whole point of `env_lock` — it
+    // serializes tests that mutate process-wide env. Dropping the guard
+    // before the await would let a parallel test race with us.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn ensure_webhook_registered_rejects_localhost_default() {
+        let _env_guard = env_lock().lock().expect("env lock poisoned");
+        let _base = ScopedEnvVar::set("STIGLAB_WEBHOOK_BASE_URL", "http://localhost:3000");
+        let token = InstallationToken {
+            token: "t".into(),
+            expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),
+        };
+        let err = ensure_webhook_registered(&token, "acme", "widgets", None)
+            .await
+            .expect_err("expected localhost rejection");
+        match err {
+            ActivationError::WebhookUrlNotReachable { url } => {
+                assert!(url.starts_with("http://localhost:3000/"), "got {url}");
+            }
+            other => panic!("expected WebhookUrlNotReachable, got {other:?}"),
         }
     }
 
