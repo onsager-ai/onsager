@@ -198,10 +198,23 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
 
         let compression = CompressionLayer::new().gzip(true).br(true);
 
+        // Status-aware: only apply `immutable` to successful responses so a
+        // 404 during a bad deploy or partial rollout isn't cached for a
+        // year by clients and intermediaries. The closure is generic over
+        // the response body type (compression wraps it); returning `None`
+        // leaves the header off.
         let assets_service = ServiceBuilder::new()
             .layer(SetResponseHeaderLayer::overriding(
                 header::CACHE_CONTROL,
-                HeaderValue::from_static("public, max-age=31536000, immutable"),
+                |response: &axum::http::Response<_>| -> Option<HeaderValue> {
+                    if response.status().is_success() {
+                        Some(HeaderValue::from_static(
+                            "public, max-age=31536000, immutable",
+                        ))
+                    } else {
+                        None
+                    }
+                },
             ))
             .layer(compression.clone())
             .service(ServeDir::new(assets_dir));
