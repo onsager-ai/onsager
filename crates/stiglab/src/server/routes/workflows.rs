@@ -559,9 +559,23 @@ fn map_activation_error(e: ActivationError) -> Response {
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({
                     "error": format!(
-                        "Webhook URL {url} is not reachable from GitHub. Set STIGLAB_WEBHOOK_BASE_URL (or STIGLAB_PUBLIC_BASE_URL) to a publicly reachable HTTPS URL (e.g. a tunnel like ngrok, or your production domain) and retry."
+                        "Webhook URL {url} is not reachable from GitHub. Set STIGLAB_WEBHOOK_BASE_URL (or STIGLAB_PUBLIC_BASE_URL) to a publicly reachable HTTP(S) URL (e.g. a tunnel like ngrok, or your production domain) and retry."
                     ),
                     "code": "webhook_url_not_reachable",
+                    "url": url,
+                })),
+            )
+                .into_response()
+        }
+        ActivationError::WebhookUrlInvalid { url } => {
+            tracing::warn!(url = %url, "webhook URL is not a valid absolute URL");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": format!(
+                        "Webhook URL {url} is not a valid absolute URL. Check STIGLAB_WEBHOOK_BASE_URL (or STIGLAB_PUBLIC_BASE_URL) — it should be an absolute HTTP(S) URL like https://stig.example.com."
+                    ),
+                    "code": "webhook_url_invalid",
                     "url": url,
                 })),
             )
