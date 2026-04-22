@@ -9,7 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { LabelCombobox } from "@/components/factory/workflows/LabelCombobox"
 import {
   GITHUB_ISSUE_TO_PR_PRESET,
-  draftToRequestTrigger,
   githubIssueToPrPreset,
 } from "@/components/factory/workflows/workflow-draft"
 
@@ -62,6 +61,18 @@ export function WorkflowStartPage() {
     )
     return hit?.tenantId ?? ""
   }, [tenantIdParam, tenantInstallsData, installId])
+
+  // The backend's workflow create API wants the numeric GitHub install id,
+  // not the dashboard's installation record id. Look it up from the same
+  // list we used to resolve the tenant.
+  const githubInstallId = useMemo(() => {
+    if (!tenantInstallsData) return 0
+    for (const e of tenantInstallsData) {
+      const hit = e.installations.find((i) => i.id === installId)
+      if (hit) return hit.install_id
+    }
+    return 0
+  }, [tenantInstallsData, installId])
 
   const installLookupDone = !!tenantIdParam || !!tenantInstallsData
   const installUnresolved =
@@ -120,6 +131,7 @@ export function WorkflowStartPage() {
                   repo={r}
                   tenantId={resolvedTenantId}
                   installId={installId}
+                  githubInstallId={githubInstallId}
                 />
               ))}
             </ul>
@@ -156,10 +168,12 @@ function RepoRow({
   repo,
   tenantId,
   installId,
+  githubInstallId,
 }: {
   repo: AccessibleRepo
   tenantId: string
   installId: string
+  githubInstallId: number
 }) {
   const [label, setLabel] = useState<string | null>(null)
   const queryClient = useQueryClient()
@@ -173,9 +187,13 @@ function RepoRow({
     },
   })
 
-  const ready = !!label && !!tenantId
+  const ready = !!label && !!tenantId && githubInstallId > 0
   const run = () => {
     if (!ready || !label) return
+    // Preset path: stiglab expands the stage chain server-side, so we
+    // send only `preset_id` (sending both `preset_id` and `stages` is an
+    // explicit 400 on the backend). The draft here is only used to
+    // compute a nice default name.
     const draft = githubIssueToPrPreset({
       install_id: installId,
       repo_owner: repo.owner,
@@ -185,10 +203,13 @@ function RepoRow({
     create.mutate({
       tenant_id: tenantId,
       name: draft.name,
-      preset: GITHUB_ISSUE_TO_PR_PRESET,
-      trigger: draftToRequestTrigger(draft.trigger),
-      stages: draft.stages,
-      activate: true,
+      trigger_kind: "github-issue-webhook",
+      install_id: githubInstallId,
+      repo_owner: repo.owner,
+      repo_name: repo.name,
+      trigger_label: label,
+      preset_id: GITHUB_ISSUE_TO_PR_PRESET,
+      active: true,
     })
   }
 
