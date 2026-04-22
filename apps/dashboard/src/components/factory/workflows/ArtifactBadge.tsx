@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils"
 import type { WorkflowArtifactKind } from "@/lib/api"
-import { artifactKindMeta } from "./workflow-meta"
+import { useWorkflowKinds } from "./useWorkflowKinds"
 
 export interface ArtifactBadgeProps {
   kind: WorkflowArtifactKind
@@ -18,7 +18,8 @@ export function ArtifactBadge({
   size = "sm",
   className,
 }: ArtifactBadgeProps) {
-  const meta = artifactKindMeta(kind)
+  const { metaFor } = useWorkflowKinds()
+  const meta = metaFor(kind)
   const Icon = meta.icon
   return (
     <span

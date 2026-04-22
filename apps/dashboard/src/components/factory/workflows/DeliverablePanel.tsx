@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { CircleDot, GitPullRequest } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import type { WorkflowArtifactKind } from "@/lib/api"
-import { artifactKindMeta } from "./workflow-meta"
+import { useWorkflowKinds } from "./useWorkflowKinds"
 
 // The "product" view of a workflow run — a live snapshot of the
 // Deliverable (issue #100/#101). Sits beside the flow strip so the UI
@@ -58,7 +58,8 @@ function isPrDeliverableKind(kind: WorkflowArtifactKind): boolean {
 }
 
 function DeliverableCard({ entry }: { entry: DeliverableEntry }) {
-  const meta = artifactKindMeta(entry.kind)
+  const { metaFor } = useWorkflowKinds()
+  const meta = metaFor(entry.kind)
   const Icon = meta.icon
 
   if (isPrDeliverableKind(entry.kind)) {
