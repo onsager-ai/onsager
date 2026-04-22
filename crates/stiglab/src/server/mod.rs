@@ -136,6 +136,13 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/workflows/{id}",
             get(routes::workflows::get_workflow).patch(routes::workflows::patch_workflow),
         )
+        // Workflow artifact-kind catalog (issue #102). Runtime surface of
+        // the registry's `workflow_builtin_types()` — lets the dashboard
+        // render the kind picker without hardcoding the union.
+        .route(
+            "/api/workflow/kinds",
+            get(routes::workflow_kinds::list_workflow_kinds),
+        )
         // Spine API — exposes shared event spine data to the dashboard
         .route("/api/spine/events", get(routes::spine::list_events))
         .route(

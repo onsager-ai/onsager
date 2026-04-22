@@ -22,7 +22,8 @@ export function ArtifactKindSelect({ value, onChange, id }: ArtifactKindSelectPr
     <Select
       value={value}
       onValueChange={(v) => {
-        if (v === "github-issue" || v === "github-pr") onChange(v)
+        // Registry-backed kinds (#102) — accept any id the registry emits.
+        if (typeof v === "string" && v.length > 0) onChange(v)
       }}
       items={WORKFLOW_ARTIFACT_KINDS}
     >

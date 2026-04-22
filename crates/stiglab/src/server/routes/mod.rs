@@ -10,4 +10,5 @@ pub mod spine;
 pub mod tasks;
 pub mod tenants;
 pub mod webhooks;
+pub mod workflow_kinds;
 pub mod workflows;

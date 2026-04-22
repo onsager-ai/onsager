@@ -9,7 +9,7 @@ export interface ProposeWorkflowCall {
   stages?: {
     name?: string
     gate_kind: WorkflowGateKind
-    artifact_kind?: "github-issue" | "github-pr"
+    artifact_kind?: string
   }[]
 }
 
@@ -23,28 +23,28 @@ export function proposePlaceholder(text: string): ProposeWorkflowCall {
     stages.push({
       name: "Agent session",
       gate_kind: "agent-session",
-      artifact_kind: "github-issue",
+      artifact_kind: "Issue",
     })
   }
   if (/ci|check|build|test/.test(lower)) {
     stages.push({
       name: "CI check",
       gate_kind: "external-check",
-      artifact_kind: "github-pr",
+      artifact_kind: "PR",
     })
   }
   if (/govern/.test(lower)) {
     stages.push({
       name: "Governance",
       gate_kind: "governance",
-      artifact_kind: "github-pr",
+      artifact_kind: "PR",
     })
   }
   if (/merge|approve|manual|human/.test(lower)) {
     stages.push({
       name: "Manual approval",
       gate_kind: "manual-approval",
-      artifact_kind: "github-pr",
+      artifact_kind: "PR",
     })
   }
   return { stages }
@@ -55,7 +55,7 @@ export function applyProposal(
   call: ProposeWorkflowCall,
 ): WorkflowDraft {
   const stages = (call.stages ?? []).map((s) =>
-    makeStage(s.gate_kind, s.artifact_kind ?? "github-issue", s.name),
+    makeStage(s.gate_kind, s.artifact_kind ?? "Issue", s.name),
   )
   return {
     ...draft,

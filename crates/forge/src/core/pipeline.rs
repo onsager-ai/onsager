@@ -424,7 +424,7 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
 
                         if let Some(sealed) = sealed {
                             self.store
-                                .record_bundle(&decision.artifact_id, sealed.bundle_id.clone());
+                                .record_version(&decision.artifact_id, sealed.bundle_id.clone());
                             output.events.push(PipelineEvent::BundleSealed {
                                 artifact_id: decision.artifact_id.to_string(),
                                 bundle_id: sealed.bundle_id,
@@ -736,8 +736,8 @@ mod tests {
 
         let art = pipeline.store.get(&id).unwrap();
         assert_eq!(art.state, ArtifactState::Released);
-        assert_eq!(art.current_bundle_id.as_ref(), Some(&evt_bundle));
-        assert_eq!(art.bundle_history.len(), 1);
+        assert_eq!(art.current_version_id.as_ref(), Some(&evt_bundle));
+        assert_eq!(art.version_history.len(), 1);
     }
 
     /// SealSink that always returns a terminal sealing error.
@@ -791,7 +791,7 @@ mod tests {
 
         let art = pipeline.store.get(&id).unwrap();
         assert_eq!(art.state, ArtifactState::UnderReview);
-        assert!(art.current_bundle_id.is_none());
+        assert!(art.current_version_id.is_none());
     }
 
     #[test]
@@ -815,7 +815,7 @@ mod tests {
 
         let art = pipeline.store.get(&id).unwrap();
         assert_eq!(art.state, ArtifactState::Released);
-        assert!(art.current_bundle_id.is_none());
+        assert!(art.current_version_id.is_none());
     }
 
     #[test]

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use chrono::Utc;
 
 use onsager_artifact::{
-    Artifact, ArtifactId, ArtifactState, ArtifactVersion, BundleId, ContentRef, Kind,
+    Artifact, ArtifactId, ArtifactState, ArtifactVersion, ArtifactVersionId, ContentRef, Kind,
     VerticalLineage,
 };
 use onsager_protocol::ShapingResult;
@@ -59,7 +59,7 @@ impl ArtifactStore {
     /// update `workflow_id`, `current_stage_index`,
     /// `workflow_parked_reason`, and the artifact state when a stage
     /// declares a `target_state`. Version/bundle/lineage mutations still
-    /// go through `advance` and `record_bundle` so the state-machine and
+    /// go through `advance` and `record_version` so the state-machine and
     /// invariants stay enforced.
     pub fn get_mut(&mut self, id: &ArtifactId) -> Option<&mut Artifact> {
         self.artifacts.get_mut(id.as_str())
@@ -134,15 +134,15 @@ impl ArtifactStore {
         Ok(())
     }
 
-    /// Record a newly sealed bundle on the artifact
+    /// Record a newly sealed artifact version on the artifact
     /// (warehouse-and-delivery-v0.1 §6.3).
     ///
     /// No-op if the artifact is not found (the caller already emits an error
-    /// event for the missing artifact; a missing bundle recording is strictly
+    /// event for the missing artifact; a missing version recording is strictly
     /// subordinate to that).
-    pub fn record_bundle(&mut self, id: &ArtifactId, bundle_id: BundleId) {
+    pub fn record_version(&mut self, id: &ArtifactId, version_id: ArtifactVersionId) {
         if let Some(artifact) = self.artifacts.get_mut(id.as_str()) {
-            artifact.record_bundle(bundle_id);
+            artifact.record_version(version_id);
         }
     }
 

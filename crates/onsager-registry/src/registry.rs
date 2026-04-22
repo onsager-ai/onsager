@@ -99,16 +99,36 @@ impl RegistryStatus {
 // Type definitions
 // ---------------------------------------------------------------------------
 
-/// Definition of an artifact type — the shape of every `Spec`, `PullRequest`,
+/// Per-kind merge rule. Declares how partial updates to an artifact of this
+/// kind combine — the canonical example is a `PullRequest`, which accumulates
+/// commits, checks, and reviews as gates complete (see issue #103). Merge
+/// rules are a first-class registry concept: every registered
+/// [`TypeDefinition`] declares one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeRule {
+    /// Latest write wins. The default for simple value kinds.
+    #[default]
+    Overwrite,
+    /// Treat the artifact as a map keyed by an identity field; merge by key.
+    MergeByKey,
+    /// List concatenation — callers guarantee idempotency on exact element.
+    Append,
+    /// Recursive per-field merge. Used by `PullRequest` to fold in partial
+    /// updates (commits: append, checks/reviews: merge-by-key, merged: overwrite).
+    DeepMerge,
+}
+
+/// Definition of an artifact type — the shape of every `Issue`, `PR`,
 /// `TestableEnvironment`, etc.
 ///
 /// Types are data: no variants in the engine. Adding a new type is a registry
 /// insert (a `type.proposed` event followed by `type.approved`). The engine
-/// reads `adapter_id`, `gate_ids`, and `producer_profile_id` and looks up the
-/// corresponding registered implementations.
+/// reads `adapter_id`, `gate_ids`, `producer_profile_id`, `intrinsic_schema`,
+/// and `merge_rule` and looks up the corresponding registered implementations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypeDefinition {
-    /// Stable id, e.g. `"Spec"`, `"PullRequest"`.
+    /// Stable id, e.g. `"Issue"`, `"PR"`.
     pub type_id: RegistryId,
     /// Human-readable description (one sentence).
     #[serde(default)]
@@ -124,6 +144,14 @@ pub struct TypeDefinition {
     /// Arbitrary type-specific configuration (labels, templates, …).
     #[serde(default)]
     pub config: serde_json::Value,
+    /// JSON-Schema fragment describing the intrinsic fields on artifacts of
+    /// this kind (issue #102). Optional — kinds that only carry a reference
+    /// (e.g. `Issue`) can leave it `Null`.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub intrinsic_schema: serde_json::Value,
+    /// How partial updates to an artifact of this kind combine.
+    #[serde(default)]
+    pub merge_rule: MergeRule,
 }
 
 /// A registered artifact type as stored in the registry.
@@ -434,16 +462,37 @@ mod tests {
     #[test]
     fn type_definition_serde_roundtrip() {
         let def = TypeDefinition {
-            type_id: "Spec".into(),
-            description: "Engineering specification artifact.".into(),
+            type_id: "Issue".into(),
+            description: "Engineering issue artifact.".into(),
             adapter_id: "github.issue".into(),
             gate_ids: vec!["ReviewApproved".into()],
             producer_profile_id: Some("spec-writer".into()),
             config: serde_json::json!({"label": "spec"}),
+            intrinsic_schema: serde_json::json!({"type": "object"}),
+            merge_rule: MergeRule::Overwrite,
         };
         let yaml = serde_yaml::to_string(&def).unwrap();
         let back: TypeDefinition = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(def, back);
+    }
+
+    #[test]
+    fn type_definition_defaults_merge_rule_to_overwrite() {
+        let yaml = r#"
+type_id: Simple
+adapter_id: github.issue
+"#;
+        let def: TypeDefinition = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(def.merge_rule, MergeRule::Overwrite);
+        assert!(def.intrinsic_schema.is_null());
+    }
+
+    #[test]
+    fn merge_rule_deep_merge_serializes_snake_case() {
+        let json = serde_json::to_string(&MergeRule::DeepMerge).unwrap();
+        assert_eq!(json, r#""deep_merge""#);
+        let back: MergeRule = serde_json::from_str(r#""merge_by_key""#).unwrap();
+        assert_eq!(back, MergeRule::MergeByKey);
     }
 
     #[test]
