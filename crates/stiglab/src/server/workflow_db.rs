@@ -251,13 +251,12 @@ pub async fn get_workflow_install_target(
     pool: &AnyPool,
     workflow_id: &str,
 ) -> anyhow::Result<Option<(i64, String, String)>> {
-    let row: Option<(i64, String, String)> =
-        sqlx::query_as(
-            "SELECT install_id, repo_owner, repo_name FROM tenant_workflows WHERE id = $1",
-        )
-            .bind(workflow_id)
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<(i64, String, String)> = sqlx::query_as(
+        "SELECT install_id, repo_owner, repo_name FROM tenant_workflows WHERE id = $1",
+    )
+    .bind(workflow_id)
+    .fetch_optional(pool)
+    .await?;
     Ok(row)
 }
 

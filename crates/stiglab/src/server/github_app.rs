@@ -263,9 +263,8 @@ pub async fn list_repo_labels(
 ) -> anyhow::Result<Vec<RepoLabel>> {
     let mut out = Vec::new();
     for page in 1..=2 {
-        let url = format!(
-            "https://api.github.com/repos/{owner}/{repo}/labels?per_page=100&page={page}"
-        );
+        let url =
+            format!("https://api.github.com/repos/{owner}/{repo}/labels?per_page=100&page={page}");
         let resp = gh_client()?
             .get(&url)
             .bearer_auth(&token.token)
