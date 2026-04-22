@@ -120,8 +120,8 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
   const hasWorkspace = (workspacesData?.tenants?.length ?? 0) > 0
 
   const { data: workflowsData, isLoading } = useQuery({
-    queryKey: ["workflows"],
-    queryFn: () => api.listWorkflows(),
+    queryKey: ["workflows", "user"],
+    queryFn: () => api.listWorkflowsForUser(),
     staleTime: 30_000,
     enabled: gateEnabled && hasWorkspace,
   })

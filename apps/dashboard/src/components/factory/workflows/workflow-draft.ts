@@ -1,8 +1,12 @@
-import type {
-  WorkflowArtifactKind,
-  WorkflowGateKind,
-  WorkflowStage,
-  WorkflowTrigger,
+import {
+  ApiError,
+  stageToCreateStage,
+  type CreateWorkflowRequest,
+  type GitHubAppInstallation,
+  type WorkflowArtifactKind,
+  type WorkflowGateKind,
+  type WorkflowStage,
+  type WorkflowTrigger,
 } from "@/lib/api"
 
 // The in-memory shape the chat/card editor manipulates. Everything here is
@@ -153,5 +157,51 @@ export function draftToRequestTrigger(t: WorkflowTriggerDraft): WorkflowTrigger 
     repo_owner: t.repo_owner,
     repo_name: t.repo_name,
     label: t.label,
+  }
+}
+
+// Build the stiglab-shaped create-workflow request from the UI draft. The
+// two non-obvious pieces:
+//
+// 1. `draft.trigger.install_id` is the dashboard's installation *record id*
+//    (`GitHubAppInstallation.id`, e.g. `inst_abc…`) — that's what the
+//    `/github-installations/:install_id/{accessible-repos,labels}` endpoints
+//    take. The workflow POST contract needs the numeric GitHub install id
+//    (`GitHubAppInstallation.install_id: i64`), so we resolve it by record
+//    id against the installations the page already has loaded.
+// 2. UI-only stage fields (name, artifact_kind) ride inside `params` so
+//    they survive the round-trip without forcing a backend schema change.
+export function draftToCreateRequest(
+  draft: WorkflowDraft,
+  installations: GitHubAppInstallation[],
+  tenantId: string,
+  activate: boolean,
+): CreateWorkflowRequest {
+  if (!tenantId.trim()) {
+    throw new ApiError("tenant_id is required", 400)
+  }
+  if (!isTriggerReady(draft.trigger)) {
+    throw new ApiError(
+      "pick an install, repo, and label before activating",
+      400,
+    )
+  }
+  const install = installations.find((i) => i.id === draft.trigger.install_id)
+  if (!install) {
+    throw new ApiError(
+      "selected GitHub install not found in this workspace",
+      400,
+    )
+  }
+  return {
+    tenant_id: tenantId,
+    name: draft.name.trim(),
+    trigger_kind: "github-issue-webhook",
+    install_id: install.install_id,
+    repo_owner: draft.trigger.repo_owner,
+    repo_name: draft.trigger.repo_name,
+    trigger_label: draft.trigger.label,
+    stages: draft.stages.map(stageToCreateStage),
+    active: activate,
   }
 }

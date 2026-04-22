@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { CardStackEditor } from "./CardStackEditor"
 import { PresetPicker } from "./PresetPicker"
 import {
-  draftToRequestTrigger,
+  draftToCreateRequest,
   emptyDraft,
   isTriggerReady,
   type WorkflowDraft,
@@ -46,13 +46,7 @@ export function WorkflowBuilder({
 
   const save = () => {
     if (!canSave) return
-    create.mutate({
-      tenant_id: tenantId,
-      name: draft.name.trim(),
-      trigger: draftToRequestTrigger(draft.trigger),
-      stages: draft.stages,
-      activate: true,
-    })
+    create.mutate(draftToCreateRequest(draft, installations, tenantId, true))
   }
 
   return (

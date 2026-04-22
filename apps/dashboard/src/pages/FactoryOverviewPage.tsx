@@ -119,8 +119,8 @@ export function FactoryOverviewPage() {
   })
   // Issue #82 — empty-state CTA banner when no workflow has been set up yet.
   const { data: workflowsData } = useQuery({
-    queryKey: ["workflows"],
-    queryFn: () => api.listWorkflows(),
+    queryKey: ["workflows", "user"],
+    queryFn: () => api.listWorkflowsForUser(),
     staleTime: 30_000,
   })
   const workflowsCount = workflowsData?.workflows?.length ?? 0

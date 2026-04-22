@@ -288,19 +288,33 @@ export interface Workflow {
   updated_at: string;
 }
 
+// Wire contract for workflow CRUD. Matches stiglab's `CreateWorkflowBody`
+// / `validate_create_body` exactly — flat trigger fields, numeric GitHub
+// install id, snake_case `active`. Construct with `draftToCreateRequest`
+// from the UI draft + installations list so the numeric id is resolved
+// from the workspace installation record id the draft carries.
 export interface CreateWorkflowRequest {
-  tenant_id?: string;
+  tenant_id: string;
   name: string;
-  preset?: string;
-  trigger: WorkflowTrigger;
-  stages: WorkflowStage[];
-  activate?: boolean;
+  trigger_kind: 'github-issue-webhook';
+  repo_owner: string;
+  repo_name: string;
+  trigger_label: string;
+  install_id: number;
+  preset_id?: string;
+  stages?: CreateWorkflowStage[];
+  active: boolean;
 }
 
-// Backend contract. Stiglab persists workflows with flat trigger fields
+export interface CreateWorkflowStage {
+  gate_kind: WorkflowGateKind;
+  params: Record<string, unknown>;
+}
+
+// Backend read shapes. Stiglab returns workflows with flat trigger fields
 // and stages as `{ gate_kind, params }` with opaque JSON params. The UI
-// keeps a richer nested shape; the adapters below translate at the API
-// boundary so the rest of the app doesn't have to know the wire format.
+// keeps a richer nested `Workflow` shape; the adapters below translate
+// so the rest of the app doesn't have to know the wire format.
 interface BackendWorkflow {
   id: string;
   tenant_id: string;
@@ -324,19 +338,6 @@ interface BackendWorkflowStage {
   params: Record<string, unknown>;
 }
 
-interface BackendCreateWorkflowBody {
-  tenant_id: string;
-  name: string;
-  trigger_kind: 'github-issue-webhook';
-  repo_owner: string;
-  repo_name: string;
-  trigger_label: string;
-  install_id: number;
-  preset_id?: string;
-  stages?: { gate_kind: WorkflowGateKind; params: Record<string, unknown> }[];
-  active: boolean;
-}
-
 function stageFromBackend(s: BackendWorkflowStage): WorkflowStage {
   const params = (s.params ?? {}) as Record<string, unknown>;
   const name = typeof params.name === 'string' ? params.name : undefined;
@@ -357,9 +358,10 @@ function stageFromBackend(s: BackendWorkflowStage): WorkflowStage {
   };
 }
 
-function stageToBackend(
-  s: WorkflowStage,
-): { gate_kind: WorkflowGateKind; params: Record<string, unknown> } {
+// Pack a UI stage into the backend's `{ gate_kind, params }` pair. UI-only
+// display fields ride in `params` so they survive the round-trip without
+// a backend-schema change.
+export function stageToCreateStage(s: WorkflowStage): CreateWorkflowStage {
   return {
     gate_kind: s.gate_kind,
     params: {
@@ -404,30 +406,6 @@ function defaultStageName(gate: WorkflowGateKind): string {
     case 'manual-approval':
       return 'Manual approval';
   }
-}
-
-// Exposed for unit tests — the request body shape is what `validate_create_body`
-// on stiglab accepts. Lives here so the contract round-trip is covered in one
-// file alongside its readers.
-export function createWorkflowRequestToBackend(
-  req: CreateWorkflowRequest,
-): BackendCreateWorkflowBody {
-  const installId = Number.parseInt(req.trigger.install_id, 10);
-  if (!Number.isFinite(installId) || installId <= 0) {
-    throw new ApiError('install_id is required', 400);
-  }
-  return {
-    tenant_id: req.tenant_id ?? '',
-    name: req.name,
-    trigger_kind: 'github-issue-webhook',
-    repo_owner: req.trigger.repo_owner,
-    repo_name: req.trigger.repo_name,
-    trigger_label: req.trigger.label,
-    install_id: installId,
-    preset_id: req.preset,
-    stages: req.preset ? undefined : req.stages.map(stageToBackend),
-    active: req.activate ?? false,
-  };
 }
 
 export type StageRunStatus = 'pending' | 'blocked' | 'passed' | 'failed';
@@ -672,12 +650,29 @@ export const api = {
   // Workflows (issue #82) — CRUD + live runs. The API is provided by the
   // stiglab sibling sub-issue; the dashboard is the only client today.
   // The backend persists workflows with flat trigger fields and stage `params`;
-  // these wrappers translate to/from the UI's nested shape.
-  listWorkflows: async (tenantId?: string): Promise<{ workflows: Workflow[] }> => {
+  // these wrappers translate backend → UI shape.
+  listWorkflows: async (tenantId: string): Promise<{ workflows: Workflow[] }> => {
+    if (!tenantId) throw new ApiError('tenantId is required', 400);
     const raw = await request<{ workflows: BackendWorkflow[] }>(
-      `/workflows${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''}`,
+      `/workflows?tenant_id=${encodeURIComponent(tenantId)}`,
     );
     return { workflows: raw.workflows.map((w) => workflowFromBackend(w)) };
+  },
+  // Fan-out across every workspace the user belongs to. Stiglab's list
+  // endpoint is tenant-scoped; cross-tenant "do I have any workflows yet?"
+  // queries (empty-state gates, first-run redirect) need this shape. We
+  // hit `/tenants` once and one `/workflows?tenant_id=…` per workspace;
+  // fine for the workspace counts we target (typically 1–3).
+  listWorkflowsForUser: async (): Promise<{ workflows: Workflow[] }> => {
+    const { tenants } = await request<{ tenants: { id: string }[] }>('/tenants');
+    const lists = await Promise.all(
+      tenants.map((t) =>
+        request<{ workflows: BackendWorkflow[] }>(
+          `/workflows?tenant_id=${encodeURIComponent(t.id)}`,
+        ).then((r) => r.workflows.map((w) => workflowFromBackend(w))),
+      ),
+    );
+    return { workflows: lists.flat() };
   },
   getWorkflow: async (id: string): Promise<{ workflow: Workflow }> => {
     const raw = await request<{ workflow: BackendWorkflow; stages: BackendWorkflowStage[] }>(
@@ -688,7 +683,7 @@ export const api = {
   createWorkflow: async (body: CreateWorkflowRequest): Promise<{ workflow: Workflow }> => {
     const raw = await request<{ workflow: BackendWorkflow; stages?: BackendWorkflowStage[] }>(
       '/workflows',
-      { method: 'POST', body: JSON.stringify(createWorkflowRequestToBackend(body)) },
+      { method: 'POST', body: JSON.stringify(body) },
     );
     return { workflow: workflowFromBackend(raw.workflow, raw.stages ?? []) };
   },
