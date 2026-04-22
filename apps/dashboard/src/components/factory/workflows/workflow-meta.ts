@@ -32,7 +32,7 @@ export const WORKFLOW_ARTIFACT_KINDS: ArtifactKindMeta[] = [
 
 const ARTIFACT_META_BY_VALUE = Object.fromEntries(
   WORKFLOW_ARTIFACT_KINDS.map((k) => [k.value, k]),
-) as Record<WorkflowArtifactKind, ArtifactKindMeta>
+) as Partial<Record<WorkflowArtifactKind, ArtifactKindMeta>>
 
 export function artifactKindMeta(value: WorkflowArtifactKind): ArtifactKindMeta {
   return (

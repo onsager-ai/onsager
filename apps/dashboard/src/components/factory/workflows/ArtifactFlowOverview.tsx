@@ -28,7 +28,7 @@ export function ArtifactFlowOverview({
     <div className="-mx-1 overflow-x-auto pb-1">
       <div className="flex min-w-max items-center gap-1.5 px-1">
         <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
-          <Tag className="h-3 w-3" />
+          <Tag aria-hidden focusable={false} className="h-3 w-3" />
           {triggerLabel || "trigger"}
         </span>
         {stages.map((s, i) => {
@@ -41,14 +41,22 @@ export function ArtifactFlowOverview({
           const transforms = output !== input
           return (
             <div key={s.id} className="flex items-center gap-1.5">
-              <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+              <ArrowRight
+                aria-hidden
+                focusable={false}
+                className="h-3 w-3 shrink-0 text-muted-foreground"
+              />
               <ArtifactBadge
                 kind={input}
                 variant={prevOutput && prevOutput !== input ? "muted" : "default"}
               />
               {transforms && (
                 <>
-                  <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <ArrowRight
+                    aria-hidden
+                    focusable={false}
+                    className="h-3 w-3 shrink-0 text-muted-foreground"
+                  />
                   <ArtifactBadge kind={output} />
                 </>
               )}
