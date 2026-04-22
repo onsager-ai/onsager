@@ -80,21 +80,20 @@ numReplicas = 1
 #
 # Railway's PR Environments feature creates an ephemeral environment for each
 # open pull request, using this config plus a forked Postgres plugin. Each
-# preview gets its own domain like `onsager-pr-<number>.up.railway.app` and is
-# torn down automatically when the PR is closed or merged.
+# preview gets its own Railway-generated domain and is torn down automatically
+# when the PR is closed or merged.
 #
 # Enable once in the Railway dashboard:
 #   Project Settings → Pull Request Environments → Enabled
 #                    → Ephemeral Postgres: enabled (do NOT clone prod data)
 #                    → Wait for check: deploy-ready
 #
-# After enabling, the `.github/workflows/preview-environment.yml` workflow
-# posts the preview URL as a PR comment and (optionally) runs smoke tests
-# against it. The workflow needs these repository secrets:
-#
-#   RAILWAY_TOKEN           — project-scoped token with environment-read access
-#   RAILWAY_PROJECT_ID      — Railway project ID (stable across envs)
-#   RAILWAY_SERVICE_NAME    — defaults to `onsager` if unset
+# After enabling, `.github/workflows/preview-environment.yml` reacts to the
+# `deployment_status` event Railway's GitHub App emits on successful deploy
+# — it reads the preview URL from the event payload, smoke-tests
+# `/api/health`, and upserts a sticky PR comment. No Railway API token is
+# required in CI (project tokens are environment-locked and can't see
+# ephemeral PR envs anyway).
 #
 # Preview-specific overrides: smaller footprint, faster failure, no restart
 # storms. The preview entrypoint still auto-runs migrations on the fresh DB
