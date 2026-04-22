@@ -92,7 +92,7 @@ export interface WorkflowPreset {
 
 export const WORKFLOW_PRESETS: WorkflowPreset[] = [
   {
-    id: "issue-to-pr",
+    id: GITHUB_ISSUE_TO_PR_PRESET,
     label: "Issue → PR",
     description: "Agent opens a PR from an issue, waits on CI, then human merges.",
     build: githubIssueToPrPreset,
