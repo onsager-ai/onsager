@@ -1,25 +1,56 @@
-import { useEffect } from "react"
+import { lazy, Suspense, useEffect } from "react"
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
 import { ThemeProvider } from "@/components/providers/ThemeProvider"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { AppLayout } from "@/components/layout/AppLayout"
-import { FactoryOverviewPage } from "@/pages/FactoryOverviewPage"
-import { ArtifactDetailPage } from "@/pages/ArtifactDetailPage"
-import { NodesPage } from "@/pages/NodesPage"
-import { SessionsPage } from "@/pages/SessionsPage"
-import { SessionDetailPage } from "@/pages/SessionDetailPage"
+import { AppShellSkeleton } from "@/components/layout/AppShellSkeleton"
+import { PageSkeleton } from "@/components/layout/PageSkeleton"
+// Login stays eager so the unauthenticated first-paint path doesn't
+// pay for an extra chunk fetch. Every other page is lazy.
 import { LoginPage } from "@/pages/LoginPage"
-import { SettingsPage } from "@/pages/SettingsPage"
-import { GovernancePage } from "@/pages/GovernancePage"
-import { SpinePage } from "@/pages/SpinePage"
-import { ArtifactsPage } from "@/pages/ArtifactsPage"
-import { WorkspacesPage } from "@/pages/WorkspacesPage"
-import { WorkflowsPage } from "@/pages/WorkflowsPage"
-import { WorkflowStartPage } from "@/pages/WorkflowStartPage"
-import { WorkflowDetailPage } from "@/pages/WorkflowDetailPage"
 import { api } from "@/lib/api"
 import type { ReactNode } from "react"
+
+const FactoryOverviewPage = lazy(() =>
+  import("@/pages/FactoryOverviewPage").then((m) => ({ default: m.FactoryOverviewPage })),
+)
+const ArtifactsPage = lazy(() =>
+  import("@/pages/ArtifactsPage").then((m) => ({ default: m.ArtifactsPage })),
+)
+const ArtifactDetailPage = lazy(() =>
+  import("@/pages/ArtifactDetailPage").then((m) => ({ default: m.ArtifactDetailPage })),
+)
+const SpinePage = lazy(() =>
+  import("@/pages/SpinePage").then((m) => ({ default: m.SpinePage })),
+)
+const GovernancePage = lazy(() =>
+  import("@/pages/GovernancePage").then((m) => ({ default: m.GovernancePage })),
+)
+const SessionsPage = lazy(() =>
+  import("@/pages/SessionsPage").then((m) => ({ default: m.SessionsPage })),
+)
+const SessionDetailPage = lazy(() =>
+  import("@/pages/SessionDetailPage").then((m) => ({ default: m.SessionDetailPage })),
+)
+const NodesPage = lazy(() =>
+  import("@/pages/NodesPage").then((m) => ({ default: m.NodesPage })),
+)
+const WorkspacesPage = lazy(() =>
+  import("@/pages/WorkspacesPage").then((m) => ({ default: m.WorkspacesPage })),
+)
+const WorkflowsPage = lazy(() =>
+  import("@/pages/WorkflowsPage").then((m) => ({ default: m.WorkflowsPage })),
+)
+const WorkflowStartPage = lazy(() =>
+  import("@/pages/WorkflowStartPage").then((m) => ({ default: m.WorkflowStartPage })),
+)
+const WorkflowDetailPage = lazy(() =>
+  import("@/pages/WorkflowDetailPage").then((m) => ({ default: m.WorkflowDetailPage })),
+)
+const SettingsPage = lazy(() =>
+  import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,11 +65,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading, authEnabled } = useAuth()
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading...</p>
-      </div>
-    )
+    return <AppShellSkeleton />
   }
 
   // If auth is not enabled, allow access
@@ -52,6 +79,19 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   }
 
   return <>{children}</>
+}
+
+// Wraps a lazy page's element in a Suspense with a variant-appropriate
+// skeleton. Chunk loads are typically sub-second but on slow connections
+// this keeps the main area non-empty while the JS streams in.
+function LazyRoute({
+  variant = "default",
+  children,
+}: {
+  variant?: "list" | "detail" | "default"
+  children: ReactNode
+}) {
+  return <Suspense fallback={<PageSkeleton variant={variant} />}>{children}</Suspense>
 }
 
 // Redirects users with zero workspaces to /workspaces?welcome=1 on their
@@ -111,6 +151,10 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
   const location = useLocation()
   const gateEnabled = authEnabled && !!user
 
+  // Fire both queries in parallel — the old code chained `workflows` on
+  // `hasWorkspace`, which serialized two RTTs. The workflows endpoint is
+  // safe to call without a workspace (it filters by the current user's
+  // membership); we only *use* the result when `hasWorkspace` is true.
   const { data: workspacesData } = useQuery({
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
@@ -119,11 +163,11 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
   })
   const hasWorkspace = (workspacesData?.tenants?.length ?? 0) > 0
 
-  const { data: workflowsData, isLoading } = useQuery({
+  const { data: workflowsData, isLoading: workflowsLoading } = useQuery({
     queryKey: ["workflows", "user"],
     queryFn: () => api.listWorkflowsForUser(),
     staleTime: 30_000,
-    enabled: gateEnabled && hasWorkspace,
+    enabled: gateEnabled,
   })
   const workflowsCount = workflowsData?.workflows?.length ?? 0
 
@@ -144,7 +188,7 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
   if (
     gateEnabled &&
     hasWorkspace &&
-    !isLoading &&
+    !workflowsLoading &&
     workflowsCount === 0 &&
     !seen &&
     location.pathname === "/"
@@ -159,11 +203,7 @@ function AppRoutes() {
   const { user, loading, authEnabled } = useAuth()
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading...</p>
-      </div>
-    )
+    return <AppShellSkeleton />
   }
 
   return (
@@ -183,19 +223,58 @@ function AppRoutes() {
               <OnboardingGate>
                 <WorkflowsFirstRunGate>
                   <Routes>
-                    <Route path="/" element={<FactoryOverviewPage />} />
-                    <Route path="/artifacts" element={<ArtifactsPage />} />
-                    <Route path="/artifacts/:id" element={<ArtifactDetailPage />} />
-                    <Route path="/spine" element={<SpinePage />} />
-                    <Route path="/governance" element={<GovernancePage />} />
-                    <Route path="/sessions" element={<SessionsPage />} />
-                    <Route path="/sessions/:id" element={<SessionDetailPage />} />
-                    <Route path="/nodes" element={<NodesPage />} />
-                    <Route path="/workspaces" element={<WorkspacesPage />} />
-                    <Route path="/workflows" element={<WorkflowsPage />} />
-                    <Route path="/workflows/start" element={<WorkflowStartPage />} />
-                    <Route path="/workflows/:id" element={<WorkflowDetailPage />} />
-                    <Route path="/settings" element={<SettingsPage />} />
+                    <Route
+                      path="/"
+                      element={<LazyRoute><FactoryOverviewPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/artifacts"
+                      element={<LazyRoute variant="list"><ArtifactsPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/artifacts/:id"
+                      element={<LazyRoute variant="detail"><ArtifactDetailPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/spine"
+                      element={<LazyRoute variant="list"><SpinePage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/governance"
+                      element={<LazyRoute><GovernancePage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/sessions"
+                      element={<LazyRoute variant="list"><SessionsPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/sessions/:id"
+                      element={<LazyRoute variant="detail"><SessionDetailPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/nodes"
+                      element={<LazyRoute variant="list"><NodesPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/workspaces"
+                      element={<LazyRoute variant="list"><WorkspacesPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/workflows"
+                      element={<LazyRoute variant="list"><WorkflowsPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/workflows/start"
+                      element={<LazyRoute><WorkflowStartPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/workflows/:id"
+                      element={<LazyRoute variant="detail"><WorkflowDetailPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/settings"
+                      element={<LazyRoute><SettingsPage /></LazyRoute>}
+                    />
                   </Routes>
                 </WorkflowsFirstRunGate>
               </OnboardingGate>
