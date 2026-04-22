@@ -5,7 +5,6 @@ import { api, type CreateWorkflowRequest, type GitHubAppInstallation } from "@/l
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CardStackEditor } from "./CardStackEditor"
-import { ChatBuilder } from "./ChatBuilder"
 import { PresetPicker } from "./PresetPicker"
 import {
   draftToRequestTrigger,
@@ -71,8 +70,6 @@ export function WorkflowBuilder({
       </div>
 
       <PresetPicker draft={draft} onApply={setDraft} />
-
-      <ChatBuilder draft={draft} onChange={setDraft} />
 
       <CardStackEditor
         tenantId={tenantId}
