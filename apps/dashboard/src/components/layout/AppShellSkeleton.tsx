@@ -51,7 +51,7 @@ export function AppShellSkeleton() {
             <Skeleton className="h-9 w-9 rounded-full" />
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-6">
+        <main className="flex-1 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:p-6 md:pb-6">
           <PageSkeleton />
         </main>
       </div>
