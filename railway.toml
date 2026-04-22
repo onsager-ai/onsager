@@ -73,3 +73,46 @@ numReplicas = 1
 #   GITHUB_TOKEN              — optional PAT used by the portal for posting
 #                               check runs / comments when installation-token
 #                               signing isn't wired up yet
+
+# =============================================================================
+# Preview (per-PR) environments
+# =============================================================================
+#
+# Railway's PR Environments feature creates an ephemeral environment for each
+# open pull request, using this config plus a forked Postgres plugin. Each
+# preview gets its own domain like `onsager-pr-<number>.up.railway.app` and is
+# torn down automatically when the PR is closed or merged.
+#
+# Enable once in the Railway dashboard:
+#   Project Settings → Pull Request Environments → Enabled
+#                    → Ephemeral Postgres: enabled (do NOT clone prod data)
+#                    → Wait for check: deploy-ready
+#
+# After enabling, the `.github/workflows/preview-environment.yml` workflow
+# posts the preview URL as a PR comment and (optionally) runs smoke tests
+# against it. The workflow needs these repository secrets:
+#
+#   RAILWAY_TOKEN           — project-scoped token with environment-read access
+#   RAILWAY_PROJECT_ID      — Railway project ID (stable across envs)
+#   RAILWAY_SERVICE_NAME    — defaults to `onsager` if unset
+#
+# Preview-specific overrides: smaller footprint, faster failure, no restart
+# storms. The preview entrypoint still auto-runs migrations on the fresh DB
+# (see crates/stiglab/deploy/entrypoint.sh) so no additional bootstrap is
+# required.
+
+[environments.preview.deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 180
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+numReplicas = 1
+
+# Preview-only variable defaults. Secrets (CREDENTIAL_KEY, OAuth client
+# secrets, GITHUB_TOKEN) are inherited from the project-level shared vars;
+# anything here is a safe, non-sensitive default that distinguishes a preview
+# deploy from production at runtime.
+[environments.preview.variables]
+STIGLAB_NODE_NAME = "preview-${{ github.pr_number }}"
+STIGLAB_MAX_SESSIONS = "2"
+ONSAGER_PREVIEW = "true"

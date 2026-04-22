@@ -1,0 +1,173 @@
+name: preview-environment
+
+# Attaches PR previews to Railway's native PR Environments feature.
+#
+# Railway itself creates the ephemeral environment (named `pr-<number>`) and
+# the forked Postgres plugin when a PR is opened — those are configured in
+# the Railway dashboard, not here. This workflow's job is the glue:
+#
+#   - resolve the preview URL once Railway reports a successful deploy
+#   - post/update a sticky PR comment with the URL and smoke-test status
+#   - run a lightweight smoke test against the preview
+#   - acknowledge teardown when the PR closes
+#
+# The preview env is torn down by Railway automatically on PR close. We do
+# not delete anything ourselves.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  announce:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets
+        id: secrets
+        run: |
+          if [ -z "${{ secrets.RAILWAY_TOKEN }}" ] || [ -z "${{ secrets.RAILWAY_PROJECT_ID }}" ]; then
+            echo "::warning::RAILWAY_TOKEN / RAILWAY_PROJECT_ID not configured — skipping preview URL announcement"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for Railway preview deploy
+        if: steps.secrets.outputs.configured == 'true'
+        id: wait
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_SERVICE_NAME: ${{ secrets.RAILWAY_SERVICE_NAME || 'onsager' }}
+        run: |
+          set -e
+          # Poll up to ~10 minutes. Railway builds the full Rust workspace on
+          # a fresh env, which commonly takes 4–7 minutes.
+          attempts=60
+          sleep_s=10
+          for i in $(seq 1 $attempts); do
+            if url=$(scripts/preview-url.sh 2>/dev/null); then
+              echo "url=$url" >> "$GITHUB_OUTPUT"
+              echo "Preview ready: $url"
+              exit 0
+            fi
+            echo "[$i/$attempts] preview not ready yet; sleeping ${sleep_s}s"
+            sleep $sleep_s
+          done
+          echo "::warning::Timed out waiting for preview deploy"
+          echo "url=" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke-test /api/health
+        if: steps.wait.outputs.url != ''
+        id: smoke
+        run: |
+          url="${{ steps.wait.outputs.url }}"
+          # Retry a few times — the healthcheck can lag the deploy-success event.
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o /tmp/health.json -w "%{http_code}" "$url/api/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "status=ok" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+
+      - name: Upsert preview comment
+        if: always() && steps.secrets.outputs.configured == 'true'
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.wait.outputs.url }}
+          SMOKE_STATUS: ${{ steps.smoke.outputs.status }}
+        with:
+          script: |
+            const marker = '<!-- onsager-preview -->';
+            const url = process.env.PREVIEW_URL || '';
+            const smoke = process.env.SMOKE_STATUS || 'unknown';
+
+            const body = url
+              ? [
+                  marker,
+                  '### Preview environment',
+                  '',
+                  `| | |`,
+                  `|---|---|`,
+                  `| URL | ${url} |`,
+                  `| Dashboard | ${url}/ |`,
+                  `| Health | ${url}/api/health |`,
+                  `| Smoke | \`${smoke}\` |`,
+                  '',
+                  `Postgres is a fresh plugin fork — migrations run automatically at boot. The environment is torn down when this PR closes.`,
+                ].join('\n')
+              : [
+                  marker,
+                  '### Preview environment',
+                  '',
+                  'Preview deploy did not report ready within the timeout. Check the Railway project for the `pr-' + context.issue.number + '` environment, or inspect this workflow run.',
+                ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  teardown-notice:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark preview as torn down
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- onsager-preview -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+            if (!existing) return;
+            const body = [
+              marker,
+              '### Preview environment',
+              '',
+              'Torn down — the `pr-' + context.issue.number + '` environment and its Postgres plugin have been released by Railway.',
+            ].join('\n');
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
