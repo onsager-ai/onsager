@@ -85,8 +85,9 @@ numReplicas = 1
 #
 # Enable once in the Railway dashboard:
 #   Project Settings → Pull Request Environments → Enabled
-#                    → Ephemeral Postgres: enabled (do NOT clone prod data)
 #                    → Wait for check: deploy-ready
+# Postgres forks as a fresh empty instance per PR by default — volume data
+# is not copied unless explicitly opted in.
 #
 # After enabling, `.github/workflows/preview-environment.yml` reacts to the
 # `deployment_status` event Railway's GitHub App emits on successful deploy

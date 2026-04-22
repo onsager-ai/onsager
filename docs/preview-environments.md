@@ -59,9 +59,14 @@ project tokens are environment-locked and can't see ephemeral PR envs.
 
 2. **Enable PR environments**
    Railway dashboard → Project Settings → *Pull Request Environments* → **Enabled**
-   - Ephemeral Postgres: **Enabled** (do not clone prod data)
    - Wait-for-check: `deploy-ready`
    - Environment TTL: leave default (tears down with PR)
+
+   Railway forks the Postgres plugin as a fresh empty instance per PR by
+   default — volume data is not copied unless you explicitly opt in. If
+   you see prod data leaking into a preview DB, look for a
+   "Copy volume contents to new environments" toggle on the Postgres
+   service's volume settings and turn it off; otherwise, no action.
 
 3. **Verify**
    Open a throwaway PR. When Railway's PR-env deploy finishes, the
