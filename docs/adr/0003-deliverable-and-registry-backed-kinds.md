@@ -16,15 +16,18 @@ conflations motivate this ADR:
    state. The name reads as "workflow output container" but means
    "per-artifact version snapshot." There is no type for a workflow's
    aggregate output.
-2. **Closed kinds in two places.** `Kind` in `onsager-artifact` is a
-   closed enum (`Code | Document | PullRequest | Custom(String)`), and
-   `WorkflowArtifactKind` in `apps/dashboard/src/lib/api.ts:253` is a
-   hardcoded TS union (`'github-issue' | 'github-pr'`). Adding a kind
-   requires synchronized edits across the artifact crate, the dashboard,
-   forge, and the registry. `onsager-registry` already carries
-   `TypeDefinition`, `RegisteredType`, `ArtifactAdapter`, `GateEvaluator`,
-   and seed catalogs at `crates/onsager-registry/src/catalog.rs:21-68`,
-   but those facts are not the source of truth for the dashboard or forge.
+2. **Typed but still code-coupled kinds in two places.** `Kind` in
+   `onsager-artifact` has a small built-in set
+   (`Code | Document | PullRequest`) plus `Custom(String)`, so it is
+   typed but not actually closed. `WorkflowArtifactKind` in
+   `apps/dashboard/src/lib/api.ts:253` is still a hardcoded TS union
+   (`'github-issue' | 'github-pr'`). In practice, adding or fully
+   supporting a kind still requires synchronized edits across the
+   artifact crate, the dashboard, forge, and registry-facing code.
+   `onsager-registry` already carries `TypeDefinition`,
+   `RegisteredType`, `ArtifactAdapter`, `GateEvaluator`, and seed
+   catalogs at `crates/onsager-registry/src/catalog.rs:21-68`, but
+   those facts are not the source of truth for the dashboard or forge.
 3. **Flow visualization duplication.** The Governed pipeline preset
    renders `Issue → PR → PR → PR → PR` because `ArtifactFlowOverview.tsx`
    maps one pill per stage's input artifact, conflating "where are we in
@@ -114,8 +117,9 @@ Ship in two waves:
   connotations (scratchpad, transient) for what is actually a durable,
   signed deliverable. The mechanics (typed channels, reducers, nodes
   emitting partial updates) are kept under native vocabulary.
-- **Closed `Kind` enum in `onsager-artifact`** — doesn't scale to new
-  kinds without synchronized edits across subsystems. Moved to registry.
+- **Keeping built-in `Kind` tags code-defined in `onsager-artifact`** —
+  doesn't scale to new kinds without synchronized edits across
+  subsystems. Moved to registry.
 - **Decomposing PR into peer artifacts** (`Commit`, `Check`, `Review`,
   `Merge`) — rejected: these cannot exist without a PR and should be
   intrinsic fields, matching GitHub's actual resource model.
@@ -132,7 +136,7 @@ Ship in two waves:
 
 - Adding `Deployment`, `Session`, `Release`, etc. is a registry change,
   not a cross-subsystem refactor. The dashboard's kind picker becomes
-  runtime data from `GET /workflow/kinds`.
+  runtime data from `GET /api/workflow/kinds`.
 - Flow visualization separates cleanly: the strip shows
   gates (process); a Deliverable panel shows typed artifact state
   (product). The Governed-pipeline duplication disappears by
