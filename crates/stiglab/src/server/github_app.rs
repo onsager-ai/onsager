@@ -238,6 +238,60 @@ pub async fn list_installation_repos(
     Ok(out)
 }
 
+#[derive(Debug, Deserialize)]
+struct LabelJson {
+    name: String,
+    color: Option<String>,
+    description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RepoLabel {
+    pub name: String,
+    pub color: Option<String>,
+    pub description: Option<String>,
+}
+
+/// List the labels defined on a repo. Paginated up to 200 (two 100-item
+/// pages) — same budget as `list_installation_repos`. Repos with more
+/// labels than that are rare; the combobox's free-text "create label"
+/// path still works when a label isn't in the returned set.
+pub async fn list_repo_labels(
+    token: &InstallationToken,
+    owner: &str,
+    repo: &str,
+) -> anyhow::Result<Vec<RepoLabel>> {
+    let mut out = Vec::new();
+    for page in 1..=2 {
+        let url = format!(
+            "https://api.github.com/repos/{owner}/{repo}/labels?per_page=100&page={page}"
+        );
+        let resp = gh_client()?
+            .get(&url)
+            .bearer_auth(&token.token)
+            .header("Accept", "application/vnd.github+json")
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("list_repo_labels failed ({status}): {body}");
+        }
+        let parsed: Vec<LabelJson> = resp.json().await?;
+        let count = parsed.len();
+        out.extend(parsed.into_iter().map(|l| RepoLabel {
+            name: l.name,
+            color: l.color,
+            description: l.description,
+        }));
+        if count < 100 {
+            break;
+        }
+    }
+    Ok(out)
+}
+
 /// Fetch a repo's default branch via the installation token. Used by
 /// `add_project` to populate `default_branch` automatically.
 pub async fn get_repo_default_branch(

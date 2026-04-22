@@ -695,6 +695,60 @@ pub async fn list_accessible_repos(
     }
 }
 
+/// GET /api/tenants/:id/github-installations/:install_id/repos/:owner/:repo/labels
+/// — list labels defined on a repo, so workflow triggers can offer a
+/// combobox of existing labels instead of free-text entry.
+pub async fn list_repo_labels(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path((tenant_id, install_id, owner, repo)): Path<(String, String, String, String)>,
+) -> Response {
+    let user_id = match require_auth_user(&auth_user) {
+        Ok(id) => id.to_string(),
+        Err(r) => return r,
+    };
+    if let Err(r) = require_tenant_member(&state.db, &user_id, &tenant_id).await {
+        return r;
+    }
+    match db::get_github_app_installation(&state.db, &install_id).await {
+        Ok(Some(inst)) if inst.tenant_id == tenant_id => {}
+        Ok(_) => return not_found("installation not found"),
+        Err(e) => {
+            tracing::error!("failed to get installation: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    }
+
+    match installation_token_for(&state.db, &install_id).await {
+        Ok(Some(token)) => match github_app::list_repo_labels(&token, &owner, &repo).await {
+            Ok(labels) => Json(serde_json::json!({ "labels": labels })).into_response(),
+            Err(e) => {
+                tracing::warn!("list_repo_labels failed: {e}");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({ "error": "GitHub API request failed" })),
+                )
+                    .into_response()
+            }
+        },
+        Ok(None) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "GitHub App is not configured on this server"
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!("failed to mint installation token: {e}");
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": "GitHub App auth failed" })),
+            )
+                .into_response()
+        }
+    }
+}
+
 // ── Install-flow routes ──
 
 #[derive(Debug, Deserialize)]
