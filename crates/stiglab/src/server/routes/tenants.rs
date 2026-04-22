@@ -704,10 +704,10 @@ pub async fn list_repo_labels(
     Path((tenant_id, install_id, owner, repo)): Path<(String, String, String, String)>,
 ) -> Response {
     let user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id.to_string(),
+        Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, user_id, &tenant_id).await {
         return r;
     }
     match db::get_github_app_installation(&state.db, &install_id).await {
