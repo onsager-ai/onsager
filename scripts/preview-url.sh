@@ -29,7 +29,14 @@ API="https://backboard.railway.com/graphql/v2"
 
 gql() {
     local query="$1"
+    # Fail fast on stalled/flaky networks so the CI poller can retry on its
+    # own cadence instead of hanging until the workflow timeout.
     curl -sS -X POST "$API" \
+        --connect-timeout 10 \
+        --max-time 30 \
+        --retry 2 \
+        --retry-delay 1 \
+        --retry-all-errors \
         -H "Authorization: Bearer $RAILWAY_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$(printf '{"query":%s}' "$(printf '%s' "$query" | jq -Rs .)")"
