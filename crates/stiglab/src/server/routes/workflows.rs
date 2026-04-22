@@ -481,13 +481,24 @@ fn map_activation_error(e: ActivationError) -> Response {
         ActivationError::RepoOutOfScope { owner, repo } => bad_request(format!(
             "repo {owner}/{repo} is outside the workspace install scope"
         )),
-        ActivationError::MissingGithubPermission { action, details } => {
-            tracing::warn!("activation missing github permission: {action}");
+        ActivationError::MissingGithubPermission {
+            action,
+            permission,
+            details,
+            upstream,
+        } => {
+            tracing::warn!(
+                action = %action,
+                permission = %permission,
+                upstream = %upstream,
+                "activation missing github permission"
+            );
             (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
                     "error": details,
                     "code": "github_permission_missing",
+                    "permission": permission,
                 })),
             )
                 .into_response()
