@@ -61,9 +61,9 @@ export function TriggerCard({
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
               <Tag className="h-4 w-4" />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 space-y-1">
               <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                Trigger
+                Trigger · starts the flow
               </div>
               <div className="truncate text-sm font-medium">{summary.title}</div>
               <div className="truncate text-xs text-muted-foreground">
@@ -77,7 +77,7 @@ export function TriggerCard({
       <Sheet open={editing} onOpenChange={setEditing}>
         <SheetContent
           side={isMobile ? "bottom" : "right"}
-          className={isMobile ? "rounded-t-xl" : ""}
+          className={isMobile ? "h-[85dvh] rounded-t-xl" : ""}
         >
           <SheetHeader>
             <SheetTitle>Edit trigger</SheetTitle>
@@ -85,7 +85,7 @@ export function TriggerCard({
               Pick the install, repo, and label that starts the workflow.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4">
             <TriggerForm
               tenantId={tenantId}
               installations={installations}

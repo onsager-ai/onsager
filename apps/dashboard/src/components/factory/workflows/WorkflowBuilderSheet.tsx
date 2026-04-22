@@ -44,7 +44,7 @@ export function WorkflowBuilderSheet({ open, onOpenChange }: WorkflowBuilderShee
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={isMobile ? "bottom" : "right"}
-        className={isMobile ? "h-[90vh] rounded-t-xl" : "sm:max-w-xl"}
+        className={isMobile ? "h-[90dvh] rounded-t-xl" : "sm:max-w-xl"}
       >
         <SheetHeader>
           <SheetTitle>Create workflow</SheetTitle>
@@ -52,7 +52,7 @@ export function WorkflowBuilderSheet({ open, onOpenChange }: WorkflowBuilderShee
             Chat out the idea, then tap cards to tune.
           </SheetDescription>
         </SheetHeader>
-        <div className="flex-1 overflow-y-auto px-4 pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
           {tenantId ? (
             <WorkflowBuilder
               tenantId={tenantId}

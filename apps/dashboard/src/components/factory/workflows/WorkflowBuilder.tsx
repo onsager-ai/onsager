@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CardStackEditor } from "./CardStackEditor"
 import { ChatBuilder } from "./ChatBuilder"
+import { PresetPicker } from "./PresetPicker"
 import {
   draftToRequestTrigger,
   emptyDraft,
@@ -68,6 +69,8 @@ export function WorkflowBuilder({
           placeholder="e.g. Issue → PR pipeline"
         />
       </div>
+
+      <PresetPicker draft={draft} onApply={setDraft} />
 
       <ChatBuilder draft={draft} onChange={setDraft} />
 
