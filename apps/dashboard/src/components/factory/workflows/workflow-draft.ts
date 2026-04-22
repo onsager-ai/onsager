@@ -80,6 +80,63 @@ export function githubIssueToPrPreset(
   }
 }
 
+// Preset catalog — drives the picker shown at the top of the workflow
+// builder. Each entry returns a fresh draft; the trigger stays empty and
+// is filled in via the TriggerCard.
+export interface WorkflowPreset {
+  id: string
+  label: string
+  description: string
+  build: (trigger: WorkflowTriggerDraft) => WorkflowDraft
+}
+
+export const WORKFLOW_PRESETS: WorkflowPreset[] = [
+  {
+    id: "issue-to-pr",
+    label: "Issue → PR",
+    description: "Agent opens a PR from an issue, waits on CI, then human merges.",
+    build: githubIssueToPrPreset,
+  },
+  {
+    id: "agent-only",
+    label: "Agent only",
+    description: "Run a single agent session on each triggered issue.",
+    build: (trigger) => ({
+      name: `${trigger.repo_owner || "agent"}/${trigger.repo_name || "session"} — agent only`,
+      trigger,
+      stages: [makeStage("agent-session", "github-issue", "Agent session")],
+    }),
+  },
+  {
+    id: "ci-then-merge",
+    label: "CI → Merge",
+    description: "Wait for CI to pass on a PR, then require a human to merge.",
+    build: (trigger) => ({
+      name: `${trigger.repo_owner || "repo"}/${trigger.repo_name || "pr"} — CI to merge`,
+      trigger,
+      stages: [
+        makeStage("external-check", "github-pr", "CI check"),
+        makeStage("manual-approval", "github-pr", "Merge approval"),
+      ],
+    }),
+  },
+  {
+    id: "governed-pipeline",
+    label: "Governed pipeline",
+    description: "Agent builds, CI checks, Synodic governs, human merges.",
+    build: (trigger) => ({
+      name: `${trigger.repo_owner || "repo"}/${trigger.repo_name || "pipeline"} — governed`,
+      trigger,
+      stages: [
+        makeStage("agent-session", "github-issue", "Spec → PR"),
+        makeStage("external-check", "github-pr", "CI check"),
+        makeStage("governance", "github-pr", "Synodic gate"),
+        makeStage("manual-approval", "github-pr", "Merge approval"),
+      ],
+    }),
+  },
+]
+
 export function isTriggerReady(t: WorkflowTriggerDraft): boolean {
   return (
     t.install_id.trim() !== "" &&

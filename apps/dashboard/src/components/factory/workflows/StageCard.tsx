@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ChevronRight, Trash2 } from "lucide-react"
+import { ArrowRight, ChevronRight, Trash2 } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -13,9 +13,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import type { WorkflowStage } from "@/lib/api"
+import { ArtifactBadge } from "./ArtifactBadge"
 import { ArtifactKindSelect } from "./ArtifactKindSelect"
 import { GateKindToggle } from "./GateKindToggle"
-import { GATE_KINDS } from "./workflow-meta"
+import { GATE_KINDS, outputArtifactKind } from "./workflow-meta"
 
 // Single source of truth for gate kind metadata lives in
 // `workflow-meta.ts`; derive per-gate lookups from there so the stage
@@ -39,6 +40,8 @@ export function StageCard({ stage, index, onChange, onRemove }: StageCardProps) 
   const isMobile = useIsMobile()
   const meta = GATE_META[stage.gate_kind]
   const Icon = meta.icon
+  const output = outputArtifactKind(stage.gate_kind, stage.artifact_kind)
+  const transforms = output !== stage.artifact_kind
 
   return (
     <>
@@ -60,13 +63,25 @@ export function StageCard({ stage, index, onChange, onRemove }: StageCardProps) 
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
               <Icon className="h-4 w-4" />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 space-y-1">
               <div className="text-xs uppercase tracking-wide text-muted-foreground">
                 Stage {index + 1} — {meta.label}
               </div>
               <div className="truncate text-sm font-medium">{stage.name}</div>
-              <div className="truncate text-xs text-muted-foreground">
-                on {stage.artifact_kind}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  in
+                </span>
+                <ArtifactBadge kind={stage.artifact_kind} />
+                {transforms && (
+                  <>
+                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      out
+                    </span>
+                    <ArtifactBadge kind={output} />
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -76,7 +91,7 @@ export function StageCard({ stage, index, onChange, onRemove }: StageCardProps) 
       <Sheet open={editing} onOpenChange={setEditing}>
         <SheetContent
           side={isMobile ? "bottom" : "right"}
-          className={isMobile ? "rounded-t-xl" : ""}
+          className={isMobile ? "h-[85dvh] rounded-t-xl" : ""}
         >
           <SheetHeader>
             <SheetTitle>Edit stage</SheetTitle>
@@ -84,7 +99,7 @@ export function StageCard({ stage, index, onChange, onRemove }: StageCardProps) 
               Pick a gate kind and what it operates on.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4">
             <div className="space-y-1.5">
               <label htmlFor={`stage-name-${stage.id}`} className="text-sm font-medium">
                 Name
@@ -104,12 +119,25 @@ export function StageCard({ stage, index, onChange, onRemove }: StageCardProps) 
               />
             </div>
             <div className="space-y-1.5">
-              <span className="text-sm font-medium">Artifact kind</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-medium">Input artifact</span>
+                {transforms && (
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                    produces
+                    <ArtifactBadge kind={output} size="sm" />
+                  </span>
+                )}
+              </div>
               <ArtifactKindSelect
                 id={`stage-kind-${stage.id}`}
                 value={stage.artifact_kind}
                 onChange={(artifact_kind) => onChange({ ...stage, artifact_kind })}
               />
+              <p className="text-xs text-muted-foreground">
+                {transforms
+                  ? "This stage reads the input artifact and produces a new one."
+                  : "This stage inspects the artifact and passes it through."}
+              </p>
             </div>
           </div>
           <SheetFooter className="gap-2">
