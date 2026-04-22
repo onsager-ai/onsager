@@ -58,9 +58,12 @@ provisioning in GitHub Actions.
    - Environment TTL: leave default (tears down with PR)
 
 2. **Create a project-scoped Railway token**
-   Dashboard → Account Settings → Tokens → *New token* → scope to this
-   project. Read-only is sufficient; the workflow never mutates Railway
-   state.
+   Dashboard → *this project* → Settings → Tokens → *New token*. Use a
+   **project token**, not an account token — it's bound to this project
+   and can't touch others on the account. Railway doesn't expose a
+   read-only sub-scope; the workflow only reads (one GraphQL query per
+   poll), but the token itself can mutate project state, so treat it like
+   any other deploy secret and rotate on leak.
 
 3. **Set GitHub repo secrets**
 
