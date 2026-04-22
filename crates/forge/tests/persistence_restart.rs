@@ -11,7 +11,7 @@
 //! `crates/onsager-warehouse/tests/warehouse_flow.rs`.
 
 use forge::core::persistence;
-use onsager_artifact::{Artifact, ArtifactId, ArtifactState, BundleId, Kind};
+use onsager_artifact::{Artifact, ArtifactId, ArtifactState, ArtifactVersionId, Kind};
 use sqlx::PgPool;
 
 fn db_url() -> Option<String> {
@@ -45,7 +45,7 @@ async fn reset(pool: &PgPool, artifact_id: &str) {
         .execute(pool)
         .await
         .ok();
-    sqlx::query("UPDATE artifacts SET current_bundle_id = NULL WHERE artifact_id = $1")
+    sqlx::query("UPDATE artifacts SET current_version_id = NULL WHERE artifact_id = $1")
         .bind(artifact_id)
         .execute(pool)
         .await
@@ -86,7 +86,7 @@ async fn restart_in_mid_tick_preserves_state_and_bundle() {
     advanced.artifact_id = ArtifactId::new(artifact_id);
     advanced.state = ArtifactState::Released;
     advanced.current_version = 2;
-    advanced.current_bundle_id = Some(BundleId::new("bnd_restart_test_abc"));
+    advanced.current_version_id = Some(ArtifactVersionId::new("ver_restart_test_abc"));
 
     persistence::persist_artifact_state(&pool, &advanced)
         .await
@@ -105,10 +105,10 @@ async fn restart_in_mid_tick_preserves_state_and_bundle() {
     assert_eq!(reloaded_artifact.current_version, 2);
     assert_eq!(
         reloaded_artifact
-            .current_bundle_id
+            .current_version_id
             .as_ref()
             .map(|b| b.as_str()),
-        Some("bnd_restart_test_abc"),
+        Some("ver_restart_test_abc"),
     );
 
     reset(&pool, artifact_id).await;

@@ -49,6 +49,8 @@ async fn propose_then_approve_type_lifecycle() {
         gate_ids: vec!["HumanApproval".into()],
         producer_profile_id: Some("Human".into()),
         config: serde_json::json!({}),
+        intrinsic_schema: serde_json::Value::Null,
+        merge_rule: Default::default(),
     };
 
     // propose inserts once

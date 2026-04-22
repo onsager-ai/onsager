@@ -1,0 +1,189 @@
+name: preview-environment
+
+# Attaches PR previews to Railway's native PR Environments feature.
+#
+# Railway creates the ephemeral environment (`pr-<number>`), forks Postgres,
+# builds, and deploys. Its GitHub integration emits a `deployment_status`
+# event when the preview is live — we consume that event here to smoke-test
+# the URL and post a sticky PR comment. When the PR closes, Railway tears
+# the env down; we update the comment to note that.
+#
+# No Railway API token is needed: the URL arrives in the event payload, and
+# Railway owns the deploy lifecycle end-to-end.
+
+on:
+  deployment_status:
+  pull_request:
+    types: [closed]
+
+concurrency:
+  group: preview-${{ github.event.deployment.environment || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  pull-requests: write
+  contents: read
+  deployments: read
+
+jobs:
+  announce:
+    # Only react to successful Railway preview deploys. Railway names its PR
+    # environments `pr-<N>` — anything else is prod or a non-PR env and we
+    # ignore it here.
+    if: >-
+      github.event_name == 'deployment_status' &&
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment.environment, 'pr-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract PR number from environment name
+        id: pr
+        env:
+          ENV_NAME: ${{ github.event.deployment.environment }}
+        run: |
+          # Railway uses `pr-<N>` (sometimes `pr-<N>-<slug>`). Pull the first
+          # numeric segment; bail cleanly if the convention ever changes.
+          pr_num=$(printf '%s' "$ENV_NAME" | sed -nE 's/^pr-([0-9]+).*/\1/p')
+          if [ -z "$pr_num" ]; then
+            echo "::warning::Could not extract PR number from deployment environment '$ENV_NAME'"
+            exit 0
+          fi
+          echo "number=$pr_num" >> "$GITHUB_OUTPUT"
+
+      - name: Pick preview URL from event payload
+        id: url
+        env:
+          ENV_URL: ${{ github.event.deployment_status.environment_url }}
+          TARGET_URL: ${{ github.event.deployment_status.target_url }}
+        run: |
+          # `environment_url` is what Railway sets for PR envs; `target_url`
+          # is the fallback (links to the deploy page) when no environment
+          # URL is provided.
+          url="$ENV_URL"
+          [ -n "$url" ] || url="$TARGET_URL"
+          if [ -z "$url" ]; then
+            echo "::warning::deployment_status event had no URL"
+            exit 0
+          fi
+          echo "value=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke-test /api/health
+        if: steps.url.outputs.value != ''
+        id: smoke
+        env:
+          URL: ${{ steps.url.outputs.value }}
+        run: |
+          # Retry a few times — the healthcheck can lag the deploy-success event.
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              --connect-timeout 5 --max-time 15 \
+              "$URL/api/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "status=ok" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+
+      - name: Upsert preview comment
+        if: steps.pr.outputs.number != '' && steps.url.outputs.value != ''
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PREVIEW_URL: ${{ steps.url.outputs.value }}
+          SMOKE_STATUS: ${{ steps.smoke.outputs.status }}
+        with:
+          script: |
+            const marker = '<!-- onsager-preview -->';
+            const pr = parseInt(process.env.PR_NUMBER, 10);
+            const url = process.env.PREVIEW_URL;
+            const smoke = process.env.SMOKE_STATUS || 'unknown';
+
+            const body = [
+              marker,
+              '### Preview environment',
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| URL | ${url} |`,
+              `| Dashboard | ${url}/ |`,
+              `| Health | ${url}/api/health |`,
+              `| Smoke | \`${smoke}\` |`,
+              '',
+              `Postgres is a fresh plugin fork — migrations run automatically at boot. The environment is torn down when this PR closes.`,
+            ].join('\n');
+
+            try {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr,
+                per_page: 100,
+              });
+              const existing = comments.find(c => c.body && c.body.startsWith(marker));
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr,
+                  body,
+                });
+              }
+            } catch (error) {
+              // Downgrade 403s (restricted org settings, archived repos, etc.)
+              // to warnings — the comment is informational.
+              if (error && (error.status === 403 || error.response?.status === 403)) {
+                core.warning('Skipping preview comment: workflow token lacks permission to write PR comments.');
+                return;
+              }
+              throw error;
+            }
+
+  teardown-notice:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark preview as torn down
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- onsager-preview -->';
+            try {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                per_page: 100,
+              });
+              const existing = comments.find(c => c.body && c.body.startsWith(marker));
+              if (!existing) return;
+              const body = [
+                marker,
+                '### Preview environment',
+                '',
+                'Torn down — the `pr-' + context.issue.number + '` environment and its Postgres plugin have been released by Railway.',
+              ].join('\n');
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } catch (error) {
+              if (error && (error.status === 403 || error.response?.status === 403)) {
+                core.warning('Skipping teardown comment: workflow token lacks permission to write PR comments.');
+                return;
+              }
+              throw error;
+            }

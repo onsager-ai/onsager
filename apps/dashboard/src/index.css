@@ -130,3 +130,25 @@
     @apply font-sans;
     }
 }
+
+/* Shimmer used by <Skeleton> — a moving highlight bar feels less static
+   than tailwind's pulse and signals "this is loading" more clearly. */
+@keyframes onsager-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted) 0%,
+    color-mix(in oklch, var(--muted-foreground) 18%, var(--muted)) 50%,
+    var(--muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: onsager-shimmer 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer { animation: none; }
+}

@@ -1,10 +1,20 @@
 import { Link, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeft, Circle, CircleCheck, CircleDot, CircleX } from "lucide-react"
+import {
+  ArrowLeft,
+  ArrowRight,
+  Circle,
+  CircleCheck,
+  CircleDot,
+  CircleX,
+} from "lucide-react"
 import { api, type StageRunStatus, type WorkflowRun } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ArtifactBadge } from "@/components/factory/workflows/ArtifactBadge"
+import { ArtifactFlowOverview } from "@/components/factory/workflows/ArtifactFlowOverview"
+import { outputArtifactKind } from "@/components/factory/workflows/workflow-meta"
 
 const STATUS_VARIANT: Record<StageRunStatus, "default" | "secondary" | "destructive" | "outline"> = {
   pending: "outline",
@@ -75,22 +85,51 @@ export function WorkflowDetailPage() {
         <CardHeader className="px-4 pb-2 pt-4 md:px-6">
           <CardTitle className="text-base">Stages</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 px-4 pb-4 md:px-6">
-          {workflow.stages.map((s, i) => (
-            <div
-              key={s.id}
-              className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
-            >
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">
-                  {i + 1}. {s.name}
-                </div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {s.gate_kind} · {s.artifact_kind}
+        <CardContent className="space-y-3 px-4 pb-4 md:px-6">
+          <div className="rounded-md border bg-muted/30 px-3 py-2">
+            <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+              Flow
+            </div>
+            <ArtifactFlowOverview
+              triggerLabel={workflow.trigger.label ?? ""}
+              stages={workflow.stages}
+            />
+          </div>
+          {workflow.stages.map((s, i) => {
+            const output = outputArtifactKind(s.gate_kind, s.artifact_kind)
+            const transforms = output !== s.artifact_kind
+            return (
+              <div
+                key={s.id}
+                className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
+              >
+                <div className="min-w-0 space-y-1">
+                  <div className="truncate text-sm font-medium">
+                    {i + 1}. {s.name}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      {s.gate_kind}
+                    </span>
+                    <span className="text-muted-foreground/50">·</span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      in
+                    </span>
+                    <ArtifactBadge kind={s.artifact_kind} />
+                    {transforms && (
+                      <>
+                        <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          out
+                        </span>
+                        <ArtifactBadge kind={output} />
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </CardContent>
       </Card>
 

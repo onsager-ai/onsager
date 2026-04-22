@@ -15,8 +15,8 @@ export function WorkflowsPage() {
   const [creating, setCreating] = useState(false)
 
   const { data, isLoading } = useQuery({
-    queryKey: ["workflows"],
-    queryFn: () => api.listWorkflows(),
+    queryKey: ["workflows", "user"],
+    queryFn: () => api.listWorkflowsForUser(),
     enabled: authed,
   })
   const workflows = data?.workflows ?? []
@@ -75,9 +75,6 @@ export function WorkflowsPage() {
                   <div className="truncate">
                     Trigger: {w.trigger.repo_owner}/{w.trigger.repo_name}
                     {w.trigger.label ? ` · ${w.trigger.label}` : ""}
-                  </div>
-                  <div>
-                    {w.stages.length} stage{w.stages.length === 1 ? "" : "s"}
                   </div>
                 </CardContent>
               </Card>

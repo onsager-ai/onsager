@@ -28,10 +28,52 @@ use crate::server::github_app::{list_installation_repos, InstallationToken};
 pub enum ActivationError {
     #[error("workflow target repo {owner}/{repo} is outside the workspace install scope")]
     RepoOutOfScope { owner: String, repo: String },
+    /// The GitHub App install responded with a 403 "Resource not accessible by
+    /// integration" — the App manifest is missing the permission required for
+    /// `action` (or the install hasn't accepted an updated permission set).
+    /// The CRUD route maps this to a user-visible 4xx so the dashboard can
+    /// prompt the operator to update the App's permissions, rather than the
+    /// generic 502 we use for opaque upstream failures. `upstream` carries
+    /// the raw `status: body` pair so operator logs keep the breadcrumb the
+    /// 502 path previously had.
+    #[error("github app install is missing permission for {action}")]
+    MissingGithubPermission {
+        action: String,
+        permission: &'static str,
+        details: String,
+        upstream: String,
+    },
     #[error("github api error: {0}")]
     GitHub(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+}
+
+/// Classify a non-2xx response from the GitHub REST API. Returns a
+/// `MissingGithubPermission` when the status + body match the signature of a
+/// missing App permission (so the caller surfaces a dashboard-actionable 4xx);
+/// otherwise falls back to the opaque `GitHub` variant. `permission` is the
+/// human-readable name the caller knows the endpoint needs (e.g.
+/// `"Repository webhooks: Read & write"` or `"Issues: Read & write"`) — GitHub
+/// returns the same opaque 403 for any missing App permission, so we can't
+/// derive it from the response.
+fn classify_github_error(
+    action: &str,
+    permission: &'static str,
+    status: reqwest::StatusCode,
+    body: &str,
+) -> ActivationError {
+    if status.as_u16() == 403 && body.contains("Resource not accessible by integration") {
+        return ActivationError::MissingGithubPermission {
+            action: action.to_string(),
+            permission,
+            details: format!(
+                "GitHub App install is missing the '{permission}' permission required to {action}. Update the App's permissions on GitHub and accept the new permission request on the installation, then retry."
+            ),
+            upstream: format!("{status}: {body}"),
+        };
+    }
+    ActivationError::GitHub(format!("{action} failed ({status}): {body}"))
 }
 
 /// Event types the webhook receiver cares about. Registered together so one
@@ -110,9 +152,12 @@ pub async fn ensure_label_exists(
     if resp.status().as_u16() != 404 {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(ActivationError::GitHub(format!(
-            "label lookup failed ({status}): {body}"
-        )));
+        return Err(classify_github_error(
+            "look up repo labels",
+            "Issues: Read & write",
+            status,
+            &body,
+        ));
     }
 
     // Create the label. GitHub requires a `color` field; pick a neutral grey.
@@ -138,9 +183,12 @@ pub async fn ensure_label_exists(
     }
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
-    Err(ActivationError::GitHub(format!(
-        "label create failed ({status}): {body}"
-    )))
+    Err(classify_github_error(
+        "create the trigger label",
+        "Issues: Read & write",
+        status,
+        &body,
+    ))
 }
 
 #[derive(Debug, Serialize)]
@@ -184,9 +232,12 @@ pub async fn ensure_webhook_registered(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(ActivationError::GitHub(format!(
-            "list hooks failed ({status}): {body}"
-        )));
+        return Err(classify_github_error(
+            "list the repo webhooks",
+            "Repository webhooks: Read & write",
+            status,
+            &body,
+        ));
     }
     let hooks: Vec<serde_json::Value> = resp
         .json()
@@ -237,9 +288,12 @@ pub async fn ensure_webhook_registered(
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(ActivationError::GitHub(format!(
-                "update hook failed ({status}): {body}"
-            )));
+            return Err(classify_github_error(
+                "update the repo webhook",
+                "Repository webhooks: Read & write",
+                status,
+                &body,
+            ));
         }
         return Ok(existing_id);
     }
@@ -268,9 +322,12 @@ pub async fn ensure_webhook_registered(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(ActivationError::GitHub(format!(
-            "create hook failed ({status}): {body}"
-        )));
+        return Err(classify_github_error(
+            "create the repo webhook",
+            "Repository webhooks: Read & write",
+            status,
+            &body,
+        ));
     }
     let created: serde_json::Value = resp
         .json()
@@ -392,5 +449,99 @@ mod tests {
         assert!(REQUIRED_WEBHOOK_EVENTS.contains(&"check_suite"));
         assert!(REQUIRED_WEBHOOK_EVENTS.contains(&"check_run"));
         assert!(REQUIRED_WEBHOOK_EVENTS.contains(&"status"));
+    }
+
+    #[test]
+    fn classify_403_not_accessible_as_missing_permission() {
+        let body = r#"{"message":"Resource not accessible by integration","documentation_url":"https://docs.github.com/rest/repos/webhooks#list-repository-webhooks","status":"403"}"#;
+        let err = classify_github_error(
+            "list the repo webhooks",
+            "Repository webhooks: Read & write",
+            reqwest::StatusCode::FORBIDDEN,
+            body,
+        );
+        match err {
+            ActivationError::MissingGithubPermission {
+                action,
+                permission,
+                details,
+                upstream,
+            } => {
+                assert_eq!(action, "list the repo webhooks");
+                assert_eq!(permission, "Repository webhooks: Read & write");
+                assert!(details.contains("Repository webhooks: Read & write"));
+                assert!(details.contains("list the repo webhooks"));
+                // No hard wraps embedded in the user-visible string.
+                assert!(!details.contains("  "));
+                // Upstream breadcrumb preserved for operator logs.
+                assert!(upstream.contains("403"));
+                assert!(upstream.contains("Resource not accessible by integration"));
+            }
+            other => panic!("expected MissingGithubPermission, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_403_label_path_mentions_issues_permission() {
+        // The same opaque 403 on a label endpoint must point at the Issues
+        // permission — not the webhooks one — since the caller knows which
+        // permission the endpoint needs.
+        let body = r#"{"message":"Resource not accessible by integration"}"#;
+        let err = classify_github_error(
+            "look up repo labels",
+            "Issues: Read & write",
+            reqwest::StatusCode::FORBIDDEN,
+            body,
+        );
+        match err {
+            ActivationError::MissingGithubPermission {
+                permission,
+                details,
+                ..
+            } => {
+                assert_eq!(permission, "Issues: Read & write");
+                assert!(details.contains("Issues: Read & write"));
+                assert!(!details.contains("Repository webhooks"));
+            }
+            other => panic!("expected MissingGithubPermission, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_403_without_integration_phrase_falls_back_to_github_error() {
+        // Some 403s are rate-limit or org-SSO ones — don't mis-classify them
+        // as a missing App permission.
+        let body = r#"{"message":"API rate limit exceeded"}"#;
+        let err = classify_github_error(
+            "list the repo webhooks",
+            "Repository webhooks: Read & write",
+            reqwest::StatusCode::FORBIDDEN,
+            body,
+        );
+        match err {
+            ActivationError::GitHub(msg) => {
+                assert!(msg.contains("list the repo webhooks failed"));
+                assert!(msg.contains("rate limit"));
+            }
+            other => panic!("expected GitHub, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_non_403_is_opaque_github_error() {
+        let err = classify_github_error(
+            "create the repo webhook",
+            "Repository webhooks: Read & write",
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            "boom",
+        );
+        match err {
+            ActivationError::GitHub(msg) => {
+                assert!(msg.contains("create the repo webhook failed"));
+                assert!(msg.contains("422"));
+                assert!(msg.contains("boom"));
+            }
+            other => panic!("expected GitHub, got {other:?}"),
+        }
     }
 }

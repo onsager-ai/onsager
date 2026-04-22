@@ -73,3 +73,51 @@ numReplicas = 1
 #   GITHUB_TOKEN              — optional PAT used by the portal for posting
 #                               check runs / comments when installation-token
 #                               signing isn't wired up yet
+
+# =============================================================================
+# Preview (per-PR) environments
+# =============================================================================
+#
+# Railway's PR Environments feature creates an ephemeral environment for each
+# open pull request, using this config plus a forked Postgres plugin. Each
+# preview gets its own Railway-generated domain and is torn down automatically
+# when the PR is closed or merged.
+#
+# Enable once in the Railway dashboard:
+#   Project Settings → Pull Request Environments → Enabled
+#                    → Wait for check: deploy-ready
+# Postgres forks as a fresh empty instance per PR by default — volume data
+# is not copied unless explicitly opted in.
+#
+# After enabling, `.github/workflows/preview-environment.yml` reacts to the
+# `deployment_status` event Railway's GitHub App emits on successful deploy
+# — it reads the preview URL from the event payload, smoke-tests
+# `/api/health`, and upserts a sticky PR comment. No Railway API token is
+# required in CI (project tokens are environment-locked and can't see
+# ephemeral PR envs anyway).
+#
+# Preview-specific overrides: smaller footprint, faster failure, no restart
+# storms. The preview entrypoint still auto-runs migrations on the fresh DB
+# (see crates/stiglab/deploy/entrypoint.sh) so no additional bootstrap is
+# required.
+
+[environments.preview.deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 180
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+numReplicas = 1
+
+# Preview-only variable defaults. Secrets (CREDENTIAL_KEY, OAuth client
+# secrets, GITHUB_TOKEN) are inherited from the project-level shared vars;
+# anything here is a safe, non-sensitive default that distinguishes a preview
+# deploy from production at runtime.
+#
+# Per-PR uniqueness for the node name comes from Railway's runtime-injected
+# `RAILWAY_ENVIRONMENT_NAME` (e.g. `pr-42`). Railway's variables system
+# resolves `${{...}}` references at deploy time, not TOML parse time — the
+# GitHub Actions `github.*` context is NOT available here.
+[environments.preview.variables]
+STIGLAB_NODE_NAME = "${{RAILWAY_ENVIRONMENT_NAME}}"
+STIGLAB_MAX_SESSIONS = "2"
+ONSAGER_PREVIEW = "true"

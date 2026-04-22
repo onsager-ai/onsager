@@ -250,7 +250,12 @@ export interface ArtifactLineageEntry {
 //
 // The CRUD API is delivered by a parallel sibling sub-issue of #79; this
 // client is the typed surface the dashboard UI talks to.
-export type WorkflowArtifactKind = 'github-issue' | 'github-pr';
+//
+// Artifact kinds are registry-backed as of #102. `WorkflowArtifactKind` is
+// a string so any kind registered server-side is representable on the wire;
+// the static-fallback list in `workflow-meta.ts` is what the UI renders
+// when the runtime fetch fails (offline / dev without stiglab).
+export type WorkflowArtifactKind = string;
 
 export interface WorkflowTrigger {
   kind: 'github-label';
@@ -265,6 +270,32 @@ export type WorkflowGateKind =
   | 'external-check'
   | 'governance'
   | 'manual-approval';
+
+// Shape returned by `GET /api/workflow/kinds` (issue #102). The registry
+// owns the canonical list; the dashboard's hardcoded set in
+// `workflow-meta.ts` is only a fallback for offline/dev.
+export type WorkflowMergeRule = 'overwrite' | 'merge_by_key' | 'append' | 'deep_merge';
+
+// `intrinsic_schema` arrives as a `serde_json::Value`, which is any JSON
+// value — including `null`, arrays, and primitives. Modelling it as
+// `JsonValue` keeps the wire shape honest so consumers can't assume
+// "always an object".
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: JsonValue }
+  | JsonValue[];
+
+export interface WorkflowKindInfo {
+  id: string;
+  description: string;
+  merge_rule: WorkflowMergeRule;
+  external_kind?: string;
+  aliases: string[];
+  intrinsic_schema: JsonValue;
+}
 
 export interface WorkflowStage {
   id: string;
@@ -288,13 +319,139 @@ export interface Workflow {
   updated_at: string;
 }
 
+// Wire contract for workflow CRUD. Matches stiglab's `CreateWorkflowBody`
+// / `validate_create_body` exactly — flat trigger fields, numeric GitHub
+// install id, snake_case `active`. Construct with `draftToCreateRequest`
+// from the UI draft + installations list so the numeric id is resolved
+// from the workspace installation record id the draft carries.
 export interface CreateWorkflowRequest {
-  tenant_id?: string;
+  tenant_id: string;
   name: string;
-  preset?: string;
-  trigger: WorkflowTrigger;
-  stages: WorkflowStage[];
-  activate?: boolean;
+  trigger_kind: 'github-issue-webhook';
+  repo_owner: string;
+  repo_name: string;
+  trigger_label: string;
+  install_id: number;
+  preset_id?: string;
+  stages?: CreateWorkflowStage[];
+  active: boolean;
+}
+
+export interface CreateWorkflowStage {
+  gate_kind: WorkflowGateKind;
+  params: Record<string, unknown>;
+}
+
+// Backend read shapes. Stiglab returns workflows with flat trigger fields
+// and stages as `{ gate_kind, params }` with opaque JSON params. The UI
+// keeps a richer nested `Workflow` shape; the adapters below translate
+// so the rest of the app doesn't have to know the wire format.
+interface BackendWorkflow {
+  id: string;
+  tenant_id: string;
+  name: string;
+  trigger_kind: 'github-issue-webhook';
+  repo_owner: string;
+  repo_name: string;
+  trigger_label: string;
+  install_id: number;
+  preset_id: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface BackendWorkflowStage {
+  id: string;
+  workflow_id: string;
+  seq: number;
+  gate_kind: WorkflowGateKind;
+  params: Record<string, unknown>;
+}
+
+function stageFromBackend(s: BackendWorkflowStage): WorkflowStage {
+  const params = (s.params ?? {}) as Record<string, unknown>;
+  const name = typeof params.name === 'string' ? params.name : undefined;
+  // Registry-backed kinds (#102) — accept any string; normalize legacy values.
+  const rawKind = typeof params.artifact_kind === 'string' ? params.artifact_kind : 'Issue';
+  const artifactKind = normalizeWorkflowArtifactKind(rawKind);
+  // Everything except the UI-only display fields is opaque stage config.
+  const { name: _n, artifact_kind: _a, ...config } = params as Record<string, unknown>;
+  void _n;
+  void _a;
+  return {
+    id: s.id,
+    name: name ?? defaultStageName(s.gate_kind),
+    gate_kind: s.gate_kind,
+    artifact_kind: artifactKind,
+    config,
+  };
+}
+
+// Legacy `Spec` / `github-issue` / `PullRequest` / `github-pr` get folded
+// into the canonical `Issue` / `PR` names (issue #102). Anything else
+// passes through unchanged — registered custom kinds keep their id.
+export function normalizeWorkflowArtifactKind(kind: string): WorkflowArtifactKind {
+  switch (kind) {
+    case 'github-issue':
+    case 'Spec':
+      return 'Issue';
+    case 'github-pr':
+    case 'PullRequest':
+      return 'PR';
+    default:
+      return kind;
+  }
+}
+
+// Pack a UI stage into the backend's `{ gate_kind, params }` pair. UI-only
+// display fields ride in `params` so they survive the round-trip without
+// a backend-schema change.
+export function stageToCreateStage(s: WorkflowStage): CreateWorkflowStage {
+  return {
+    gate_kind: s.gate_kind,
+    params: {
+      ...(s.config ?? {}),
+      name: s.name,
+      artifact_kind: s.artifact_kind,
+    },
+  };
+}
+
+function workflowFromBackend(
+  w: BackendWorkflow,
+  stages: BackendWorkflowStage[] = [],
+): Workflow {
+  return {
+    id: w.id,
+    tenant_id: w.tenant_id,
+    name: w.name,
+    preset: w.preset_id,
+    status: w.active ? 'active' : 'draft',
+    trigger: {
+      kind: 'github-label',
+      install_id: String(w.install_id),
+      repo_owner: w.repo_owner,
+      repo_name: w.repo_name,
+      label: w.trigger_label,
+    },
+    stages: stages.map(stageFromBackend),
+    created_at: w.created_at,
+    updated_at: w.updated_at,
+  };
+}
+
+function defaultStageName(gate: WorkflowGateKind): string {
+  switch (gate) {
+    case 'agent-session':
+      return 'Agent session';
+    case 'external-check':
+      return 'CI check';
+    case 'governance':
+      return 'Governance';
+    case 'manual-approval':
+      return 'Manual approval';
+  }
 }
 
 export type StageRunStatus = 'pending' | 'blocked' | 'passed' | 'failed';
@@ -538,22 +695,51 @@ export const api = {
     }),
   // Workflows (issue #82) — CRUD + live runs. The API is provided by the
   // stiglab sibling sub-issue; the dashboard is the only client today.
-  listWorkflows: (tenantId?: string) =>
-    request<{ workflows: Workflow[] }>(
-      `/workflows${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''}`,
-    ),
-  getWorkflow: (id: string) =>
-    request<{ workflow: Workflow }>(`/workflows/${encodeURIComponent(id)}`),
-  createWorkflow: (body: CreateWorkflowRequest) =>
-    request<{ workflow: Workflow }>('/workflows', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  updateWorkflow: (id: string, body: Partial<CreateWorkflowRequest>) =>
-    request<{ workflow: Workflow }>(`/workflows/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(body),
-    }),
+  // The backend persists workflows with flat trigger fields and stage `params`;
+  // these wrappers translate backend → UI shape.
+  listWorkflows: async (tenantId: string): Promise<{ workflows: Workflow[] }> => {
+    if (!tenantId) throw new ApiError('tenantId is required', 400);
+    const raw = await request<{ workflows: BackendWorkflow[] }>(
+      `/workflows?tenant_id=${encodeURIComponent(tenantId)}`,
+    );
+    return { workflows: raw.workflows.map((w) => workflowFromBackend(w)) };
+  },
+  // Fan-out across every workspace the user belongs to. Stiglab's list
+  // endpoint is tenant-scoped; cross-tenant "do I have any workflows yet?"
+  // queries (empty-state gates, first-run redirect) need this shape. We
+  // hit `/tenants` once and one `/workflows?tenant_id=…` per workspace;
+  // fine for the workspace counts we target (typically 1–3).
+  listWorkflowsForUser: async (): Promise<{ workflows: Workflow[] }> => {
+    const { tenants } = await request<{ tenants: { id: string }[] }>('/tenants');
+    const lists = await Promise.all(
+      tenants.map((t) =>
+        request<{ workflows: BackendWorkflow[] }>(
+          `/workflows?tenant_id=${encodeURIComponent(t.id)}`,
+        ).then((r) => r.workflows.map((w) => workflowFromBackend(w))),
+      ),
+    );
+    return { workflows: lists.flat() };
+  },
+  getWorkflow: async (id: string): Promise<{ workflow: Workflow }> => {
+    const raw = await request<{ workflow: BackendWorkflow; stages: BackendWorkflowStage[] }>(
+      `/workflows/${encodeURIComponent(id)}`,
+    );
+    return { workflow: workflowFromBackend(raw.workflow, raw.stages) };
+  },
+  createWorkflow: async (body: CreateWorkflowRequest): Promise<{ workflow: Workflow }> => {
+    const raw = await request<{ workflow: BackendWorkflow; stages?: BackendWorkflowStage[] }>(
+      '/workflows',
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    return { workflow: workflowFromBackend(raw.workflow, raw.stages ?? []) };
+  },
+  setWorkflowActive: async (id: string, active: boolean): Promise<{ workflow: Workflow }> => {
+    const raw = await request<{ workflow: BackendWorkflow }>(
+      `/workflows/${encodeURIComponent(id)}`,
+      { method: 'PATCH', body: JSON.stringify({ active }) },
+    );
+    return { workflow: workflowFromBackend(raw.workflow) };
+  },
   deleteWorkflow: (id: string) =>
     request<{ ok: boolean }>(`/workflows/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -562,6 +748,12 @@ export const api = {
     request<{ runs: WorkflowRun[] }>(
       `/workflows/${encodeURIComponent(id)}/runs?limit=${limit}`,
     ),
+  // Registry-backed workflow artifact kinds (issue #102). Poll-on-load; the
+  // dashboard caches the result for the session. Falls back to the static
+  // list in `workflow-meta.ts` if the fetch fails (offline / dev without
+  // stiglab).
+  listWorkflowKinds: () =>
+    request<{ kinds: WorkflowKindInfo[] }>('/workflow/kinds'),
   // GitHub labels for a workspace install + repo. Used by the trigger card
   // combobox so the user selects from existing labels (with an inline
   // create-new affordance) instead of free-texting.

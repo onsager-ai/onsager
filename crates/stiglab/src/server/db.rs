@@ -300,8 +300,12 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     // No FK declarations — the rest of the stiglab schema uses app-layer
     // referential checks for the same SQLite/Postgres-portability reasons
     // documented above.
+    // Named `tenant_workflows` / `tenant_workflow_stages` to avoid colliding
+    // with the onsager-spine `006_workflows.sql` migration which also creates
+    // a `workflows` table with a different schema (spine's table is the factory
+    // workflow runtime; this one is the stiglab tenant-level blueprint store).
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS workflows (
+        "CREATE TABLE IF NOT EXISTS tenant_workflows (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
             name TEXT NOT NULL,
@@ -319,18 +323,20 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     )
     .execute(pool)
     .await?;
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_workflows_tenant_id ON workflows (tenant_id)")
-        .execute(pool)
-        .await?;
     sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_workflows_repo_active \
-         ON workflows (repo_owner, repo_name, active)",
+        "CREATE INDEX IF NOT EXISTS idx_tenant_workflows_tenant_id ON tenant_workflows (tenant_id)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_tenant_workflows_repo_active \
+         ON tenant_workflows (repo_owner, repo_name, active)",
     )
     .execute(pool)
     .await?;
 
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS workflow_stages (
+        "CREATE TABLE IF NOT EXISTS tenant_workflow_stages (
             id TEXT PRIMARY KEY,
             workflow_id TEXT NOT NULL,
             seq INTEGER NOT NULL,
@@ -342,8 +348,8 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
     sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_workflow_stages_workflow_id \
-         ON workflow_stages (workflow_id, seq)",
+        "CREATE INDEX IF NOT EXISTS idx_tenant_workflow_stages_workflow_id \
+         ON tenant_workflow_stages (workflow_id, seq)",
     )
     .execute(pool)
     .await?;

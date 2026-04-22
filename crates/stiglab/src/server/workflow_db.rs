@@ -10,7 +10,7 @@ use sqlx::AnyPool;
 
 use crate::core::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
 
-/// Row shape straight out of the `workflows` table. `i32` is the
+/// Row shape straight out of the `tenant_workflows` table. `i32` is the
 /// AnyPool-portable boolean — both SQLite and Postgres store the column as
 /// `INTEGER`.
 #[derive(sqlx::FromRow)]
@@ -84,9 +84,9 @@ pub async fn insert_workflow_with_stages(
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        "INSERT INTO workflows (id, tenant_id, name, trigger_kind, repo_owner, repo_name, \
-                                trigger_label, install_id, preset_id, active, created_by, \
-                                created_at, updated_at) \
+        "INSERT INTO tenant_workflows (id, tenant_id, name, trigger_kind, repo_owner, repo_name, \
+                                       trigger_label, install_id, preset_id, active, created_by, \
+                                       created_at, updated_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
     )
     .bind(&workflow.id)
@@ -107,7 +107,7 @@ pub async fn insert_workflow_with_stages(
 
     for s in stages {
         sqlx::query(
-            "INSERT INTO workflow_stages (id, workflow_id, seq, gate_kind, params) \
+            "INSERT INTO tenant_workflow_stages (id, workflow_id, seq, gate_kind, params) \
              VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(&s.id)
@@ -127,7 +127,7 @@ pub async fn get_workflow(pool: &AnyPool, workflow_id: &str) -> anyhow::Result<O
     let row = sqlx::query_as::<_, WorkflowRow>(
         "SELECT id, tenant_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
                 install_id, preset_id, active, created_by, created_at, updated_at \
-         FROM workflows WHERE id = $1",
+         FROM tenant_workflows WHERE id = $1",
     )
     .bind(workflow_id)
     .fetch_optional(pool)
@@ -142,7 +142,7 @@ pub async fn list_workflows_for_tenant(
     let rows = sqlx::query_as::<_, WorkflowRow>(
         "SELECT id, tenant_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
                 install_id, preset_id, active, created_by, created_at, updated_at \
-         FROM workflows WHERE tenant_id = $1 ORDER BY created_at ASC",
+         FROM tenant_workflows WHERE tenant_id = $1 ORDER BY created_at ASC",
     )
     .bind(tenant_id)
     .fetch_all(pool)
@@ -155,7 +155,7 @@ pub async fn list_stages_for_workflow(
     workflow_id: &str,
 ) -> anyhow::Result<Vec<WorkflowStage>> {
     let rows = sqlx::query_as::<_, WorkflowStageRow>(
-        "SELECT id, workflow_id, seq, gate_kind, params FROM workflow_stages \
+        "SELECT id, workflow_id, seq, gate_kind, params FROM tenant_workflow_stages \
          WHERE workflow_id = $1 ORDER BY seq ASC",
     )
     .bind(workflow_id)
@@ -170,7 +170,7 @@ pub async fn set_workflow_active(
     workflow_id: &str,
     active: bool,
 ) -> anyhow::Result<()> {
-    sqlx::query("UPDATE workflows SET active = $1, updated_at = $2 WHERE id = $3")
+    sqlx::query("UPDATE tenant_workflows SET active = $1, updated_at = $2 WHERE id = $3")
         .bind(if active { 1 } else { 0 })
         .bind(Utc::now().to_rfc3339())
         .bind(workflow_id)
@@ -195,7 +195,7 @@ pub async fn find_active_github_workflows_for_label(
     let rows = sqlx::query_as::<_, WorkflowRow>(
         "SELECT id, tenant_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
                 install_id, preset_id, active, created_by, created_at, updated_at \
-         FROM workflows \
+         FROM tenant_workflows \
          WHERE active = 1 AND trigger_kind = $1 \
            AND repo_owner = $2 AND repo_name = $3 AND trigger_label = $4",
     )
@@ -218,7 +218,7 @@ pub async fn any_other_active_workflow_on_repo(
     exclude_workflow_id: &str,
 ) -> anyhow::Result<bool> {
     let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM workflows \
+        "SELECT COUNT(*) FROM tenant_workflows \
          WHERE active = 1 AND repo_owner = $1 AND repo_name = $2 AND id <> $3",
     )
     .bind(repo_owner)
@@ -251,11 +251,12 @@ pub async fn get_workflow_install_target(
     pool: &AnyPool,
     workflow_id: &str,
 ) -> anyhow::Result<Option<(i64, String, String)>> {
-    let row: Option<(i64, String, String)> =
-        sqlx::query_as("SELECT install_id, repo_owner, repo_name FROM workflows WHERE id = $1")
-            .bind(workflow_id)
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<(i64, String, String)> = sqlx::query_as(
+        "SELECT install_id, repo_owner, repo_name FROM tenant_workflows WHERE id = $1",
+    )
+    .bind(workflow_id)
+    .fetch_optional(pool)
+    .await?;
     Ok(row)
 }
 
