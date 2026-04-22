@@ -49,20 +49,17 @@ export function DeliverablePanel({ entries, empty }: DeliverablePanelProps) {
   )
 }
 
-// Canonical PR kind detection (issue #102). Mirrors the alias map in
-// `workflow-meta.ts` so legacy persisted `github-pr` / `PullRequest`
-// values still get the rich PR card instead of falling through to the
-// generic one.
-function isPrDeliverableKind(kind: WorkflowArtifactKind): boolean {
-  return kind === "PR" || kind === "github-pr" || kind === "PullRequest"
-}
-
 function DeliverableCard({ entry }: { entry: DeliverableEntry }) {
   const { metaFor } = useWorkflowKinds()
   const meta = metaFor(entry.kind)
   const Icon = meta.icon
 
-  if (isPrDeliverableKind(entry.kind)) {
+  // Canonical PR detection (issue #102). `metaFor` resolves via the
+  // registry alias map first, then the static fallback — so any PR
+  // alias the server reports (legacy `github-pr` / `PullRequest` or a
+  // future one) canonicalizes to `meta.value === "PR"` without needing
+  // a hardcoded table here.
+  if (meta.value === "PR") {
     return <PrCard entry={entry} />
   }
 

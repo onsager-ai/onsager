@@ -81,8 +81,12 @@ export function useWorkflowKinds(): UseWorkflowKindsResult {
   })
 
   return useMemo<UseWorkflowKindsResult>(() => {
-    const registry = data?.kinds ?? []
-    if (registry.length === 0) {
+    // Fall back to the static list only while the fetch hasn't produced
+    // a usable response — i.e. the initial load hasn't resolved yet or
+    // the request errored. A successful response with an empty `kinds`
+    // array is legitimate server state (registry genuinely has nothing
+    // exposed) and should render as empty, not as the static set.
+    if (!data || isError) {
       return {
         kinds: WORKFLOW_ARTIFACT_KINDS,
         metaFor: staticArtifactKindMeta,
@@ -90,6 +94,7 @@ export function useWorkflowKinds(): UseWorkflowKindsResult {
         isError,
       }
     }
+    const registry = data.kinds
     const kinds = registry.map(metaFromRegistry)
     const byValue = Object.fromEntries(
       kinds.map((k) => [k.value, k]),
