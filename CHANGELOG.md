@@ -73,7 +73,6 @@ project does not yet publish numbered releases.
   and the spine migration step now applies every `*.sql` file instead
   of hard-coding the first two. <!-- sha: bfe9057 -->
 
-### Fixed
 - **Stiglab + Dashboard**: GitHub App install callback now registers at
   `/api/github-app/callback` (was `/api/github-app/install-callback`),
   matching the Setup URL typically configured on the GitHub App. Post-
