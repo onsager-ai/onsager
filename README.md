@@ -95,6 +95,13 @@ stiglab serve
 - Unit tests co-located in `#[cfg(test)]` modules
 - All internal deps use `path = "../..."` — no git deps, no crates.io
 
+## Preview environments
+
+Every open PR gets an ephemeral Railway deploy at
+`https://onsager-pr-<number>.up.railway.app` with a fresh Postgres plugin.
+See [`docs/preview-environments.md`](docs/preview-environments.md) for
+setup and troubleshooting.
+
 ## Per-crate context
 
 Each subsystem has its own `CLAUDE.md` or `.claude/` directory with
