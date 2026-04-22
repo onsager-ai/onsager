@@ -80,6 +80,10 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             get(routes::tenants::list_accessible_repos),
         )
         .route(
+            "/api/tenants/{id}/github-installations/{install_id}/repos/{owner}/{repo}/labels",
+            get(routes::tenants::list_repo_labels),
+        )
+        .route(
             "/api/github-app/config",
             get(routes::tenants::github_app_config),
         )
