@@ -2,103 +2,82 @@ name: preview-environment
 
 # Attaches PR previews to Railway's native PR Environments feature.
 #
-# Railway itself creates the ephemeral environment (named `pr-<number>`) and
-# the forked Postgres plugin when a PR is opened — those are configured in
-# the Railway dashboard, not here. This workflow's job is the glue:
+# Railway creates the ephemeral environment (`pr-<number>`), forks Postgres,
+# builds, and deploys. Its GitHub integration emits a `deployment_status`
+# event when the preview is live — we consume that event here to smoke-test
+# the URL and post a sticky PR comment. When the PR closes, Railway tears
+# the env down; we update the comment to note that.
 #
-#   - resolve the preview URL once Railway reports a successful deploy
-#   - post/update a sticky PR comment with the URL and smoke-test status
-#   - run a lightweight smoke test against the preview
-#   - acknowledge teardown when the PR closes
-#
-# The preview env is torn down by Railway automatically on PR close. We do
-# not delete anything ourselves.
-#
-# Fork PRs are skipped outright: GITHUB_TOKEN is read-only for them (so
-# comment upserts would 403) and repo secrets aren't injected into
-# `pull_request`-triggered runs from forks, so the announce step couldn't
-# query Railway anyway. Running nothing is the honest outcome.
+# No Railway API token is needed: the URL arrives in the event payload, and
+# Railway owns the deploy lifecycle end-to-end.
 
 on:
+  deployment_status:
   pull_request:
-    types: [opened, reopened, synchronize, closed]
+    types: [closed]
 
 concurrency:
-  group: preview-${{ github.event.pull_request.number }}
+  group: preview-${{ github.event.deployment.environment || github.event.pull_request.number }}
   cancel-in-progress: false
 
 permissions:
   pull-requests: write
   contents: read
+  deployments: read
 
 jobs:
   announce:
+    # Only react to successful Railway preview deploys. Railway names its PR
+    # environments `pr-<N>` — anything else is prod or a non-PR env and we
+    # ignore it here.
     if: >-
-      github.event.action != 'closed' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'deployment_status' &&
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment.environment, 'pr-')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Check required secrets
-        id: secrets
-        run: |
-          if [ -z "${{ secrets.RAILWAY_TOKEN }}" ] || [ -z "${{ secrets.RAILWAY_PROJECT_ID }}" ]; then
-            echo "::warning::RAILWAY_TOKEN / RAILWAY_PROJECT_ID not configured — skipping preview URL announcement"
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Wait for Railway preview deploy
-        if: steps.secrets.outputs.configured == 'true'
-        id: wait
+      - name: Extract PR number from environment name
+        id: pr
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-          RAILWAY_SERVICE_NAME: ${{ secrets.RAILWAY_SERVICE_NAME || 'onsager' }}
+          ENV_NAME: ${{ github.event.deployment.environment }}
         run: |
-          # Poll up to ~10 minutes. Railway builds the full Rust workspace on
-          # a fresh env, which commonly takes 4–7 minutes. Exit 2 from the
-          # script means "not ready, retry" — any other non-zero is a hard
-          # failure (bad token, GraphQL error, jq parse error) and we bail
-          # early with the diagnostic surfaced, rather than silently
-          # spinning for the full 10 minutes.
-          attempts=60
-          sleep_s=10
-          stderr_file=$(mktemp)
-          trap 'rm -f "$stderr_file"' EXIT
-          for i in $(seq 1 $attempts); do
-            if url=$(scripts/preview-url.sh 2>"$stderr_file"); then
-              echo "url=$url" >> "$GITHUB_OUTPUT"
-              echo "Preview ready: $url"
-              exit 0
-            fi
-            status=$?
-            if [ "$status" -eq 2 ]; then
-              echo "[$i/$attempts] preview not ready yet; sleeping ${sleep_s}s"
-              sleep $sleep_s
-              continue
-            fi
-            echo "::error::scripts/preview-url.sh failed with exit code $status"
-            cat "$stderr_file" >&2 || true
-            exit "$status"
-          done
-          echo "::warning::Timed out waiting for preview deploy"
-          echo "Last preview-url.sh stderr:" >&2
-          cat "$stderr_file" >&2 || true
-          echo "url=" >> "$GITHUB_OUTPUT"
+          # Railway uses `pr-<N>` (sometimes `pr-<N>-<slug>`). Pull the first
+          # numeric segment; bail cleanly if the convention ever changes.
+          pr_num=$(printf '%s' "$ENV_NAME" | sed -nE 's/^pr-([0-9]+).*/\1/p')
+          if [ -z "$pr_num" ]; then
+            echo "::warning::Could not extract PR number from deployment environment '$ENV_NAME'"
+            exit 0
+          fi
+          echo "number=$pr_num" >> "$GITHUB_OUTPUT"
+
+      - name: Pick preview URL from event payload
+        id: url
+        env:
+          ENV_URL: ${{ github.event.deployment_status.environment_url }}
+          TARGET_URL: ${{ github.event.deployment_status.target_url }}
+        run: |
+          # `environment_url` is what Railway sets for PR envs; `target_url`
+          # is the fallback (links to the deploy page) when no environment
+          # URL is provided.
+          url="$ENV_URL"
+          [ -n "$url" ] || url="$TARGET_URL"
+          if [ -z "$url" ]; then
+            echo "::warning::deployment_status event had no URL"
+            exit 0
+          fi
+          echo "value=$url" >> "$GITHUB_OUTPUT"
 
       - name: Smoke-test /api/health
-        if: steps.wait.outputs.url != ''
+        if: steps.url.outputs.value != ''
         id: smoke
+        env:
+          URL: ${{ steps.url.outputs.value }}
         run: |
-          url="${{ steps.wait.outputs.url }}"
           # Retry a few times — the healthcheck can lag the deploy-success event.
           for i in 1 2 3 4 5; do
-            code=$(curl -s -o /tmp/health.json -w "%{http_code}" "$url/api/health" || true)
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              --connect-timeout 5 --max-time 15 \
+              "$URL/api/health" || true)
             if [ "$code" = "200" ]; then
               echo "status=ok" >> "$GITHUB_OUTPUT"
               exit 0
@@ -108,43 +87,38 @@ jobs:
           echo "status=failed" >> "$GITHUB_OUTPUT"
 
       - name: Upsert preview comment
-        if: always() && steps.secrets.outputs.configured == 'true'
+        if: steps.pr.outputs.number != '' && steps.url.outputs.value != ''
         uses: actions/github-script@v7
         env:
-          PREVIEW_URL: ${{ steps.wait.outputs.url }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PREVIEW_URL: ${{ steps.url.outputs.value }}
           SMOKE_STATUS: ${{ steps.smoke.outputs.status }}
         with:
           script: |
             const marker = '<!-- onsager-preview -->';
-            const url = process.env.PREVIEW_URL || '';
+            const pr = parseInt(process.env.PR_NUMBER, 10);
+            const url = process.env.PREVIEW_URL;
             const smoke = process.env.SMOKE_STATUS || 'unknown';
 
-            const body = url
-              ? [
-                  marker,
-                  '### Preview environment',
-                  '',
-                  `| | |`,
-                  `|---|---|`,
-                  `| URL | ${url} |`,
-                  `| Dashboard | ${url}/ |`,
-                  `| Health | ${url}/api/health |`,
-                  `| Smoke | \`${smoke}\` |`,
-                  '',
-                  `Postgres is a fresh plugin fork — migrations run automatically at boot. The environment is torn down when this PR closes.`,
-                ].join('\n')
-              : [
-                  marker,
-                  '### Preview environment',
-                  '',
-                  'Preview deploy did not report ready within the timeout. Check the Railway project for the `pr-' + context.issue.number + '` environment, or inspect this workflow run.',
-                ].join('\n');
+            const body = [
+              marker,
+              '### Preview environment',
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| URL | ${url} |`,
+              `| Dashboard | ${url}/ |`,
+              `| Health | ${url}/api/health |`,
+              `| Smoke | \`${smoke}\` |`,
+              '',
+              `Postgres is a fresh plugin fork — migrations run automatically at boot. The environment is torn down when this PR closes.`,
+            ].join('\n');
 
             try {
               const { data: comments } = await github.rest.issues.listComments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number,
+                issue_number: pr,
                 per_page: 100,
               });
               const existing = comments.find(c => c.body && c.body.startsWith(marker));
@@ -159,13 +133,13 @@ jobs:
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  issue_number: context.issue.number,
+                  issue_number: pr,
                   body,
                 });
               }
             } catch (error) {
-              // Downgrade 403s (e.g. restricted org settings) to warnings —
-              // the comment is informational; don't red-X the workflow for it.
+              // Downgrade 403s (restricted org settings, archived repos, etc.)
+              // to warnings — the comment is informational.
               if (error && (error.status === 403 || error.response?.status === 403)) {
                 core.warning('Skipping preview comment: workflow token lacks permission to write PR comments.');
                 return;
@@ -175,6 +149,7 @@ jobs:
 
   teardown-notice:
     if: >-
+      github.event_name == 'pull_request' &&
       github.event.action == 'closed' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest

@@ -1,12 +1,11 @@
 # Preview environments
 
-Every open pull request gets its own ephemeral Railway deploy at
-`https://onsager-pr-<number>.up.railway.app` with a freshly-forked Postgres.
-The environment is created when the PR opens, redeployed on each push, and
-torn down when the PR closes or merges.
+Every open pull request gets its own ephemeral Railway deploy with a
+freshly-forked Postgres. The environment is created when the PR opens,
+redeployed on each push, and torn down when the PR closes or merges.
 
-This doc covers what's wired up, how to enable it on a new fork, and the
-failure modes you're likely to hit.
+This doc covers what's wired up, how to enable it on a fresh Railway
+project, and the failure modes you're likely to hit.
 
 ## What ships per PR
 
@@ -21,7 +20,7 @@ specific to preview:
 
 | Variable | Preview default | Why |
 |---|---|---|
-| `STIGLAB_NODE_NAME` | `preview-<PR>` | Keeps agent-run heartbeats separated from prod |
+| `STIGLAB_NODE_NAME` | `${{RAILWAY_ENVIRONMENT_NAME}}` → `pr-<N>` | Keeps agent-run heartbeats separated from prod |
 | `STIGLAB_MAX_SESSIONS` | `2` | Preview envs get smaller quota — no multi-tenant load |
 | `ONSAGER_PREVIEW` | `true` | Runtime flag subsystems can read to gate destructive ops |
 
@@ -33,56 +32,45 @@ See `[environments.preview]` in `railway.toml` for the source of truth.
 PR opened   ──▶  Railway (native PR envs)
                  ├─ forks Postgres plugin → empty DB
                  ├─ builds Docker image from PR SHA
-                 └─ deploys → onsager-pr-<N>.up.railway.app
+                 └─ deploys → posts GitHub deployment_status (success)
                                 │
                                 ▼
-PR synced   ──▶  .github/workflows/preview-environment.yml
-                 ├─ polls scripts/preview-url.sh until ready
-                 ├─ curls /api/health (smoke)
-                 └─ upserts a PR comment with URL + status
+deployment_status  ──▶  .github/workflows/preview-environment.yml
+  event (from            ├─ extracts PR number from env name (`pr-<N>`)
+  Railway's GH app)      ├─ pulls URL from event payload
+                         ├─ curls /api/health (smoke)
+                         └─ upserts a PR comment with URL + status
 
 PR closed   ──▶  Railway auto-tears down env + plugin
                  └─ workflow updates the PR comment to note teardown
 ```
 
 Railway owns the deploy lifecycle; the workflow only observes and
-announces. That split is deliberate — we don't reinvent environment
-provisioning in GitHub Actions.
+announces. The URL arrives in the event payload, so there's **no Railway
+API token in CI** — previously we polled Railway's GraphQL API, but
+project tokens are environment-locked and can't see ephemeral PR envs.
 
 ## First-time setup (per Railway project)
 
-1. **Enable PR environments**
+1. **Connect Railway to the GitHub repo** (standard Railway setup).
+   This installs Railway's GitHub App, which is what fires the
+   `deployment_status` events the workflow listens for. No extra config
+   needed.
+
+2. **Enable PR environments**
    Railway dashboard → Project Settings → *Pull Request Environments* → **Enabled**
    - Ephemeral Postgres: **Enabled** (do not clone prod data)
    - Wait-for-check: `deploy-ready`
    - Environment TTL: leave default (tears down with PR)
 
-2. **Create a project-scoped Railway token**
-   Dashboard → *this project* → Settings → Tokens → *New token*. Use a
-   **project token**, not an account token — it's bound to this project
-   and can't touch others on the account. Leave the environment scope
-   **unset** (project-wide): the workflow queries ephemeral `pr-<N>`
-   environments that don't exist when the token is created, so a token
-   locked to `production` (or any single env) won't see them. Railway
-   doesn't expose a read-only sub-scope; the workflow only reads (one
-   GraphQL query per poll), but the token itself can mutate project
-   state, so treat it like any other deploy secret and rotate on leak.
-   A distinct name like `ci-preview-lookup` makes the blast radius
-   easier to reason about.
+3. **Verify**
+   Open a throwaway PR. When Railway's PR-env deploy finishes, the
+   `preview-environment` workflow runs (triggered by `deployment_status`)
+   and posts a sticky comment with the URL and smoke-test status. If no
+   comment appears, check the workflow runs for this repo — they'll show
+   whether `deployment_status` events are arriving.
 
-3. **Set GitHub repo secrets**
-
-   | Secret | Value |
-   |---|---|
-   | `RAILWAY_TOKEN` | the token from step 2 |
-   | `RAILWAY_PROJECT_ID` | from `railway status --json` or the URL |
-   | `RAILWAY_SERVICE_NAME` | optional; defaults to `onsager` |
-
-4. **Verify**
-   Open a throwaway PR. Within ~10 minutes the `preview-environment`
-   workflow should post a comment with the preview URL. If it times out,
-   check the workflow logs and the Railway project's `pr-<N>` environment
-   directly.
+No GitHub secrets are required for this workflow.
 
 ## Cost and quota
 
@@ -97,10 +85,14 @@ workflow.
 
 ## Failure modes
 
-**Workflow times out, no URL posted.**
-The build probably exceeded the 10-minute poll window. Check the Railway
-project for the `pr-<N>` environment — the build is likely still running.
-Re-run the workflow after the build completes to post the URL.
+**No preview comment on a PR.**
+Either Railway didn't emit a `deployment_status` (build failed, PR envs
+not enabled, Railway GitHub App not installed) or the workflow dropped
+the event. Check:
+1. The Railway project's `pr-<N>` environment — is there a deploy?
+2. The repo's *Settings → Deployments* page — is there a deployment for
+   this PR's SHA?
+3. The `preview-environment` workflow runs — any failures?
 
 **Smoke test reports `failed`.**
 The container deployed but `/api/health` did not return 200. Usual suspects:
@@ -108,20 +100,20 @@ migrations failed (fresh DB but migration SQL is broken), a required secret
 is not forwarded to the preview env, or the entrypoint crashed. Inspect
 Railway's deploy logs for the `pr-<N>` env.
 
-**Workflow skips with a warning about missing secrets.**
-`RAILWAY_TOKEN` or `RAILWAY_PROJECT_ID` are not configured. Previews still
-deploy (Railway doesn't need the workflow), but no comment gets posted.
-Fix by adding the secrets.
-
-**Preview env exists but domain is empty.**
-Railway sometimes needs a few seconds after deploy-success to provision the
-domain. `scripts/preview-url.sh` exits 2 in this case so the workflow
-retries.
+**PR number couldn't be extracted.**
+The workflow expects Railway's env name to start with `pr-<N>`. If Railway
+ever changes that convention, the `announce` job warns and exits without
+commenting. Update the `sed` pattern in the workflow.
 
 **Preview DB is not reset between pushes.**
 By design. The DB is fresh on *PR open*, not on every push. If you need a
 clean DB mid-review, close and reopen the PR, or delete the `pr-<N>`
 environment in Railway (it'll be recreated on the next push).
+
+**Fork PRs get no preview.**
+Railway only deploys PR envs for branches in the same repo. Fork PRs
+therefore emit no `deployment_status` and the workflow stays silent.
+The `teardown-notice` job also short-circuits on fork PRs.
 
 ## Not in scope (yet)
 
@@ -129,7 +121,6 @@ environment in Railway (it'll be recreated on the next push).
 - Seeded data (demo workspace, canned sessions). Previews boot empty.
 - Automatic e2e run against the preview URL. The smoke test is just
   `/api/health`; extend the workflow or run `just test-e2e-remote
-  https://onsager-pr-<N>.up.railway.app` manually if you need full
-  coverage.
+  https://<preview-url>` manually if you need full coverage.
 - Pre-release (tagged) previews. That would be a separate environment
   (`rc` or similar), not a PR env.
