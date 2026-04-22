@@ -250,7 +250,12 @@ export interface ArtifactLineageEntry {
 //
 // The CRUD API is delivered by a parallel sibling sub-issue of #79; this
 // client is the typed surface the dashboard UI talks to.
-export type WorkflowArtifactKind = 'github-issue' | 'github-pr';
+//
+// Artifact kinds are registry-backed as of #102. `WorkflowArtifactKind` is
+// a string so any kind registered server-side is representable on the wire;
+// the static-fallback list in `workflow-meta.ts` is what the UI renders
+// when the runtime fetch fails (offline / dev without stiglab).
+export type WorkflowArtifactKind = string;
 
 export interface WorkflowTrigger {
   kind: 'github-label';
@@ -265,6 +270,20 @@ export type WorkflowGateKind =
   | 'external-check'
   | 'governance'
   | 'manual-approval';
+
+// Shape returned by `GET /api/workflow/kinds` (issue #102). The registry
+// owns the canonical list; the dashboard's hardcoded set in
+// `workflow-meta.ts` is only a fallback for offline/dev.
+export type WorkflowMergeRule = 'overwrite' | 'merge_by_key' | 'append' | 'deep_merge';
+
+export interface WorkflowKindInfo {
+  id: string;
+  description: string;
+  merge_rule: WorkflowMergeRule;
+  external_kind?: string;
+  aliases: string[];
+  intrinsic_schema: Record<string, unknown>;
+}
 
 export interface WorkflowStage {
   id: string;
@@ -341,10 +360,9 @@ interface BackendWorkflowStage {
 function stageFromBackend(s: BackendWorkflowStage): WorkflowStage {
   const params = (s.params ?? {}) as Record<string, unknown>;
   const name = typeof params.name === 'string' ? params.name : undefined;
-  const artifactKind =
-    params.artifact_kind === 'github-issue' || params.artifact_kind === 'github-pr'
-      ? params.artifact_kind
-      : 'github-issue';
+  // Registry-backed kinds (#102) — accept any string; normalize legacy values.
+  const rawKind = typeof params.artifact_kind === 'string' ? params.artifact_kind : 'Issue';
+  const artifactKind = normalizeWorkflowArtifactKind(rawKind);
   // Everything except the UI-only display fields is opaque stage config.
   const { name: _n, artifact_kind: _a, ...config } = params as Record<string, unknown>;
   void _n;
@@ -356,6 +374,22 @@ function stageFromBackend(s: BackendWorkflowStage): WorkflowStage {
     artifact_kind: artifactKind,
     config,
   };
+}
+
+// Legacy `Spec` / `github-issue` / `PullRequest` / `github-pr` get folded
+// into the canonical `Issue` / `PR` names (issue #102). Anything else
+// passes through unchanged — registered custom kinds keep their id.
+export function normalizeWorkflowArtifactKind(kind: string): WorkflowArtifactKind {
+  switch (kind) {
+    case 'github-issue':
+    case 'Spec':
+      return 'Issue';
+    case 'github-pr':
+    case 'PullRequest':
+      return 'PR';
+    default:
+      return kind;
+  }
 }
 
 // Pack a UI stage into the backend's `{ gate_kind, params }` pair. UI-only
@@ -702,6 +736,12 @@ export const api = {
     request<{ runs: WorkflowRun[] }>(
       `/workflows/${encodeURIComponent(id)}/runs?limit=${limit}`,
     ),
+  // Registry-backed workflow artifact kinds (issue #102). Poll-on-load; the
+  // dashboard caches the result for the session. Falls back to the static
+  // list in `workflow-meta.ts` if the fetch fails (offline / dev without
+  // stiglab).
+  listWorkflowKinds: () =>
+    request<{ kinds: WorkflowKindInfo[] }>('/workflow/kinds'),
   // GitHub labels for a workspace install + repo. Used by the trigger card
   // combobox so the user selects from existing labels (with an inline
   // create-new affordance) instead of free-texting.

@@ -2606,6 +2606,7 @@ dependencies = [
  "jsonwebtoken",
  "onsager-artifact",
  "onsager-protocol",
+ "onsager-registry",
  "onsager-spine",
  "rand 0.8.5",
  "reqwest",

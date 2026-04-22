@@ -2,6 +2,10 @@ import { ArrowDown, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { GitHubAppInstallation, WorkflowStage } from "@/lib/api"
 import { ArtifactFlowOverview } from "./ArtifactFlowOverview"
+import {
+  DeliverablePanel,
+  type DeliverableEntry,
+} from "./DeliverablePanel"
 import { StageCard } from "./StageCard"
 import { TriggerCard } from "./TriggerCard"
 import { makeStage, type WorkflowDraft } from "./workflow-draft"
@@ -11,6 +15,10 @@ export interface CardStackEditorProps {
   installations: GitHubAppInstallation[]
   draft: WorkflowDraft
   onChange: (next: WorkflowDraft) => void
+  /// When set (run-detail view), the flow strip highlights this stage and
+  /// the deliverable panel becomes visible. Editor view leaves both undefined.
+  currentStageIndex?: number
+  deliverable?: DeliverableEntry[]
 }
 
 export function CardStackEditor({
@@ -18,6 +26,8 @@ export function CardStackEditor({
   installations,
   draft,
   onChange,
+  currentStageIndex,
+  deliverable,
 }: CardStackEditorProps) {
   const updateStage = (idx: number, next: WorkflowStage) => {
     const stages = draft.stages.slice()
@@ -46,7 +56,16 @@ export function CardStackEditor({
           <ArtifactFlowOverview
             triggerLabel={draft.trigger.label}
             stages={draft.stages}
+            currentStageIndex={currentStageIndex}
           />
+        </div>
+      )}
+      {deliverable && (
+        <div className="rounded-md border bg-background px-3 py-2">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+            Deliverable
+          </div>
+          <DeliverablePanel entries={deliverable} />
         </div>
       )}
       <TriggerCard

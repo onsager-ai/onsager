@@ -370,7 +370,7 @@ pub fn run(database_url: &str, tick_ms: u64) {
         };
 
         // Load existing artifacts from the spine database (issue #30).
-        // `load_artifact_store` restores state, version, and current_bundle_id
+        // `load_artifact_store` restores state, version, and current_version_id
         // so a mid-tick restart resumes at the last persisted transition.
         let artifact_store = match spine.as_ref() {
             Some(s) => match persistence::load_artifact_store(s.pool()).await {

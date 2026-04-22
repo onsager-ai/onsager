@@ -3,7 +3,7 @@ name = "onsager-artifact"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Artifact value objects — Artifact, ArtifactId, BundleId, lineage, quality signals."
+description = "Artifact value objects — Artifact, ArtifactId, ArtifactVersionId, Deliverable, lineage, quality signals."
 
 [dependencies]
 serde = { workspace = true }

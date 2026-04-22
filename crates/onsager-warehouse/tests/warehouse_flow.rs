@@ -24,7 +24,7 @@ async fn reset_artifact(store: &EventStore, artifact_id: &str) {
         .execute(store.pool())
         .await
         .ok();
-    sqlx::query("UPDATE artifacts SET current_bundle_id = NULL WHERE artifact_id = $1")
+    sqlx::query("UPDATE artifacts SET current_version_id = NULL WHERE artifact_id = $1")
         .bind(artifact_id)
         .execute(store.pool())
         .await

@@ -10,9 +10,9 @@
 //! This module provides two halves of the projection:
 //!
 //! - [`load_artifact_store`]: on startup, read the `artifacts` table and
-//!   rebuild the in-memory store. Includes `current_bundle_id` so sealed
+//!   rebuild the in-memory store. Includes `current_version_id` so sealed
 //!   releases survive restart (forge invariant: the warehouse pointer on
-//!   each artifact is the tip of its bundle chain).
+//!   each artifact is the tip of its version chain).
 //! - [`persist_artifact_state`]: after a tick produces an
 //!   `ArtifactAdvanced` or `BundleSealed` event and releases the write
 //!   lock, mirror the resulting in-memory state to the `artifacts` row.
@@ -22,7 +22,7 @@
 //! the DB write fails, the next successful transition or a deliberate
 //! reconciliation pass will catch the drift.
 
-use onsager_artifact::{Artifact, ArtifactId, ArtifactState, BundleId, Kind};
+use onsager_artifact::{Artifact, ArtifactId, ArtifactState, ArtifactVersionId, Kind};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use super::artifact_store::ArtifactStore;
@@ -67,7 +67,7 @@ fn kind_from_db(s: &str) -> Kind {
 /// artifacts only (forge-v0.1 §10).
 pub async fn load_artifact_store(pool: &PgPool) -> Result<ArtifactStore, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT artifact_id, kind, name, owner, state, current_version, current_bundle_id, \
+        "SELECT artifact_id, kind, name, owner, state, current_version, current_version_id, \
                 workflow_id, current_stage_index, workflow_parked_reason \
          FROM artifacts \
          WHERE state != 'archived'",
@@ -83,7 +83,7 @@ pub async fn load_artifact_store(pool: &PgPool) -> Result<ArtifactStore, sqlx::E
         let owner: String = row.get("owner");
         let state_str: String = row.get("state");
         let version: i32 = row.get("current_version");
-        let bundle_id: Option<String> = row.get("current_bundle_id");
+        let version_id: Option<String> = row.get("current_version_id");
         let workflow_id: Option<String> = row.try_get("workflow_id").unwrap_or(None);
         let stage_index_raw: Option<i32> = row.try_get("current_stage_index").unwrap_or(None);
         let parked_reason: Option<String> = row.try_get("workflow_parked_reason").unwrap_or(None);
@@ -118,7 +118,7 @@ pub async fn load_artifact_store(pool: &PgPool) -> Result<ArtifactStore, sqlx::E
         artifact.artifact_id = ArtifactId::new(&id);
         artifact.state = state_from_db(&state_str);
         artifact.current_version = version_u32;
-        artifact.current_bundle_id = bundle_id.map(BundleId::new);
+        artifact.current_version_id = version_id.map(ArtifactVersionId::new);
         artifact.workflow_id = workflow_id;
         artifact.current_stage_index = stage_index_u32;
         artifact.workflow_parked_reason = parked_reason;
@@ -162,18 +162,18 @@ pub async fn insert_artifact_row(
 
 /// Mirror the post-tick state of `artifact` to the `artifacts` row.
 ///
-/// Writes `state`, `current_version`, and `current_bundle_id` from the
+/// Writes `state`, `current_version`, and `current_version_id` from the
 /// in-memory snapshot. The trigger in `002_artifacts.sql` refreshes
 /// `updated_at` automatically.
 pub async fn persist_artifact_state(pool: &PgPool, artifact: &Artifact) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE artifacts \
-            SET state = $1, current_version = $2, current_bundle_id = $3 \
+            SET state = $1, current_version = $2, current_version_id = $3 \
           WHERE artifact_id = $4",
     )
     .bind(state_to_db(artifact.state))
     .bind(artifact.current_version as i32)
-    .bind(artifact.current_bundle_id.as_ref().map(|b| b.as_str()))
+    .bind(artifact.current_version_id.as_ref().map(|b| b.as_str()))
     .bind(artifact.artifact_id.as_str())
     .execute(pool)
     .await?;

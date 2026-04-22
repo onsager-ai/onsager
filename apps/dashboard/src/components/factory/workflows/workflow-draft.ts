@@ -37,7 +37,7 @@ function newStageId(): string {
 
 export function makeStage(
   gate: WorkflowGateKind,
-  artifactKind: WorkflowArtifactKind = "github-issue",
+  artifactKind: WorkflowArtifactKind = "Issue",
   name?: string,
 ): WorkflowStage {
   return {
@@ -77,9 +77,9 @@ export function githubIssueToPrPreset(
     name: `${trigger.repo_owner}/${trigger.repo_name} — issue to PR`,
     trigger,
     stages: [
-      makeStage("agent-session", "github-issue", "Spec → PR"),
-      makeStage("external-check", "github-pr", "CI check"),
-      makeStage("manual-approval", "github-pr", "Merge approval"),
+      makeStage("agent-session", "Issue", "Spec → PR"),
+      makeStage("external-check", "PR", "CI check"),
+      makeStage("manual-approval", "PR", "Merge approval"),
     ],
   }
 }
@@ -108,7 +108,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     build: (trigger) => ({
       name: `${trigger.repo_owner || "agent"}/${trigger.repo_name || "session"} — agent only`,
       trigger,
-      stages: [makeStage("agent-session", "github-issue", "Agent session")],
+      stages: [makeStage("agent-session", "Issue", "Agent session")],
     }),
   },
   {
@@ -119,8 +119,8 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
       name: `${trigger.repo_owner || "repo"}/${trigger.repo_name || "pr"} — CI to merge`,
       trigger,
       stages: [
-        makeStage("external-check", "github-pr", "CI check"),
-        makeStage("manual-approval", "github-pr", "Merge approval"),
+        makeStage("external-check", "PR", "CI check"),
+        makeStage("manual-approval", "PR", "Merge approval"),
       ],
     }),
   },
@@ -132,10 +132,24 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
       name: `${trigger.repo_owner || "repo"}/${trigger.repo_name || "pipeline"} — governed`,
       trigger,
       stages: [
-        makeStage("agent-session", "github-issue", "Spec → PR"),
-        makeStage("external-check", "github-pr", "CI check"),
-        makeStage("governance", "github-pr", "Synodic gate"),
-        makeStage("manual-approval", "github-pr", "Merge approval"),
+        makeStage("agent-session", "Issue", "Spec → PR"),
+        makeStage("external-check", "PR", "CI check"),
+        makeStage("governance", "PR", "Synodic gate"),
+        makeStage("manual-approval", "PR", "Merge approval"),
+      ],
+    }),
+  },
+  {
+    id: "merge-to-deploy",
+    label: "Merge → Deploy staging",
+    description:
+      "Wait for a PR to merge, then roll the commit to staging. Requires a Deployment adapter.",
+    build: (trigger) => ({
+      name: `${trigger.repo_owner || "repo"}/${trigger.repo_name || "deploy"} — merge to deploy`,
+      trigger,
+      stages: [
+        makeStage("external-check", "PR", "Merge wait"),
+        makeStage("agent-session", "Deployment", "Deploy to staging"),
       ],
     }),
   },
