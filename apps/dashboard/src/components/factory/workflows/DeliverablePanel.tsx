@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { CircleDot, GitPullRequest } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import type { WorkflowArtifactKind } from "@/lib/api"
@@ -24,7 +25,7 @@ export interface DeliverableEntry {
 
 export interface DeliverablePanelProps {
   entries: DeliverableEntry[]
-  empty?: React.ReactNode
+  empty?: ReactNode
 }
 
 export function DeliverablePanel({ entries, empty }: DeliverablePanelProps) {
@@ -48,11 +49,19 @@ export function DeliverablePanel({ entries, empty }: DeliverablePanelProps) {
   )
 }
 
+// Canonical PR kind detection (issue #102). Mirrors the alias map in
+// `workflow-meta.ts` so legacy persisted `github-pr` / `PullRequest`
+// values still get the rich PR card instead of falling through to the
+// generic one.
+function isPrDeliverableKind(kind: WorkflowArtifactKind): boolean {
+  return kind === "PR" || kind === "github-pr" || kind === "PullRequest"
+}
+
 function DeliverableCard({ entry }: { entry: DeliverableEntry }) {
   const meta = artifactKindMeta(entry.kind)
   const Icon = meta.icon
 
-  if (entry.kind === "PR" || entry.kind === "github-pr") {
+  if (isPrDeliverableKind(entry.kind)) {
     return <PrCard entry={entry} />
   }
 
