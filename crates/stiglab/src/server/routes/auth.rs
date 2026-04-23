@@ -461,7 +461,17 @@ pub async fn sso_finish(
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         tracing::error!(status = %status, body = %text, "sso_finish: redeem rejected");
-        return (StatusCode::BAD_GATEWAY, "redeem rejected").into_response();
+        // Owner 4xx ("expired/redeemed/unknown code", "bad bearer") is a
+        // client-facing problem with the preview's request — propagate as
+        // 400. Reserve 502 for real upstream failures (5xx, timeouts,
+        // connectivity) so the preview's browser-visible status matches
+        // the underlying condition.
+        let mapped = if status.is_client_error() {
+            StatusCode::BAD_REQUEST
+        } else {
+            StatusCode::BAD_GATEWAY
+        };
+        return (mapped, "redeem rejected").into_response();
     }
 
     let payload: SsoRedeemResponse = match resp.json().await {

@@ -85,9 +85,11 @@ pub fn verify_state(secret: &str, state: &str, now_unix: i64) -> Option<StateCla
 
 /// Parse a comma-separated env-var list like `*.preview.onsager.ai,app.onsager.ai`
 /// into an allowlist vector. Empty and whitespace-only entries are dropped.
+/// Hostnames are case-insensitive in DNS, so entries are lower-cased here so
+/// the match path can compare as raw bytes without per-call normalization.
 pub fn parse_host_allowlist(raw: &str) -> Vec<String> {
     raw.split(',')
-        .map(|s| s.trim().to_string())
+        .map(|s| s.trim().to_ascii_lowercase())
         .filter(|s| !s.is_empty())
         .collect()
 }
@@ -120,6 +122,10 @@ pub fn host_of(url: &str) -> Option<String> {
 }
 
 fn host_matches_allowlist(allowlist: &[String], host: &str) -> bool {
+    // Allowlist entries are already lowercased by `parse_host_allowlist`;
+    // lowercase the incoming host here so both branches compare uniformly
+    // (the wildcard branch uses raw `ends_with`, which is case-sensitive).
+    let host = host.to_ascii_lowercase();
     for entry in allowlist {
         if let Some(suffix) = entry.strip_prefix("*.") {
             // Strict subdomain match: `host` must be `<something>.suffix`.
@@ -129,7 +135,7 @@ fn host_matches_allowlist(allowlist: &[String], host: &str) -> bool {
             {
                 return true;
             }
-        } else if host.eq_ignore_ascii_case(entry) {
+        } else if host == *entry {
             return true;
         }
     }
@@ -256,6 +262,17 @@ mod tests {
     }
 
     #[test]
+    fn allowlist_is_case_insensitive_for_both_branches() {
+        // `parse_host_allowlist` lowercases entries; matching lowercases
+        // the host. Exact-host and wildcard branches must behave the same.
+        let allow = parse_host_allowlist("*.PREVIEW.onsager.ai,APP.onsager.ai");
+        assert!(host_matches_allowlist(&allow, "Pr-1.Preview.Onsager.AI"));
+        assert!(host_matches_allowlist(&allow, "app.ONSAGER.ai"));
+        // Still rejects the usual suffix attack regardless of casing.
+        assert!(!host_matches_allowlist(&allow, "EvilPreview.Onsager.AI"));
+    }
+
+    #[test]
     fn return_to_requires_valid_url() {
         let allow = vec!["*.preview.onsager.ai".into()];
         assert!(return_to_allowed(
@@ -271,8 +288,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_allowlist_trims_and_filters() {
-        let v = parse_host_allowlist(" *.preview.onsager.ai , app.onsager.ai ,  ");
+    fn parse_allowlist_trims_filters_and_lowercases() {
+        let v = parse_host_allowlist(" *.PREVIEW.onsager.ai , App.Onsager.AI ,  ");
         assert_eq!(
             v,
             vec![
