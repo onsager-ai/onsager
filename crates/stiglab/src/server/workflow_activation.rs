@@ -174,29 +174,51 @@ fn resolve_webhook_url(headers: &axum::http::HeaderMap) -> Option<String> {
     resolve_webhook_base(headers).map(|base| format!("{base}{WEBHOOK_PATH}"))
 }
 
+/// Whether `STIGLAB_TRUST_FORWARDED_HEADERS` is set to a truthy value.
+/// Accepts the common conventions — `1`, `true`, `yes`, `on` — all
+/// case-insensitive. Anything else (including `0`, `false`, `no`, `off`,
+/// and typos like `True1`) is false.
 fn trust_forwarded_headers() -> bool {
-    matches!(
-        std::env::var("STIGLAB_TRUST_FORWARDED_HEADERS")
-            .ok()
-            .as_deref(),
-        Some("1") | Some("true") | Some("TRUE")
-    )
+    match std::env::var("STIGLAB_TRUST_FORWARDED_HEADERS")
+        .ok()
+        .as_deref()
+    {
+        Some(s) => {
+            let lower = s.trim().to_ascii_lowercase();
+            matches!(lower.as_str(), "1" | "true" | "yes" | "on")
+        }
+        None => false,
+    }
 }
 
 /// Pull a public origin (scheme + host[:port]) from the incoming request
 /// headers. Prefers `X-Forwarded-Proto` + `X-Forwarded-Host` (what the
 /// Railway edge / Vite proxy / nginx set) over the raw `Host` header
 /// since the latter is the internal hostname when behind a proxy.
+///
+/// Returns `None` when:
+/// - neither forwarded nor `Host` header is present,
+/// - the host value contains characters that would break URL structure
+///   (`/`, `?`, `#`, whitespace) — a misbehaving proxy shouldn't let us
+///   register a webhook under an attacker-influenced path, and
+/// - `X-Forwarded-Proto` is set to anything other than `http` / `https`.
+///   We don't want a proxy-supplied `javascript:` or `file:` scheme
+///   leaking through classification. Missing proto falls back to `https`
+///   because a trusted proxy terminates TLS and that's safer than `http`.
 fn origin_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
-    let proto = headers
+    let proto = match headers
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
         // Some proxies set a comma-separated list; take the first.
         .and_then(|s| s.split(',').next())
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "https".to_string());
+    {
+        Some(s) if s.eq_ignore_ascii_case("http") => "http",
+        Some(s) if s.eq_ignore_ascii_case("https") => "https",
+        Some(_) => return None,
+        None => "https",
+    };
     let host = headers
         .get("x-forwarded-host")
         .or_else(|| headers.get("host"))
@@ -204,6 +226,12 @@ fn origin_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
         .and_then(|s| s.split(',').next())
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())?;
+    if host
+        .chars()
+        .any(|c| c == '/' || c == '?' || c == '#' || c.is_whitespace())
+    {
+        return None;
+    }
     Some(format!("{proto}://{host}"))
 }
 
@@ -574,11 +602,18 @@ pub async fn deregister_webhook(
 
 /// Whether a hook's `config.url` looks like one stiglab registered —
 /// i.e. its path ends with [`WEBHOOK_PATH`]. Parses through
-/// `reqwest::Url` so we compare the path structurally rather than
-/// string-matching into query strings or fragments.
+/// `reqwest::Url` so we compare the path structurally (ignoring query
+/// strings and fragments). True suffix check rather than exact equality
+/// so stiglab running under a base path prefix (reverse proxy mounting
+/// it at `/stiglab/…`) still matches its own hooks.
+///
+/// The `/api/webhooks/github` prefix is specific enough that the only
+/// realistic false positive would be another service deliberately using
+/// the same path, which we don't guard against — stiglab owns this path
+/// by convention.
 fn webhook_url_matches_ours(url: &str) -> bool {
     reqwest::Url::parse(url)
-        .map(|u| u.path().trim_end_matches('/') == WEBHOOK_PATH)
+        .map(|u| u.path().trim_end_matches('/').ends_with(WEBHOOK_PATH))
         .unwrap_or(false)
 }
 
@@ -757,14 +792,83 @@ mod tests {
             ("1", true),
             ("true", true),
             ("TRUE", true),
+            ("True", true),
+            ("yes", true),
+            ("YES", true),
+            ("Yes", true),
+            ("on", true),
+            ("ON", true),
+            // Leading/trailing whitespace is tolerated; env substitution
+            // that leaves a stray newline shouldn't silently disable the
+            // flag.
+            (" 1 ", true),
             ("0", false),
             ("false", false),
+            ("no", false),
+            ("off", false),
             ("", false),
-            ("yes", false),
+            // Typos and near-misses are disabled, not truthy.
+            ("True1", false),
+            ("y", false),
         ] {
             let _flag = ScopedEnvVar::set("STIGLAB_TRUST_FORWARDED_HEADERS", val);
             assert_eq!(trust_forwarded_headers(), expected, "value {val:?}");
         }
+    }
+
+    #[test]
+    fn origin_from_headers_rejects_non_http_proto() {
+        // A misbehaving proxy (or an attacker who can reach stiglab
+        // directly) mustn't be able to smuggle a non-HTTP scheme into
+        // the registered webhook URL.
+        let headers = header_map(&[
+            ("x-forwarded-proto", "javascript"),
+            ("x-forwarded-host", "stig.example.com"),
+        ]);
+        assert_eq!(origin_from_headers(&headers), None);
+        let headers = header_map(&[
+            ("x-forwarded-proto", "file"),
+            ("x-forwarded-host", "stig.example.com"),
+        ]);
+        assert_eq!(origin_from_headers(&headers), None);
+    }
+
+    #[test]
+    fn origin_from_headers_rejects_host_with_structural_chars() {
+        // Trailing slash / query / fragment / embedded whitespace in the
+        // host would let a spoofed header inject path or break URL
+        // structure. Refuse to resolve in those cases. (Control chars
+        // like `\n` are rejected by `HeaderValue::from_str` before they
+        // could reach us, so we only test the characters that are valid
+        // HTTP header values but still structurally dangerous.)
+        for host in [
+            "stig.example.com/",
+            "stig.example.com/evil",
+            "stig.example.com?x=1",
+            "stig.example.com#frag",
+            "stig.example.com evil.com",
+        ] {
+            let headers = header_map(&[("x-forwarded-host", host)]);
+            assert_eq!(
+                origin_from_headers(&headers),
+                None,
+                "expected None for host {host:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn origin_from_headers_normalizes_proto_case() {
+        // RFC 3986 scheme comparison is case-insensitive; Railway edge
+        // occasionally emits uppercase.
+        let headers = header_map(&[
+            ("x-forwarded-proto", "HTTPS"),
+            ("x-forwarded-host", "stig.example.com"),
+        ]);
+        assert_eq!(
+            origin_from_headers(&headers),
+            Some("https://stig.example.com".to_string())
+        );
     }
 
     #[test]
@@ -781,6 +885,16 @@ mod tests {
         assert!(webhook_url_matches_ours(
             "https://stig.example.com/api/webhooks/github/"
         ));
+        // Base-path prefix (stiglab mounted under a reverse proxy path)
+        // → still match. This is the case that motivates true
+        // `ends_with` over exact equality.
+        assert!(webhook_url_matches_ours(
+            "https://proxy.example.com/stiglab/api/webhooks/github"
+        ));
+        // Query / fragment are stripped by URL parsing before comparison.
+        assert!(webhook_url_matches_ours(
+            "https://stig.example.com/api/webhooks/github?foo=1#bar"
+        ));
         // Different path → no match.
         assert!(!webhook_url_matches_ours(
             "https://stig.example.com/api/webhooks/other"
@@ -789,6 +903,12 @@ mod tests {
         // over-matching `/api/webhooks/github-extra`).
         assert!(!webhook_url_matches_ours(
             "https://stig.example.com/api/webhooks/github-extra"
+        ));
+        // Near-miss segment boundary — `/xapi/webhooks/github` must
+        // NOT match, because the suffix starts mid-segment. The leading
+        // `/` in WEBHOOK_PATH keeps this honest.
+        assert!(!webhook_url_matches_ours(
+            "https://stig.example.com/xapi/webhooks/github"
         ));
         // Unparseable → no match (best-effort cleanup never errors).
         assert!(!webhook_url_matches_ours("not a url"));
