@@ -74,6 +74,22 @@ numReplicas = 1
 #                               split, etc.).
 #   GITHUB_CLIENT_ID          — GitHub OAuth app client ID
 #   GITHUB_CLIENT_SECRET      — GitHub OAuth app client secret
+#
+# Cross-environment SSO (owner side — prod only):
+#   The preview environments piggy-back off prod's GitHub OAuth app via a
+#   back-channel exchange. Prod registers a single OAuth callback with
+#   GitHub; previews delegate to prod over HTTPS. Set these on prod only —
+#   they must NOT be set on preview environments.
+#
+#   SSO_STATE_SECRET            — HMAC secret signing the OAuth `state`
+#                                 envelope (≥ 32 random bytes).
+#   SSO_EXCHANGE_SECRET         — shared bearer token: previews present
+#                                 this to POST /api/auth/sso/redeem.
+#   SSO_RETURN_HOST_ALLOWLIST   — comma-separated. Entries may be a strict
+#                                 subdomain pattern (`*.preview.onsager.ai`)
+#                                 or an exact host (`app.onsager.ai`).
+#                                 Any `return_to` whose host is not listed
+#                                 is rejected at the start of the flow.
 #   SYNODIC_PORT              — internal port for synodic (default: 3001)
 #   PORTAL_PORT               — internal port for onsager-portal (default: 3002)
 #   GITHUB_TOKEN              — optional PAT used by the portal for posting
@@ -146,3 +162,19 @@ ONSAGER_PREVIEW = "true"
 # STIGLAB_WEBHOOK_BASE_URL per-PR. Production deliberately leaves this
 # unset — see the webhook resolution notes above.
 STIGLAB_TRUST_FORWARDED_HEADERS = "1"
+
+# Cross-environment SSO (relying side).
+#
+# Previews never talk to GitHub directly. `/api/auth/github` on a preview
+# 302s to `${SSO_AUTH_DOMAIN}/api/auth/github?return_to=…`; prod runs the
+# OAuth dance against its single registered callback, then hands back an
+# opaque one-shot code via `${return_to}?code=…` which `/api/auth/sso/finish`
+# redeems server-to-server with `SSO_EXCHANGE_SECRET` as Bearer.
+#
+# SSO_EXCHANGE_SECRET must equal the value set on prod and must be kept as
+# a shared secret (configure via the Railway dashboard, NOT in the TOML).
+# GITHUB_CLIENT_ID/SECRET must NOT be set on preview environments — the
+# startup assertion panics if both owner and relying credentials are
+# present, to catch config confusion early.
+SSO_AUTH_DOMAIN = "${{SSO_AUTH_DOMAIN}}"
+SSO_EXCHANGE_SECRET = "${{SSO_EXCHANGE_SECRET}}"
