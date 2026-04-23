@@ -124,6 +124,30 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
+    // Short-lived opaque codes used by cross-environment SSO delegation.
+    // `redeemed_at` is NULL until a relying party successfully exchanges
+    // the code for the user identity; the UPDATE that flips it is the
+    // single-use gate (see `redeem_sso_exchange_code`).
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS sso_exchange_codes (
+            code TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            return_to_host TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            redeemed_at TEXT,
+            created_at TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_sso_exchange_codes_expires_at \
+         ON sso_exchange_codes (expires_at)",
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS user_credentials (
             id TEXT PRIMARY KEY,
@@ -793,6 +817,66 @@ pub async fn delete_auth_session(pool: &AnyPool, session_id: &str) -> anyhow::Re
         .execute(pool)
         .await?;
     Ok(())
+}
+
+// ── SSO Exchange Codes (cross-env delegation) ──
+
+pub async fn insert_sso_exchange_code(
+    pool: &AnyPool,
+    code: &str,
+    user_id: &str,
+    return_to_host: &str,
+    expires_at: chrono::DateTime<Utc>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO sso_exchange_codes (code, user_id, return_to_host, expires_at, redeemed_at, created_at)
+         VALUES ($1, $2, $3, $4, NULL, $5)",
+    )
+    .bind(code)
+    .bind(user_id)
+    .bind(return_to_host)
+    .bind(expires_at.to_rfc3339())
+    .bind(Utc::now().to_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Atomically consume an exchange code. The UPDATE is the single-use gate —
+/// it succeeds for exactly one caller (the one who sees `rows_affected == 1`);
+/// concurrent or repeat calls get `None`. The return-to-host check runs in the
+/// UPDATE predicate so a code issued for host A can't be redeemed by host B
+/// even if both are in the owner's allowlist.
+pub async fn redeem_sso_exchange_code(
+    pool: &AnyPool,
+    code: &str,
+    return_to_host: &str,
+) -> anyhow::Result<Option<User>> {
+    let now = Utc::now().to_rfc3339();
+    let rows = sqlx::query(
+        "UPDATE sso_exchange_codes
+         SET redeemed_at = $1
+         WHERE code = $2
+           AND redeemed_at IS NULL
+           AND expires_at > $1
+           AND return_to_host = $3",
+    )
+    .bind(&now)
+    .bind(code)
+    .bind(return_to_host)
+    .execute(pool)
+    .await?;
+
+    if rows.rows_affected() == 0 {
+        return Ok(None);
+    }
+
+    let user_id: String =
+        sqlx::query_scalar("SELECT user_id FROM sso_exchange_codes WHERE code = $1")
+            .bind(code)
+            .fetch_one(pool)
+            .await?;
+    get_user(pool, &user_id).await
 }
 
 // ── User Credentials CRUD ──

@@ -5,6 +5,7 @@ pub mod github_app;
 pub mod handler;
 pub mod routes;
 pub mod spine;
+pub mod sso;
 pub mod state;
 pub mod webhook_router;
 pub mod workflow_activation;
@@ -52,6 +53,18 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         )
         .route("/api/auth/me", get(routes::auth::me))
         .route("/api/auth/logout", post(routes::auth::logout))
+        // Cross-environment SSO delegation.
+        //
+        // * `/api/auth/sso/redeem` (POST, owner only): server-to-server
+        //   redemption of an opaque exchange code. Requires
+        //   `Authorization: Bearer $SSO_EXCHANGE_SECRET`. 404s when this
+        //   process is not an owner with delegation enabled.
+        // * `/api/auth/sso/finish` (GET, relying only): browser lands here
+        //   after the owner completes the OAuth dance; we redeem the code
+        //   and mint a local session. 404s when this process owns the
+        //   OAuth app directly.
+        .route("/api/auth/sso/redeem", post(routes::auth::sso_redeem))
+        .route("/api/auth/sso/finish", get(routes::auth::sso_finish))
         // Credential routes
         .route(
             "/api/credentials",
