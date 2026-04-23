@@ -73,8 +73,10 @@ export function emptyDraft(): WorkflowDraft {
 export function githubIssueToPrPreset(
   trigger: WorkflowTriggerDraft,
 ): WorkflowDraft {
+  const owner = trigger.repo_owner || "repo"
+  const name = trigger.repo_name || "issue-to-pr"
   return {
-    name: `${trigger.repo_owner}/${trigger.repo_name} — issue to PR`,
+    name: `${owner}/${name} — issue to PR`,
     trigger,
     stages: [
       makeStage("agent-session", "Issue", "Spec → PR"),

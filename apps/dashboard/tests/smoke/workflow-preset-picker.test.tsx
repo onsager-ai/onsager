@@ -53,4 +53,17 @@ describe("PresetPicker", () => {
     const next = onApply.mock.calls[0][0] as WorkflowDraft
     expect(next.name.length).toBeGreaterThan(0)
   })
+
+  it("every preset generates a readable name when no repo has been picked yet", () => {
+    // Regression: applying the Issue → PR preset before the trigger repo
+    // was picked used to produce names like "/ — issue to PR" (empty
+    // owner/name around a literal slash). Every preset must fall back to
+    // a placeholder instead.
+    const { trigger } = emptyDraft()
+    for (const p of WORKFLOW_PRESETS) {
+      const next = p.build(trigger)
+      expect(next.name, `${p.id} name`).not.toMatch(/^\s*\//)
+      expect(next.name, `${p.id} name`).not.toMatch(/\/\s+—/)
+    }
+  })
 })
