@@ -132,6 +132,10 @@ fn app_state(pool: AnyPool) -> AppState {
         github_client_secret: None,
         credential_key: Some(TEST_KEY_HEX.to_string()),
         public_url: None,
+        sso_state_secret: None,
+        sso_exchange_secret: None,
+        sso_return_host_allowlist: Vec::new(),
+        sso_auth_domain: None,
     };
     // Auth disabled — the webhook receiver doesn't need AuthUser; the CRUD
     // routes aren't exercised here.
