@@ -7,6 +7,50 @@ project does not yet publish numbered releases.
 ## [Unreleased]
 
 ### Added
+- **Stiglab**: workflow lifecycle controls end-to-end. New
+  `DELETE /api/workflows/:id` deactivates first (so webhook + label
+  side effects unwind) then drops the row and stage chain in a single
+  transaction; the dashboard gains a `WorkflowActions` bar on the
+  detail page with a pause/resume toggle (PATCH `active`) and a
+  destructive delete guarded by modal confirmation. The builder's
+  single "Activate workflow" button splits into
+  "Save as draft" / "Activate workflow" so users can land a workflow
+  without publishing and flip the switch later. <!-- sha: ae21bac -->
+- **Dashboard**: workflow builder drives `ArtifactKindSelect`,
+  `ArtifactBadge`, and `DeliverablePanel` off the runtime registry via
+  a new `useWorkflowKinds()` query that calls the `listWorkflowKinds`
+  API shipped in #102 — a registry-registered kind is now visible to
+  the user instead of being masked by the static fallback. Alias
+  resolution reads from the registry response, and
+  `DeliverablePanel` routes any registry-reported PR alias through the
+  rich PR card via `metaFor(...).value === "PR"` instead of a local
+  alias table. Fallback keys on `!data || isError` so a successful-
+  but-empty registry renders as empty, matching the hook's contract.
+  Part of #100. <!-- sha: f21bdbe, 332534f -->
+- **Stiglab**: webhook base URL now resolves through a documented
+  chain instead of a silent localhost default. Order: explicit
+  `STIGLAB_WEBHOOK_BASE_URL` / `STIGLAB_PUBLIC_BASE_URL` override,
+  Railway-injected `RAILWAY_PUBLIC_DOMAIN`, then
+  `X-Forwarded-Proto` + `X-Forwarded-Host` from the activation
+  request (gated on `STIGLAB_TRUST_FORWARDED_HEADERS` — accepts `1` /
+  `true` / `yes` / `on` case-insensitively, defaults off so a
+  non-proxied deploy can't be spoofed). Chain exhaustion surfaces a
+  new `ActivationError::WebhookUrlUnknown` → 503 naming all three
+  sources. Forwarded-header classification validates the host has no
+  structural characters and whitelists proto to `http` / `https`.
+  Preflight `classify_webhook_url` rejects loopback, unspecified,
+  RFC1918 private, link-local, IPv6 unique-local (`fc00::/7`) +
+  link-local (`fe80::/10`), and the `localhost`/`localhost.` family
+  before calling GitHub; `WebhookUrlInvalid` vs `WebhookUrlNotReachable`
+  variants give operators an actionable message instead of the opaque
+  GitHub 422. Deactivation matches webhooks by path suffix on
+  `/api/webhooks/github` so a workflow activated under one preview URL
+  (or custom domain) still cleans up after re-deploy / rebase /
+  cutover, and deploys mounted behind a reverse-proxy path prefix
+  deregister correctly. `.env.example` + `railway.toml` document the
+  chain; Railway preview env opts in to
+  `STIGLAB_TRUST_FORWARDED_HEADERS=1`. Closes #109, #110.
+  <!-- sha: 2341512, e7e44ce, 8725804, 95db7f7 -->
 - **Artifact + Registry + Dashboard**: Deliverable + registry-backed kinds
   (issue #100, closes #101–#105). New `Deliverable` / `DeliverableId` /
   `WorkflowRunId` / `KindId` value objects plus `DeliverableCreated` /
@@ -100,6 +144,11 @@ project does not yet publish numbered releases.
   <!-- sha: ab6a083, be6f4d3 -->
 
 ### Fixed
+- **Dashboard**: the Issue → PR preset no longer renders its name as
+  "/ — issue to PR" when the repo owner/name fields are still empty.
+  `githubIssueToPrPreset` coalesces empty owner/name to placeholders,
+  matching the four sibling presets; a regression test covers every
+  preset in the catalog. Closes #111. <!-- sha: b78c7dc -->
 - **Stiglab**: workflow activate surfaces the missing GitHub App
   permission as a `400` with an actionable message instead of a
   dead-end `502 "github api error"`. A new
