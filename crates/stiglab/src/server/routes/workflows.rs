@@ -175,9 +175,15 @@ pub fn validate_create_body(
 
 /// POST /api/workflows — create a workflow. If `active=true`, the
 /// activation hook runs inline and rejects out-of-scope repos with 400.
+///
+/// The `HeaderMap` is plumbed into activation so the webhook base URL
+/// can be derived from `X-Forwarded-Proto` / `X-Forwarded-Host` when
+/// `STIGLAB_TRUST_FORWARDED_HEADERS=1`. Axum extractors ordering:
+/// `Json<_>` consumes the body and must come last.
 pub async fn create_workflow(
     State(state): State<AppState>,
     auth_user: AuthUser,
+    headers: axum::http::HeaderMap,
     Json(body): Json<CreateWorkflowBody>,
 ) -> Response {
     let user_id = match require_auth_user(&auth_user) {
@@ -226,7 +232,7 @@ pub async fn create_workflow(
     // Activation runs after the row is durable. If it fails the workflow
     // stays `active=false` and the caller sees the activation error.
     if body.active {
-        if let Err(r) = activate_workflow(&state, &workflow.id).await {
+        if let Err(r) = activate_workflow(&state, &workflow.id, &headers).await {
             return r;
         }
     }
@@ -311,10 +317,14 @@ pub struct PatchWorkflowBody {
 
 /// PATCH /api/workflows/:id — toggle `active`. Runs the activation /
 /// deactivation hooks as side effects.
+///
+/// Headers are plumbed into activation for request-derived webhook URL
+/// resolution; see `create_workflow`.
 pub async fn patch_workflow(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Path(workflow_id): Path<String>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<PatchWorkflowBody>,
 ) -> Response {
     let user_id = match require_auth_user(&auth_user) {
@@ -341,7 +351,7 @@ pub async fn patch_workflow(
     }
 
     if desired_active {
-        if let Err(r) = activate_workflow(&state, &workflow_id).await {
+        if let Err(r) = activate_workflow(&state, &workflow_id, &headers).await {
             return r;
         }
     } else if let Err(r) = deactivate_workflow(&state, &workflow_id).await {
@@ -398,8 +408,15 @@ pub async fn delete_workflow(
 /// Run the activation pipeline against the live GitHub App install. Emits
 /// typed failure modes through `Response` so the caller can bubble the HTTP
 /// status directly.
+///
+/// `headers` comes from the originating HTTP request and feeds the
+/// webhook-URL resolver (`resolve_webhook_base`) when trust is enabled.
 #[allow(clippy::result_large_err)]
-async fn activate_workflow(state: &AppState, workflow_id: &str) -> Result<(), Response> {
+async fn activate_workflow(
+    state: &AppState,
+    workflow_id: &str,
+    headers: &axum::http::HeaderMap,
+) -> Result<(), Response> {
     let workflow = match workflow_db::get_workflow(&state.db, workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return Err(not_found("workflow not found")),
@@ -457,6 +474,7 @@ async fn activate_workflow(state: &AppState, workflow_id: &str) -> Result<(), Re
         &workflow.repo_owner,
         &workflow.repo_name,
         secret.as_deref(),
+        headers,
     )
     .await
     {
@@ -559,7 +577,7 @@ fn map_activation_error(e: ActivationError) -> Response {
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({
                     "error": format!(
-                        "Webhook URL {url} is not reachable from GitHub. Set STIGLAB_WEBHOOK_BASE_URL (or STIGLAB_PUBLIC_BASE_URL) to a publicly reachable HTTP(S) URL (e.g. a tunnel like ngrok, or your production domain) and retry."
+                        "Webhook URL {url} is not reachable from GitHub. The stiglab webhook base URL is resolved in order: STIGLAB_WEBHOOK_BASE_URL (or STIGLAB_PUBLIC_BASE_URL), then RAILWAY_PUBLIC_DOMAIN, then X-Forwarded-* headers when STIGLAB_TRUST_FORWARDED_HEADERS=1. Configure one of these to point at a publicly reachable HTTP(S) origin (tunnel like ngrok, Railway public domain, or production host) and retry."
                     ),
                     "code": "webhook_url_not_reachable",
                     "url": url,
@@ -573,10 +591,21 @@ fn map_activation_error(e: ActivationError) -> Response {
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({
                     "error": format!(
-                        "Webhook URL {url} is not a valid absolute URL. Check STIGLAB_WEBHOOK_BASE_URL (or STIGLAB_PUBLIC_BASE_URL) — it should be an absolute HTTP(S) URL like https://stig.example.com."
+                        "Webhook URL {url} is not a valid absolute URL. Check STIGLAB_WEBHOOK_BASE_URL / STIGLAB_PUBLIC_BASE_URL / RAILWAY_PUBLIC_DOMAIN — the first non-empty value must be an absolute HTTP(S) URL like https://stig.example.com (or a bare hostname for RAILWAY_PUBLIC_DOMAIN)."
                     ),
                     "code": "webhook_url_invalid",
                     "url": url,
+                })),
+            )
+                .into_response()
+        }
+        ActivationError::WebhookUrlUnknown => {
+            tracing::warn!("webhook base URL unresolved from env and request");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Webhook base URL is not configured. Set STIGLAB_WEBHOOK_BASE_URL (or STIGLAB_PUBLIC_BASE_URL) to a public HTTP(S) URL, or set RAILWAY_PUBLIC_DOMAIN, or enable STIGLAB_TRUST_FORWARDED_HEADERS=1 when running behind a trusted proxy that sets X-Forwarded-Proto and X-Forwarded-Host.",
+                    "code": "webhook_url_unknown",
                 })),
             )
                 .into_response()
