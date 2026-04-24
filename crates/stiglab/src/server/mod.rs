@@ -140,6 +140,16 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/webhooks/github",
             post(routes::webhooks::handle).layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)),
         )
+        // Forgiving alias for the webhook receiver. The `/api/github-app/*`
+        // prefix hosts the GET-only OAuth/install flow, so a GitHub App
+        // configured to POST its webhook to `/api/github-app/webhook` (a
+        // plausible-looking but wrong URL) would otherwise 405. Accept it
+        // here so a misconfigured App heals itself instead of silently
+        // dropping every delivery.
+        .route(
+            "/api/github-app/webhook",
+            post(routes::webhooks::handle).layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)),
+        )
         // Workflow CRUD (issue #81).
         .route(
             "/api/workflows",
