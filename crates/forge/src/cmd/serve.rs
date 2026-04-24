@@ -27,7 +27,6 @@ use crate::core::stage_runner::{self, StageEvent};
 use crate::core::trigger_subscriber::{
     self, register_artifact_from_trigger, TriggerFired, TriggerHandler,
 };
-use crate::core::workflow::Workflow;
 use crate::core::workflow_gates::LiveGateEvaluator;
 use crate::core::workflow_persistence;
 use crate::core::workflow_signal_listener;
@@ -335,8 +334,6 @@ struct ForgeSharedState {
     pipeline: ForgePipeline<HttpStiglabDispatcher, HttpSynodicGate>,
     kernel: BaselineKernel,
     spine: Option<EventStore>,
-    /// Active + in-flight workflows (issue #80). Keyed by workflow_id.
-    workflows: std::collections::HashMap<String, Workflow>,
     /// Shared signal cache populated by the workflow signal listener and
     /// consumed by the gate evaluator on each stage-runner tick. Held
     /// here so the HTTP API can introspect pending gates if a future
@@ -432,28 +429,19 @@ pub fn run(database_url: &str, tick_ms: u64) {
             ForgePipeline::new(stiglab, synodic).with_insight_cache(insight_cache.clone());
         pipeline.store = artifact_store;
 
-        // Load workflows (issue #80). Absent spine → empty registry.
-        let workflows = match spine.as_ref() {
-            Some(s) => match workflow_persistence::load_workflows(s.pool()).await {
-                Ok(w) => {
-                    tracing::info!("forge: loaded {} workflows from spine", w.len());
-                    w
-                }
-                Err(e) => {
-                    tracing::error!("forge: failed to load workflows: {e}");
-                    std::collections::HashMap::new()
-                }
-            },
-            None => std::collections::HashMap::new(),
-        };
-
+        // Workflows are read from the spine DB on demand — both at the top
+        // of every tick (for the stage runner) and inside the trigger
+        // handler (for `trigger.fired` lookups). No in-memory registry:
+        // stiglab's `workflows` table is the single source of truth, which
+        // means workflow edits, deactivations, and fresh creations are
+        // picked up without a restart and without risking a stale-cache
+        // branch that silently disagrees with the DB.
         let signals = SignalCache::new();
 
         let shared = Arc::new(RwLock::new(ForgeSharedState {
             pipeline,
             kernel: BaselineKernel::new(),
             spine,
-            workflows,
             signals: signals.clone(),
         }));
 
@@ -478,6 +466,27 @@ pub fn run(database_url: &str, tick_ms: u64) {
             loop {
                 interval.tick().await;
 
+                // Load workflows fresh from the spine DB before taking the
+                // tick write lock. DB query outside the lock so HTTP reads
+                // aren't blocked, and a per-tick snapshot means no stale
+                // in-memory entries can mask an edit or deactivation.
+                let workflows_snapshot = {
+                    let spine_handle = {
+                        let state = tick_shared.read().await;
+                        state.spine.clone()
+                    };
+                    match spine_handle.as_ref() {
+                        Some(s) => match workflow_persistence::load_workflows(s.pool()).await {
+                            Ok(m) => m,
+                            Err(e) => {
+                                tracing::error!("forge: failed to reload workflows: {e}");
+                                continue;
+                            }
+                        },
+                        None => std::collections::HashMap::new(),
+                    }
+                };
+
                 // Run the pipeline tick under the write lock, then release it
                 // before emitting spine events so HTTP reads aren't starved.
                 let (output, spine, stage_events, stage_touched_ids) = {
@@ -493,7 +502,6 @@ pub fn run(database_url: &str, tick_ms: u64) {
                     // before the pass so a burst of new artifacts can't
                     // synchronously hammer Stiglab under the lock.
                     gate_evaluator.reset_dispatch_budget();
-                    let workflows_snapshot = state.workflows.clone();
                     let stage_events = stage_runner::advance_workflow_artifacts(
                         &workflows_snapshot,
                         &mut state.pipeline.store,
@@ -733,55 +741,41 @@ struct WorkflowTriggerHandler {
 #[async_trait]
 impl TriggerHandler for WorkflowTriggerHandler {
     async fn on_trigger_fired(&self, event: TriggerFired) -> anyhow::Result<()> {
-        let (spine, workflow_opt) = {
+        let spine = {
             let state = self.shared.read().await;
-            (
-                state.spine.clone(),
-                state.workflows.get(&event.workflow_id).cloned(),
-            )
+            state.spine.clone()
         };
-        // Workflows are loaded into memory at startup, but new workflows
-        // can be created in stiglab while forge is running. Rather than
-        // drop a valid trigger for a workflow forge simply hasn't heard
-        // about yet, fetch it on demand and cache it in the registry.
-        let workflow = match workflow_opt {
-            Some(w) => w,
-            None => {
-                let Some(ref s) = spine else {
-                    tracing::warn!(
-                        workflow_id = %event.workflow_id,
-                        "trigger.fired for unknown workflow (no spine to lazy-load)"
-                    );
-                    return Ok(());
-                };
-                match workflow_persistence::load_workflow(s.pool(), &event.workflow_id).await {
-                    Ok(Some(w)) => {
-                        tracing::info!(
-                            workflow_id = %event.workflow_id,
-                            "forge: lazy-loaded workflow from spine for trigger.fired"
-                        );
-                        let mut state = self.shared.write().await;
-                        state
-                            .workflows
-                            .entry(event.workflow_id.clone())
-                            .or_insert_with(|| w.clone());
-                        w
-                    }
-                    Ok(None) => {
-                        tracing::warn!(
-                            workflow_id = %event.workflow_id,
-                            "trigger.fired for unknown workflow (no row in spine)"
-                        );
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            workflow_id = %event.workflow_id,
-                            "forge: failed to lazy-load workflow: {e}"
-                        );
-                        return Ok(());
-                    }
-                }
+        // Resolve the workflow by reading the spine DB directly — no
+        // in-memory cache means no stale view of active/inactive or
+        // edited stages. Absent spine means forge can't advance
+        // workflows at all; surface and bail.
+        let Some(ref spine_ref) = spine else {
+            tracing::warn!(
+                workflow_id = %event.workflow_id,
+                "trigger.fired dropped (no spine to resolve workflow)"
+            );
+            return Ok(());
+        };
+        let workflow = match workflow_persistence::load_workflow(
+            spine_ref.pool(),
+            &event.workflow_id,
+        )
+        .await
+        {
+            Ok(Some(w)) => w,
+            Ok(None) => {
+                tracing::warn!(
+                    workflow_id = %event.workflow_id,
+                    "trigger.fired for unknown workflow (no row in spine)"
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::error!(
+                    workflow_id = %event.workflow_id,
+                    "forge: failed to load workflow for trigger.fired: {e}"
+                );
+                return Ok(());
             }
         };
 
