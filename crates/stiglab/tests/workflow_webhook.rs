@@ -193,10 +193,10 @@ async fn webhook_with_valid_signature_returns_202() {
 
 #[tokio::test]
 async fn webhook_alias_under_github_app_prefix_returns_202() {
-    // `/api/github-app/*` hosts the GET-only OAuth/install flow. A GitHub
-    // App configured to POST its webhook to `/api/github-app/webhook` (a
-    // plausible-looking but wrong URL) would 405 without this alias; we
-    // accept it so a misconfigured App heals itself.
+    // `/api/github-app/*` hosts the GET-only OAuth/install flow and had
+    // no handler at `/api/github-app/webhook`, so an App configured to
+    // POST its webhook there never reached the handler. Verify the alias
+    // catches it.
     let pool = test_pool().await;
     let install_id = 987;
     let tenant_id = seed_tenant_and_installation(&pool, install_id).await;
