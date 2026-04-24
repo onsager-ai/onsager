@@ -7,6 +7,30 @@ project does not yet publish numbered releases.
 ## [Unreleased]
 
 ### Added
+- **Stiglab + Railway**: cross-env SSO delegation so per-PR preview
+  environments can piggy-back off prod's single registered GitHub
+  OAuth callback. Previews 302 to prod's `/api/auth/github?return_to=…`;
+  prod completes the OAuth dance, mints a single-use opaque exchange
+  code, and 302s back to the preview, which redeems it server-to-server
+  with a shared bearer and mints its own local session. `SsoMode`
+  (`Disabled` / `Owner { delegate_enabled }` / `Relying`) is derived
+  from env at startup; mutually exclusive configs (both owner and
+  relying credentials set) panic before serving traffic. The `state`
+  carried through GitHub is an HMAC-signed envelope holding the CSRF
+  nonce and optional `return_to`, so the owner trusts the callback's
+  intent without a server-side store; `return_to` host is checked
+  against `SSO_RETURN_HOST_ALLOWLIST` at both start and callback with
+  strict-subdomain matching (`*.preview.onsager.ai`) and full
+  case-insensitivity at parse + match time. New `sso_exchange_codes`
+  table with an atomic single-use gate
+  (`UPDATE … WHERE redeemed_at IS NULL`) and a 30-second TTL — the
+  code is useless without the bearer. `sso_finish` maps owner 4xx
+  (expired/redeemed code, bad bearer) to 400 and reserves 502 for 5xx
+  / connectivity. `railway.toml` wires `SSO_AUTH_DOMAIN` +
+  `SSO_EXCHANGE_SECRET` into the preview environment and documents
+  prod-side `SSO_STATE_SECRET`, `SSO_EXCHANGE_SECRET`, and
+  `SSO_RETURN_HOST_ALLOWLIST` (scoped to the preview subdomain
+  pattern). <!-- sha: ee47c2a, bbf7477, eecbd20 -->
 - **Stiglab**: workflow lifecycle controls end-to-end. New
   `DELETE /api/workflows/:id` deactivates first (so webhook + label
   side effects unwind) then drops the row and stage chain in a single
@@ -144,6 +168,22 @@ project does not yet publish numbered releases.
   <!-- sha: ab6a083, be6f4d3 -->
 
 ### Fixed
+- **Stiglab**: GitHub App webhook deliveries no longer silently 401 or
+  405 for installations registered via the OAuth callback. A new
+  `GITHUB_APP_WEBHOOK_SECRET` env var provides a shared fallback HMAC
+  secret when no per-install cipher is stored (per-install secrets
+  from the manual tenant endpoint still take precedence); the fallback
+  is gated on the presence of an install row, so unknown `install_id`s
+  still 401 — the module keeps its fail-closed contract.
+  `get_install_webhook_secret_cipher` now distinguishes "install row
+  missing" from "row present with NULL cipher" so the shared secret
+  only applies to installs stiglab has actually registered. The
+  webhook router also accepts `/api/github-app/webhook` as an alias
+  for `/api/webhooks/github`, healing GitHub Apps misconfigured to
+  POST under the GET-only `/api/github-app/*` OAuth/install prefix.
+  `Cow<str>` in the handler avoids cloning the global secret on every
+  request. `.env.example` documents the new env var.
+  <!-- sha: 2227e59, dbe2e29, fe35ad4 -->
 - **Dashboard**: the Issue → PR preset no longer renders its name as
   "/ — issue to PR" when the repo owner/name fields are still empty.
   `githubIssueToPrPreset` coalesces empty owner/name to placeholders,
