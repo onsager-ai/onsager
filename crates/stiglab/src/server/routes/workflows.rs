@@ -621,6 +621,7 @@ async fn resolve_install_webhook_secret(state: &AppState, install_id: i64) -> Op
     let cipher = workflow_db::get_install_webhook_secret_cipher(&state.db, install_id)
         .await
         .ok()
+        .flatten()
         .flatten()?;
     let key = state.config.credential_key.as_ref()?;
     decrypt_credential(key, &cipher).ok()

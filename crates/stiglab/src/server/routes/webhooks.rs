@@ -11,6 +11,8 @@
 //! deliveries, malformed signatures, and unknown installations all return
 //! `401`. Malformed payloads return `400`. Successful routing returns `202`.
 
+use std::borrow::Cow;
+
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -90,20 +92,27 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
         }
     };
 
-    let per_install_cipher =
-        match workflow_db::get_install_webhook_secret_cipher(&state.db, install_id).await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("install secret lookup failed: {e}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        };
+    let lookup = match workflow_db::get_install_webhook_secret_cipher(&state.db, install_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("install secret lookup failed: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
     // Precedence: per-install cipher (manual tenant endpoint) → shared App
-    // secret from `GITHUB_APP_WEBHOOK_SECRET` (Railway env var). The shared
-    // secret covers installs registered via the normal OAuth callback, which
-    // persists the row without a cipher.
-    let secret = match per_install_cipher {
-        Some(cipher) => {
+    // secret from `GITHUB_APP_WEBHOOK_SECRET` (Railway env var) when the
+    // install row exists without a cipher. Unknown installations still fail
+    // closed — the global fallback is only reachable for rows we registered.
+    let secret: Cow<'_, str> = match lookup {
+        None => {
+            tracing::warn!(install_id, "unknown installation");
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "unknown installation" })),
+            )
+                .into_response();
+        }
+        Some(Some(cipher)) => {
             let Some(key_hex) = state.config.credential_key.as_ref() else {
                 tracing::error!(
                     "STIGLAB_CREDENTIAL_KEY not set — cannot decrypt per-install webhook secret"
@@ -111,20 +120,19 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             };
             match decrypt_credential(key_hex, &cipher) {
-                Ok(s) => s,
+                Ok(s) => Cow::Owned(s),
                 Err(e) => {
                     tracing::error!("webhook secret decrypt failed: {e}");
                     return StatusCode::INTERNAL_SERVER_ERROR.into_response();
                 }
             }
         }
-        None => match state.config.github_app_webhook_secret.as_deref() {
-            Some(s) => s.to_string(),
+        Some(None) => match state.config.github_app_webhook_secret.as_deref() {
+            Some(s) => Cow::Borrowed(s),
             None => {
                 tracing::warn!(
                     install_id,
-                    "no webhook secret available (no per-install cipher and \
-                     GITHUB_APP_WEBHOOK_SECRET unset)"
+                    "install has no per-install cipher and GITHUB_APP_WEBHOOK_SECRET unset"
                 );
                 return (
                     StatusCode::UNAUTHORIZED,
