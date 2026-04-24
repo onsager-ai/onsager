@@ -92,6 +92,60 @@ async fn seed_tenant_and_installation(pool: &AnyPool, install_numeric_id: i64) -
     tenant_id
 }
 
+/// Seed an installation as the OAuth-callback flow does — row exists, but
+/// no per-install webhook-secret cipher is stored. The global App secret
+/// from `GITHUB_APP_WEBHOOK_SECRET` is expected to cover it.
+async fn seed_tenant_and_installation_without_cipher(
+    pool: &AnyPool,
+    install_numeric_id: i64,
+) -> String {
+    let tenant_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO users (id, github_id, github_login, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $4)",
+    )
+    .bind("u1")
+    .bind(1i64)
+    .bind("u1")
+    .bind(Utc::now().to_rfc3339())
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let t = Tenant {
+        id: tenant_id.clone(),
+        slug: format!("t-{}", &tenant_id[..8]),
+        name: "workspace".into(),
+        created_by: "u1".into(),
+        created_at: Utc::now(),
+    };
+    db::insert_tenant(pool, &t).await.unwrap();
+    db::insert_tenant_member(
+        pool,
+        &TenantMember {
+            tenant_id: tenant_id.clone(),
+            user_id: "u1".into(),
+            joined_at: Utc::now(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let install = GitHubAppInstallation {
+        id: Uuid::new_v4().to_string(),
+        tenant_id: tenant_id.clone(),
+        install_id: install_numeric_id,
+        account_login: "acme".into(),
+        account_type: GitHubAccountType::Organization,
+        created_at: Utc::now(),
+    };
+    db::insert_github_app_installation(pool, &install, None)
+        .await
+        .unwrap();
+
+    tenant_id
+}
+
 async fn seed_active_workflow(pool: &AnyPool, tenant_id: &str, install_id: i64, label: &str) {
     let now = Utc::now();
     let wf = Workflow {
@@ -362,11 +416,11 @@ async fn webhook_with_malformed_body_returns_400() {
 
 #[tokio::test]
 async fn webhook_with_global_app_secret_is_verified_and_accepted() {
-    // Installation registered via the OAuth callback has no per-install
-    // cipher. The `GITHUB_APP_WEBHOOK_SECRET` env var is the fallback the
-    // HMAC is checked against.
+    // Install row exists (via OAuth callback) but has no per-install
+    // cipher — the `GITHUB_APP_WEBHOOK_SECRET` env var is the fallback.
     let pool = test_pool().await;
     let install_id = 126368686;
+    seed_tenant_and_installation_without_cipher(&pool, install_id).await;
     let mut state = app_state(pool);
     let mut cfg = state.config.clone();
     cfg.github_app_webhook_secret = Some("railway-app-secret".into());
@@ -398,6 +452,7 @@ async fn webhook_with_global_app_secret_is_verified_and_accepted() {
 async fn webhook_with_global_app_secret_rejects_bad_signature() {
     let pool = test_pool().await;
     let install_id = 126368686;
+    seed_tenant_and_installation_without_cipher(&pool, install_id).await;
     let mut state = app_state(pool);
     let mut cfg = state.config.clone();
     cfg.github_app_webhook_secret = Some("railway-app-secret".into());
@@ -408,6 +463,38 @@ async fn webhook_with_global_app_secret_rejects_bad_signature() {
 
     let body = issues_labeled_payload(install_id, "spec");
     let sig = hmac_header(&body, b"wrong-secret");
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/webhooks/github")
+                .header("x-github-event", "issues")
+                .header("x-hub-signature-256", sig)
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn webhook_with_global_app_secret_but_unknown_install_returns_401() {
+    // Regression guard: the global-secret fallback must NOT accept
+    // webhooks for installations stiglab has never seen.
+    let pool = test_pool().await;
+    let mut state = app_state(pool);
+    let mut cfg = state.config.clone();
+    cfg.github_app_webhook_secret = Some("railway-app-secret".into());
+    state.config = cfg;
+
+    let config = state.config.clone();
+    let app = stiglab::server::build_router(state, &config);
+
+    let body = issues_labeled_payload(9999, "spec");
+    let sig = hmac_header(&body, b"railway-app-secret");
 
     let resp = app
         .oneshot(
