@@ -132,6 +132,7 @@ fn app_state(pool: AnyPool) -> AppState {
         github_client_secret: None,
         credential_key: Some(TEST_KEY_HEX.to_string()),
         public_url: None,
+        github_app_webhook_secret: None,
         sso_state_secret: None,
         sso_exchange_secret: None,
         sso_return_host_allowlist: Vec::new(),
@@ -357,4 +358,69 @@ async fn webhook_with_malformed_body_returns_400() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn webhook_with_global_app_secret_is_verified_and_accepted() {
+    // Installation registered via the OAuth callback has no per-install
+    // cipher. The `GITHUB_APP_WEBHOOK_SECRET` env var is the fallback the
+    // HMAC is checked against.
+    let pool = test_pool().await;
+    let install_id = 126368686;
+    let mut state = app_state(pool);
+    let mut cfg = state.config.clone();
+    cfg.github_app_webhook_secret = Some("railway-app-secret".into());
+    state.config = cfg;
+
+    let config = state.config.clone();
+    let app = stiglab::server::build_router(state, &config);
+
+    let body = issues_labeled_payload(install_id, "spec");
+    let sig = hmac_header(&body, b"railway-app-secret");
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/webhooks/github")
+                .header("x-github-event", "issues")
+                .header("x-hub-signature-256", sig)
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
+async fn webhook_with_global_app_secret_rejects_bad_signature() {
+    let pool = test_pool().await;
+    let install_id = 126368686;
+    let mut state = app_state(pool);
+    let mut cfg = state.config.clone();
+    cfg.github_app_webhook_secret = Some("railway-app-secret".into());
+    state.config = cfg;
+
+    let config = state.config.clone();
+    let app = stiglab::server::build_router(state, &config);
+
+    let body = issues_labeled_payload(install_id, "spec");
+    let sig = hmac_header(&body, b"wrong-secret");
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/webhooks/github")
+                .header("x-github-event", "issues")
+                .header("x-hub-signature-256", sig)
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }

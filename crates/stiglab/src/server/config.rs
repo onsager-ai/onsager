@@ -13,6 +13,10 @@ pub struct ServerConfig {
     pub github_client_secret: Option<String>,
     pub credential_key: Option<String>,
     pub public_url: Option<String>,
+    /// Shared webhook secret for the (single) Onsager GitHub App. Used to
+    /// verify HMAC signatures when an installation has no per-install
+    /// override cipher. Set via `GITHUB_APP_WEBHOOK_SECRET`.
+    pub github_app_webhook_secret: Option<String>,
     /// Cross-environment SSO — owner side. `Some` on the prod deployment
     /// that owns the GitHub OAuth app and is willing to serve preview envs.
     pub sso_state_secret: Option<String>,
@@ -48,6 +52,9 @@ impl ServerConfig {
             .filter(|s| !s.is_empty());
         let credential_key = env::var("STIGLAB_CREDENTIAL_KEY").ok();
         let public_url = env::var("STIGLAB_PUBLIC_URL").ok();
+        let github_app_webhook_secret = env::var("GITHUB_APP_WEBHOOK_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty());
         let sso_state_secret = env::var("SSO_STATE_SECRET").ok().filter(|s| !s.is_empty());
         let sso_exchange_secret = env::var("SSO_EXCHANGE_SECRET")
             .ok()
@@ -70,6 +77,7 @@ impl ServerConfig {
             github_client_secret,
             credential_key,
             public_url,
+            github_app_webhook_secret,
             sso_state_secret,
             sso_exchange_secret,
             sso_return_host_allowlist,
@@ -153,6 +161,7 @@ mod tests {
             github_client_secret: None,
             credential_key: None,
             public_url: None,
+            github_app_webhook_secret: None,
             sso_state_secret: None,
             sso_exchange_secret: None,
             sso_return_host_allowlist: Vec::new(),

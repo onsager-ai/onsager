@@ -45,6 +45,7 @@ fn base_config() -> ServerConfig {
         github_client_secret: None,
         credential_key: None,
         public_url: None,
+        github_app_webhook_secret: None,
         sso_state_secret: None,
         sso_exchange_secret: None,
         sso_return_host_allowlist: Vec::new(),
