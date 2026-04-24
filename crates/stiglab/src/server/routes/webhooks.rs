@@ -90,31 +90,49 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
         }
     };
 
-    let cipher = match workflow_db::get_install_webhook_secret_cipher(&state.db, install_id).await {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            tracing::warn!(install_id, "installation has no webhook secret");
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({ "error": "unknown installation" })),
-            )
-                .into_response();
+    let per_install_cipher =
+        match workflow_db::get_install_webhook_secret_cipher(&state.db, install_id).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("install secret lookup failed: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+    // Precedence: per-install cipher (manual tenant endpoint) → shared App
+    // secret from `GITHUB_APP_WEBHOOK_SECRET` (Railway env var). The shared
+    // secret covers installs registered via the normal OAuth callback, which
+    // persists the row without a cipher.
+    let secret = match per_install_cipher {
+        Some(cipher) => {
+            let Some(key_hex) = state.config.credential_key.as_ref() else {
+                tracing::error!(
+                    "STIGLAB_CREDENTIAL_KEY not set — cannot decrypt per-install webhook secret"
+                );
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            };
+            match decrypt_credential(key_hex, &cipher) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("webhook secret decrypt failed: {e}");
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            }
         }
-        Err(e) => {
-            tracing::error!("install secret lookup failed: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-    let Some(key_hex) = state.config.credential_key.as_ref() else {
-        tracing::error!("STIGLAB_CREDENTIAL_KEY not set — cannot verify webhook signature");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
-    let secret = match decrypt_credential(key_hex, &cipher) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("webhook secret decrypt failed: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        None => match state.config.github_app_webhook_secret.as_deref() {
+            Some(s) => s.to_string(),
+            None => {
+                tracing::warn!(
+                    install_id,
+                    "no webhook secret available (no per-install cipher and \
+                     GITHUB_APP_WEBHOOK_SECRET unset)"
+                );
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({ "error": "unknown installation" })),
+                )
+                    .into_response();
+            }
+        },
     };
     let Some(sig) = signature.as_deref() else {
         return (
