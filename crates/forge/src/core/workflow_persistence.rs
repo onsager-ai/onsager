@@ -17,13 +17,45 @@ use super::workflow::{GateSpec, StageSpec, TriggerSpec, Workflow};
 /// in-flight artifacts are also needed so the stage runner can continue
 /// walking them to completion.
 pub async fn load_workflows(pool: &PgPool) -> Result<HashMap<String, Workflow>, sqlx::Error> {
-    let wf_rows = sqlx::query(
-        "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                workspace_install_ref \
-           FROM workflows",
-    )
-    .fetch_all(pool)
-    .await?;
+    load_workflows_filtered(pool, None).await
+}
+
+/// Load a single workflow by id. Returns `Ok(None)` when no row matches.
+/// Used by the trigger handler to resolve workflows created after startup,
+/// rather than silently dropping `trigger.fired` for unknown ids.
+pub async fn load_workflow(
+    pool: &PgPool,
+    workflow_id: &str,
+) -> Result<Option<Workflow>, sqlx::Error> {
+    let map = load_workflows_filtered(pool, Some(workflow_id)).await?;
+    Ok(map.into_iter().next().map(|(_, w)| w))
+}
+
+async fn load_workflows_filtered(
+    pool: &PgPool,
+    only_id: Option<&str>,
+) -> Result<HashMap<String, Workflow>, sqlx::Error> {
+    let wf_rows = match only_id {
+        Some(id) => {
+            sqlx::query(
+                "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                        workspace_install_ref \
+                   FROM workflows WHERE workflow_id = $1",
+            )
+            .bind(id)
+            .fetch_all(pool)
+            .await?
+        }
+        None => {
+            sqlx::query(
+                "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                        workspace_install_ref \
+                   FROM workflows",
+            )
+            .fetch_all(pool)
+            .await?
+        }
+    };
 
     let mut workflows = HashMap::new();
     for row in wf_rows {

@@ -740,12 +740,49 @@ impl TriggerHandler for WorkflowTriggerHandler {
                 state.workflows.get(&event.workflow_id).cloned(),
             )
         };
-        let Some(workflow) = workflow_opt else {
-            tracing::warn!(
-                workflow_id = %event.workflow_id,
-                "trigger.fired for unknown workflow"
-            );
-            return Ok(());
+        // Workflows are loaded into memory at startup, but new workflows
+        // can be created in stiglab while forge is running. Rather than
+        // drop a valid trigger for a workflow forge simply hasn't heard
+        // about yet, fetch it on demand and cache it in the registry.
+        let workflow = match workflow_opt {
+            Some(w) => w,
+            None => {
+                let Some(ref s) = spine else {
+                    tracing::warn!(
+                        workflow_id = %event.workflow_id,
+                        "trigger.fired for unknown workflow (no spine to lazy-load)"
+                    );
+                    return Ok(());
+                };
+                match workflow_persistence::load_workflow(s.pool(), &event.workflow_id).await {
+                    Ok(Some(w)) => {
+                        tracing::info!(
+                            workflow_id = %event.workflow_id,
+                            "forge: lazy-loaded workflow from spine for trigger.fired"
+                        );
+                        let mut state = self.shared.write().await;
+                        state
+                            .workflows
+                            .entry(event.workflow_id.clone())
+                            .or_insert_with(|| w.clone());
+                        w
+                    }
+                    Ok(None) => {
+                        tracing::warn!(
+                            workflow_id = %event.workflow_id,
+                            "trigger.fired for unknown workflow (no row in spine)"
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            workflow_id = %event.workflow_id,
+                            "forge: failed to lazy-load workflow: {e}"
+                        );
+                        return Ok(());
+                    }
+                }
+            }
         };
 
         // Perform the registration under the write lock and capture the

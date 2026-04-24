@@ -665,7 +665,12 @@ export const api = {
     });
   },
   // Spine
-  getSpineEvents: (params?: { stream_type?: string; event_type?: string; limit?: number }) => {
+  getSpineEvents: (params?: {
+    stream_type?: string;
+    event_type?: string;
+    stream_id?: string;
+    limit?: number;
+  }) => {
     const qs = params ? '?' + new URLSearchParams(
       Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])
     ).toString() : '';

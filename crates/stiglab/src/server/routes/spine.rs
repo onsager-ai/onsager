@@ -17,6 +17,10 @@ use crate::server::state::AppState;
 pub struct EventsQuery {
     pub stream_type: Option<String>,
     pub event_type: Option<String>,
+    /// Exact-match filter on `stream_id`. Used by per-artifact and
+    /// per-workflow views in the dashboard to pull just the events for
+    /// one entity without scanning the whole table client-side.
+    pub stream_id: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -134,55 +138,25 @@ pub async fn list_events(
     // `events_ext` stores the partition key in `namespace` and the actor inside
     // `metadata`. The API surfaces them as `stream_type` / `actor` for clients,
     // so we alias on the way out.
-    let result = match (params.stream_type.as_deref(), params.event_type.as_deref()) {
-        (Some(st), Some(et)) => {
-            sqlx::query_as::<_, SpineEvent>(
-                "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
-                        COALESCE(metadata->>'actor', '') AS actor, created_at \
-                 FROM events_ext WHERE namespace = $1 AND event_type = $2 \
-                 ORDER BY id DESC LIMIT $3",
-            )
-            .bind(st)
-            .bind(et)
-            .bind(limit)
-            .fetch_all(pool)
-            .await
-        }
-        (Some(st), None) => {
-            sqlx::query_as::<_, SpineEvent>(
-                "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
-                        COALESCE(metadata->>'actor', '') AS actor, created_at \
-                 FROM events_ext WHERE namespace = $1 \
-                 ORDER BY id DESC LIMIT $2",
-            )
-            .bind(st)
-            .bind(limit)
-            .fetch_all(pool)
-            .await
-        }
-        (None, Some(et)) => {
-            sqlx::query_as::<_, SpineEvent>(
-                "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
-                        COALESCE(metadata->>'actor', '') AS actor, created_at \
-                 FROM events_ext WHERE event_type = $1 \
-                 ORDER BY id DESC LIMIT $2",
-            )
-            .bind(et)
-            .bind(limit)
-            .fetch_all(pool)
-            .await
-        }
-        (None, None) => {
-            sqlx::query_as::<_, SpineEvent>(
-                "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
-                        COALESCE(metadata->>'actor', '') AS actor, created_at \
-                 FROM events_ext ORDER BY id DESC LIMIT $1",
-            )
-            .bind(limit)
-            .fetch_all(pool)
-            .await
-        }
-    };
+    let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+        "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
+                COALESCE(metadata->>'actor', '') AS actor, created_at \
+         FROM events_ext",
+    );
+    let mut sep = " WHERE ";
+    if let Some(st) = params.stream_type.as_deref() {
+        qb.push(sep).push("namespace = ").push_bind(st.to_string());
+        sep = " AND ";
+    }
+    if let Some(et) = params.event_type.as_deref() {
+        qb.push(sep).push("event_type = ").push_bind(et.to_string());
+        sep = " AND ";
+    }
+    if let Some(sid) = params.stream_id.as_deref() {
+        qb.push(sep).push("stream_id = ").push_bind(sid.to_string());
+    }
+    qb.push(" ORDER BY id DESC LIMIT ").push_bind(limit);
+    let result = qb.build_query_as::<SpineEvent>().fetch_all(pool).await;
 
     match result {
         Ok(events) => Json(serde_json::json!({ "events": events })).into_response(),

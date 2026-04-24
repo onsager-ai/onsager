@@ -1,5 +1,6 @@
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { ChevronDown, ChevronRight } from "lucide-react"
 import { api, type SpineEvent } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -24,6 +25,7 @@ const STREAM_TYPES = ["", "stiglab", "synodic", "forge", "ising"]
 
 export function SpinePage() {
   const [streamType, setStreamType] = useState("")
+  const [expandedId, setExpandedId] = useState<number | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ["spine-events", streamType],
@@ -35,6 +37,7 @@ export function SpinePage() {
   })
 
   const events = data?.events ?? []
+  const toggle = (id: number) => setExpandedId((cur) => (cur === id ? null : id))
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -78,7 +81,12 @@ export function SpinePage() {
               {/* Mobile: card list */}
               <div className="flex flex-col gap-2 md:hidden">
                 {events.map((e) => (
-                  <SpineEventCard key={e.id} event={e} />
+                  <SpineEventCard
+                    key={e.id}
+                    event={e}
+                    expanded={expandedId === e.id}
+                    onToggle={() => toggle(e.id)}
+                  />
                 ))}
               </div>
 
@@ -87,6 +95,7 @@ export function SpinePage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-[32px]"></TableHead>
                       <TableHead className="w-[60px]">ID</TableHead>
                       <TableHead>Subsystem</TableHead>
                       <TableHead>Event Type</TableHead>
@@ -96,29 +105,51 @@ export function SpinePage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {events.map((e) => (
-                      <TableRow key={e.id}>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {e.id}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={STREAM_TYPE_COLORS[e.stream_type] || ""}
+                    {events.map((e) => {
+                      const isOpen = expandedId === e.id
+                      return (
+                        <Fragment key={e.id}>
+                          <TableRow
+                            className="cursor-pointer hover:bg-muted/50"
+                            onClick={() => toggle(e.id)}
                           >
-                            {e.stream_type}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">{e.event_type}</TableCell>
-                        <TableCell className="max-w-[200px] truncate font-mono text-xs text-muted-foreground">
-                          {e.stream_id}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{e.actor}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {new Date(e.created_at).toLocaleString()}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                            <TableCell className="text-muted-foreground">
+                              {isOpen ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-muted-foreground">
+                              {e.id}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={STREAM_TYPE_COLORS[e.stream_type] || ""}
+                              >
+                                {e.stream_type}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">{e.event_type}</TableCell>
+                            <TableCell className="max-w-[200px] truncate font-mono text-xs text-muted-foreground">
+                              {e.stream_id}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">{e.actor}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {new Date(e.created_at).toLocaleString()}
+                            </TableCell>
+                          </TableRow>
+                          {isOpen && (
+                            <TableRow>
+                              <TableCell colSpan={7} className="bg-muted/30 p-0">
+                                <EventDataPanel event={e} />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </Fragment>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -130,23 +161,55 @@ export function SpinePage() {
   )
 }
 
-function SpineEventCard({ event }: { event: SpineEvent }) {
+function SpineEventCard({
+  event,
+  expanded,
+  onToggle,
+}: {
+  event: SpineEvent
+  expanded: boolean
+  onToggle: () => void
+}) {
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border p-3">
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className={STREAM_TYPE_COLORS[event.stream_type] || ""}>
-          {event.stream_type}
-        </Badge>
-        <span className="truncate font-mono text-sm">{event.event_type}</span>
-        <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">
-          #{event.id}
-        </span>
-      </div>
-      <p className="truncate font-mono text-xs text-muted-foreground">{event.stream_id}</p>
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span className="truncate">{event.actor}</span>
-        <span className="shrink-0">{new Date(event.created_at).toLocaleString()}</span>
-      </div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex flex-col gap-1.5 text-left"
+      >
+        <div className="flex items-center gap-2">
+          {expanded ? (
+            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+          )}
+          <Badge variant="outline" className={STREAM_TYPE_COLORS[event.stream_type] || ""}>
+            {event.stream_type}
+          </Badge>
+          <span className="truncate font-mono text-sm">{event.event_type}</span>
+          <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">
+            #{event.id}
+          </span>
+        </div>
+        <p className="truncate font-mono text-xs text-muted-foreground">{event.stream_id}</p>
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span className="truncate">{event.actor}</span>
+          <span className="shrink-0">{new Date(event.created_at).toLocaleString()}</span>
+        </div>
+      </button>
+      {expanded && <EventDataPanel event={event} />}
     </div>
+  )
+}
+
+// Render the `data` JSON blob carried by the event. Unknown shape varies by
+// `event_type`; a pretty-printed pre is the universal fallback and keeps the
+// page useful for every subsystem without a per-type component.
+export function EventDataPanel({ event }: { event: SpineEvent }) {
+  const pretty = JSON.stringify(event.data ?? {}, null, 2)
+  return (
+    <pre className="overflow-x-auto whitespace-pre-wrap break-words p-3 text-xs text-muted-foreground md:p-4">
+      {pretty}
+    </pre>
   )
 }
