@@ -15,6 +15,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArtifactBadge } from "@/components/factory/workflows/ArtifactBadge"
 import { ArtifactFlowOverview } from "@/components/factory/workflows/ArtifactFlowOverview"
 import { WorkflowActions } from "@/components/factory/workflows/WorkflowActions"
+import { WorkflowEventsCard } from "@/components/factory/workflows/WorkflowEventsCard"
+import { WorkflowSessionsCard } from "@/components/factory/workflows/WorkflowSessionsCard"
 import { outputArtifactKind } from "@/components/factory/workflows/workflow-meta"
 
 const STATUS_VARIANT: Record<StageRunStatus, "default" | "secondary" | "destructive" | "outline"> = {
@@ -150,6 +152,9 @@ export function WorkflowDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <WorkflowEventsCard workflowId={workflow.id} runs={runs} />
+      <WorkflowSessionsCard runs={runs} />
     </div>
   )
 }
