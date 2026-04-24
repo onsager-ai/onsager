@@ -756,28 +756,24 @@ impl TriggerHandler for WorkflowTriggerHandler {
             );
             return Ok(());
         };
-        let workflow = match workflow_persistence::load_workflow(
-            spine_ref.pool(),
-            &event.workflow_id,
-        )
-        .await
-        {
-            Ok(Some(w)) => w,
-            Ok(None) => {
-                tracing::warn!(
-                    workflow_id = %event.workflow_id,
-                    "trigger.fired for unknown workflow (no row in spine)"
-                );
-                return Ok(());
-            }
-            Err(e) => {
-                tracing::error!(
-                    workflow_id = %event.workflow_id,
-                    "forge: failed to load workflow for trigger.fired: {e}"
-                );
-                return Ok(());
-            }
-        };
+        let workflow =
+            match workflow_persistence::load_workflow(spine_ref.pool(), &event.workflow_id).await {
+                Ok(Some(w)) => w,
+                Ok(None) => {
+                    tracing::warn!(
+                        workflow_id = %event.workflow_id,
+                        "trigger.fired for unknown workflow (no row in spine)"
+                    );
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::error!(
+                        workflow_id = %event.workflow_id,
+                        "forge: failed to load workflow for trigger.fired: {e}"
+                    );
+                    return Ok(());
+                }
+            };
 
         // Perform the registration under the write lock and capture the
         // resulting StageEntered event.

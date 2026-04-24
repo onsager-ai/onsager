@@ -111,7 +111,16 @@ export function SpinePage() {
                         <Fragment key={e.id}>
                           <TableRow
                             className="cursor-pointer hover:bg-muted/50"
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={isOpen}
                             onClick={() => toggle(e.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault()
+                                toggle(e.id)
+                              }
+                            }}
                           >
                             <TableCell className="text-muted-foreground">
                               {isOpen ? (
