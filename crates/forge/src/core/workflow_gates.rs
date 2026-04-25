@@ -173,12 +173,28 @@ where
                 constraints: vec![],
                 deadline: None,
             };
-            // The dispatcher call may complete synchronously (legacy
-            // stiglab path) and return immediately; the session listener
-            // is still responsible for writing the signal so the gate
-            // resolves on a subsequent tick.
-            let _ = self.stiglab.dispatch(&request);
-            self.mark_dispatched(artifact.artifact_id.as_str(), stage_index);
+            // Only mark as dispatched when the dispatcher actually accepted
+            // the request. A failure here (stiglab unreachable, no runner
+            // node yet, transient 5xx) returns a `dispatch_error`-tagged
+            // ShapingResult — leaving the gate unmarked means the next
+            // tick retries until stiglab can take the work, instead of
+            // permanently parking the artifact in `in_progress` with no
+            // session attached. The retry is safe because the request
+            // carries a stable Idempotency-Key (ShapingRequest.request_id
+            // changes per attempt; stiglab dedups via the Idempotency-Key
+            // header which forge sets to that id — so a retry that races
+            // a slow first POST collapses onto one session).
+            let result = self.stiglab.dispatch(&request);
+            if result.error.is_none() {
+                self.mark_dispatched(artifact.artifact_id.as_str(), stage_index);
+            } else {
+                tracing::warn!(
+                    artifact_id = %artifact.artifact_id,
+                    stage_index,
+                    error = ?result.error,
+                    "workflow gate: agent-session dispatch failed; will retry next tick"
+                );
+            }
         }
         GateOutcome::Pending
     }
@@ -314,6 +330,40 @@ mod tests {
         }
     }
 
+    /// Dispatcher that always returns a `dispatch_error` ShapingResult,
+    /// simulating stiglab being unreachable / 503 from no available
+    /// runner nodes. Mirrors the shape `HttpStiglabDispatcher` returns
+    /// from `cmd::serve` when the POST or polling fails.
+    struct FailingStiglab {
+        dispatches: AtomicU32,
+    }
+    impl FailingStiglab {
+        fn new() -> Self {
+            Self {
+                dispatches: AtomicU32::new(0),
+            }
+        }
+    }
+    impl StiglabDispatcher for FailingStiglab {
+        fn dispatch(&self, req: &ShapingRequest) -> ShapingResult {
+            self.dispatches.fetch_add(1, Ordering::SeqCst);
+            ShapingResult {
+                request_id: req.request_id.clone(),
+                outcome: ShapingOutcome::Failed,
+                content_ref: None,
+                change_summary: String::new(),
+                quality_signals: vec![],
+                session_id: String::new(),
+                duration_ms: 0,
+                error: Some(onsager_protocol::ErrorDetail {
+                    code: "dispatch_error".into(),
+                    message: "stiglab unreachable".into(),
+                    retriable: Some(true),
+                }),
+            }
+        }
+    }
+
     struct AllowSynodic;
     impl SynodicGate for AllowSynodic {
         fn evaluate(&self, _req: &GateRequest) -> GateVerdict {
@@ -347,6 +397,41 @@ mod tests {
             preset_id: None,
             workspace_install_ref: None,
         }
+    }
+
+    #[test]
+    fn agent_session_retries_dispatch_after_failure() {
+        // Regression: a stiglab-unreachable dispatch must NOT be marked
+        // as already-dispatched. Otherwise the artifact parks at stage 0
+        // forever, even after stiglab recovers (issue from the
+        // claude/debug-trigger session). The gate evaluator must keep
+        // retrying every tick until dispatch succeeds.
+        let cache = SignalCache::new();
+        let stiglab = FailingStiglab::new();
+        let evaluator = LiveGateEvaluator::new(cache, stiglab, AllowSynodic);
+        let artifact = make_artifact();
+        let wf = make_workflow();
+        let gate = GateSpec::AgentSession {
+            shaping_intent: serde_json::Value::Null,
+        };
+
+        // Three ticks under a failing stiglab — each one must re-attempt
+        // the dispatch (budget refill happens between ticks in the real
+        // runner; here we only need to confirm `mark_dispatched` was not
+        // called, so consecutive evaluate calls within one tick reuse
+        // the budget).
+        for _ in 0..3 {
+            evaluator.reset_dispatch_budget();
+            assert_eq!(
+                evaluator.evaluate(&artifact, &wf, 0, &gate),
+                GateOutcome::Pending
+            );
+        }
+        assert_eq!(
+            evaluator.stiglab.dispatches.load(Ordering::SeqCst),
+            3,
+            "failed dispatches should retry on every tick, not be silently marked done"
+        );
     }
 
     #[test]
