@@ -66,6 +66,14 @@ pub struct VerticalLineageRow {
     pub recorded_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Serialize, FromRow)]
+pub struct HorizontalLineageRow {
+    pub source_artifact_id: String,
+    pub source_version: i32,
+    pub role: String,
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RegisterArtifactRequest {
     pub kind: String,
@@ -385,6 +393,31 @@ pub async fn get_artifact(
         }
     };
 
+    // Fetch horizontal lineage — which other artifacts were used as
+    // inputs when shaping this one (artifact-model §4, e.g. PR
+    // `closes_issue` link). Empty for artifacts with no cross-kind
+    // references; we still surface the (possibly empty) field so the UI
+    // doesn't have to special-case undefined.
+    let horizontal = match sqlx::query_as::<_, HorizontalLineageRow>(
+        "SELECT source_artifact_id, source_version, role, recorded_at \
+         FROM horizontal_lineage WHERE artifact_id = $1 \
+         ORDER BY recorded_at ASC",
+    )
+    .bind(&id)
+    .fetch_all(pool)
+    .await
+    {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("failed to load horizontal lineage for artifact {id}: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "failed to load horizontal lineage" })),
+            )
+                .into_response();
+        }
+    };
+
     // Fetch created_by from artifacts table
     let created_by: String =
         sqlx::query_scalar("SELECT created_by FROM artifacts WHERE artifact_id = $1")
@@ -414,6 +447,7 @@ pub async fn get_artifact(
             "updated_at": artifact.updated_at,
             "versions": versions,
             "vertical_lineage": lineage,
+            "horizontal_lineage": horizontal,
             "related_events": related_events,
         }
     }))

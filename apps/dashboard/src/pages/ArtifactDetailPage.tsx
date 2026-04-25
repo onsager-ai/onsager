@@ -340,6 +340,45 @@ export function ArtifactDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {artifact.horizontal_lineage && artifact.horizontal_lineage.length > 0 && (
+        <Card>
+          <CardHeader className="px-4 md:px-6">
+            <CardTitle className="text-base md:text-lg">Horizontal Lineage</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 md:px-6">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Source Artifact</TableHead>
+                  <TableHead>Version</TableHead>
+                  <TableHead>Recorded</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {artifact.horizontal_lineage.map((entry, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="text-xs">{entry.role}</TableCell>
+                    <TableCell>
+                      <Link
+                        to={`/artifacts/${entry.source_artifact_id}`}
+                        className="font-mono text-xs hover:underline"
+                      >
+                        {entry.source_artifact_id}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="font-mono">v{entry.source_version}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {new Date(entry.recorded_at).toLocaleString()}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
