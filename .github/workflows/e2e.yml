@@ -6,7 +6,11 @@ name: e2e
 # Requires secrets:
 #   CLAUDE_CODE_OAUTH_TOKEN — Claude Code credentials for the agent
 #
-# Runs: nightly + manual trigger + on main merges
+# Runs: nightly + manual trigger + on pull requests
+#
+# Gating at PR (not post-merge) so regressions are caught before they land
+# on main. Post-merge runs would only flag bad code after it had already
+# poisoned the branch.
 
 on:
   schedule:
@@ -17,7 +21,7 @@ on:
         description: "Target Onsager URL (leave empty for local stack)"
         required: false
         type: string
-  push:
+  pull_request:
     branches: [main]
 
 concurrency:
