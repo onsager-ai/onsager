@@ -45,6 +45,42 @@ pub fn external_check_signal_kind(check_name: &str) -> String {
 /// Stiglab under the Forge write lock (issue #80 copilot-review).
 pub const DEFAULT_DISPATCH_BUDGET_PER_TICK: u32 = 4;
 
+/// Dispatcher error code returned when forge couldn't even hand the
+/// request to stiglab (network failure, 5xx on POST, polling timeout
+/// before any session_id was assigned). Distinct from session-level
+/// failures, which carry their own error codes and a populated
+/// `session_id`. Mirrors the constant `HttpStiglabDispatcher` writes in
+/// `cmd::serve` — kept as a string here to avoid forge's core depending
+/// on the binary's adapter layer.
+const DISPATCH_TRANSPORT_ERROR_CODE: &str = "dispatch_error";
+
+/// Per-(artifact, stage) dispatch state. Held in the
+/// [`LiveGateEvaluator::dispatched`] map.
+#[derive(Debug, Clone)]
+struct DispatchAttempt {
+    /// Stable idempotency key reused across every retry for this
+    /// (artifact, stage). Generated once on the first attempt and held
+    /// until [`on_stage_advanced`] clears the entry.
+    request_id: String,
+    /// Whether stiglab accepted the request (POST returned a session_id
+    /// and no `dispatch_error`). Once true we never resend — the signal
+    /// listener is responsible for resolving the gate.
+    posted: bool,
+}
+
+/// Did stiglab actually accept the request? True when there's no
+/// transport-level error AND a session_id was returned. Distinguishes
+/// "couldn't even POST" (retriable here) from "session ran and failed"
+/// (the listener will write a Failure signal — retrying would create
+/// duplicate sessions).
+fn dispatch_was_accepted(result: &onsager_protocol::ShapingResult) -> bool {
+    let is_transport_error = result
+        .error
+        .as_ref()
+        .is_some_and(|e| e.code == DISPATCH_TRANSPORT_ERROR_CODE);
+    !is_transport_error && !result.session_id.is_empty()
+}
+
 /// Live gate evaluator that backs the stage runner in production.
 pub struct LiveGateEvaluator<S, G>
 where
@@ -58,10 +94,15 @@ where
     stiglab: S,
     /// Synodic gate used for `governance` gate kinds.
     synodic: G,
-    /// Tracks which (artifact_id, stage_index) pairs already had their
-    /// agent-session dispatched so we don't fire the same session
-    /// multiple times across ticks.
-    dispatched: Mutex<HashMap<(String, u32), ()>>,
+    /// Tracks per-(artifact_id, stage_index) dispatch state so retries
+    /// can reuse the same idempotency key across ticks. `posted=true`
+    /// means stiglab has accepted the request — we keep waiting for
+    /// the signal listener and never resend. `posted=false` means we
+    /// tried at least once and the dispatcher returned `dispatch_error`
+    /// (transport-level failure) — next tick reuses the stored
+    /// `request_id` so a retry that races a slow first POST collapses
+    /// onto one stiglab session via `Idempotency-Key` dedup.
+    dispatched: Mutex<HashMap<(String, u32), DispatchAttempt>>,
     /// Remaining agent-session dispatches allowed this tick. The caller
     /// resets this via [`reset_dispatch_budget`] once per pass so a
     /// burst of new workflow artifacts can't synchronously hammer
@@ -121,14 +162,26 @@ where
         false
     }
 
-    fn already_dispatched(&self, artifact_id: &str, stage_index: u32) -> bool {
-        let map = self.dispatched.lock().expect("dispatched map poisoned");
-        map.contains_key(&(artifact_id.to_string(), stage_index))
+    /// Look up the existing attempt for this (artifact, stage), or
+    /// create a fresh one with a new ULID `request_id`. Either way the
+    /// returned `request_id` is stable across retries until the entry
+    /// is cleared by [`on_stage_advanced`] — this is what makes
+    /// stiglab's `Idempotency-Key` dedup work across forge retries.
+    fn get_or_init_attempt(&self, artifact_id: &str, stage_index: u32) -> DispatchAttempt {
+        let mut map = self.dispatched.lock().expect("dispatched map poisoned");
+        map.entry((artifact_id.to_string(), stage_index))
+            .or_insert_with(|| DispatchAttempt {
+                request_id: ulid::Ulid::new().to_string(),
+                posted: false,
+            })
+            .clone()
     }
 
-    fn mark_dispatched(&self, artifact_id: &str, stage_index: u32) {
+    fn mark_posted(&self, artifact_id: &str, stage_index: u32) {
         let mut map = self.dispatched.lock().expect("dispatched map poisoned");
-        map.insert((artifact_id.to_string(), stage_index), ());
+        if let Some(attempt) = map.get_mut(&(artifact_id.to_string(), stage_index)) {
+            attempt.posted = true;
+        }
     }
 
     fn evaluate_agent_session(
@@ -155,46 +208,54 @@ where
         // N synchronous Stiglab requests under the Forge write lock. If
         // the budget is exhausted this tick, return Pending and retry
         // next tick — the artifact stays at this stage.
-        if !self.already_dispatched(artifact.artifact_id.as_str(), stage_index) {
-            if !self.try_consume_dispatch() {
-                tracing::debug!(
-                    artifact_id = %artifact.artifact_id,
-                    stage_index,
-                    "workflow gate: agent-session dispatch budget exhausted this tick"
-                );
-                return GateOutcome::Pending;
-            }
-            let request = onsager_protocol::ShapingRequest {
-                request_id: ulid::Ulid::new().to_string(),
-                artifact_id: artifact.artifact_id.clone(),
-                target_version: artifact.current_version + 1,
-                shaping_intent: shaping_intent.clone(),
-                inputs: vec![],
-                constraints: vec![],
-                deadline: None,
-            };
-            // Only mark as dispatched when the dispatcher actually accepted
-            // the request. A failure here (stiglab unreachable, no runner
-            // node yet, transient 5xx) returns a `dispatch_error`-tagged
-            // ShapingResult — leaving the gate unmarked means the next
-            // tick retries until stiglab can take the work, instead of
-            // permanently parking the artifact in `in_progress` with no
-            // session attached. The retry is safe because the request
-            // carries a stable Idempotency-Key (ShapingRequest.request_id
-            // changes per attempt; stiglab dedups via the Idempotency-Key
-            // header which forge sets to that id — so a retry that races
-            // a slow first POST collapses onto one session).
-            let result = self.stiglab.dispatch(&request);
-            if result.error.is_none() {
-                self.mark_dispatched(artifact.artifact_id.as_str(), stage_index);
-            } else {
-                tracing::warn!(
-                    artifact_id = %artifact.artifact_id,
-                    stage_index,
-                    error = ?result.error,
-                    "workflow gate: agent-session dispatch failed; will retry next tick"
-                );
-            }
+        let attempt = self.get_or_init_attempt(artifact.artifact_id.as_str(), stage_index);
+        if attempt.posted {
+            // Already accepted by stiglab — just wait for the listener
+            // to write the signal. Don't redispatch, even if the gate
+            // is re-evaluated before the signal arrives.
+            return GateOutcome::Pending;
+        }
+        if !self.try_consume_dispatch() {
+            tracing::debug!(
+                artifact_id = %artifact.artifact_id,
+                stage_index,
+                "workflow gate: agent-session dispatch budget exhausted this tick"
+            );
+            return GateOutcome::Pending;
+        }
+        let request = onsager_protocol::ShapingRequest {
+            request_id: attempt.request_id.clone(),
+            artifact_id: artifact.artifact_id.clone(),
+            target_version: artifact.current_version + 1,
+            shaping_intent: shaping_intent.clone(),
+            inputs: vec![],
+            constraints: vec![],
+            deadline: None,
+        };
+        // Distinguish "stiglab never accepted the POST" (dispatch_error,
+        // empty session_id — transport failure) from "stiglab accepted
+        // and the session ran but failed" (other error codes, populated
+        // session_id). The former is the only retriable case here; the
+        // latter is the session listener's job to surface as a Failure
+        // signal so the gate resolves Fail. Retrying past a real session
+        // failure would create duplicate sessions for the same artifact.
+        //
+        // Idempotency: the request reuses `attempt.request_id` across
+        // retries. `HttpStiglabDispatcher` sends it as the
+        // `Idempotency-Key` header, and stiglab's
+        // `find_session_by_idempotency_key` collapses concurrent
+        // attempts onto a single session.
+        let result = self.stiglab.dispatch(&request);
+        if dispatch_was_accepted(&result) {
+            self.mark_posted(artifact.artifact_id.as_str(), stage_index);
+        } else {
+            tracing::warn!(
+                artifact_id = %artifact.artifact_id,
+                stage_index,
+                error = ?result.error,
+                "workflow gate: agent-session dispatch failed; will retry next tick \
+                 with the same idempotency key"
+            );
         }
         GateOutcome::Pending
     }
@@ -333,20 +394,27 @@ mod tests {
     /// Dispatcher that always returns a `dispatch_error` ShapingResult,
     /// simulating stiglab being unreachable / 503 from no available
     /// runner nodes. Mirrors the shape `HttpStiglabDispatcher` returns
-    /// from `cmd::serve` when the POST or polling fails.
+    /// from `cmd::serve` when the POST or polling fails. Captures the
+    /// request_id of every attempt so the test can assert idempotency.
     struct FailingStiglab {
         dispatches: AtomicU32,
+        request_ids: Mutex<Vec<String>>,
     }
     impl FailingStiglab {
         fn new() -> Self {
             Self {
                 dispatches: AtomicU32::new(0),
+                request_ids: Mutex::new(Vec::new()),
             }
         }
     }
     impl StiglabDispatcher for FailingStiglab {
         fn dispatch(&self, req: &ShapingRequest) -> ShapingResult {
             self.dispatches.fetch_add(1, Ordering::SeqCst);
+            self.request_ids
+                .lock()
+                .unwrap()
+                .push(req.request_id.clone());
             ShapingResult {
                 request_id: req.request_id.clone(),
                 outcome: ShapingOutcome::Failed,
@@ -359,6 +427,42 @@ mod tests {
                     code: "dispatch_error".into(),
                     message: "stiglab unreachable".into(),
                     retriable: Some(true),
+                }),
+            }
+        }
+    }
+
+    /// Dispatcher that simulates "session was accepted by stiglab and
+    /// then ran and failed." Returns a non-empty `session_id` and an
+    /// error whose code is NOT `dispatch_error` — distinct from a
+    /// transport failure. The gate must NOT retry this case (doing so
+    /// would create duplicate sessions); the signal listener is
+    /// responsible for surfacing the failure as a `Fail` outcome.
+    struct SessionFailedStiglab {
+        dispatches: AtomicU32,
+    }
+    impl SessionFailedStiglab {
+        fn new() -> Self {
+            Self {
+                dispatches: AtomicU32::new(0),
+            }
+        }
+    }
+    impl StiglabDispatcher for SessionFailedStiglab {
+        fn dispatch(&self, req: &ShapingRequest) -> ShapingResult {
+            self.dispatches.fetch_add(1, Ordering::SeqCst);
+            ShapingResult {
+                request_id: req.request_id.clone(),
+                outcome: ShapingOutcome::Failed,
+                content_ref: None,
+                change_summary: String::new(),
+                quality_signals: vec![],
+                session_id: "sess_already_ran".into(),
+                duration_ms: 1234,
+                error: Some(onsager_protocol::ErrorDetail {
+                    code: "agent_failure".into(),
+                    message: "agent exited 1".into(),
+                    retriable: Some(false),
                 }),
             }
         }
@@ -415,11 +519,6 @@ mod tests {
             shaping_intent: serde_json::Value::Null,
         };
 
-        // Three ticks under a failing stiglab — each one must re-attempt
-        // the dispatch (budget refill happens between ticks in the real
-        // runner; here we only need to confirm `mark_dispatched` was not
-        // called, so consecutive evaluate calls within one tick reuse
-        // the budget).
         for _ in 0..3 {
             evaluator.reset_dispatch_budget();
             assert_eq!(
@@ -431,6 +530,46 @@ mod tests {
             evaluator.stiglab.dispatches.load(Ordering::SeqCst),
             3,
             "failed dispatches should retry on every tick, not be silently marked done"
+        );
+
+        // Idempotency: every retry MUST send the same request_id so
+        // stiglab's Idempotency-Key dedup collapses concurrent attempts
+        // onto one session. A fresh ULID per retry would create N
+        // sessions for the same artifact-stage.
+        let ids = evaluator.stiglab.request_ids.lock().unwrap().clone();
+        assert_eq!(ids.len(), 3);
+        assert!(
+            ids.iter().all(|id| id == &ids[0]),
+            "request_id must be stable across retries; got {ids:?}"
+        );
+    }
+
+    #[test]
+    fn agent_session_does_not_retry_on_session_failure() {
+        // Regression for a Copilot review point: a session that stiglab
+        // accepted, ran, and reported failed must NOT trigger another
+        // dispatch. The signal listener is responsible for surfacing
+        // session failure as a `Fail` outcome on a later tick.
+        let cache = SignalCache::new();
+        let stiglab = SessionFailedStiglab::new();
+        let evaluator = LiveGateEvaluator::new(cache, stiglab, AllowSynodic);
+        let artifact = make_artifact();
+        let wf = make_workflow();
+        let gate = GateSpec::AgentSession {
+            shaping_intent: serde_json::Value::Null,
+        };
+
+        for _ in 0..3 {
+            evaluator.reset_dispatch_budget();
+            assert_eq!(
+                evaluator.evaluate(&artifact, &wf, 0, &gate),
+                GateOutcome::Pending
+            );
+        }
+        assert_eq!(
+            evaluator.stiglab.dispatches.load(Ordering::SeqCst),
+            1,
+            "a stiglab-accepted session that failed at runtime must not be redispatched"
         );
     }
 
