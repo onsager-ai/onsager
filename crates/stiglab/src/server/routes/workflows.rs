@@ -936,4 +936,138 @@ mod tests {
         let err = validate_create_body(&body).unwrap_err();
         assert!(err.contains("preset_id or stages"));
     }
+
+    // ---------------------------------------------------------------
+    // project_run — status table for /api/workflows/:id/runs
+    // ---------------------------------------------------------------
+
+    fn run_row(
+        state: &str,
+        current_stage_index: Option<i32>,
+        parked: Option<&str>,
+    ) -> ArtifactRunRow {
+        let now = chrono::Utc::now();
+        ArtifactRunRow {
+            artifact_id: "art_test".into(),
+            workflow_id: "wf_test".into(),
+            state: state.into(),
+            current_stage_index,
+            workflow_parked_reason: parked.map(str::to_string),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn three_stages() -> Vec<WorkflowStage> {
+        let now = Utc::now();
+        let _ = now; // silence unused — only seq/id matter for projection
+        (0..3)
+            .map(|i| WorkflowStage {
+                id: format!("stage_{i}"),
+                workflow_id: "wf_test".into(),
+                seq: i,
+                gate_kind: GateKind::AgentSession,
+                params: serde_json::json!({}),
+            })
+            .collect()
+    }
+
+    fn stage_status(value: &serde_json::Value, idx: usize) -> &str {
+        value["stages"][idx]["status"].as_str().expect("status str")
+    }
+
+    #[test]
+    fn project_run_in_progress_partway_through() {
+        let row = run_row("in_progress", Some(1), None);
+        let stages = three_stages();
+        let v = project_run(&row, &stages);
+        assert_eq!(v["status"], "pending");
+        assert_eq!(stage_status(&v, 0), "passed");
+        assert_eq!(stage_status(&v, 1), "pending");
+        assert_eq!(stage_status(&v, 2), "pending");
+    }
+
+    #[test]
+    fn project_run_released_marks_all_stages_passed() {
+        let row = run_row("released", Some(2), None);
+        let stages = three_stages();
+        let v = project_run(&row, &stages);
+        assert_eq!(v["status"], "passed");
+        for i in 0..3 {
+            assert_eq!(stage_status(&v, i), "passed", "stage {i}");
+        }
+    }
+
+    #[test]
+    fn project_run_archived_marks_current_stage_failed() {
+        let row = run_row("archived", Some(1), None);
+        let stages = three_stages();
+        let v = project_run(&row, &stages);
+        assert_eq!(v["status"], "failed");
+        assert_eq!(stage_status(&v, 0), "passed");
+        assert_eq!(stage_status(&v, 1), "failed");
+        assert_eq!(stage_status(&v, 2), "pending");
+    }
+
+    #[test]
+    fn project_run_parked_marks_current_stage_blocked() {
+        let row = run_row("under_review", Some(1), Some("ci red"));
+        let stages = three_stages();
+        let v = project_run(&row, &stages);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(stage_status(&v, 0), "passed");
+        assert_eq!(stage_status(&v, 1), "blocked");
+        assert_eq!(stage_status(&v, 2), "pending");
+    }
+
+    #[test]
+    fn project_run_no_current_stage_index_keeps_all_pending() {
+        // current_stage_index None happens for trigger-just-fired
+        // artifacts before the first tick has set the column.
+        let row = run_row("draft", None, None);
+        let stages = three_stages();
+        let v = project_run(&row, &stages);
+        assert_eq!(v["status"], "pending");
+        for i in 0..3 {
+            assert_eq!(stage_status(&v, i), "pending", "stage {i}");
+        }
+    }
+
+    #[test]
+    fn project_run_negative_current_stage_index_clamps_to_pending() {
+        // i32 -> usize fails for negatives; the projection must treat
+        // the index as absent rather than panicking.
+        let row = run_row("draft", Some(-1), None);
+        let stages = three_stages();
+        let v = project_run(&row, &stages);
+        for i in 0..3 {
+            assert_eq!(stage_status(&v, i), "pending", "stage {i}");
+        }
+    }
+
+    #[test]
+    fn project_run_current_stage_past_end_keeps_known_passed_intact() {
+        // current_stage_index past the last stage (e.g. workflow was
+        // edited to remove a stage). Stages with seq < idx still
+        // render as passed; nothing renders as the parked/blocked
+        // current stage because there is no current stage in range.
+        let row = run_row("in_progress", Some(5), None);
+        let stages = three_stages();
+        let v = project_run(&row, &stages);
+        for i in 0..3 {
+            assert_eq!(stage_status(&v, i), "passed", "stage {i}");
+        }
+    }
+
+    #[test]
+    fn project_run_emits_artifact_id_as_run_id() {
+        // The dashboard treats artifact_id and run id interchangeably;
+        // this test pins that contract.
+        let row = run_row("draft", None, None);
+        let stages = three_stages();
+        let v = project_run(&row, &stages);
+        assert_eq!(v["id"], "art_test");
+        assert_eq!(v["artifact_id"], "art_test");
+        assert_eq!(v["workflow_id"], "wf_test");
+    }
 }

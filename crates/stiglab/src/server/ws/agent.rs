@@ -134,6 +134,16 @@ async fn handle_agent_connection(socket: WebSocket, state: AppState) {
 /// (state stuck in `pending`) and dispatch them now over the freshly
 /// registered WebSocket. Best-effort: a send failure logs but doesn't
 /// abort registration — the next reconnect will retry.
+///
+/// Replay is gated on `artifact_id.is_some()` so we only redispatch
+/// sessions that came from `POST /api/shaping`. The `sessions` row
+/// persists `prompt` / `working_dir` / `artifact_id` / `artifact_version`
+/// but NOT the task-level fields (`allowed_tools`, `max_turns`, `model`,
+/// `system_prompt`, `permission_mode`, `credentials`). For shaping
+/// sessions those are always `None` (see `adapter::shaping_request_to_task`),
+/// so a lossless replay is safe. Direct `POST /api/tasks` sessions can
+/// carry user-set values that aren't on the row, so replaying them with
+/// defaults would silently change the task — skip + log instead.
 async fn dispatch_pending_for_node(state: &AppState, node_id: &str, tx: &WsSender) {
     let pending = match db::list_pending_sessions_for_node(&state.db, node_id).await {
         Ok(s) => s,
@@ -152,10 +162,50 @@ async fn dispatch_pending_for_node(state: &AppState, node_id: &str, tx: &WsSende
     );
 
     for session in pending {
-        // Reconstruct the dispatch payload from the persisted row. The
-        // task id matches the original ShapingRequest.request_id, so a
-        // duplicate dispatch is collapsed by the agent's own idempotency
-        // (it tracks session_id) — there's no double-shape risk.
+        if session.artifact_id.is_none() {
+            // Direct-task session: the persisted row is missing
+            // task-level fields a user may have set on the original
+            // request. Re-dispatching with defaults would silently
+            // change the task; surface the orphan instead.
+            tracing::warn!(
+                session_id = %session.id,
+                task_id = %session.task_id,
+                node_id,
+                "skipping pending direct-task session replay — persisted row \
+                 doesn't carry the full original task payload"
+            );
+            continue;
+        }
+
+        // Atomically claim the session before sending. If another path
+        // (e.g. a parallel reconnect or the create-time dispatch that
+        // raced with our list) already promoted this row past `pending`,
+        // the conditional UPDATE returns 0 affected rows and we skip.
+        // This closes the window where Copilot review #137 worried
+        // about duplicate local processes per session_id.
+        let claimed =
+            match db::claim_pending_session(&state.db, &session.id, SessionState::Dispatched).await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(
+                        session_id = %session.id,
+                        "failed to claim pending session for redispatch: {e}"
+                    );
+                    continue;
+                }
+            };
+        if !claimed {
+            tracing::debug!(
+                session_id = %session.id,
+                "pending session already claimed by another path — skipping replay"
+            );
+            continue;
+        }
+
+        // Shaping sessions: all task-level fields are known to be `None`
+        // for the original request (see shaping_request_to_task), so the
+        // reconstruction below is lossless.
         let task = Task {
             id: session.task_id.clone(),
             prompt: session.prompt.clone(),
@@ -179,16 +229,8 @@ async fn dispatch_pending_for_node(state: &AppState, node_id: &str, tx: &WsSende
         if tx.send(Message::Text(json.into())).is_err() {
             tracing::warn!(
                 session_id = %session.id,
-                "failed to dispatch pending session to agent — channel closed"
-            );
-            continue;
-        }
-        if let Err(e) =
-            db::update_session_state(&state.db, &session.id, SessionState::Dispatched).await
-        {
-            tracing::warn!(
-                session_id = %session.id,
-                "dispatched pending session but failed to update state: {e}"
+                "failed to dispatch claimed session to agent — channel closed; \
+                 leaving session in dispatched state for the next reconnect"
             );
         }
     }

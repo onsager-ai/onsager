@@ -617,6 +617,31 @@ pub async fn update_session_state(
     Ok(())
 }
 
+/// Atomically claim a `pending` session by transitioning it to the given
+/// state. Returns `true` only when this caller won the race (the row was
+/// `pending` at update time and exactly one row was affected).
+///
+/// Used by the agent reconnect drain so a session that's already been
+/// claimed by another path (e.g. the create-time WebSocket dispatch, or
+/// a parallel reconnect that beat us) doesn't get sent twice.
+pub async fn claim_pending_session(
+    pool: &AnyPool,
+    session_id: &str,
+    new_state: SessionState,
+) -> anyhow::Result<bool> {
+    let affected = sqlx::query(
+        "UPDATE sessions SET state = $1, updated_at = $2 \
+         WHERE id = $3 AND state = 'pending'",
+    )
+    .bind(new_state.to_string())
+    .bind(Utc::now().to_rfc3339())
+    .bind(session_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(affected == 1)
+}
+
 // ── Session Logs (append-only) ──
 
 pub async fn append_session_log(

@@ -357,8 +357,10 @@ export function ArtifactDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {artifact.horizontal_lineage.map((entry, i) => (
-                  <TableRow key={i}>
+                {artifact.horizontal_lineage.map((entry) => (
+                  <TableRow
+                    key={`${entry.role}-${entry.source_artifact_id}-${entry.source_version}-${entry.recorded_at}`}
+                  >
                     <TableCell className="text-xs">{entry.role}</TableCell>
                     <TableCell>
                       <Link
