@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/lib/api"
+import { useAuth } from "@/lib/auth"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -89,25 +90,38 @@ function PipelineStats({ artifacts }: { artifacts: SpineArtifact[] }) {
 }
 
 export function FactoryOverviewPage() {
+  // Gate every poll on resolved auth state so we don't flood the
+  // browser console / network tab with 401s before login. Every query
+  // on this page hits an auth-required endpoint (artifacts, governance
+  // stats, spine events, nodes, session spend, user workflows). The
+  // dedicated `useNodes()` hook applies this gate too — see its
+  // comment for the original motivation.
+  const { user, loading: authLoading, authEnabled } = useAuth()
+  const enabled = !authLoading && (!authEnabled || !!user)
+
   const { data: artifactsData } = useQuery({
     queryKey: ["artifacts"],
     queryFn: api.getArtifacts,
     refetchInterval: 5000,
+    enabled,
   })
   const { data: govStats } = useQuery({
     queryKey: ["governance-stats"],
     queryFn: api.getGovernanceStats,
     refetchInterval: 10000,
+    enabled,
   })
   const { data: spineData } = useQuery({
     queryKey: ["spine-events-overview"],
     queryFn: () => api.getSpineEvents({ limit: 20 }),
     refetchInterval: 5000,
+    enabled,
   })
   const { data: nodesData } = useQuery({
     queryKey: ["nodes"],
     queryFn: api.getNodes,
     refetchInterval: 10000,
+    enabled,
   })
   // Issue #39 — per-session token usage, pulled from the last N
   // session_completed events so the spend card can render without a
@@ -116,12 +130,14 @@ export function FactoryOverviewPage() {
     queryKey: ["session-spend"],
     queryFn: () => api.getSessionSpend(100),
     refetchInterval: 30000,
+    enabled,
   })
   // Issue #82 — empty-state CTA banner when no workflow has been set up yet.
   const { data: workflowsData } = useQuery({
     queryKey: ["workflows", "user"],
     queryFn: () => api.listWorkflowsForUser(),
     staleTime: 30_000,
+    enabled,
   })
   const workflowsCount = workflowsData?.workflows?.length ?? 0
 
