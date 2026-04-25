@@ -342,6 +342,164 @@ pub async fn get_workflow(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct RunsQuery {
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// GET /api/workflows/:id/runs — list every artifact flowing through a
+/// workflow, projected as a "run" (1 artifact == 1 run) with per-stage
+/// status derived from `artifacts.current_stage_index` and
+/// `workflow_parked_reason`.
+///
+/// Stage IDs come from `tenant_workflow_stages` (stiglab DB) in `seq`
+/// order; the per-run stage list aligns 1:1 with that ordering so the
+/// dashboard can zip stages by index.
+pub async fn list_workflow_runs(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(workflow_id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<RunsQuery>,
+) -> Response {
+    let user_id = match require_auth_user(&auth_user) {
+        Ok(id) => id.to_string(),
+        Err(r) => return r,
+    };
+    let workflow = match workflow_db::get_workflow(&state.db, &workflow_id).await {
+        Ok(Some(w)) => w,
+        Ok(None) => return not_found("workflow not found"),
+        Err(e) => {
+            tracing::error!("failed to load workflow: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
+    if let Err(r) = require_tenant_member(&state.db, &user_id, &workflow.tenant_id).await {
+        return r;
+    }
+    let stages = match workflow_db::list_stages_for_workflow(&state.db, &workflow_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("failed to load stages: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
+
+    let Some(spine) = state.spine.as_ref() else {
+        // Without a spine connection there are no artifacts to surface —
+        // return an empty list rather than 503 so the dashboard's
+        // empty-state copy still renders sensibly in dev.
+        return Json(serde_json::json!({ "runs": Vec::<serde_json::Value>::new() }))
+            .into_response();
+    };
+
+    let limit = q.limit.unwrap_or(50).clamp(1, 500);
+    let rows = match sqlx::query_as::<_, ArtifactRunRow>(
+        "SELECT artifact_id, workflow_id, state, current_stage_index, \
+                workflow_parked_reason, created_at, updated_at \
+         FROM artifacts \
+         WHERE workflow_id = $1 \
+         ORDER BY updated_at DESC \
+         LIMIT $2",
+    )
+    .bind(&workflow_id)
+    .bind(limit)
+    .fetch_all(spine.pool())
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("failed to load workflow runs: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "failed to load runs" })),
+            )
+                .into_response();
+        }
+    };
+
+    let runs: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|row| project_run(&row, &stages))
+        .collect();
+    Json(serde_json::json!({ "runs": runs })).into_response()
+}
+
+#[derive(sqlx::FromRow)]
+struct ArtifactRunRow {
+    artifact_id: String,
+    workflow_id: String,
+    state: String,
+    current_stage_index: Option<i32>,
+    workflow_parked_reason: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Project a single artifact row + its workflow's stage chain into the
+/// dashboard `WorkflowRun` shape.
+///
+/// Status mapping:
+/// - `archived` → run failed; stages before parked index passed,
+///   stage at parked index failed, rest pending.
+/// - `released` → all stages passed, run passed.
+/// - `workflow_parked_reason` set → run blocked; current stage blocked.
+/// - otherwise → stages [0..idx] passed, stage[idx] pending, rest pending.
+fn project_run(
+    row: &ArtifactRunRow,
+    stages: &[crate::core::workflow::WorkflowStage],
+) -> serde_json::Value {
+    let current_idx = row
+        .current_stage_index
+        .and_then(|i| usize::try_from(i).ok());
+
+    let archived = row.state == "archived";
+    let released = row.state == "released";
+    let parked = row.workflow_parked_reason.is_some();
+
+    let stage_entries: Vec<serde_json::Value> = stages
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let status = match (released, archived, parked, current_idx) {
+                (true, _, _, _) => "passed",
+                (_, true, _, Some(idx)) if i < idx => "passed",
+                (_, true, _, Some(idx)) if i == idx => "failed",
+                (_, true, _, _) => "pending",
+                (_, _, true, Some(idx)) if i < idx => "passed",
+                (_, _, true, Some(idx)) if i == idx => "blocked",
+                (_, _, _, Some(idx)) if i < idx => "passed",
+                _ => "pending",
+            };
+            serde_json::json!({
+                "stage_id": s.id,
+                "status": status,
+                "updated_at": row.updated_at,
+            })
+        })
+        .collect();
+
+    let run_status = if released {
+        "passed"
+    } else if archived {
+        "failed"
+    } else if parked {
+        "blocked"
+    } else {
+        "pending"
+    };
+
+    serde_json::json!({
+        "id": row.artifact_id,
+        "workflow_id": row.workflow_id,
+        "artifact_id": row.artifact_id,
+        "status": run_status,
+        "stages": stage_entries,
+        "started_at": row.created_at,
+        "updated_at": row.updated_at,
+    })
+}
+
+#[derive(Debug, Deserialize)]
 pub struct PatchWorkflowBody {
     pub active: Option<bool>,
 }
