@@ -173,11 +173,13 @@ where
                 constraints: vec![],
                 deadline: None,
             };
-            // The dispatcher call may complete synchronously (legacy
-            // stiglab path) and return immediately; the session listener
-            // is still responsible for writing the signal so the gate
-            // resolves on a subsequent tick.
-            let _ = self.stiglab.dispatch(&request);
+            // Fire-and-forget: the workflow path resolves via the
+            // `stiglab.session_completed` listener writing into the
+            // signal cache, not by waiting for the HTTP roundtrip to
+            // finish. Using the blocking `dispatch` here would hold the
+            // Forge write lock for the full shaping deadline if no agent
+            // is connected to pick the session up.
+            self.stiglab.dispatch_fire_and_forget(&request);
             self.mark_dispatched(artifact.artifact_id.as_str(), stage_index);
         }
         GateOutcome::Pending

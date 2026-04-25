@@ -140,6 +140,41 @@ impl HttpStiglabDispatcher {
     }
 }
 
+impl HttpStiglabDispatcher {
+    /// POST `/api/shaping` and return as soon as Stiglab accepts the
+    /// request. No status polling, no waiting for terminal state — used
+    /// by `dispatch_fire_and_forget` on the workflow gate path.
+    async fn post_only(&self, request: &ShapingRequest) -> Result<String, anyhow::Error> {
+        let create_url = format!("{}/api/shaping", self.stiglab_url);
+        let body = serde_json::to_value(request)?;
+        let resp = self
+            .client
+            .post(&create_url)
+            .header("Idempotency-Key", &request.request_id)
+            .json(&body)
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!(
+                "stiglab POST /api/shaping returned {status}: {text}"
+            ));
+        }
+        let body_text = resp.text().await?;
+        // Stiglab can return either 202 with `{ session_id, ... }` or a
+        // legacy 200 with a full `ShapingResult`; both carry a session id
+        // we can surface.
+        if status == reqwest::StatusCode::OK {
+            let result: ShapingResult = serde_json::from_str(&body_text)?;
+            Ok(result.session_id)
+        } else {
+            let accepted: ShapingAccepted = serde_json::from_str(&body_text)?;
+            Ok(accepted.session_id)
+        }
+    }
+}
+
 impl StiglabDispatcher for HttpStiglabDispatcher {
     fn dispatch(&self, request: &ShapingRequest) -> ShapingResult {
         // The pipeline tick is synchronous, so block_in_place lets us await
@@ -166,6 +201,34 @@ impl StiglabDispatcher for HttpStiglabDispatcher {
                         retriable: Some(true),
                     }),
                 }
+            }
+        }
+    }
+
+    fn dispatch_fire_and_forget(&self, request: &ShapingRequest) {
+        // Workflow gates only need Stiglab to accept the dispatch — the
+        // session_completed event listener resolves the signal cache for
+        // a later tick. Polling here would hold the Forge write lock for
+        // the full shaping deadline whenever no agent is connected to
+        // pick the session up.
+        let outcome = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.post_only(request))
+        });
+        match outcome {
+            Ok(session_id) => {
+                tracing::info!(
+                    request_id = %request.request_id,
+                    artifact_id = %request.artifact_id,
+                    session_id,
+                    "workflow agent-session dispatched"
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    request_id = %request.request_id,
+                    artifact_id = %request.artifact_id,
+                    "workflow agent-session dispatch failed: {e}"
+                );
             }
         }
     }
