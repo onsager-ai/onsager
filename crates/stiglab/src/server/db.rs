@@ -510,6 +510,26 @@ pub async fn list_sessions(pool: &AnyPool) -> anyhow::Result<Vec<Session>> {
     rows.into_iter().map(|r| r.try_into()).collect()
 }
 
+/// Sessions assigned to `node_id` that were created while the agent was
+/// not connected (state still `Pending`). The agent registration handler
+/// drains these on (re)connect so a session created during a brief
+/// disconnect doesn't sit in `Pending` forever.
+pub async fn list_pending_sessions_for_node(
+    pool: &AnyPool,
+    node_id: &str,
+) -> anyhow::Result<Vec<Session>> {
+    let rows = sqlx::query_as::<_, SessionRow>(
+        "SELECT id, task_id, node_id, state, prompt, output, working_dir, \
+                artifact_id, artifact_version, created_at, updated_at \
+         FROM sessions WHERE node_id = $1 AND state = 'pending' \
+         ORDER BY created_at ASC",
+    )
+    .bind(node_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
 pub async fn get_session(pool: &AnyPool, session_id: &str) -> anyhow::Result<Option<Session>> {
     let row = sqlx::query_as::<_, SessionRow>(
         "SELECT id, task_id, node_id, state, prompt, output, working_dir, \
