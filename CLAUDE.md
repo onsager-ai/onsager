@@ -30,6 +30,44 @@ must NOT import each other, and must NOT be statically linked into the same
 binary. The `onsager` dispatcher has zero business dependencies -- it discovers
 subsystem binaries on PATH.
 
+## Architectural drift patterns to watch
+
+Loose runtime coupling is correct and stays — but the seams it creates are
+informal, and recent PRs show drift accumulating in predictable shapes. When
+designing or reviewing a change, watch for these and prefer **unification at
+the seam** over a bridge. If a bridge is the right call for now, file a
+follow-up issue with a `bridge-debt` label and a target removal date.
+
+- **Parallel schemas across subsystems.** If two subsystems each persist their
+  own version of the same concept (e.g. stiglab `tenant_workflows` vs spine
+  `workflows`, PR #129), the spine wins — the private table should be
+  collapsed into the spine table with a discriminator column (e.g. `tenant_id`).
+  The mirror/translator pattern is a bridge, not a destination.
+- **Producer with no consumer.** A subsystem can emit events that nothing
+  consumes if a consumer is coded but undeployed (PR #127). Treat new event
+  types as a contract: producer + consumer + deploy manifest land together,
+  or the producer waits.
+- **In-memory caches drifting from the bus.** If a subsystem caches state
+  that the spine owns, it will drift the moment something changes that state
+  out-of-band (PR #123). Default to reading from the spine; only cache with
+  an explicit invalidation path tied to a spine event.
+- **Half-wired API/UI contracts.** Endpoint shipped without a UI caller, or
+  client method shipped without a backend handler (PR #108). Backend and
+  dashboard changes for the same surface should land in one PR (or two PRs
+  with a contract test that fails until both sides exist).
+- **Divergent state shapes from multiple write paths.** If a row can be
+  created via two paths (e.g. OAuth callback vs. manual install, PR #122),
+  both paths must produce the same shape — or the read side has to be
+  defensive in a single, named place, not at every call site.
+- **Compat aliases that ossify.** Renames with `serde(alias=...)` or type
+  aliases "for one release" (PR #107 `BundleId` → `ArtifactVersionId`) tend
+  to outlive their intended window. File a `bridge-debt` issue at rename
+  time; remove the alias on the target date, not "eventually".
+
+The strategy spec #131 captures the full reasoning and the five-lever plan
+to make these contracts enforced rather than informal. Until that lands,
+treat the patterns above as review-time heuristics.
+
 ## Workspace layout
 
 ```
