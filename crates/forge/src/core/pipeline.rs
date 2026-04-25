@@ -76,7 +76,26 @@ pub enum PipelineEvent {
 /// Production implementations call Stiglab's HTTP API.
 /// Tests use mock implementations.
 pub trait StiglabDispatcher: Send + Sync {
+    /// Synchronous dispatch — used by the legacy `ForgePipeline` tick,
+    /// which folds the terminal `ShapingResult` back into the artifact
+    /// state inline. Blocks until Stiglab returns a terminal state or the
+    /// request deadline elapses.
     fn dispatch(&self, request: &ShapingRequest) -> ShapingResult;
+
+    /// Fire-and-forget dispatch — used by the workflow stage runner's
+    /// `agent-session` gate. POSTs the shaping request and returns as
+    /// soon as Stiglab acknowledges; the runner does NOT wait for the
+    /// session to complete. Resolution comes via the
+    /// `stiglab.session_completed` event listener writing into the
+    /// signal cache, which the next tick observes.
+    ///
+    /// Default implementation falls back to the blocking `dispatch` for
+    /// backwards compatibility with mocks; production paths override
+    /// with a true non-blocking call so the Forge write lock isn't held
+    /// for the full shaping deadline when no agent is available.
+    fn dispatch_fire_and_forget(&self, request: &ShapingRequest) {
+        let _ = self.dispatch(request);
+    }
 }
 
 /// Trait for consulting Synodic at gate points.
