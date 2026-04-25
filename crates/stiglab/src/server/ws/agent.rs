@@ -5,11 +5,11 @@ use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use uuid::Uuid;
 
-use crate::core::{AgentMessage, Node, NodeStatus, ServerMessage};
+use crate::core::{AgentMessage, Node, NodeStatus, ServerMessage, SessionState, Task};
 
 use crate::server::db;
 use crate::server::handler;
-use crate::server::state::{AgentConnection, AppState};
+use crate::server::state::{AgentConnection, AppState, WsSender};
 
 pub async fn agent_ws_handler(
     ws: WebSocketUpgrade,
@@ -87,10 +87,21 @@ async fn handle_agent_connection(socket: WebSocket, state: AppState) {
                 tracing::info!("node registered: {} ({})", info.name, id);
 
                 // Send confirmation
-                let response = ServerMessage::Registered { node_id: id };
+                let response = ServerMessage::Registered {
+                    node_id: id.clone(),
+                };
                 if let Ok(json) = serde_json::to_string(&response) {
                     let _ = tx.send(Message::Text(json.into()));
                 }
+
+                // Drain any sessions that were created and assigned to
+                // this node while the agent was disconnected. Without
+                // this, a session created by `POST /api/shaping` during
+                // a brief disconnect (or before the agent has registered
+                // for the first time) sits in `pending` forever even
+                // though the spine's `stiglab.session_created` event
+                // says one was scheduled.
+                dispatch_pending_for_node(&state, &id, &tx).await;
             }
 
             other => {
@@ -117,4 +128,68 @@ async fn handle_agent_connection(socket: WebSocket, state: AppState) {
     }
 
     send_task.abort();
+}
+
+/// Look up sessions that were assigned to this node but never dispatched
+/// (state stuck in `pending`) and dispatch them now over the freshly
+/// registered WebSocket. Best-effort: a send failure logs but doesn't
+/// abort registration — the next reconnect will retry.
+async fn dispatch_pending_for_node(state: &AppState, node_id: &str, tx: &WsSender) {
+    let pending = match db::list_pending_sessions_for_node(&state.db, node_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(node_id, "failed to list pending sessions on register: {e}");
+            return;
+        }
+    };
+    if pending.is_empty() {
+        return;
+    }
+    tracing::info!(
+        node_id,
+        count = pending.len(),
+        "draining pending sessions for newly registered agent"
+    );
+
+    for session in pending {
+        // Reconstruct the dispatch payload from the persisted row. The
+        // task id matches the original ShapingRequest.request_id, so a
+        // duplicate dispatch is collapsed by the agent's own idempotency
+        // (it tracks session_id) — there's no double-shape risk.
+        let task = Task {
+            id: session.task_id.clone(),
+            prompt: session.prompt.clone(),
+            node_id: Some(node_id.to_string()),
+            working_dir: session.working_dir.clone(),
+            allowed_tools: None,
+            max_turns: None,
+            model: None,
+            system_prompt: None,
+            permission_mode: None,
+            created_at: session.created_at,
+        };
+        let msg = ServerMessage::DispatchTask {
+            task: Box::new(task),
+            session_id: session.id.clone(),
+            credentials: None,
+        };
+        let Ok(json) = serde_json::to_string(&msg) else {
+            continue;
+        };
+        if tx.send(Message::Text(json.into())).is_err() {
+            tracing::warn!(
+                session_id = %session.id,
+                "failed to dispatch pending session to agent — channel closed"
+            );
+            continue;
+        }
+        if let Err(e) =
+            db::update_session_state(&state.db, &session.id, SessionState::Dispatched).await
+        {
+            tracing::warn!(
+                session_id = %session.id,
+                "dispatched pending session but failed to update state: {e}"
+            );
+        }
+    }
 }
