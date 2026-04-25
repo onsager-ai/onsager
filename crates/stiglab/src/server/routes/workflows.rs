@@ -25,6 +25,36 @@ use crate::server::workflow_activation::{
     ActivationError,
 };
 use crate::server::workflow_db;
+use crate::server::workflow_spine_mirror;
+
+/// Push the current `tenant_workflows` row + its stages into the spine
+/// `workflows` schema forge reads. Best-effort: a failure here means the
+/// workflow won't fire until the next successful sync (via another CRUD or
+/// startup backfill), but we don't abort the request — the stiglab-side
+/// write already committed.
+async fn mirror_to_spine(state: &AppState, workflow_id: &str) {
+    let Some(spine) = state.spine.as_ref() else {
+        return;
+    };
+    let workflow = match workflow_db::get_workflow(&state.db, workflow_id).await {
+        Ok(Some(w)) => w,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::warn!(workflow_id, "spine mirror: load workflow failed: {e}");
+            return;
+        }
+    };
+    let stages = match workflow_db::list_stages_for_workflow(&state.db, workflow_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(workflow_id, "spine mirror: load stages failed: {e}");
+            return;
+        }
+    };
+    if let Err(e) = workflow_spine_mirror::upsert(spine.pool(), &workflow, &stages).await {
+        tracing::warn!(workflow_id, "spine mirror: upsert failed: {e}");
+    }
+}
 
 #[allow(clippy::result_large_err)]
 async fn require_tenant_member(
@@ -228,6 +258,7 @@ pub async fn create_workflow(
         )
             .into_response();
     }
+    mirror_to_spine(&state, &workflow.id).await;
 
     // Activation runs after the row is durable. If it fails the workflow
     // stays `active=false` and the caller sees the activation error.
@@ -402,6 +433,11 @@ pub async fn delete_workflow(
         tracing::error!("failed to delete workflow: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
+    if let Some(spine) = state.spine.as_ref() {
+        if let Err(e) = workflow_spine_mirror::delete(spine.pool(), &workflow_id).await {
+            tracing::warn!(workflow_id = %workflow_id, "spine mirror: delete failed: {e}");
+        }
+    }
     Json(serde_json::json!({ "ok": true })).into_response()
 }
 
@@ -485,6 +521,7 @@ async fn activate_workflow(
         tracing::error!("mark workflow active: {e}");
         return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
     }
+    mirror_to_spine(state, workflow_id).await;
     Ok(())
 }
 
@@ -503,6 +540,7 @@ async fn deactivate_workflow(state: &AppState, workflow_id: &str) -> Result<(), 
         tracing::error!("mark workflow inactive: {e}");
         return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
     }
+    mirror_to_spine(state, workflow_id).await;
 
     // Dedup: keep the webhook if any other active workflow on the same repo
     // still needs it.

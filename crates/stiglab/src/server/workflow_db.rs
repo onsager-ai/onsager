@@ -150,6 +150,19 @@ pub async fn list_workflows_for_tenant(
     rows.into_iter().map(|r| r.try_into()).collect()
 }
 
+/// List every workflow across tenants. Used by the spine-mirror startup
+/// backfill so workflows pre-dating the bridge sync into the spine schema.
+pub async fn list_all_workflows(pool: &AnyPool) -> anyhow::Result<Vec<Workflow>> {
+    let rows = sqlx::query_as::<_, WorkflowRow>(
+        "SELECT id, tenant_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
+                install_id, preset_id, active, created_by, created_at, updated_at \
+         FROM tenant_workflows ORDER BY created_at ASC",
+    )
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
 pub async fn list_stages_for_workflow(
     pool: &AnyPool,
     workflow_id: &str,

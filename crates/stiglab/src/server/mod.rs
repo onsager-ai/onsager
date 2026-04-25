@@ -10,6 +10,7 @@ pub mod state;
 pub mod webhook_router;
 pub mod workflow_activation;
 pub mod workflow_db;
+pub mod workflow_spine_mirror;
 pub mod ws;
 
 pub use sqlx::AnyPool;
