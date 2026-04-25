@@ -48,10 +48,26 @@ if [ -n "$ONSAGER_DATABASE_URL" ]; then
     gosu onsager sh -c "while true; do PORTAL_BIND=\"$PORTAL_BIND\" DATABASE_URL=\"$ONSAGER_DATABASE_URL\" ONSAGER_CREDENTIAL_KEY=\"$PORTAL_CREDENTIAL_KEY\" SYNODIC_URL=\"$PORTAL_SYNODIC_URL\" /app/onsager-portal serve 2>&1; echo 'onsager-portal exited, restarting in 1s...'; sleep 1; done" &
 fi
 
+# Start forge (workflow orchestrator) on an internal port.
+# Forge subscribes to `trigger.fired` events on the spine, registers the
+# workflow's first artifact, and dispatches stage-0 work back to stiglab
+# via HTTP. Without forge running, trigger events accumulate with no
+# downstream effect — see CLAUDE.md "factory event bus".
+# Skipped when the spine DB isn't configured (no events to consume).
+if [ -n "$ONSAGER_DATABASE_URL" ]; then
+    # Default 3002 collides with portal — use 3003.
+    FORGE_PORT="${FORGE_PORT:-3003}"
+    # stiglab binds to $PORT first (Railway-injected) then STIGLAB_PORT.
+    FORGE_STIGLAB_URL="${STIGLAB_URL:-http://127.0.0.1:${PORT:-${STIGLAB_PORT:-3000}}}"
+    FORGE_SYNODIC_URL="${SYNODIC_URL:-http://127.0.0.1:${SYNODIC_PORT}}"
+    echo "Starting forge on :${FORGE_PORT}..."
+    gosu onsager sh -c "while true; do DATABASE_URL=\"$ONSAGER_DATABASE_URL\" FORGE_PORT=\"$FORGE_PORT\" STIGLAB_URL=\"$FORGE_STIGLAB_URL\" SYNODIC_URL=\"$FORGE_SYNODIC_URL\" /app/forge serve 2>&1; echo 'forge exited, restarting in 1s...'; sleep 1; done" &
+fi
+
 # Drop from root to unprivileged user and start stiglab.
 # Claude Code CLI refuses --permission-mode bypassPermissions under root.
 echo "==> pre-exec: binaries present"
-ls -la /app/stiglab /app/synodic /app/onsager-portal
+ls -la /app/stiglab /app/synodic /app/onsager-portal /app/forge
 echo "==> pre-exec: gosu version"
 gosu --version || true
 echo "==> pre-exec: PORT=${PORT:-unset} STIGLAB_PORT=${STIGLAB_PORT:-unset}"

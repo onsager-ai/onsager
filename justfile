@@ -55,6 +55,11 @@ dev: dev-infra
     echo "==> Starting synodic on :3001..."
     PORT=3001 cargo run -p synodic -- serve &
 
+    echo "==> Starting forge on :3003..."
+    DATABASE_URL="postgres://onsager:onsager@localhost:5432/onsager" \
+    FORGE_PORT=3003 \
+        cargo run -p forge -- serve &
+
     echo "==> Starting dashboard on :5173..."
     pnpm --filter dashboard dev &
 
@@ -63,6 +68,7 @@ dev: dev-infra
     echo "  Dashboard:  http://localhost:5173"
     echo "  Stiglab:    http://localhost:3000"
     echo "  Synodic:    http://localhost:3001"
+    echo "  Forge:      http://localhost:3003"
     echo "  Postgres:   postgres://onsager:onsager@localhost:5432/onsager"
     echo ""
     echo "Press Ctrl+C to stop all services."
