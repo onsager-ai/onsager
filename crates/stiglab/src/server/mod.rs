@@ -162,6 +162,11 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
                 .patch(routes::workflows::patch_workflow)
                 .delete(routes::workflows::delete_workflow),
         )
+        // Live runs (artifacts flowing through this workflow).
+        .route(
+            "/api/workflows/{id}/runs",
+            get(routes::workflows::list_workflow_runs),
+        )
         // Workflow artifact-kind catalog (issue #102). Runtime surface of
         // the registry's `workflow_builtin_types()` — lets the dashboard
         // render the kind picker without hardcoding the union.
