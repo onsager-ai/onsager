@@ -67,7 +67,7 @@ RUN mkdir -p \
       crates/onsager-portal/src/main.rs \
       crates/refract/src/main.rs \
     && cargo build --release \
-         -p stiglab -p synodic -p onsager-portal \
+         -p stiglab -p synodic -p onsager-portal -p forge \
          --features synodic/postgres 2>/dev/null || true
 # Copy actual source and rebuild.
 # Touch all .rs files so their mtime is newer than the dummy-build artifacts —
@@ -76,7 +76,7 @@ RUN mkdir -p \
 COPY crates/ crates/
 RUN find crates -name "*.rs" | xargs touch \
     && cargo build --release \
-         -p stiglab -p synodic -p onsager-portal \
+         -p stiglab -p synodic -p onsager-portal -p forge \
          --features synodic/postgres
 
 # ---- Stage 3: Node.js for runtime (glibc-compatible) ----
@@ -113,6 +113,7 @@ WORKDIR /app
 COPY --from=rust-builder /app/target/release/stiglab        /app/stiglab
 COPY --from=rust-builder /app/target/release/synodic        /app/synodic
 COPY --from=rust-builder /app/target/release/onsager-portal /app/onsager-portal
+COPY --from=rust-builder /app/target/release/forge          /app/forge
 COPY --from=ui-builder /app/apps/dashboard/dist /app/static
 # Spine migrations — applied on startup when ONSAGER_DATABASE_URL is set
 COPY crates/onsager-spine/migrations/ /app/spine-migrations/

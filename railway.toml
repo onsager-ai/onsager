@@ -7,6 +7,7 @@
 #   stiglab         | Sessions, agents, dashboard, API          | 3000 (exposed)
 #   synodic         | Governance API (internal)                 | 3001 (proxied)
 #   onsager-portal  | GitHub webhook ingress (internal)         | 3002 (proxied)
+#   forge           | Workflow orchestrator (spine consumer)    | 3003 (internal)
 #   PostgreSQL      | Shared event spine (Railway plugin)       | 5432
 #
 # Stiglab is the front door — it serves the dashboard, its own API, and
