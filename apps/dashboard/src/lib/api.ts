@@ -224,6 +224,7 @@ export interface ArtifactDetail extends SpineArtifact {
   created_by: string;
   versions: ArtifactVersion[];
   vertical_lineage: ArtifactLineageEntry[];
+  horizontal_lineage?: ArtifactHorizontalLineageEntry[];
   related_events?: SpineEvent[];
 }
 
@@ -240,6 +241,15 @@ export interface ArtifactVersion {
 export interface ArtifactLineageEntry {
   version: number;
   session_id: string;
+  recorded_at: string;
+}
+
+// Horizontal lineage — cross-artifact dependency edges, e.g. a PR's
+// `closes_issue` link back to the spec issue it implements.
+export interface ArtifactHorizontalLineageEntry {
+  source_artifact_id: string;
+  source_version: number;
+  role: string;
   recorded_at: string;
 }
 
