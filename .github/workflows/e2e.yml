@@ -28,6 +28,12 @@ concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+# Default to read-only token. The job opts in to the e2e environment, which
+# is where CLAUDE_CODE_OAUTH_TOKEN lives — no other job in this workflow can
+# read it, and the environment requires a reviewer to approve PR runs.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
@@ -36,6 +42,16 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    # Gate the secret-bearing job behind a protected GitHub Environment.
+    # Configure in repo Settings → Environments → e2e:
+    #   - Required reviewers: trusted maintainers (gates same-repo PR runs)
+    #   - Deployment branches: main + PR refs (or restrict to main if you
+    #     want every PR run to require a manual approval)
+    #   - Secrets: move CLAUDE_CODE_OAUTH_TOKEN here from repo secrets
+    # Fork PRs cannot reach this environment, so they fail fast in the
+    # approval gate instead of running half-broken without secrets.
+    environment: e2e
 
     services:
       postgres:
