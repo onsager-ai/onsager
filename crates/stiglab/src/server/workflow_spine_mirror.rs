@@ -98,25 +98,18 @@ pub async fn delete(spine_pool: &PgPool, workflow_id: &str) -> anyhow::Result<()
 /// stages and upserts the spine schema. Idempotent; safe to run on every
 /// boot. Logs a warning per failed row but does not abort startup —
 /// individual translation failures shouldn't take stiglab down.
-pub async fn backfill(
-    stiglab_pool: &sqlx::AnyPool,
-    spine_pool: &PgPool,
-) -> anyhow::Result<usize> {
+pub async fn backfill(stiglab_pool: &sqlx::AnyPool, spine_pool: &PgPool) -> anyhow::Result<usize> {
     let workflows = crate::server::workflow_db::list_all_workflows(stiglab_pool).await?;
     let mut synced = 0usize;
     for w in workflows {
-        let stages = match crate::server::workflow_db::list_stages_for_workflow(
-            stiglab_pool,
-            &w.id,
-        )
-        .await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(workflow_id = %w.id, "backfill: stage load failed: {e}");
-                continue;
-            }
-        };
+        let stages =
+            match crate::server::workflow_db::list_stages_for_workflow(stiglab_pool, &w.id).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(workflow_id = %w.id, "backfill: stage load failed: {e}");
+                    continue;
+                }
+            };
         if let Err(e) = upsert(spine_pool, &w, &stages).await {
             tracing::warn!(workflow_id = %w.id, "backfill: spine upsert failed: {e}");
             continue;
