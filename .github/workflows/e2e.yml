@@ -6,23 +6,18 @@ name: e2e
 # Requires secrets:
 #   CLAUDE_CODE_OAUTH_TOKEN — Claude Code credentials for the agent
 #
-# Runs: nightly + manual trigger + on pull requests
-#
-# Gating at PR (not post-merge) so regressions are caught before they land
-# on main. Post-merge runs would only flag bad code after it had already
-# poisoned the branch.
+# DISABLED — auto-triggers removed pending migration to Onsager's own
+# workflow engine. Kept around as `workflow_dispatch`-only so it can be
+# invoked manually if needed; remove this file once the Onsager-native
+# E2E pipeline is online.
 
 on:
-  schedule:
-    - cron: "0 6 * * *" # daily at 06:00 UTC
   workflow_dispatch:
     inputs:
       onsager_url:
         description: "Target Onsager URL (leave empty for local stack)"
         required: false
         type: string
-  pull_request:
-    branches: [main]
 
 concurrency:
   group: e2e-${{ github.ref }}
