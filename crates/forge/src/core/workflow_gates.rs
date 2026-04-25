@@ -179,8 +179,16 @@ where
             // finish. Using the blocking `dispatch` here would hold the
             // Forge write lock for the full shaping deadline if no agent
             // is connected to pick the session up.
-            self.stiglab.dispatch_fire_and_forget(&request);
-            self.mark_dispatched(artifact.artifact_id.as_str(), stage_index);
+            //
+            // Only mark the gate as dispatched when Stiglab actually
+            // accepted the POST. Marking unconditionally would strand
+            // the artifact at this stage on transient network/5xx
+            // errors — already_dispatched would suppress retries
+            // forever, and the completion signal can't arrive for a
+            // session that was never created.
+            if self.stiglab.dispatch_fire_and_forget(&request) {
+                self.mark_dispatched(artifact.artifact_id.as_str(), stage_index);
+            }
         }
         GateOutcome::Pending
     }

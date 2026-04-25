@@ -89,12 +89,22 @@ pub trait StiglabDispatcher: Send + Sync {
     /// `stiglab.session_completed` event listener writing into the
     /// signal cache, which the next tick observes.
     ///
+    /// Returns `true` when Stiglab accepted the request, `false`
+    /// otherwise (network error, 5xx, …). The caller uses the return
+    /// value to decide whether to mark this dispatch as done — a
+    /// failed POST must not be marked dispatched, or the gate will
+    /// stall waiting for a completion signal that can never arrive.
+    ///
     /// Default implementation falls back to the blocking `dispatch` for
     /// backwards compatibility with mocks; production paths override
     /// with a true non-blocking call so the Forge write lock isn't held
     /// for the full shaping deadline when no agent is available.
-    fn dispatch_fire_and_forget(&self, request: &ShapingRequest) {
-        let _ = self.dispatch(request);
+    fn dispatch_fire_and_forget(&self, request: &ShapingRequest) -> bool {
+        let result = self.dispatch(request);
+        !matches!(
+            result.outcome,
+            ShapingOutcome::Failed | ShapingOutcome::Aborted
+        )
     }
 }
 

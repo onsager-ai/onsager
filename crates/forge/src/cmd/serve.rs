@@ -205,7 +205,7 @@ impl StiglabDispatcher for HttpStiglabDispatcher {
         }
     }
 
-    fn dispatch_fire_and_forget(&self, request: &ShapingRequest) {
+    fn dispatch_fire_and_forget(&self, request: &ShapingRequest) -> bool {
         // Workflow gates only need Stiglab to accept the dispatch — the
         // session_completed event listener resolves the signal cache for
         // a later tick. Polling here would hold the Forge write lock for
@@ -222,6 +222,7 @@ impl StiglabDispatcher for HttpStiglabDispatcher {
                     session_id,
                     "workflow agent-session dispatched"
                 );
+                true
             }
             Err(e) => {
                 tracing::error!(
@@ -229,6 +230,7 @@ impl StiglabDispatcher for HttpStiglabDispatcher {
                     artifact_id = %request.artifact_id,
                     "workflow agent-session dispatch failed: {e}"
                 );
+                false
             }
         }
     }
