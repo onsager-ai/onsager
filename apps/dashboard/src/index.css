@@ -130,6 +130,7 @@
   html {
     @apply font-sans;
     overscroll-behavior: none;
+    overflow: hidden;
     }
   body {
     @apply bg-background text-foreground;
