@@ -162,6 +162,17 @@ pub async fn create_shaping(
         }
     }
 
+    // Fetch user credentials when the request carries a `created_by`
+    // (issue #156). Without this the spawned agent has no
+    // `CLAUDE_CODE_OAUTH_TOKEN` and exits immediately with "stdout closed
+    // without result event". Direct callers without `created_by` keep the
+    // legacy `None` behavior — the resulting session_failed event surfaces
+    // the broken state via forge's signal listener.
+    let credentials = match req.created_by.as_deref() {
+        Some(uid) => super::tasks::fetch_user_credentials(&state, uid).await,
+        None => None,
+    };
+
     // Dispatch to agent via WebSocket.
     {
         let agents = state.agents.read().await;
@@ -169,7 +180,7 @@ pub async fn create_shaping(
             let msg = ServerMessage::DispatchTask {
                 task: Box::new(task.clone()),
                 session_id: session.id.clone(),
-                credentials: None,
+                credentials,
             };
             if let Ok(json) = serde_json::to_string(&msg) {
                 let _ = agent
@@ -349,6 +360,10 @@ async fn terminal_response(session: &Session) -> axum::response::Response {
         inputs: vec![],
         constraints: vec![],
         deadline: None,
+        // Synthesised for adapter shape-matching only; not dispatched
+        // anywhere. Owner identity isn't part of the persisted session
+        // row, and the adapter doesn't read this field anyway.
+        created_by: None,
     };
 
     let duration_ms = session

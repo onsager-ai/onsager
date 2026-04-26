@@ -151,6 +151,7 @@ mod tests {
                 },
             ],
             deadline: None,
+            created_by: None,
         }
     }
 
@@ -178,6 +179,7 @@ mod tests {
             inputs: vec![],
             constraints: vec![],
             deadline: None,
+            created_by: None,
         };
         let task = shaping_request_to_task(&req);
 

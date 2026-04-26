@@ -5,12 +5,21 @@
 //!
 //! Event mapping (producers live in the stiglab webhook receiver):
 //!
-//! | Spine event              | Signal kind (cache key)            |
-//! |--------------------------|-------------------------------------|
-//! | `git.ci_completed`       | `ci:<check_name>`                   |
-//! | `git.pr_merged`          | `pr_merged`                         |
-//! | `git.pr_closed`          | `pr_closed`                         |
-//! | `stiglab.session_completed` | `agent_session`                  |
+//! | Spine event                | Signal kind (cache key)               |
+//! |----------------------------|---------------------------------------|
+//! | `git.ci_completed`         | `ci:<check_name>`                     |
+//! | `git.pr_merged`            | `pr_merged`                           |
+//! | `git.pr_closed`            | `pr_closed`                           |
+//! | `stiglab.session_completed`| `agent_session` → Success             |
+//! | `stiglab.session_failed`   | `agent_session` → Failure(error)      |
+//!
+//! `session_failed` (issue #156) is the failure-side counterpart of
+//! `session_completed`: without it, an agent that crashes on launch (no
+//! credentials, OAuth expired, panic) leaves the agent-session gate
+//! pending, the artifact stalls at stage 0, and the next tick re-dispatches
+//! a new session that also fails. With it, the gate fails loudly and the
+//! artifact parks in `workflow_parked_reason` so the dashboard can render
+//! a "needs reconnect" affordance.
 
 use async_trait::async_trait;
 use onsager_spine::factory_event::{FactoryEvent, FactoryEventKind};
@@ -67,6 +76,17 @@ pub fn classify_signal(kind: &FactoryEventKind) -> Option<(String, Signal)> {
             Signal {
                 kind: AGENT_SESSION_SIGNAL.into(),
                 outcome: SignalOutcome::Success,
+            },
+        )),
+        FactoryEventKind::StiglabSessionFailed {
+            artifact_id: Some(aid),
+            error,
+            ..
+        } => Some((
+            aid.clone(),
+            Signal {
+                kind: AGENT_SESSION_SIGNAL.into(),
+                outcome: SignalOutcome::Failure(error.clone()),
             },
         )),
         _ => None,
@@ -127,7 +147,11 @@ impl EventHandler for SignalHandler {
         // Fast reject on event types that can never be signals.
         let interesting = matches!(
             notification.event_type.as_str(),
-            "git.ci_completed" | "git.pr_merged" | "git.pr_closed" | "stiglab.session_completed"
+            "git.ci_completed"
+                | "git.pr_merged"
+                | "git.pr_closed"
+                | "stiglab.session_completed"
+                | "stiglab.session_failed"
         );
         if !interesting {
             return Ok(());
@@ -228,6 +252,39 @@ mod tests {
             token_usage: None,
             branch: None,
             pr_number: None,
+        };
+        assert!(classify_signal(&kind).is_none());
+    }
+
+    #[test]
+    fn session_failed_with_artifact_id_classifies_as_agent_session_failure() {
+        let kind = FactoryEventKind::StiglabSessionFailed {
+            session_id: "s".into(),
+            request_id: "r".into(),
+            error: "stdout closed without result event".into(),
+            artifact_id: Some("art_failed".into()),
+        };
+        let (aid, sig) = classify_signal(&kind).expect("classified");
+        assert_eq!(aid, "art_failed");
+        assert_eq!(sig.kind, AGENT_SESSION_SIGNAL);
+        match sig.outcome {
+            SignalOutcome::Failure(reason) => {
+                assert_eq!(reason, "stdout closed without result event")
+            }
+            other => panic!("expected Failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_failed_without_artifact_id_is_not_a_signal() {
+        // Direct task POSTs (no artifact link) shouldn't write to the
+        // signal cache — only workflow-dispatched sessions carry an
+        // artifact_id so the gate has somewhere to land the failure.
+        let kind = FactoryEventKind::StiglabSessionFailed {
+            session_id: "s".into(),
+            request_id: "r".into(),
+            error: "anything".into(),
+            artifact_id: None,
         };
         assert!(classify_signal(&kind).is_none());
     }

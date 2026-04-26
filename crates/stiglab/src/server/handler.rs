@@ -165,9 +165,17 @@ pub async fn handle_agent_message(
             if let Err(e) = db::append_session_log(pool, &session_id, &error, "stderr").await {
                 tracing::error!("failed to append session log: {e}");
             }
-            // Emit spine event for session failure
+            // Emit spine event for session failure. Carry artifact_id so
+            // forge's workflow signal listener can fail the agent-session
+            // gate loudly (issue #156) — without it the artifact stalls
+            // at stage 0 and forge re-dispatches every tick forever.
             if let Some(spine) = spine {
-                if let Err(e) = spine.emit_session_failed(&session_id, "", &error).await {
+                let (_branch, _project_id, artifact_id) =
+                    git_context_for_session(pool, &session_id).await;
+                if let Err(e) = spine
+                    .emit_session_failed(&session_id, "", &error, artifact_id.as_deref())
+                    .await
+                {
                     tracing::warn!("failed to emit session_failed spine event: {e}");
                 }
             }

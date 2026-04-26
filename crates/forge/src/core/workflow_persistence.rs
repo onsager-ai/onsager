@@ -39,7 +39,7 @@ async fn load_workflows_filtered(
         Some(id) => {
             sqlx::query(
                 "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                        workspace_install_ref \
+                        workspace_install_ref, created_by \
                    FROM workflows WHERE workflow_id = $1",
             )
             .bind(id)
@@ -49,7 +49,7 @@ async fn load_workflows_filtered(
         None => {
             sqlx::query(
                 "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                        workspace_install_ref \
+                        workspace_install_ref, created_by \
                    FROM workflows",
             )
             .fetch_all(pool)
@@ -66,6 +66,7 @@ async fn load_workflows_filtered(
         let active: bool = row.get("active");
         let preset_id: Option<String> = row.get("preset_id");
         let workspace_install_ref: Option<String> = row.get("workspace_install_ref");
+        let created_by: Option<String> = row.try_get("created_by").ok().flatten();
 
         let trigger = match parse_trigger(&trigger_kind, &trigger_config) {
             Some(t) => t,
@@ -162,6 +163,7 @@ async fn load_workflows_filtered(
                 active,
                 preset_id,
                 workspace_install_ref,
+                created_by,
             },
         );
     }

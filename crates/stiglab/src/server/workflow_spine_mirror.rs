@@ -32,17 +32,24 @@ pub async fn upsert(
     let trigger_config = trigger_config_for(workflow);
     let install_ref = workflow.install_id.to_string();
 
+    // `created_by` (issue #156) is the owner identity stiglab uses to
+    // decrypt CLAUDE_CODE_OAUTH_TOKEN at shaping-dispatch time. Mirror it
+    // through to the spine so forge can read it from the same `workflows`
+    // table without a stiglab DB roundtrip. ON CONFLICT updates it too:
+    // re-activating a legacy workflow attaches the activator's id and
+    // unblocks the dispatch path the next time the gate evaluates.
     sqlx::query(
         "INSERT INTO workflows (workflow_id, name, trigger_kind, trigger_config, \
-                                active, preset_id, workspace_install_ref) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7) \
+                                active, preset_id, workspace_install_ref, created_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          ON CONFLICT (workflow_id) DO UPDATE SET \
              name = EXCLUDED.name, \
              trigger_kind = EXCLUDED.trigger_kind, \
              trigger_config = EXCLUDED.trigger_config, \
              active = EXCLUDED.active, \
              preset_id = EXCLUDED.preset_id, \
-             workspace_install_ref = EXCLUDED.workspace_install_ref",
+             workspace_install_ref = EXCLUDED.workspace_install_ref, \
+             created_by = EXCLUDED.created_by",
     )
     .bind(&workflow.id)
     .bind(&workflow.name)
@@ -51,6 +58,7 @@ pub async fn upsert(
     .bind(workflow.active)
     .bind(workflow.preset_id.as_deref())
     .bind(&install_ref)
+    .bind(&workflow.created_by)
     .execute(&mut *tx)
     .await
     .context("upsert spine workflows row")?;

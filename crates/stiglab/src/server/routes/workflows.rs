@@ -102,6 +102,33 @@ fn require_auth_user(auth_user: &AuthUser) -> Result<&str, Response> {
     }
 }
 
+/// Issue #156: ensure the workflow's owner has at least one credential
+/// row before activating. Returns a 4xx response when missing so the
+/// dashboard can surface a "connect Claude credentials" CTA.
+#[allow(clippy::result_large_err)]
+async fn require_owner_credentials(state: &AppState, owner_user_id: &str) -> Result<(), Response> {
+    match db::user_has_any_credential(&state.db, owner_user_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "no_credentials_for_workflow",
+                "message": "Workflow owner has no Claude credentials. Connect credentials in Settings before activating.",
+                "owner_user_id": owner_user_id,
+            })),
+        )
+            .into_response()),
+        Err(e) => {
+            tracing::error!("credential lookup failed during activation gate: {e}");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "credential check failed" })),
+            )
+                .into_response())
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkflowBody {
     pub tenant_id: String,
@@ -263,6 +290,14 @@ pub async fn create_workflow(
     // Activation runs after the row is durable. If it fails the workflow
     // stays `active=false` and the caller sees the activation error.
     if body.active {
+        // Issue #156: same activation gate as patch_workflow — refuse to
+        // activate if the owner has no credentials. Here `created_by` is
+        // the caller themselves (just set above), so this in practice
+        // surfaces the case where a user creates+activates without ever
+        // having connected Claude credentials.
+        if let Err(r) = require_owner_credentials(&state, &workflow.created_by).await {
+            return r;
+        }
         if let Err(r) = activate_workflow(&state, &workflow.id, &headers).await {
             return r;
         }
@@ -540,6 +575,17 @@ pub async fn patch_workflow(
     }
 
     if desired_active {
+        // Issue #156: refuse activation when the workflow's owner has no
+        // credentials. Without this guard the workflow would be active
+        // but every shaping dispatch would spawn an agent without
+        // CLAUDE_CODE_OAUTH_TOKEN and immediately fail with "stdout
+        // closed without result event". Failing fast at activation
+        // surfaces the broken state in the UX layer (a 4xx the dashboard
+        // can render as "connect Claude credentials") instead of in the
+        // spine event stream where users won't see it.
+        if let Err(r) = require_owner_credentials(&state, &workflow.created_by).await {
+            return r;
+        }
         if let Err(r) = activate_workflow(&state, &workflow_id, &headers).await {
             return r;
         }

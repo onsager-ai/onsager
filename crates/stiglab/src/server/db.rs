@@ -1071,6 +1071,21 @@ pub async fn user_credential_exists(
     Ok(row.is_some())
 }
 
+/// True if the user has at least one credential row. Used by the
+/// workflow-activate gate (issue #156) to refuse activation when the
+/// owner has no credentials to dispatch with — without this check, the
+/// workflow would be active but every session would fail with "stdout
+/// closed without result event".
+pub async fn user_has_any_credential(pool: &AnyPool, user_id: &str) -> anyhow::Result<bool> {
+    let row = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM user_credentials WHERE user_id = $1 LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.is_some())
+}
+
 // ── Personal Access Tokens (issue #143) ──
 
 #[derive(Debug, Clone)]

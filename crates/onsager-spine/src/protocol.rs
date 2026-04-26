@@ -56,6 +56,13 @@ pub struct ShapingRequest {
     /// Optional soft deadline.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deadline: Option<DateTime<Utc>>,
+    /// User the request runs on behalf of — drives credential lookup so
+    /// the spawned agent gets `CLAUDE_CODE_OAUTH_TOKEN` (issue #156).
+    /// `None` means "no user context" (legacy direct-shaping callers);
+    /// stiglab will spawn the agent without OAuth env vars and the
+    /// session will fail loudly via `stiglab.session_failed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
 }
 
 /// Error detail attached to failed or aborted shaping results.
@@ -246,11 +253,61 @@ mod tests {
             inputs: vec![],
             constraints: vec![],
             deadline: None,
+            created_by: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         let back: ShapingRequest = serde_json::from_value(json).unwrap();
         assert_eq!(back.request_id, "01HXYZ");
         assert_eq!(back.target_version, 2);
+    }
+
+    #[test]
+    fn shaping_request_created_by_is_wire_optional() {
+        // Issue #156: legacy callers serialize without `created_by` and
+        // deserialize cleanly thanks to `#[serde(default)]`. Populated
+        // values round-trip through the wire format unchanged.
+        let with = ShapingRequest {
+            request_id: "01HABC".into(),
+            artifact_id: ArtifactId::new("art_owned_1234"),
+            target_version: 1,
+            shaping_intent: serde_json::json!({}),
+            inputs: vec![],
+            constraints: vec![],
+            deadline: None,
+            created_by: Some("user_42".into()),
+        };
+        let json = serde_json::to_value(&with).unwrap();
+        assert_eq!(json["created_by"], "user_42");
+        let back: ShapingRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(back.created_by.as_deref(), Some("user_42"));
+
+        let without = ShapingRequest {
+            request_id: "01HDEF".into(),
+            artifact_id: ArtifactId::new("art_legacy_1234"),
+            target_version: 1,
+            shaping_intent: serde_json::json!({}),
+            inputs: vec![],
+            constraints: vec![],
+            deadline: None,
+            created_by: None,
+        };
+        let json = serde_json::to_value(&without).unwrap();
+        assert!(
+            !json.as_object().unwrap().contains_key("created_by"),
+            "None created_by must be omitted for wire compat with legacy callers"
+        );
+
+        // Legacy payload (no `created_by` key) still parses.
+        let legacy: ShapingRequest = serde_json::from_value(serde_json::json!({
+            "request_id": "01HOLD",
+            "artifact_id": "art_old_12345",
+            "target_version": 1,
+            "shaping_intent": {},
+            "inputs": [],
+            "constraints": []
+        }))
+        .expect("legacy ShapingRequest must deserialize");
+        assert!(legacy.created_by.is_none());
     }
 
     #[test]
