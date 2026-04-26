@@ -139,10 +139,15 @@ pub async fn load_artifact_store(pool: &PgPool) -> Result<ArtifactStore, sqlx::E
 /// `external_ref` is the stable identity in an upstream system (e.g.
 /// `forge:trigger:{wf}:github-issue:{owner}/{repo}#{n}`). When
 /// non-`None`, callers should first look up by external_ref via
-/// [`find_artifact_id_by_external_ref`] under an advisory lock to avoid
-/// duplicates — `external_ref` is intentionally not `UNIQUE` workspace-
-/// wide (different adapters may legitimately share the column), so the
-/// DB cannot dedup for us via `ON CONFLICT`.
+/// [`find_artifact_id_by_external_ref`] and skip the INSERT on hit.
+/// The lookup is intentionally a plain `SELECT` (not advisory-locked):
+/// `external_ref` is not `UNIQUE` workspace-wide (different adapters may
+/// legitimately share the column), and a true concurrent tie would at
+/// worst briefly create two rows — subsequent deliveries converge on
+/// the canonical (oldest) row via the deterministic `ORDER BY` in
+/// `find_artifact_id_by_external_ref`. If concurrency races appear in
+/// practice, the next step is the portal's
+/// `pg_advisory_xact_lock(hashtextextended($1, 0))` pattern.
 pub async fn insert_artifact_row(
     pool: &PgPool,
     artifact_id: &str,
@@ -176,15 +181,26 @@ pub async fn insert_artifact_row(
 /// Used by the trigger subscriber to dedup `trigger.fired` events: the
 /// same GitHub issue label-fired through the same workflow must produce
 /// a single artifact, not one per webhook delivery.
+///
+/// Ordered by `(created_at ASC, artifact_id ASC)` so that if a
+/// concurrent tie briefly creates two rows with the same `external_ref`
+/// (the lookup-then-insert is not advisory-locked — see
+/// [`insert_artifact_row`]), every caller across processes converges
+/// on the same canonical (oldest) row instead of returning whichever
+/// the planner happens to surface.
 pub async fn find_artifact_id_by_external_ref(
     pool: &PgPool,
     external_ref: &str,
 ) -> Result<Option<String>, sqlx::Error> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT artifact_id FROM artifacts WHERE external_ref = $1 LIMIT 1")
-            .bind(external_ref)
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT artifact_id FROM artifacts \
+          WHERE external_ref = $1 \
+          ORDER BY created_at ASC, artifact_id ASC \
+          LIMIT 1",
+    )
+    .bind(external_ref)
+    .fetch_optional(pool)
+    .await?;
     Ok(row.map(|(id,)| id))
 }
 

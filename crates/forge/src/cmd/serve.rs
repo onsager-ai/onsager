@@ -843,7 +843,13 @@ impl TriggerHandler for WorkflowTriggerHandler {
         // Dedup: a single (workflow, issue) must produce a single artifact
         // even if the trigger fires multiple times (e.g. label removed and
         // re-added, retried webhook delivery, rapid double-click). Look up
-        // by external_ref under an advisory lock before creating.
+        // by external_ref before creating; on hit, drop the trigger.
+        //
+        // Best-effort: the lookup is a plain SELECT, not advisory-locked.
+        // True concurrent ties may briefly create two rows; subsequent
+        // deliveries converge via the deterministic ORDER BY in
+        // `find_artifact_id_by_external_ref`. If races appear in practice,
+        // upgrade to the portal's `pg_advisory_xact_lock` pattern.
         let external_ref =
             trigger_external_ref(&event.workflow_id, &event.trigger_kind, &event.payload);
 

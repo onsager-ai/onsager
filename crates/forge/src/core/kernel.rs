@@ -81,8 +81,7 @@ impl Ord for SchedulableArtifact {
 ///   via the workflow gate path. Letting the kernel ALSO grab them caused
 ///   a double-dispatch where the kernel's blocking 5-minute polling call
 ///   timed out into `ShapingOutcome::Failed`, surfacing as the
-///   "shaping Failed: not advancing state" log spam (issue: artifact
-///   deduplication, branch claude/fix-artifact-deduplication-NJwA3).
+///   "shaping Failed: not advancing state" log spam.
 /// - Respects `max_in_flight` concurrency limit
 #[derive(Debug, Default, Clone)]
 pub struct BaselineKernel {
