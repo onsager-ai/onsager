@@ -128,8 +128,32 @@ pub async fn handle_agent_message(
                         tracing::warn!("failed to record branch link: {e}");
                     }
                 }
+                // Look up the session's `artifact_id` so the spine event
+                // carries the linkage forge's `SessionLinker` writes into
+                // `vertical_lineage`. Without this the workflow detail
+                // page's Sessions card stays empty even when sessions
+                // run, because lineage rows never get inserted.
+                let artifact_id = match db::get_session(pool, &session_id).await {
+                    Ok(Some(s)) => s.artifact_id,
+                    Ok(None) => None,
+                    Err(e) => {
+                        tracing::warn!(
+                            session_id = %session_id,
+                            "failed to load session for artifact_id lookup: {e}"
+                        );
+                        None
+                    }
+                };
                 if let Err(e) = spine
-                    .emit_session_completed(&session_id, "", 0, None, None, branch.as_deref(), None)
+                    .emit_session_completed(
+                        &session_id,
+                        "",
+                        0,
+                        artifact_id.as_deref(),
+                        None,
+                        branch.as_deref(),
+                        None,
+                    )
                     .await
                 {
                     tracing::warn!("failed to emit session_completed spine event: {e}");
