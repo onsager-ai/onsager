@@ -235,7 +235,9 @@ is explicitly trivial). This is the local counterpart to the
 
 ### 6.5. Seam-rule self-check
 
-Before pushing, look at the diff once more against the canonical rule:
+`just lint-rust` runs `cargo run -p xtask --quiet -- lint-seams` as part
+of step 4. That's the canonical check; CI runs the same. The lint
+enforces the rule from ADR 0004 / spec #131 Lever B:
 
 > HTTP APIs exist only at external boundaries:
 > - **User-facing endpoints** called by the dashboard.
@@ -246,41 +248,47 @@ Before pushing, look at the diff once more against the canonical rule:
 > shared spine tables. No subsystem makes HTTP calls to another
 > subsystem. No subsystem imports another subsystem's crate.
 
-Run a focused diff scan — Lever B of spec #131 will eventually hard-fail
-each of these in CI; until that lands, catch them locally:
+What the lint catches (each with a precise file:line and a fix
+hint — see `xtask/src/lint_seams.rs` for the full set):
+
+- **`arch-dep`** — subsystem A's `Cargo.toml` declares another
+  subsystem in `[dependencies]` / `[dev-dependencies]` /
+  `[build-dependencies]`. **No escape hatch** — Cargo.toml violations
+  always hard-fail.
+- **`sibling-env`** — code in subsystem A reads `<B>_URL` / `<B>_PORT`
+  for sibling B. That's the `forge → stiglab/synodic` HTTP-RPC shape.
+- **`sibling-host`** — a literal `http://<sibling>:` or
+  `https://<sibling>:` URL appears in subsystem source.
+- **`sibling-port`** — a literal `localhost:<sibling-port>` appears
+  in subsystem source.
+- **`serde-alias`** — new `#[serde(alias = …)]` in subsystem source.
+- **`mirror-file`** — a file matching `*_mirror.rs` exists under a
+  subsystem's `src/`.
+- **`legacy-type-alias`** — `pub type X = Y;` whose adjacent
+  doc-comment contains "legacy" / "deprecated" / "compat" / "alias
+  for" / "renamed" / "for backwards" / "until …".
+
+(`producer-without-consumer` is gated on Lever E #150 and currently
+warn-only.)
+
+To run the lint by hand without the rest of `lint-rust`:
 
 ```bash
-git diff origin/main...HEAD -- 'crates/forge/**' 'crates/stiglab/**' \
-  'crates/synodic/**' 'crates/ising/**'
+cargo run -p xtask --quiet -- lint-seams
 ```
 
-Flag any of:
+**Escape hatch (use sparingly).** For a single-line non-Cargo.toml
+violation, add `// seam-allow: <reason>` on the line **immediately
+above** the offending line. The reason text is mandatory; the lint
+reports each allow separately so reviewers see them. Every allow is
+debt — file the follow-up ticket in the reason string. Cargo.toml
+violations have no escape hatch.
 
-- **New sibling-subsystem HTTP client.** A new `reqwest::Client` /
-  `hyper::Client` constructed in `forge|stiglab|synodic|ising` whose
-  URL targets a sibling-subsystem port (3000, 3001, …) or service
-  name. The right shape is event emit + listener pair.
-- **New cross-subsystem Cargo dep.** Subsystem A's `Cargo.toml`
-  declaring B as a dep, e.g. `forge` adding `stiglab = { path = ... }`.
-  Subsystems may depend only on `onsager-{artifact, warehouse,
-  protocol, spine, registry, delivery}` per their existing manifests.
-- **New `serde(alias = …)`.** Renames must land atomically; aliases
-  ossify (PR #107 is the canonical case).
-- **New `*_mirror.rs` file or "translator" module.** The spine is
-  already the source of truth; mirror modules drift (PR #129 / Lever
-  D is removing the live one).
-- **New `pub type X = Y` "for compatibility".** Same problem as a
-  serde alias.
-- **New `FactoryEventKind` variant without a consumer.** Producer +
-  consumer should land together (PR #127 drift pattern). Lever E will
-  make this CI-enforceable.
-- **New API endpoint with no dashboard caller, or new dashboard
-  client method with no backend handler.** PR #108 drift pattern;
-  ship both halves in one PR (or two PRs gated by a contract test).
-
-If any of these appear, fix the seam before pushing — do not file a
-follow-up issue and ship the bridge. (Database schema migrations are
-the only exception; they remain governed by `migrations/NNN_*.sql`.)
+If the lint fires on something genuinely new (not a known Lever C/D
+allow-listed exception), fix the seam before pushing — do not add a
+new `seam-allow` without a tracked follow-up issue, and do not file
+a follow-up "to remove this later". Database schema migrations
+remain governed by `migrations/NNN_*.sql` and are not in lint scope.
 
 ### 7. Push
 

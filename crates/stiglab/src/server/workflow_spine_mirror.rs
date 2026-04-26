@@ -1,3 +1,4 @@
+// seam-allow: removed in Lever D (#149) — collapses tenant_workflows into spine workflows with a tenant_id discriminator
 //! Mirror stiglab's `tenant_workflows` rows into the spine `workflows` /
 //! `workflow_stages` tables that forge reads.
 //!

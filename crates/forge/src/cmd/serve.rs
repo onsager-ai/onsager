@@ -451,10 +451,14 @@ pub fn run(database_url: &str, tick_ms: u64) {
             None => ArtifactStore::new(),
         };
 
+        // seam-allow: legacy ADR 0001 sync RPC; replaced by spine events in Lever C (#148)
         let stiglab_port = std::env::var("STIGLAB_PORT").unwrap_or_else(|_| "3000".to_string());
+        // seam-allow: legacy ADR 0001 sync RPC; replaced by spine events in Lever C (#148)
         let stiglab_url = std::env::var("STIGLAB_URL")
             .unwrap_or_else(|_| format!("http://localhost:{stiglab_port}"));
+        // seam-allow: legacy ADR 0001 sync RPC; replaced by spine events in Lever C (#148)
         let synodic_port = std::env::var("SYNODIC_PORT").unwrap_or_else(|_| "3001".to_string());
+        // seam-allow: legacy ADR 0001 sync RPC; replaced by spine events in Lever C (#148)
         let synodic_url = std::env::var("SYNODIC_URL")
             .unwrap_or_else(|_| format!("http://localhost:{synodic_port}"));
 
