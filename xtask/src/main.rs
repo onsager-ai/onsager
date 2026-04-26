@@ -22,10 +22,9 @@ const ENUM_NAME: &str = "FactoryEventKind";
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let cmd = args.next();
-    let check = args.any(|a| a == "--check");
 
     let result = match cmd.as_deref() {
-        Some("gen-event-docs") => run_gen_event_docs(check),
+        Some("gen-event-docs") => parse_gen_event_docs_flags(args).and_then(run_gen_event_docs),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
             "usage: cargo run -p xtask -- <gen-event-docs> [--check]"
@@ -39,6 +38,19 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Strict-parse the `gen-event-docs` flag set so typos like `--chek` fail
+/// loudly instead of silently selecting the wrong mode.
+fn parse_gen_event_docs_flags(args: impl IntoIterator<Item = String>) -> Result<bool> {
+    let mut check = false;
+    for arg in args {
+        match arg.as_str() {
+            "--check" => check = true,
+            other => bail!("unknown flag for gen-event-docs: {other}"),
+        }
+    }
+    Ok(check)
 }
 
 fn run_gen_event_docs(check: bool) -> Result<()> {
@@ -186,19 +198,25 @@ fn extract_model(file: &syn::File) -> Result<Model> {
             Fields::Named(named) => named
                 .named
                 .iter()
-                .map(|f| {
-                    let name = f.ident.as_ref().expect("named field").to_string();
+                .map(|f| -> Result<FieldDoc> {
+                    let name = f
+                        .ident
+                        .as_ref()
+                        .ok_or_else(|| {
+                            anyhow!("variant {variant} has a named field without an identifier")
+                        })?
+                        .to_string();
                     let ty = type_to_string(&f.ty);
                     let optional = is_option(&f.ty);
                     let description = collect_doc(&f.attrs);
-                    FieldDoc {
+                    Ok(FieldDoc {
                         name,
                         ty,
                         description,
                         optional,
-                    }
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>>>()?,
             Fields::Unit => Vec::new(),
             Fields::Unnamed(_) => bail!("variant {variant} uses tuple fields; not supported"),
         };
@@ -285,8 +303,14 @@ fn is_option(ty: &Type) -> bool {
 fn type_to_string(ty: &Type) -> String {
     use quote::ToTokens;
     let mut s = ty.to_token_stream().to_string();
-    // collapse `Foo < Bar >` → `Foo<Bar>` and `Vec < T >` → `Vec<T>`
-    s = s.replace(" < ", "<").replace(" >", ">").replace(" ,", ",");
+    // Collapse common spacing artifacts from `ToTokens` so generics, commas,
+    // and path separators read as humans wrote them: `Foo < Bar >` → `Foo<Bar>`,
+    // `Vec < T >` → `Vec<T>`, and `serde_json :: Value` → `serde_json::Value`.
+    s = s
+        .replace(" < ", "<")
+        .replace(" >", ">")
+        .replace(" ,", ",")
+        .replace(" :: ", "::");
     s
 }
 
