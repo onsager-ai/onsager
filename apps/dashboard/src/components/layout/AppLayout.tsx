@@ -9,7 +9,11 @@ import { QuickCreateMenu } from "./QuickCreateMenu"
 
 export function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <SidebarProvider>
+    // Constrain the shell to the viewport so the inner <main> can be the
+    // only scroll container — body is overflow:hidden in index.css.
+    // shadcn's wrapper defaults to min-h-svh which would let content grow
+    // and clip; h-svh + overflow-hidden pins it.
+    <SidebarProvider className="h-svh overflow-hidden">
       <AppSidebar />
       <SidebarInset>
         {/* Mobile header */}
@@ -31,7 +35,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <UserMenu />
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto overscroll-contain p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:p-6 md:pb-6">
+        {/* min-h-0 is required for flex-1 + overflow-y-auto to engage in a
+            flex column: flex items default to min-height: auto and would
+            otherwise grow to content height instead of scrolling. */}
+        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:p-6 md:pb-6">
           {children}
         </main>
       </SidebarInset>
