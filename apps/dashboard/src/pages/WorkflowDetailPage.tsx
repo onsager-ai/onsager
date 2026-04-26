@@ -18,6 +18,7 @@ import { WorkflowActions } from "@/components/factory/workflows/WorkflowActions"
 import { WorkflowEventsCard } from "@/components/factory/workflows/WorkflowEventsCard"
 import { WorkflowSessionsCard } from "@/components/factory/workflows/WorkflowSessionsCard"
 import { outputArtifactKind } from "@/components/factory/workflows/workflow-meta"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 const STATUS_VARIANT: Record<StageRunStatus, "default" | "secondary" | "destructive" | "outline"> = {
   pending: "outline",
@@ -54,11 +55,20 @@ export function WorkflowDetailPage() {
   const workflow = data?.workflow
   const runs = runsData?.runs ?? []
 
+  // Mobile chrome: back arrow + workflow name + icon-only Pause/Delete
+  // live in the global top bar. Desktop renders the page-level block
+  // below (md:flex). Header stays registered while loading so the bar
+  // doesn't flicker between "Onsager" and the workflow name.
+  usePageHeader({
+    title: workflow?.name ?? "Workflow",
+    backTo: "/workflows",
+    actions: workflow ? <WorkflowActions workflow={workflow} compact /> : null,
+  })
+
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (isError || !workflow) {
     return (
       <div className="space-y-3">
-        <BackLink />
         <p className="text-sm text-destructive">Couldn&apos;t load workflow.</p>
       </div>
     )
@@ -66,14 +76,12 @@ export function WorkflowDetailPage() {
 
   return (
     <div className="space-y-4 md:space-y-6">
-      {/* Sticky on mobile so Pause/Delete stay at the top while content
-          scrolls beneath. Negative margins extend the bg under the
-          parent's p-4 so nothing peeks through above this header. */}
-      <div className="sticky top-0 z-20 -mx-4 -mt-4 space-y-2 border-b bg-background/95 px-4 pb-3 pt-4 backdrop-blur supports-backdrop-filter:bg-background/80 md:static md:mx-0 md:mt-0 md:border-0 md:bg-transparent md:px-0 md:pb-0 md:pt-0 md:backdrop-blur-none">
+      {/* Desktop-only page header. Mobile uses the global top bar. */}
+      <div className="hidden space-y-2 md:block">
         <BackLink />
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-bold tracking-tight md:text-2xl">
+            <h1 className="truncate text-2xl font-bold tracking-tight">
               {workflow.name}
             </h1>
             <p className="truncate text-sm text-muted-foreground">
@@ -86,6 +94,17 @@ export function WorkflowDetailPage() {
           </Badge>
         </div>
         <WorkflowActions workflow={workflow} />
+      </div>
+      {/* Mobile context strip: repo + status badge sit just under the
+          global header so users still see them on small screens. */}
+      <div className="flex items-center justify-between gap-2 md:hidden">
+        <p className="min-w-0 truncate text-sm text-muted-foreground">
+          {workflow.trigger.repo_owner}/{workflow.trigger.repo_name}
+          {workflow.trigger.label ? ` · ${workflow.trigger.label}` : ""}
+        </p>
+        <Badge variant={workflow.status === "active" ? "default" : "outline"}>
+          {workflow.status}
+        </Badge>
       </div>
 
       <Card>

@@ -13,6 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 const STREAM_TYPE_COLORS: Record<string, string> = {
   stiglab: "bg-blue-500/10 text-blue-500 border-blue-500/20",
@@ -24,6 +25,7 @@ const STREAM_TYPE_COLORS: Record<string, string> = {
 const STREAM_TYPES = ["", "stiglab", "synodic", "forge", "ising"]
 
 export function SpinePage() {
+  usePageHeader({ title: "Event Spine" })
   const [streamType, setStreamType] = useState("")
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
@@ -42,7 +44,7 @@ export function SpinePage() {
   return (
     <div className="space-y-4 md:space-y-6">
       <div>
-        <h1 className="text-xl font-bold tracking-tight md:text-2xl">Event Spine</h1>
+        <h1 className="hidden text-2xl font-bold tracking-tight md:block">Event Spine</h1>
         <p className="text-sm text-muted-foreground">
           Live view of all factory events across subsystems.
         </p>

@@ -11,6 +11,7 @@ import {
   GITHUB_ISSUE_TO_PR_PRESET,
   githubIssueToPrPreset,
 } from "@/components/factory/workflows/workflow-draft"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 /**
  * The 60-second "start the factory" card shown after a GitHub App install.
@@ -19,6 +20,7 @@ import {
  * the `github-issue-to-pr` preset and marks it active.
  */
 export function WorkflowStartPage() {
+  usePageHeader({ title: "Start the factory", backTo: "/workspaces" })
   const [params] = useSearchParams()
   const installId = params.get("install") ?? ""
   const tenantIdParam = params.get("tenant_id") ?? ""
@@ -93,7 +95,7 @@ export function WorkflowStartPage() {
           <Factory className="h-5 w-5" />
         </div>
         <div>
-          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
+          <h1 className="hidden text-2xl font-bold tracking-tight md:block">
             Start the factory
           </h1>
           <p className="text-sm text-muted-foreground">

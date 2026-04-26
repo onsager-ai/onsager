@@ -6,6 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   Table,
   TableBody,
   TableCell,
@@ -13,8 +19,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ArrowLeft, RefreshCw, Ban, ShieldCheck } from "lucide-react"
+import { ArrowLeft, Ban, MoreHorizontal, RefreshCw, ShieldCheck } from "lucide-react"
 import { LineageDAG } from "@/components/factory/LineageDAG"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -109,6 +116,68 @@ export function ArtifactDetailPage() {
     })
   }
 
+  const isTerminal =
+    artifact?.state === "archived" || artifact?.state === "released"
+  const archived = artifact?.state === "archived"
+  const busy =
+    retryMutation.isPending ||
+    abortMutation.isPending ||
+    overrideMutation.isPending
+
+  // Mobile chrome: back + artifact name + overflow menu (Retry / Override
+  // / Abort). Desktop renders the same 4 actions inline below.
+  usePageHeader({
+    title: artifact?.name ?? "Artifact",
+    backTo: "/artifacts",
+    actions: artifact ? (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              aria-label="Artifact actions"
+            />
+          }
+        >
+          <MoreHorizontal className="h-5 w-5" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem
+            disabled={busy || isTerminal}
+            onClick={() => retryMutation.mutate()}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Retry
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={busy || archived}
+            onClick={() => handleOverride("allow")}
+          >
+            <ShieldCheck className="mr-2 h-4 w-4" />
+            Override gate: Allow
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={busy || archived}
+            onClick={() => handleOverride("deny")}
+          >
+            <ShieldCheck className="mr-2 h-4 w-4" />
+            Override gate: Deny
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={busy || archived}
+            onClick={handleAbort}
+          >
+            <Ban className="mr-2 h-4 w-4" />
+            Abort
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ) : null,
+  })
+
   if (isLoading) {
     return (
       <div className="flex min-h-[200px] items-center justify-center">
@@ -120,31 +189,30 @@ export function ArtifactDetailPage() {
   if (error || !artifact) {
     return (
       <div className="space-y-4">
-        <Link to="/artifacts" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> Back to Artifacts
-        </Link>
         <p className="text-destructive">Artifact not found.</p>
       </div>
     )
   }
 
-  const isTerminal =
-    artifact.state === "archived" || artifact.state === "released"
-  const busy =
-    retryMutation.isPending ||
-    abortMutation.isPending ||
-    overrideMutation.isPending
-
   return (
     <div className="space-y-4 md:space-y-6">
-      <Link to="/artifacts" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      {/* Desktop header — back link + title + state badge. Mobile uses
+          the global top bar (back arrow + title + overflow menu). */}
+      <Link
+        to="/artifacts"
+        className="hidden items-center gap-1 text-sm text-muted-foreground hover:text-foreground md:inline-flex"
+      >
         <ArrowLeft className="h-4 w-4" /> Back to Artifacts
       </Link>
 
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight md:text-2xl">{artifact.name}</h1>
-          <p className="text-sm text-muted-foreground font-mono">{artifact.id}</p>
+        <div className="min-w-0">
+          <h1 className="hidden truncate text-2xl font-bold tracking-tight md:block">
+            {artifact.name}
+          </h1>
+          <p className="truncate text-sm text-muted-foreground font-mono">
+            {artifact.id}
+          </p>
         </div>
         <Badge variant={STATE_VARIANT[artifact.state] || "secondary"} className="text-sm">
           {artifact.state.replace("_", " ")}
@@ -164,8 +232,9 @@ export function ArtifactDetailPage() {
         </div>
       )}
 
-      {/* Controls */}
-      <div className="flex flex-wrap gap-2">
+      {/* Desktop controls — mobile uses the overflow menu in the global
+          top bar via usePageHeader above. */}
+      <div className="hidden flex-wrap gap-2 md:flex">
         <Button
           variant="outline"
           size="sm"
@@ -183,7 +252,7 @@ export function ArtifactDetailPage() {
         <Button
           variant="outline"
           size="sm"
-          disabled={busy || artifact.state === "archived"}
+          disabled={busy || archived}
           onClick={() => handleOverride("allow")}
           title="Manually allow an escalated gate"
         >
@@ -193,7 +262,7 @@ export function ArtifactDetailPage() {
         <Button
           variant="outline"
           size="sm"
-          disabled={busy || artifact.state === "archived"}
+          disabled={busy || archived}
           onClick={() => handleOverride("deny")}
         >
           <ShieldCheck className="mr-1 h-3.5 w-3.5" />
@@ -202,7 +271,7 @@ export function ArtifactDetailPage() {
         <Button
           variant="destructive"
           size="sm"
-          disabled={busy || artifact.state === "archived"}
+          disabled={busy || archived}
           onClick={handleAbort}
         >
           <Ban className="mr-1 h-3.5 w-3.5" />

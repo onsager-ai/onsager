@@ -5,16 +5,26 @@ import { SessionLogStream } from "@/components/sessions/SessionLogStream"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { formatDistanceToNow } from "@/lib/utils"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 export function SessionDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data, isLoading } = useSession(id!)
+  const session = data?.session
+
+  usePageHeader({
+    title: session ? (
+      <span className="font-mono">{session.id.slice(0, 8)}</span>
+    ) : (
+      "Session"
+    ),
+    backTo: "/sessions",
+  })
 
   if (isLoading) {
     return <p className="py-8 text-center text-muted-foreground">Loading...</p>
   }
 
-  const session = data?.session
   if (!session) {
     return <p className="py-8 text-center text-muted-foreground">Session not found</p>
   }
@@ -22,7 +32,7 @@ export function SessionDetailPage() {
   return (
     <div className="space-y-4 md:space-y-6">
       <div className="flex items-center gap-3">
-        <h1 className="text-lg font-bold tracking-tight font-mono md:text-2xl">
+        <h1 className="hidden text-2xl font-bold tracking-tight font-mono md:block">
           {session.id.slice(0, 8)}
         </h1>
         <SessionStateBadge state={session.state} />
