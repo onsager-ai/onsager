@@ -49,9 +49,10 @@ API/UI contract enforcement). Until the levers all land, the rule is
 review-time discipline; treat the drift patterns below as the working
 heuristics.
 
-Live violation (Lever C target): `crates/forge/src/cmd/serve.rs:65–180`
-still constructs `HttpStiglabDispatcher` and `HttpSynodicGate` against
-sibling subsystem ports. New code must not add to that pattern.
+Live violation (Lever C target): `crates/forge/src/cmd/serve.rs`
+still defines `HttpStiglabDispatcher` (≈52–304) and `HttpSynodicGate`
+(≈344–397), and instantiates them against sibling-subsystem ports in
+`run` (≈469–490). New code must not add to that pattern.
 
 ## Architectural drift patterns to watch
 

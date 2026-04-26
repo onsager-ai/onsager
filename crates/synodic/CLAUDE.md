@@ -21,11 +21,12 @@ What this means for synodic specifically:
   governance UI (rule lists, verdict views, etc.). Webhooks from
   external policy sources, if any.
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `stiglab`,
-  or `ising`. The legacy `HttpSynodicGate` path in
-  `crates/forge/src/cmd/serve.rs:65–180` is the one remaining
-  violation, and Lever C of spec #131 deletes it. Gate verdicts must
-  flow as events: forge emits `forge.gate_requested`; synodic consumes
-  it and emits `synodic.gate_verdict` with the decision.
+  or `ising`. The legacy `HttpSynodicGate` path
+  (`crates/forge/src/cmd/serve.rs` ≈344–397, instantiated in `run`
+  ≈469–490) is the one remaining violation, and Lever C of spec #131
+  deletes it. Gate verdicts must flow as events: forge emits
+  `forge.gate_requested`; synodic consumes it and emits
+  `synodic.gate_verdict` with the decision.
 - **`SYNODIC_FAIL_POLICY` (forge-side).** When forge cannot reach the
   HTTP gate today, it falls back per `SYNODIC_FAIL_POLICY` (default
   `escalate`). Once Lever C lands, the equivalent failure mode is "no
