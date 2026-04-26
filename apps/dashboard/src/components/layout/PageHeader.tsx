@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -13,10 +14,13 @@ import {
 //
 //   [← backTo OR ☰ sidebar] [title] [...actions]
 //
-// Desktop is unchanged — pages still render their own page-level
-// title + actions block (typically gated `hidden md:flex`). Keeping the
-// API mobile-leaning avoids two source-of-truths: the header context is
-// always set, but only the mobile chrome consumes it.
+// The contexts are deliberately split: pages subscribe only to the
+// stable setter (PageHeaderSetContext, value never changes), so writes
+// from the hook don't re-render the page itself. Only the bar (which
+// reads PageHeaderValueContext) re-renders. Without this split, every
+// time a page passes a fresh JSX `actions` node, setState would
+// re-render the page, which would create new JSX, which would fire the
+// effect again — an infinite loop.
 export interface PageHeaderState {
   title?: ReactNode
   // Back-arrow target. When set, the mobile header replaces the
@@ -29,49 +33,67 @@ export interface PageHeaderState {
   actions?: ReactNode
 }
 
-interface PageHeaderContextValue extends PageHeaderState {
+interface PageHeaderSetters {
   setHeader: (state: PageHeaderState) => void
   clearHeader: () => void
 }
 
-const PageHeaderContext = createContext<PageHeaderContextValue | null>(null)
+const PageHeaderValueContext = createContext<PageHeaderState>({})
+const PageHeaderSetContext = createContext<PageHeaderSetters | null>(null)
 
 export function PageHeaderProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<PageHeaderState>({})
 
-  const value = useMemo<PageHeaderContextValue>(
+  const setters = useMemo<PageHeaderSetters>(
     () => ({
-      ...state,
-      setHeader: setState,
+      setHeader: (next) =>
+        setState((prev) =>
+          prev.title === next.title &&
+          prev.backTo === next.backTo &&
+          prev.actions === next.actions
+            ? prev
+            : next,
+        ),
       clearHeader: () => setState({}),
     }),
-    [state],
+    [],
   )
 
   return (
-    <PageHeaderContext.Provider value={value}>
-      {children}
-    </PageHeaderContext.Provider>
+    <PageHeaderSetContext.Provider value={setters}>
+      <PageHeaderValueContext.Provider value={state}>
+        {children}
+      </PageHeaderValueContext.Provider>
+    </PageHeaderSetContext.Provider>
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function usePageHeaderState(): PageHeaderState {
-  const ctx = useContext(PageHeaderContext)
-  if (!ctx) throw new Error("usePageHeaderState must be used within PageHeaderProvider")
-  return { title: ctx.title, backTo: ctx.backTo, actions: ctx.actions }
+  return useContext(PageHeaderValueContext)
 }
 
 // Pages call this in their render to register their header content.
-// State is keyed on the JSON-serializable bits; React-node `title` and
-// `actions` are deps too so updates flow through. Cleared on unmount so
-// navigating away resets the bar.
+// Cleared on unmount so navigating away resets the bar. Note: pages
+// passing JSX `actions` should `useMemo` the node (or this hook will
+// re-set on every render — wasteful but not a loop, since pages don't
+// subscribe to the value context).
+//
+// Safe outside a provider — silently no-ops, so smoke tests can mount
+// pages standalone without wrapping every test in AppLayout.
+// eslint-disable-next-line react-refresh/only-export-components
 export function usePageHeader(state: PageHeaderState) {
-  const ctx = useContext(PageHeaderContext)
-  if (!ctx) throw new Error("usePageHeader must be used within PageHeaderProvider")
-  const { setHeader, clearHeader } = ctx
+  const setters = useContext(PageHeaderSetContext)
   const { title, backTo, actions } = state
+
+  const setHeaderCb = useCallback(
+    () => setters?.setHeader({ title, backTo, actions }),
+    [setters, title, backTo, actions],
+  )
+
   useEffect(() => {
-    setHeader({ title, backTo, actions })
-    return clearHeader
-  }, [title, backTo, actions, setHeader, clearHeader])
+    if (!setters) return
+    setHeaderCb()
+    return setters.clearHeader
+  }, [setters, setHeaderCb])
 }
