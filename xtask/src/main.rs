@@ -40,7 +40,7 @@ fn main() -> ExitCode {
         }
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage: cargo run -p xtask -- <gen-event-docs|lint-seams> [--check]"
+            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams"
         )),
     };
 
