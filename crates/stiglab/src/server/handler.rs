@@ -113,8 +113,14 @@ pub async fn handle_agent_message(
             // detection (issue #60): if the session has a working_dir, ask
             // git for the current branch so the portal can attach
             // vertical_lineage when the matching PR webhook arrives.
+            //
+            // `artifact_id` is loaded by the same query so forge's
+            // `SessionLinker` can write `vertical_lineage`; without it
+            // the workflow detail page's Sessions card stays empty even
+            // when sessions run.
             if let Some(spine) = spine {
-                let (branch, project_id) = git_context_for_session(pool, &session_id).await;
+                let (branch, project_id, artifact_id) =
+                    git_context_for_session(pool, &session_id).await;
                 if let Some(branch_name) = branch.as_deref() {
                     let spine_pool = spine.pool().clone();
                     if let Err(e) = record_branch_link(
@@ -128,22 +134,6 @@ pub async fn handle_agent_message(
                         tracing::warn!("failed to record branch link: {e}");
                     }
                 }
-                // Look up the session's `artifact_id` so the spine event
-                // carries the linkage forge's `SessionLinker` writes into
-                // `vertical_lineage`. Without this the workflow detail
-                // page's Sessions card stays empty even when sessions
-                // run, because lineage rows never get inserted.
-                let artifact_id = match db::get_session(pool, &session_id).await {
-                    Ok(Some(s)) => s.artifact_id,
-                    Ok(None) => None,
-                    Err(e) => {
-                        tracing::warn!(
-                            session_id = %session_id,
-                            "failed to load session for artifact_id lookup: {e}"
-                        );
-                        None
-                    }
-                };
                 if let Err(e) = spine
                     .emit_session_completed(
                         &session_id,
@@ -188,28 +178,30 @@ pub async fn handle_agent_message(
     }
 }
 
-/// Best-effort branch + project lookup for a session at completion time.
-/// Reads `working_dir` from the session row, asks `git rev-parse --abbrev-ref HEAD`
-/// for the active branch, and joins `sessions.project_id` to surface the
-/// owning project (so the portal can scope its branch-link lookup). Failures
-/// at any step degrade gracefully to `None` — branch/PR detection is purely
+/// Best-effort branch + project + artifact lookup for a session at
+/// completion time. Reads `working_dir` from the session row, asks
+/// `git rev-parse --abbrev-ref HEAD` for the active branch, joins
+/// `sessions.project_id` to surface the owning project (so the portal
+/// can scope its branch-link lookup), and returns `artifact_id` so the
+/// caller can attach it to the spine event without a second roundtrip.
+/// Failures at any step degrade gracefully to `None` — every field is
 /// additive context.
 async fn git_context_for_session(
     pool: &AnyPool,
     session_id: &str,
-) -> (Option<String>, Option<String>) {
-    let row: Option<(Option<String>, Option<String>)> =
-        sqlx::query_as("SELECT working_dir, project_id FROM sessions WHERE id = $1")
+) -> (Option<String>, Option<String>, Option<String>) {
+    let row: Option<(Option<String>, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT working_dir, project_id, artifact_id FROM sessions WHERE id = $1")
             .bind(session_id)
             .fetch_optional(pool)
             .await
             .ok()
             .flatten();
-    let Some((working_dir, project_id)) = row else {
-        return (None, None);
+    let Some((working_dir, project_id, artifact_id)) = row else {
+        return (None, None, None);
     };
     let Some(working_dir) = working_dir else {
-        return (None, project_id);
+        return (None, project_id, artifact_id);
     };
     // Detached HEAD and empty output both mean "no usable branch name" —
     // record neither, otherwise the portal's branch-match lookup could
@@ -234,7 +226,7 @@ async fn git_context_for_session(
             Some(name)
         }
     });
-    (branch, project_id)
+    (branch, project_id, artifact_id)
 }
 
 /// Persist a `(session_id, branch, project_id)` row in the portal-managed
