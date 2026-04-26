@@ -442,6 +442,7 @@ async fn create_pat_409s_on_duplicate_name() {
     let state = AppState::new(pool, auth_enabled_config(), None);
     let app_ = app(state);
 
+    let exp = (Utc::now() + chrono::Duration::days(30)).to_rfc3339();
     let make = || {
         Request::builder()
             .method("POST")
@@ -449,7 +450,7 @@ async fn create_pat_409s_on_duplicate_name() {
             .header(header::COOKIE, format!("stiglab_session={session_token}"))
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
-                serde_json::json!({ "name": "ci", "expires_at": null }).to_string(),
+                serde_json::json!({ "name": "ci", "expires_at": exp }).to_string(),
             ))
             .unwrap()
     };
@@ -478,6 +479,7 @@ async fn create_pat_rejects_empty_name() {
     .unwrap();
     let state = AppState::new(pool, auth_enabled_config(), None);
 
+    let exp = (Utc::now() + chrono::Duration::days(7)).to_rfc3339();
     let resp = app(state)
         .oneshot(
             Request::builder()
@@ -486,13 +488,96 @@ async fn create_pat_rejects_empty_name() {
                 .header(header::COOKIE, format!("stiglab_session={session_token}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "name": "  ", "expires_at": null }).to_string(),
+                    serde_json::json!({ "name": "  ", "expires_at": exp }).to_string(),
                 ))
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn create_pat_rejects_missing_expires_at() {
+    // v1 contract: an explicit expiry is required. `null` is reserved for
+    // a future "never expires" affordance and must not silently mint a
+    // long-lived token today.
+    let pool = test_pool().await;
+    let user = seed_user(&pool).await;
+    let session_token = stiglab::server::auth::generate_session_token();
+    db::create_auth_session(
+        &pool,
+        &session_token,
+        &user.id,
+        Utc::now() + chrono::Duration::days(1),
+    )
+    .await
+    .unwrap();
+    let state = AppState::new(pool, auth_enabled_config(), None);
+
+    for body in [
+        serde_json::json!({ "name": "ci", "expires_at": null }),
+        serde_json::json!({ "name": "ci" }),
+    ] {
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/pats")
+                    .header(header::COOKIE, format!("stiglab_session={session_token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
+async fn create_pat_response_carries_no_store_cache_headers() {
+    // The body holds the only copy of the secret token — every
+    // intermediary must be told not to cache it.
+    let pool = test_pool().await;
+    let user = seed_user(&pool).await;
+    let session_token = stiglab::server::auth::generate_session_token();
+    db::create_auth_session(
+        &pool,
+        &session_token,
+        &user.id,
+        Utc::now() + chrono::Duration::days(1),
+    )
+    .await
+    .unwrap();
+    let state = AppState::new(pool, auth_enabled_config(), None);
+
+    let exp = (Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+    let resp = app(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/pats")
+                .header(header::COOKIE, format!("stiglab_session={session_token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "name": "ci", "expires_at": exp }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|v| v.to_str().ok()),
+        Some("no-store")
+    );
+    assert_eq!(
+        resp.headers().get("pragma").and_then(|v| v.to_str().ok()),
+        Some("no-cache")
+    );
 }
 
 #[tokio::test]

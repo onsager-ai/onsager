@@ -104,14 +104,23 @@ pub async fn create_pat(
             .into_response();
     }
 
-    if let Some(exp) = body.expires_at {
-        if exp <= Utc::now() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": "expires_at must be in the future" })),
-            )
-                .into_response();
-        }
+    // v1: explicit expiry required. The dashboard always sends one of the
+    // 7/30/60/90/custom-date choices; `null` is reserved for a future
+    // "never expires" affordance and must not silently mint long-lived
+    // tokens today.
+    let Some(expires_at) = body.expires_at else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "expires_at is required" })),
+        )
+            .into_response();
+    };
+    if expires_at <= Utc::now() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "expires_at must be in the future" })),
+        )
+            .into_response();
     }
 
     // If the caller pinned the PAT to a workspace, they must be a member of
@@ -148,7 +157,7 @@ pub async fn create_pat(
         name,
         &generated.prefix,
         &generated.hash,
-        body.expires_at,
+        Some(expires_at),
     )
     .await
     {
@@ -174,7 +183,7 @@ pub async fn create_pat(
         tenant_id: body.tenant_id.clone(),
         name: name.to_string(),
         token_prefix: generated.prefix.clone(),
-        expires_at: body.expires_at,
+        expires_at: Some(expires_at),
         last_used_at: None,
         last_used_ip: None,
         last_used_user_agent: None,
@@ -182,13 +191,24 @@ pub async fn create_pat(
         revoked_at: None,
     };
 
-    Json(serde_json::json!({
+    // The body carries the only copy of the secret token. Tell every
+    // intermediary not to cache it — the response is single-use by design.
+    let mut response = Json(serde_json::json!({
         "pat": pat_summary(&pat),
         // Returned exactly once. After this response, the only way to
         // recover access is to mint a new token.
         "token": generated.token,
     }))
-    .into_response()
+    .into_response();
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response.headers_mut().insert(
+        axum::http::header::PRAGMA,
+        axum::http::HeaderValue::from_static("no-cache"),
+    );
+    response
 }
 
 /// DELETE /api/pats/{id} — Soft-delete (revoke) a PAT.
