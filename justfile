@@ -36,9 +36,17 @@ lint: lint-rust lint-ui
 lint-rust:
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
+    cargo run -p xtask --quiet -- gen-event-docs --check
 
 lint-ui:
     pnpm --filter dashboard lint
+
+# ── Docs ─────────────────────────────────────────────────────────────
+
+# Regenerate docs/events.md from FactoryEventKind. Run after editing
+# crates/onsager-spine/src/factory_event.rs. CI runs `--check`.
+gen-event-docs:
+    cargo run -p xtask --quiet -- gen-event-docs
 
 # ── Dev (full stack) ─────────────────────────────────────────────────
 

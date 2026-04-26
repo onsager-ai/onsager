@@ -20,6 +20,7 @@ jobs:
       synodic: ${{ steps.filter.outputs.synodic }}
       onsager: ${{ steps.filter.outputs.onsager }}
       workspace: ${{ steps.filter.outputs.workspace }}
+      xtask: ${{ steps.filter.outputs.xtask }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -46,6 +47,8 @@ jobs:
               - 'crates/onsager-spine/**'
             onsager:
               - 'crates/onsager/**'
+            xtask:
+              - 'xtask/**'
 
   check:
     needs: changes
@@ -56,7 +59,8 @@ jobs:
       needs.changes.outputs.ising == 'true' ||
       needs.changes.outputs.stiglab == 'true' ||
       needs.changes.outputs.synodic == 'true' ||
-      needs.changes.outputs.onsager == 'true'
+      needs.changes.outputs.onsager == 'true' ||
+      needs.changes.outputs.xtask == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -77,6 +81,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo build --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Verify docs/events.md is in sync with FactoryEventKind
+        run: cargo run -p xtask --quiet -- gen-event-docs --check
       - name: Apply database migrations
         run: |
           psql "$DATABASE_URL" -f crates/onsager-spine/migrations/001_initial.sql
