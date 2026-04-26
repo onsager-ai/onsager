@@ -121,13 +121,22 @@
   * {
     @apply border-border outline-ring/50;
     }
+  /* Lock the page to the viewport so scrolling happens inside the app
+     shell (see AppLayout's <main>), not on <body>. This kills iOS
+     rubber-band / pull-to-refresh and gives the app a native feel. */
+  html, body, #root {
+    height: 100%;
+    }
+  html {
+    @apply font-sans;
+    overscroll-behavior: none;
+    }
   body {
     @apply bg-background text-foreground;
     -webkit-tap-highlight-color: transparent;
     -webkit-font-smoothing: antialiased;
-    }
-  html {
-    @apply font-sans;
+    overscroll-behavior: none;
+    overflow: hidden;
     }
 }
 
