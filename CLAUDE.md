@@ -41,13 +41,13 @@ subsystem binaries on PATH.
 > shared spine tables. No subsystem makes HTTP calls to another
 > subsystem. No subsystem imports another subsystem's crate.
 
-This is the rule. ADR 0001 set it; spec #131 is collapsing the
-remaining places it is informally stated or informally enforced into
-six levers (A–F: persisted rule → mechanical guardrails → finish ADR
-0001 migration → spine as SoT → registry-backed event types →
-API/UI contract enforcement). Until the levers all land, the rule is
-review-time discipline; treat the drift patterns below as the working
-heuristics.
+This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md)
+captures the decision to make it machine-checkable and the six-lever
+execution plan that spec #131 tracks (A–F: persisted rule →
+mechanical guardrails → finish ADR 0001 migration → spine as SoT →
+registry-backed event types → API/UI contract enforcement). Until the
+levers all land, the rule is review-time discipline; treat the drift
+patterns below as the working heuristics.
 
 Live violation (Lever C target): `crates/forge/src/cmd/serve.rs`
 still defines `HttpStiglabDispatcher` (≈52–304) and `HttpSynodicGate`
