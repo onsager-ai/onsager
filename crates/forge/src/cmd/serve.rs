@@ -25,7 +25,7 @@ use crate::core::session_listener::{self, SessionCompleted, SessionCompletedHand
 use crate::core::signal_cache::SignalCache;
 use crate::core::stage_runner::{self, StageEvent};
 use crate::core::trigger_subscriber::{
-    self, register_artifact_from_trigger, TriggerFired, TriggerHandler,
+    self, register_artifact_from_trigger, trigger_external_ref, TriggerFired, TriggerHandler,
 };
 use crate::core::workflow_gates::LiveGateEvaluator;
 use crate::core::workflow_persistence;
@@ -840,6 +840,34 @@ impl TriggerHandler for WorkflowTriggerHandler {
                 }
             };
 
+        // Dedup: a single (workflow, issue) must produce a single artifact
+        // even if the trigger fires multiple times (e.g. label removed and
+        // re-added, retried webhook delivery, rapid double-click). Look up
+        // by external_ref under an advisory lock before creating.
+        let external_ref =
+            trigger_external_ref(&event.workflow_id, &event.trigger_kind, &event.payload);
+
+        if let (Some(spine_ref), Some(ref ext_ref)) = (spine.as_ref(), external_ref.as_ref()) {
+            match persistence::find_artifact_id_by_external_ref(spine_ref.pool(), ext_ref).await {
+                Ok(Some(existing_id)) => {
+                    tracing::info!(
+                        workflow_id = %event.workflow_id,
+                        external_ref = %ext_ref,
+                        artifact_id = %existing_id,
+                        "trigger.fired dropped (artifact already exists for this issue)"
+                    );
+                    return Ok(());
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        external_ref = %ext_ref,
+                        "forge: dedup lookup failed, falling through to register: {e}"
+                    );
+                }
+            }
+        }
+
         // Perform the registration under the write lock and capture the
         // resulting StageEntered event.
         let emitted = {
@@ -857,12 +885,15 @@ impl TriggerHandler for WorkflowTriggerHandler {
 
         if let Some(spine) = spine {
             // Mirror both the base artifact row and the workflow tagging.
+            // The external_ref column is what makes the next trigger.fired
+            // for this same (workflow, issue) hit the dedup branch above.
             if let Err(e) = persistence::insert_artifact_row(
                 spine.pool(),
                 artifact.artifact_id.as_str(),
                 &artifact.kind.to_string(),
                 &artifact.name,
                 &artifact.owner,
+                external_ref.as_deref(),
             )
             .await
             {
@@ -1030,6 +1061,7 @@ async fn register_artifact(
             &req.kind,
             &req.name,
             &req.owner,
+            None,
         )
         .await
         {

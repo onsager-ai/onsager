@@ -135,29 +135,57 @@ pub async fn load_artifact_store(pool: &PgPool) -> Result<ArtifactStore, sqlx::E
 /// the in-memory write, which is how `register_artifact` in
 /// `cmd/serve.rs` preserves the "no divergent state" property
 /// required by issue #30.
+///
+/// `external_ref` is the stable identity in an upstream system (e.g.
+/// `forge:trigger:{wf}:github-issue:{owner}/{repo}#{n}`). When
+/// non-`None`, callers should first look up by external_ref via
+/// [`find_artifact_id_by_external_ref`] under an advisory lock to avoid
+/// duplicates — `external_ref` is intentionally not `UNIQUE` workspace-
+/// wide (different adapters may legitimately share the column), so the
+/// DB cannot dedup for us via `ON CONFLICT`.
 pub async fn insert_artifact_row(
     pool: &PgPool,
     artifact_id: &str,
     kind: &str,
     name: &str,
     owner: &str,
+    external_ref: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     let mut tx: Transaction<'_, Postgres> = pool.begin().await?;
 
     sqlx::query(
         "INSERT INTO artifacts \
-             (artifact_id, kind, name, owner, created_by, state, current_version) \
-         VALUES ($1, $2, $3, $4, 'forge', 'draft', 0) \
+             (artifact_id, kind, name, owner, created_by, state, current_version, external_ref) \
+         VALUES ($1, $2, $3, $4, 'forge', 'draft', 0, $5) \
          ON CONFLICT (artifact_id) DO NOTHING",
     )
     .bind(artifact_id)
     .bind(kind)
     .bind(name)
     .bind(owner)
+    .bind(external_ref)
     .execute(&mut *tx)
     .await?;
 
     tx.commit().await
+}
+
+/// Look up an artifact_id by its `external_ref`. Returns `None` if no
+/// row matches — the caller then proceeds to insert with that ref.
+///
+/// Used by the trigger subscriber to dedup `trigger.fired` events: the
+/// same GitHub issue label-fired through the same workflow must produce
+/// a single artifact, not one per webhook delivery.
+pub async fn find_artifact_id_by_external_ref(
+    pool: &PgPool,
+    external_ref: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT artifact_id FROM artifacts WHERE external_ref = $1 LIMIT 1")
+            .bind(external_ref)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|(id,)| id))
 }
 
 /// Mirror the post-tick state of `artifact` to the `artifacts` row.

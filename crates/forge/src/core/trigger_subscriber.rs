@@ -126,6 +126,33 @@ impl<H: TriggerHandler> EventHandler for Dispatcher<H> {
     }
 }
 
+/// Stable identity for an artifact created from a trigger payload.
+///
+/// Format: `forge:trigger:{workflow_id}:{trigger_kind}:{owner}/{repo}#{n}`.
+/// Returns `None` when the payload is missing the fields needed to form a
+/// stable key (we never fall back to a random ref — that would re-introduce
+/// the duplication this function exists to prevent).
+///
+/// Anchored on `(workflow_id, issue)`: the same issue under two different
+/// workflows produces two distinct artifacts (each workflow drives its own
+/// pipeline), but a re-fired trigger for the same `(workflow, issue)`
+/// converges on the existing row.
+pub fn trigger_external_ref(
+    workflow_id: &str,
+    trigger_kind: &str,
+    payload: &serde_json::Value,
+) -> Option<String> {
+    let owner = payload.get("repo_owner").and_then(|v| v.as_str())?;
+    let repo = payload.get("repo_name").and_then(|v| v.as_str())?;
+    let number = payload.get("issue_number").and_then(|v| v.as_u64())?;
+    if owner.is_empty() || repo.is_empty() || number == 0 {
+        return None;
+    }
+    Some(format!(
+        "forge:trigger:{workflow_id}:{trigger_kind}:{owner}/{repo}#{number}"
+    ))
+}
+
 /// Pure helper: given a fired trigger + the corresponding workflow, build
 /// and register the artifact in the store. Used by the live handler in
 /// `cmd/serve.rs` and by tests that want to exercise the logic without a
@@ -241,6 +268,69 @@ mod tests {
         let trigger = make_trigger();
         assert!(register_artifact_from_trigger(&mut store, &wf, &trigger).is_none());
         assert_eq!(store.active_artifacts().len(), 0);
+    }
+
+    #[test]
+    fn external_ref_is_stable_across_calls() {
+        let payload = serde_json::json!({
+            "repo_owner": "acme",
+            "repo_name": "widgets",
+            "issue_number": 42,
+            "title": "anything",
+        });
+        let a = trigger_external_ref("wf_1", "github_issue_webhook", &payload);
+        let b = trigger_external_ref("wf_1", "github_issue_webhook", &payload);
+        assert_eq!(a, b);
+        assert_eq!(
+            a.as_deref(),
+            Some("forge:trigger:wf_1:github_issue_webhook:acme/widgets#42")
+        );
+    }
+
+    #[test]
+    fn external_ref_distinct_per_workflow() {
+        let payload = serde_json::json!({
+            "repo_owner": "acme",
+            "repo_name": "widgets",
+            "issue_number": 42,
+        });
+        let a = trigger_external_ref("wf_1", "github_issue_webhook", &payload);
+        let b = trigger_external_ref("wf_2", "github_issue_webhook", &payload);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn external_ref_returns_none_when_payload_incomplete() {
+        // Missing repo_owner / repo_name / issue_number → can't form a
+        // stable key, so we don't fabricate one (which would re-introduce
+        // duplicates).
+        assert!(trigger_external_ref("wf", "k", &serde_json::json!({})).is_none());
+        assert!(trigger_external_ref(
+            "wf",
+            "k",
+            &serde_json::json!({ "repo_owner": "a", "repo_name": "b" })
+        )
+        .is_none());
+        assert!(trigger_external_ref(
+            "wf",
+            "k",
+            &serde_json::json!({
+                "repo_owner": "",
+                "repo_name": "b",
+                "issue_number": 1
+            })
+        )
+        .is_none());
+        assert!(trigger_external_ref(
+            "wf",
+            "k",
+            &serde_json::json!({
+                "repo_owner": "a",
+                "repo_name": "b",
+                "issue_number": 0
+            })
+        )
+        .is_none());
     }
 
     #[test]

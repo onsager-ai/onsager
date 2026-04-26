@@ -76,6 +76,13 @@ impl Ord for SchedulableArtifact {
 ///
 /// - Picks the highest-priority artifact in `Draft` or `InProgress` state
 /// - Skips artifacts that are `UnderReview`, `Released`, or `Archived`
+/// - Skips workflow-tagged artifacts (`workflow_id.is_some()`) — those are
+///   driven by the stage runner, which dispatches sessions fire-and-forget
+///   via the workflow gate path. Letting the kernel ALSO grab them caused
+///   a double-dispatch where the kernel's blocking 5-minute polling call
+///   timed out into `ShapingOutcome::Failed`, surfacing as the
+///   "shaping Failed: not advancing state" log spam (issue: artifact
+///   deduplication, branch claude/fix-artifact-deduplication-NJwA3).
 /// - Respects `max_in_flight` concurrency limit
 #[derive(Debug, Default, Clone)]
 pub struct BaselineKernel {
@@ -121,6 +128,14 @@ impl SchedulingKernel for BaselineKernel {
                 artifact.state,
                 ArtifactState::Draft | ArtifactState::InProgress
             ) {
+                continue;
+            }
+
+            // Workflow-tagged artifacts belong to the stage runner — see
+            // the struct doc comment. Skipping here is what stops the
+            // double-dispatch that produced spurious `shaping Failed`
+            // log lines on every workflow trigger.
+            if artifact.workflow_id.is_some() {
                 continue;
             }
 
@@ -243,6 +258,46 @@ mod tests {
             max_in_flight: 5,
         };
         assert!(kernel.decide(&world).is_none());
+    }
+
+    #[test]
+    fn decide_skips_workflow_tagged_artifacts() {
+        // Workflow-tagged artifacts are driven by the stage runner; the
+        // baseline kernel must not also dispatch shaping for them or we
+        // get the double-dispatch failure mode (the kernel's 5-minute
+        // blocking poll times out into ShapingOutcome::Failed while the
+        // workflow path is meanwhile dispatching its own session).
+        let kernel = BaselineKernel::new();
+        let mut tagged = make_artifact("wf-art", ArtifactState::InProgress, 1);
+        tagged.workflow_id = Some("wf_1".to_string());
+        tagged.current_stage_index = Some(0);
+
+        let world = WorldState {
+            artifacts: vec![tagged],
+            insights: vec![],
+            in_flight_count: 0,
+            max_in_flight: 5,
+        };
+        assert!(kernel.decide(&world).is_none());
+    }
+
+    #[test]
+    fn decide_picks_untagged_when_tagged_present() {
+        // The kernel still dispatches for non-workflow artifacts even
+        // when workflow-tagged ones are in the same world.
+        let kernel = BaselineKernel::new();
+        let mut tagged = make_artifact("wf-art", ArtifactState::InProgress, 1);
+        tagged.workflow_id = Some("wf_1".to_string());
+        let untagged = make_artifact("plain-art", ArtifactState::InProgress, 1);
+
+        let world = WorldState {
+            artifacts: vec![tagged, untagged.clone()],
+            insights: vec![],
+            in_flight_count: 0,
+            max_in_flight: 5,
+        };
+        let decision = kernel.decide(&world).expect("should pick untagged");
+        assert_eq!(decision.artifact_id, untagged.artifact_id);
     }
 
     #[test]
