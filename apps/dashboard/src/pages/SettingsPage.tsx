@@ -118,6 +118,31 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* Personal Access Tokens — link-out to the dedicated page. Sits
+          directly above Credentials because users hunting for "API access"
+          look in the same place they store provider keys. Hidden in
+          anonymous mode (no user to mint a token against). */}
+      {authEnabled && user && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base md:text-lg">
+              <KeyRound className="h-4 w-4" />
+              Personal access tokens
+            </CardTitle>
+            <CardDescription>
+              Bearer tokens for calling the Onsager API from CLIs, agents, and
+              scheduled jobs.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button render={<Link to="/settings/tokens" />} variant="outline">
+              Manage tokens
+              <ArrowRight className="ml-1 h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Credentials */}
       <Card>
         <CardHeader>

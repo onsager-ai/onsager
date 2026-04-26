@@ -16,7 +16,7 @@ pub mod ws;
 pub use sqlx::AnyPool;
 
 use axum::http::{header, HeaderValue};
-use axum::routing::{any, get, post, put};
+use axum::routing::{any, delete, get, post, put};
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
@@ -75,6 +75,12 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/credentials/{name}",
             put(routes::credentials::set_credential).delete(routes::credentials::delete_credential),
         )
+        // Personal Access Tokens (issue #143)
+        .route(
+            "/api/pats",
+            get(routes::pats::list_pats).post(routes::pats::create_pat),
+        )
+        .route("/api/pats/{id}", delete(routes::pats::delete_pat))
         // Tenant / workspace routes (issue #59 — Phase 0)
         .route(
             "/api/tenants",

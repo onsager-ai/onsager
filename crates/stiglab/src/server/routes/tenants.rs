@@ -30,13 +30,31 @@ use crate::server::state::AppState;
 /// **404** (not 403) for non-members — callers get the same response for
 /// "tenant doesn't exist" and "you're not a member", so tenant IDs can't be
 /// enumerated.
+///
+/// PAT principals carry an optional `tenant_id` scope (issue #143); when
+/// set, the request must target that exact tenant. A mismatch returns
+/// **403** (not 404) — the caller already proved membership at PAT-mint
+/// time, so hiding the tenant's existence is moot, and a distinct error
+/// makes the scope-violation observable in client tooling.
 #[allow(clippy::result_large_err)]
 async fn require_tenant_member(
     pool: &AnyPool,
-    user_id: &str,
+    auth_user: &AuthUser,
     tenant_id: &str,
 ) -> Result<(), Response> {
-    match db::is_tenant_member(pool, tenant_id, user_id).await {
+    if let Some(pinned) = auth_user.principal.pinned_tenant_id() {
+        if pinned != tenant_id {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "pat_tenant_scope_mismatch",
+                    "detail": "PAT is pinned to a different workspace",
+                })),
+            )
+                .into_response());
+        }
+    }
+    match db::is_tenant_member(pool, tenant_id, &auth_user.user_id).await {
         Ok(true) => Ok(()),
         Ok(false) => Err(not_found("tenant not found")),
         Err(e) => {
@@ -164,11 +182,11 @@ pub async fn get_tenant(
     auth_user: AuthUser,
     Path(tenant_id): Path<String>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &tenant_id).await {
         return r;
     }
     match db::get_tenant(&state.db, &tenant_id).await {
@@ -187,11 +205,11 @@ pub async fn list_members(
     auth_user: AuthUser,
     Path(tenant_id): Path<String>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &tenant_id).await {
         return r;
     }
     match db::list_tenant_members_with_users(&state.db, &tenant_id).await {
@@ -229,11 +247,11 @@ pub async fn register_installation(
     Path(tenant_id): Path<String>,
     Json(body): Json<RegisterInstallationBody>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &tenant_id).await {
         return r;
     }
 
@@ -305,11 +323,11 @@ pub async fn list_installations(
     auth_user: AuthUser,
     Path(tenant_id): Path<String>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &tenant_id).await {
         return r;
     }
     match db::list_github_app_installations_for_tenant(&state.db, &tenant_id).await {
@@ -333,11 +351,11 @@ pub async fn delete_installation(
     auth_user: AuthUser,
     Path((tenant_id, install_id)): Path<(String, String)>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &tenant_id).await {
         return r;
     }
 
@@ -398,11 +416,11 @@ pub async fn add_project(
     Path(tenant_id): Path<String>,
     Json(body): Json<AddProjectBody>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &tenant_id).await {
         return r;
     }
 
@@ -493,11 +511,11 @@ pub async fn list_projects(
     auth_user: AuthUser,
     Path(tenant_id): Path<String>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &tenant_id).await {
         return r;
     }
     match db::list_projects_for_tenant(&state.db, &tenant_id).await {
@@ -536,7 +554,7 @@ pub async fn get_project(
     auth_user: AuthUser,
     Path(project_id): Path<String>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id,
         Err(r) => return r,
     };
@@ -548,7 +566,7 @@ pub async fn get_project(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_tenant_member(&state.db, user_id, &project.tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &project.tenant_id).await {
         return r;
     }
     Json(serde_json::json!({ "project": project })).into_response()
@@ -562,7 +580,7 @@ pub async fn delete_project(
     auth_user: AuthUser,
     Path(project_id): Path<String>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id,
         Err(r) => return r,
     };
@@ -574,7 +592,7 @@ pub async fn delete_project(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_tenant_member(&state.db, user_id, &project.tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &project.tenant_id).await {
         return r;
     }
 
@@ -606,14 +624,15 @@ pub async fn delete_project(
 }
 
 /// Public helper re-exported so `routes::tasks` can reuse the same 404
-/// semantics when creating a session scoped to a project.
+/// semantics (and PAT scope check) when creating a session scoped to a
+/// project.
 #[allow(clippy::result_large_err)]
 pub async fn assert_tenant_member(
     pool: &AnyPool,
-    user_id: &str,
+    auth_user: &AuthUser,
     tenant_id: &str,
 ) -> Result<(), Response> {
-    require_tenant_member(pool, user_id, tenant_id).await
+    require_tenant_member(pool, auth_user, tenant_id).await
 }
 
 // ── Accessible-repos picker + GitHub App install flow ──
@@ -648,11 +667,11 @@ pub async fn list_accessible_repos(
     auth_user: AuthUser,
     Path((tenant_id, install_id)): Path<(String, String)>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &tenant_id).await {
         return r;
     }
     // Confirm the install row belongs to this tenant before burning a token.
@@ -703,11 +722,11 @@ pub async fn list_repo_labels(
     auth_user: AuthUser,
     Path((tenant_id, install_id, owner, repo)): Path<(String, String, String, String)>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &tenant_id).await {
         return r;
     }
     match db::get_github_app_installation(&state.db, &install_id).await {
@@ -768,11 +787,11 @@ pub async fn github_app_install_start(
     use axum::http::header;
     use axum::response::Redirect;
 
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &query.tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &query.tenant_id).await {
         return r;
     }
 
@@ -833,7 +852,7 @@ pub async fn github_app_install_callback(
 ) -> Response {
     use axum::http::header;
 
-    let user_id = match require_auth_user(&auth_user) {
+    let _user_id = match require_auth_user(&auth_user) {
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
@@ -851,7 +870,7 @@ pub async fn github_app_install_callback(
         Some((t, _)) if !t.is_empty() => t.to_string(),
         _ => return (StatusCode::BAD_REQUEST, "malformed state").into_response(),
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &tenant_id).await {
+    if let Err(r) = require_tenant_member(&state.db, &auth_user, &tenant_id).await {
         return r;
     }
 

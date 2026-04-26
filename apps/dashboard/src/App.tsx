@@ -51,6 +51,11 @@ const WorkflowDetailPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 )
+const PersonalAccessTokensPage = lazy(() =>
+  import("@/pages/PersonalAccessTokensPage").then((m) => ({
+    default: m.PersonalAccessTokensPage,
+  })),
+)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -274,6 +279,10 @@ function AppRoutes() {
                     <Route
                       path="/settings"
                       element={<LazyRoute><SettingsPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/settings/tokens"
+                      element={<LazyRoute><PersonalAccessTokensPage /></LazyRoute>}
                     />
                   </Routes>
                 </WorkflowsFirstRunGate>
