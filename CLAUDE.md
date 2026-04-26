@@ -76,7 +76,7 @@ This is a value, not a checklist. Three operating principles fall out of it:
   finish the connection in the same PR, or remove the loose end.
 - **The inside is reviewable.** Files that grow past ~500 LOC, modules that
   mix unrelated concerns, error types that change shape across a subsystem
-  boundary — these aren't style preferences, they're tax on every future
+  boundary — these aren't style preferences, they're a tax on every future
   reader. Splitting and unifying them is real work, worth scheduling.
 
 The seam rule above and the "Architectural drift patterns to watch" list
