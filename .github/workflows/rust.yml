@@ -49,6 +49,7 @@ jobs:
               - 'crates/onsager/**'
             xtask:
               - 'xtask/**'
+              - 'docs/events.md'
 
   check:
     needs: changes

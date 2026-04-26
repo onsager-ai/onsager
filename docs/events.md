@@ -125,7 +125,7 @@ New vertical or horizontal lineage entry recorded.
 |---|---|---|
 | `artifact_id` | `ArtifactId` |  |
 | `lineage_type` | `LineageType` |  |
-| `detail` | `serde_json :: Value` |  |
+| `detail` | `serde_json::Value` |  |
 
 ### `artifact.quality_recorded`
 
@@ -842,7 +842,7 @@ A trigger (e.g. a GitHub issue webhook) fired and produced a payload the trigger
 |---|---|---|
 | `workflow_id` | `String` | Workflow whose trigger fired. |
 | `trigger_kind` | `String` | Trigger classification (matches the `workflows.trigger_kind` column). v1 always `"github_issue_webhook"`. |
-| `payload` | `serde_json :: Value` | Free-form payload the subscriber needs to translate the trigger into an artifact (e.g. issue number, title, body, repo). |
+| `payload` | `serde_json::Value` | Free-form payload the subscriber needs to translate the trigger into an artifact (e.g. issue number, title, body, repo). |
 
 ### `stage.entered`
 
