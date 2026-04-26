@@ -33,10 +33,13 @@ use anyhow::{anyhow, bail, Context, Result};
 
 const SUBSYSTEMS: &[&str] = &["forge", "stiglab", "synodic", "ising"];
 
-/// Well-known ports each subsystem listens on. Hard-coded because they are
-/// part of the subsystem's external contract — see root `CLAUDE.md`.
+/// Well-known **default** ports each subsystem listens on (i.e. what
+/// `cargo run -p <subsys> -- serve` binds without env overrides; verified
+/// against the `*_PORT` defaults in each subsystem's serve command). Hard-
+/// coded because they are part of the subsystem's external contract — see
+/// root `CLAUDE.md`.
 const SUBSYSTEM_PORTS: &[(&str, &str)] =
-    &[("stiglab", "3000"), ("synodic", "3001"), ("forge", "3003")];
+    &[("stiglab", "3000"), ("synodic", "3001"), ("forge", "3002")];
 
 pub fn run() -> Result<()> {
     let root = workspace_root()?;
@@ -176,39 +179,90 @@ fn check_arch_deps(root: &Path, subsys: &str, out: &mut Vec<Violation>) -> Resul
         toml::from_str(&text).with_context(|| format!("parse {}", manifest.display()))?;
 
     let dep_tables = ["dependencies", "dev-dependencies", "build-dependencies"];
+
+    // Top-level [dependencies] / [dev-dependencies] / [build-dependencies].
     for table_key in dep_tables {
-        let Some(table) = parsed.get(table_key).and_then(|v| v.as_table()) else {
-            continue;
-        };
-        for (name, _) in table {
-            if name == subsys {
-                continue;
-            }
-            if SUBSYSTEMS.contains(&name.as_str()) {
-                let line = find_dep_line(&text, table_key, name);
-                out.push(Violation {
-                    path: rel(root, &manifest),
-                    line,
-                    kind: "arch-dep",
-                    message: format!(
-                        "subsystem `{subsys}` declares `{name}` as [{table_key}] — subsystems must not depend on each other (ADR 0001)"
-                    ),
-                });
+        if let Some(table) = parsed.get(table_key).and_then(|v| v.as_table()) {
+            for (name, _) in table {
+                check_arch_dep_entry(root, &manifest, &text, subsys, name, table_key, None, out);
             }
         }
     }
+
+    // Target-specific tables: [target.'<cfg>'.dependencies] / dev / build.
+    // A subsystem-to-subsystem dep dressed up as cfg-gated would otherwise
+    // bypass the lint.
+    if let Some(target) = parsed.get("target").and_then(|v| v.as_table()) {
+        for (cfg, value) in target {
+            for table_key in dep_tables {
+                if let Some(table) = value.get(table_key).and_then(|v| v.as_table()) {
+                    for (name, _) in table {
+                        check_arch_dep_entry(
+                            root,
+                            &manifest,
+                            &text,
+                            subsys,
+                            name,
+                            table_key,
+                            Some(cfg.as_str()),
+                            out,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn check_arch_dep_entry(
+    root: &Path,
+    manifest: &Path,
+    text: &str,
+    subsys: &str,
+    name: &str,
+    table_key: &str,
+    cfg: Option<&str>,
+    out: &mut Vec<Violation>,
+) {
+    if name == subsys {
+        return;
+    }
+    if !SUBSYSTEMS.contains(&name) {
+        return;
+    }
+    let line = find_dep_line(text, table_key, name, cfg);
+    let table_label = match cfg {
+        Some(c) => format!("target.{c}.{table_key}"),
+        None => table_key.to_string(),
+    };
+    out.push(Violation {
+        path: rel(root, manifest),
+        line,
+        kind: "arch-dep",
+        message: format!(
+            "subsystem `{subsys}` declares `{name}` as [{table_label}] — subsystems must not depend on each other (ADR 0001)"
+        ),
+    });
+}
+
 /// Find the 1-indexed line where a dep declaration starts. Best-effort: we
-/// look for a `<name>\s*=` line after the matching `[<table>]` header.
-fn find_dep_line(text: &str, table: &str, name: &str) -> usize {
-    let header = format!("[{table}]");
+/// look for a `<name>\s*=` line after the matching `[<table>]` header. For
+/// target-specific tables (`cfg = Some(...)`), the header is matched on
+/// suffix (`.{table}`) since the cfg literal can be quoted multiple ways.
+fn find_dep_line(text: &str, table: &str, name: &str, cfg: Option<&str>) -> usize {
+    let plain_header = format!("[{table}]");
+    let target_suffix = format!(".{table}]");
     let mut in_section = false;
     for (i, line) in text.lines().enumerate() {
         let t = line.trim_start();
         if t.starts_with('[') && t.ends_with(']') {
-            in_section = t == header;
+            in_section = match cfg {
+                None => t == plain_header,
+                Some(_) => t.starts_with("[target.") && t.ends_with(target_suffix.as_str()),
+            };
             continue;
         }
         if in_section {
@@ -227,11 +281,15 @@ fn find_dep_line(text: &str, table: &str, name: &str) -> usize {
 
 fn check_file(root: &Path, subsys: &str, path: &Path, out: &mut Vec<Violation>) -> Result<()> {
     let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    for (idx, line) in text.lines().enumerate() {
+    // Split once and reuse — `check_legacy_type_alias` needs the full
+    // line context for its doc-comment look-back, and re-collecting per
+    // line would be O(n²) on files with many `pub type` declarations.
+    let lines: Vec<&str> = text.lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
         let n = idx + 1;
         check_sibling_url(root, subsys, path, n, line, out);
         check_serde_alias(root, path, n, line, out);
-        check_legacy_type_alias(root, path, n, line, &text, out);
+        check_legacy_type_alias(root, path, n, line, &lines, out);
     }
     Ok(())
 }
@@ -264,7 +322,7 @@ fn check_sibling_url(
                 line: line_no,
                 kind: "sibling-env",
                 message: format!(
-                    "subsystem `{subsys}` references `{url_var}`/`{port_var}` — that's a `forge → stiglab/synodic`-style HTTP RPC; coordinate via the spine instead (Lever C)"
+                    "subsystem `{subsys}` references sibling `{sibling}` via `{url_var}`/`{port_var}` — that's a direct HTTP RPC to another subsystem; coordinate via the spine instead (Lever C / ADR 0001)"
                 ),
             });
             continue;
@@ -373,7 +431,7 @@ fn check_legacy_type_alias(
     path: &Path,
     line_no: usize,
     line: &str,
-    full: &str,
+    lines: &[&str],
     out: &mut Vec<Violation>,
 ) {
     let trimmed = line.trim_start();
@@ -381,8 +439,8 @@ fn check_legacy_type_alias(
         return;
     }
     // Heuristic: look at up to the previous 5 lines for a doc-comment
-    // containing one of the legacy markers.
-    let lines: Vec<&str> = full.lines().collect();
+    // containing one of the legacy markers. `lines` is split once per file
+    // by `check_file` and reused across all violations in the same file.
     let start = line_no.saturating_sub(5).max(1);
     let mut legacy = false;
     for back in start..line_no {
@@ -421,10 +479,18 @@ fn check_legacy_type_alias(
 // Allow-list
 // ---------------------------------------------------------------------------
 
-/// Apply the `// seam-allow: <reason>` escape. A violation at line N is
-/// suppressed if line N-1 (after trimming) starts with `// seam-allow:` and
-/// has a non-empty reason. Cargo.toml violations are not exempt-able and
-/// always pass through (they're hard-fail per ADR 0004).
+/// Apply the `// seam-allow: <reason>` escape.
+///
+/// - **Line-level violations** (everything except `mirror-file`): a violation
+///   at line N is suppressed if line N-1 (after trimming) starts with
+///   `// seam-allow:` and has a non-empty reason. A violation on line 1
+///   has no "line above" and therefore **cannot** be allow-listed this way.
+/// - **File-level violations** (`mirror-file`): the marker must be the
+///   file's first non-empty line — a single `// seam-allow: <reason>`
+///   header that documents the whole file's exemption.
+///
+/// Cargo.toml violations (`arch-dep`) are not exempt-able and always pass
+/// through (they're hard-fail per ADR 0004).
 fn apply_allow_list(violations: Vec<Violation>) -> (Vec<Violation>, Vec<(Violation, String)>) {
     // Group by file to avoid re-reading.
     let mut by_file: std::collections::BTreeMap<PathBuf, Vec<Violation>> = Default::default();
@@ -456,9 +522,24 @@ fn apply_allow_list(violations: Vec<Violation>) -> (Vec<Violation>, Vec<(Violati
             if !seen_pairs.insert(key) {
                 continue;
             }
-            let prev_idx = v.line.saturating_sub(2);
-            let prev = lines.get(prev_idx).copied().unwrap_or("").trim_start();
-            if let Some(reason) = prev.strip_prefix("// seam-allow:") {
+            let marker = if v.kind == "mirror-file" {
+                // File-level violation: the marker is a single header line
+                // at the top of the file. We accept the first non-empty
+                // line of the file as the marker.
+                lines
+                    .iter()
+                    .find(|l| !l.trim().is_empty())
+                    .copied()
+                    .unwrap_or("")
+                    .trim_start()
+            } else if v.line > 1 {
+                lines.get(v.line - 2).copied().unwrap_or("").trim_start()
+            } else {
+                // Line-level violation on line 1 has no line above; the
+                // "// seam-allow:" rule cannot apply.
+                ""
+            };
+            if let Some(reason) = marker.strip_prefix("// seam-allow:") {
                 let reason = reason.trim();
                 if !reason.is_empty() {
                     allowed.push((v, reason.to_string()));
@@ -598,9 +679,8 @@ mod tests {
     #[test]
     fn flags_legacy_type_alias_with_doc_keyword() {
         let mut v = Vec::new();
-        let full = "/// Legacy alias for the new name.\npub type Old = New;\n";
-        let line = "pub type Old = New;";
-        check_legacy_type_alias(fake_root(), fake_path(), 2, line, full, &mut v);
+        let lines = ["/// Legacy alias for the new name.", "pub type Old = New;"];
+        check_legacy_type_alias(fake_root(), fake_path(), 2, lines[1], &lines, &mut v);
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].kind, "legacy-type-alias");
     }
@@ -608,14 +688,51 @@ mod tests {
     #[test]
     fn ignores_plain_type_alias() {
         let mut v = Vec::new();
-        let full = "/// A reusable shorthand for a complex generic.\npub type Result<T> = std::result::Result<T, Error>;\n";
-        let line = "pub type Result<T> = std::result::Result<T, Error>;";
-        check_legacy_type_alias(fake_root(), fake_path(), 2, line, full, &mut v);
+        let lines = [
+            "/// A reusable shorthand for a complex generic.",
+            "pub type Result<T> = std::result::Result<T, Error>;",
+        ];
+        check_legacy_type_alias(fake_root(), fake_path(), 2, lines[1], &lines, &mut v);
         assert!(
             v.is_empty(),
             "non-legacy aliases must not fire: {:?}",
             v.iter().map(|x| &x.message).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn allow_list_no_marker_above_line_1_for_line_violation() {
+        // For line-level violations on line 1 there is no "line above";
+        // the seam-allow rule must not silently match against line 1 itself.
+        let lines = ["// seam-allow: should NOT apply to a line-1 violation"];
+        let v_line: usize = 1;
+        let marker = if v_line > 1 {
+            lines.get(v_line - 2).copied().unwrap_or("")
+        } else {
+            ""
+        };
+        assert!(
+            marker.is_empty(),
+            "line-1 line-violations must have no marker"
+        );
+    }
+
+    #[test]
+    fn allow_list_uses_first_line_for_mirror_file() {
+        // mirror-file violations are file-level; the marker is the first
+        // non-empty line of the file.
+        let lines = [
+            "// seam-allow: collapsed in Lever D (#149)",
+            "//! file docs",
+            "use anyhow::Result;",
+        ];
+        let marker = lines
+            .iter()
+            .find(|l| !l.trim().is_empty())
+            .copied()
+            .unwrap_or("")
+            .trim_start();
+        assert!(marker.starts_with("// seam-allow:"));
     }
 
     #[test]
