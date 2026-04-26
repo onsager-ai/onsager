@@ -227,8 +227,11 @@ is explicitly trivial). This is the local counterpart to the
    title, two issues silently left open after merge.
 
 5. **If this is genuinely trivial** (typo, doc-only, one-line obvious
-   fix), skip steps 6.1–6.4 and plan to apply the `trivial` label to the
-   PR immediately after `mcp__github__create_pull_request`. Use sparingly.
+   fix), skip the spec-link substeps above (1–4) and plan to apply the
+   `trivial` label to the PR immediately after
+   `mcp__github__create_pull_request`. The seam-rule self-check in
+   step 6.5 still runs — it's a no-op for genuinely doc-only diffs and
+   takes seconds otherwise. Use the trivial label sparingly.
 
 ### 6.5. Seam-rule self-check
 

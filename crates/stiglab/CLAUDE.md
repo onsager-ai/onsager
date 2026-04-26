@@ -23,20 +23,22 @@ What this means for stiglab specifically:
   webhook router at `src/server/webhook_router.rs`) called by external
   services. Both are "external boundary" by definition.
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `synodic`,
-  or `ising`. The legacy `HttpStiglabDispatcher` path in
-  `crates/forge/src/cmd/serve.rs:65–180` is the one remaining
-  violation, and Lever C of spec #131 deletes it. Do not add new
-  internal routes to satisfy a sibling subsystem — emit/consume an
-  event instead.
+  or `ising`. The legacy `HttpStiglabDispatcher` path
+  (`crates/forge/src/cmd/serve.rs` ≈52–304, instantiated in `run`
+  ≈469–490) is the one remaining violation, and Lever C of spec #131
+  deletes it. Do not add new internal routes to satisfy a sibling
+  subsystem — emit/consume an event instead.
 - **Coordinating with forge or synodic.** Listen on the spine for the
   event you care about, write your response as a new event. Concrete
   pattern: forge will emit `forge.shaping_dispatched` once Lever C
   lands; stiglab consumes it and emits `stiglab.session_completed` (or
   the equivalent error event) when the session resolves.
-- **Cargo deps.** `stiglab` may depend on `onsager-{artifact, protocol,
-  spine}` (and on `onsager-protocol` only until Lever C deletes that
-  crate). It must NOT depend on `forge`, `synodic`, or `ising`. CI
-  will hard-fail this once Lever B's architecture lint lands.
+- **Cargo deps.** `stiglab` may depend on `onsager-{artifact,
+  protocol, registry, spine}` (and on `onsager-protocol` only until
+  Lever C deletes that crate; matches the current
+  `crates/stiglab/Cargo.toml`). It must NOT depend on `forge`,
+  `synodic`, or `ising`. CI will hard-fail this once Lever B's
+  architecture lint lands.
 - **Spine as single source of truth.** `src/server/workflow_db.rs` +
   `src/server/workflow_spine_mirror.rs` are the live drift example —
   stiglab owns `tenant_workflows` while the spine owns `workflows`.

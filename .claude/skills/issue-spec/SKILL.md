@@ -214,10 +214,18 @@ alias as the destination — those are bridge debt by construction
 migrations are the only multi-step exception and stay governed by
 the existing `migrations/NNN_*.sql` convention.
 
-When the spec is large enough that the seam rule pushes the work into
-two PRs (a back-end emit + a front-end consume, for instance), keep
-them in one spec and split into sub-issues — one per PR — rather than
-splitting the spec.
+When a contract under the seam rule splits the work across two
+subsystems (a back-end producer + a front-end consumer of an event,
+for instance), follow the existing parent-plus-children rule below
+under "Area label taxonomy": one parent spec captures the end-to-end
+slice, one child spec per subsystem captures its half. The contract
+lives in the parent's Plan (e.g. "stiglab emits `X`; forge consumes
+`X` and emits `Y`"); each child spec scopes to a single subsystem so
+each PR stays inside one `area:*`. Producer and consumer halves can
+land in separate PRs as long as both children close before the parent
+does — but the parent's Plan should require a contract test that
+fails until both halves exist, so the half-wired API/UI pattern from
+PR #108 can't recur.
 
 ## Area label taxonomy (Onsager monorepo)
 
