@@ -74,7 +74,7 @@ async fn restart_in_mid_tick_preserves_state_and_bundle() {
     reset(&pool, artifact_id).await;
 
     // 1. Register via the DB-first path.
-    persistence::insert_artifact_row(&pool, artifact_id, "code", "restart-test", "marvin")
+    persistence::insert_artifact_row(&pool, artifact_id, "code", "restart-test", "marvin", None)
         .await
         .expect("insert_artifact_row");
 
@@ -127,10 +127,10 @@ async fn load_skips_archived_artifacts() {
     reset(&pool, active_id).await;
     reset(&pool, archived_id).await;
 
-    persistence::insert_artifact_row(&pool, active_id, "code", "active", "marvin")
+    persistence::insert_artifact_row(&pool, active_id, "code", "active", "marvin", None)
         .await
         .unwrap();
-    persistence::insert_artifact_row(&pool, archived_id, "code", "archived", "marvin")
+    persistence::insert_artifact_row(&pool, archived_id, "code", "archived", "marvin", None)
         .await
         .unwrap();
 
@@ -170,9 +170,15 @@ async fn failed_insert_leaves_no_divergent_state() {
 
     let bad_pool = PgPool::connect(&url).await.unwrap();
     bad_pool.close().await;
-    let err =
-        persistence::insert_artifact_row(&bad_pool, artifact_id, "code", "failure-test", "marvin")
-            .await;
+    let err = persistence::insert_artifact_row(
+        &bad_pool,
+        artifact_id,
+        "code",
+        "failure-test",
+        "marvin",
+        None,
+    )
+    .await;
     assert!(err.is_err(), "expected closed-pool insert to fail");
 
     let store = persistence::load_artifact_store(&pool).await.unwrap();
