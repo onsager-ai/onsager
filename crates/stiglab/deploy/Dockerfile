@@ -29,6 +29,7 @@ COPY crates/forge/Cargo.toml            crates/forge/Cargo.toml
 COPY crates/ising/Cargo.toml            crates/ising/Cargo.toml
 COPY crates/stiglab/Cargo.toml          crates/stiglab/Cargo.toml
 COPY crates/synodic/Cargo.toml          crates/synodic/Cargo.toml
+COPY xtask/Cargo.toml                   xtask/Cargo.toml
 # Create dummy source files so Cargo can compile each crate stub.
 # Crates with [lib] need src/lib.rs; crates with [[bin]] need src/main.rs.
 RUN mkdir -p \
@@ -45,6 +46,7 @@ RUN mkdir -p \
       crates/ising/src \
       crates/stiglab/src \
       crates/synodic/src \
+      xtask/src \
     && touch \
       crates/onsager-spine/src/lib.rs \
       crates/onsager-artifact/src/lib.rs \
@@ -66,6 +68,7 @@ RUN mkdir -p \
       crates/synodic/src/main.rs \
       crates/onsager-portal/src/main.rs \
       crates/refract/src/main.rs \
+      xtask/src/main.rs \
     && cargo build --release \
          -p stiglab -p synodic -p onsager-portal -p forge \
          --features synodic/postgres 2>/dev/null || true
