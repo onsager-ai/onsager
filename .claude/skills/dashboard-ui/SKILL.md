@@ -1,6 +1,6 @@
 ---
 name: dashboard-ui
-description: Enforce shadcn/ui component usage in apps/dashboard AND the "avoid manual input" UX principle — linkable fields (repo owner/name, installation IDs, project slugs, URLs) must be solved with OAuth pickers or deep-links-out, never typed inputs. Native HTML form and interactive elements (input, select, button, textarea, checkbox, radio, dialog, etc.) are forbidden — use the shadcn/ui primitives under @/components/ui instead. Trigger when editing or creating .tsx files under apps/dashboard/, when adding forms/buttons/inputs/selects/modals to the web app, when wiring up GitHub/Railway/OAuth integrations, or when the user mentions "shadcn", "UI component", "form control", "dashboard component", "manual input", "paste URL", "linkable field", "borrow UX from Railway/Vercel/Claude".
+description: Enforce shadcn/ui component usage in apps/dashboard, the "avoid manual input" UX principle, AND the mobile chrome rules — pages declare title/back/actions via usePageHeader (one global mobile bar, icon-only actions, no per-page sticky headers), html/body never scroll (rubber-band disabled, the app shell's <main> is the only scroll container), and account/avatar lives in the sidebar footer. Linkable fields (repo owner/name, installation IDs, project slugs, URLs) must be solved with OAuth pickers or deep-links-out, never typed inputs. Native HTML form and interactive elements (input, select, button, textarea, checkbox, radio, dialog, etc.) are forbidden — use the shadcn/ui primitives under @/components/ui instead. Trigger when editing or creating .tsx files under apps/dashboard/, when adding forms/buttons/inputs/selects/modals to the web app, when wiring up GitHub/Railway/OAuth integrations, when adding/changing a page header / back arrow / page title / sticky toolbar / mobile chrome / sidebar footer, or when the user mentions "shadcn", "UI component", "form control", "dashboard component", "manual input", "paste URL", "linkable field", "page header", "page title", "back arrow", "mobile bar", "rubber-band", "overscroll", "borrow UX from Railway/Vercel/Claude".
 ---
 
 # dashboard-ui
@@ -177,6 +177,120 @@ on desktop, and definitely not on mobile.
 
 When in doubt, open Railway/Vercel, walk through the analogous flow, and
 copy the pattern.
+
+## Mobile chrome — one bar, declarative title/actions
+
+The dashboard ships a **single mobile chrome bar** rendered by
+`AppLayout`. Pages must not stack their own sticky top bar on top — the
+result is a 100px+ chrome stack on a 700px-tall screen, the same
+content-shift bug `usePageHeader` exists to solve, and back-button
+ambiguity (which arrow goes "up"?). One bar, one source of truth.
+
+Pages declare what goes in it via:
+
+```tsx
+import { usePageHeader } from "@/components/layout/PageHeader"
+
+usePageHeader({
+  title: workflow?.name ?? "Workflow",  // string | ReactNode
+  backTo: "/workflows",                 // absolute path (omit for top-level pages)
+  actions: actionsNode,                 // icon-only buttons; useMemo if non-trivial
+})
+```
+
+`AppLayout`'s mobile bar renders:
+
+```
+[← backTo OR ☰ sidebar] [title]   [...actions] [+ QuickCreate]
+```
+
+### Rules
+
+- **Always call `usePageHeader` at the top of a routed page**, even if
+  it's just `usePageHeader({ title: "Sessions" })`. Without a title
+  registration the bar falls back to the Onsager wordmark, which is
+  fine on `/` but useless context everywhere else.
+- **`backTo` is an absolute path, not `navigate(-1)`**. Deep links
+  open detail pages directly; relative back is unreliable. Detail
+  pages always pass `backTo`; top-level pages always omit it.
+- **Hide the page H1 on mobile** with `hidden md:block` — the bar's
+  title replaces it. Keep description text and any subtitle below it
+  visible on both viewports.
+- **Mobile actions are icon-only.** Use `size="icon"` ghost buttons
+  with `aria-label` + `title`. Two icons inline is the cap; for three
+  or more, collapse into a single `⋯` (`MoreHorizontal`)
+  `DropdownMenu` with full-width `DropdownMenuItem` rows showing the
+  label + icon.
+- **Memoize JSX `actions` (and JSX `title`).** The hook's effect
+  re-runs when its deps change, so a fresh JSX object every render
+  triggers needless setState. Wrap with `useMemo` keyed on the data
+  it depends on.
+- **Desktop keeps its own page-level title + actions block** in flow
+  (typically `hidden md:flex` / `md:block` wrappers). The mobile bar
+  is a mobile-only surface; desktop has the room for a proper page
+  header. Don't try to consolidate them.
+- **No new sticky/fixed/`top-0` chrome bars on a page.** If you find
+  yourself reaching for `sticky top-0` to keep something visible
+  during scroll on mobile, the answer is almost always
+  `usePageHeader`.
+
+### Existing actions, compact variants
+
+When the same action set has both desktop labels and a mobile
+icon-only render, parameterise the action component with `compact`
+(see `WorkflowActions`) — don't duplicate. The page passes
+`compact` to the slot registration and the unparameterised version to
+its desktop block.
+
+## App shell scrolling — body never scrolls, `<main>` does
+
+On mobile especially, the app must feel native: no rubber-band, no
+pull-to-refresh on a page that has no refresh, no chrome scrolling
+out of view. The shell is fixed; only the content area scrolls.
+
+Already wired in:
+
+- `index.css` sets `html, body, #root { height: 100% }` and
+  `overflow: hidden` + `overscroll-behavior: none` on `html` and
+  `body`. **Do not undo** these.
+- `AppLayout`'s `SidebarProvider` is `h-svh overflow-hidden`. The
+  inner `<main>` is `flex-1 overflow-y-auto overscroll-contain
+  min-h-0` — the `min-h-0` is load-bearing (flex items default to
+  `min-height: auto`, which would let the column grow and clip
+  content instead of scrolling).
+
+### Rules
+
+- **No `overflow-y-auto` / `overflow-y-scroll` / sticky scroll
+  containers at the page level.** The shell already provides the
+  scroll context; nesting another scroll container creates
+  swipe-direction ambiguity on mobile and breaks `position: sticky`
+  inside it.
+- **Tall lists / tables that need their own scroll** belong in a
+  `<ScrollArea>` from `@/components/ui/scroll-area` with a defined
+  `max-h-…`. The body of the page still scrolls in `<main>`; the
+  list scrolls inside the scroll-area.
+- **Don't set heights in `vh` / `dvh` / `lvh` on page-level
+  components.** The shell pins to `svh`; everything inside should
+  flow naturally. `vh` units inside a fixed shell produce off-by-the-
+  URL-bar bugs on iOS.
+- **Safe-area insets**: `<main>` already adds
+  `pb-[calc(env(safe-area-inset-bottom)+1rem)]` on mobile. Don't
+  re-apply at the page level.
+
+## Account / user menu lives in the sidebar footer
+
+The avatar / account dropdown is rendered by `AppSidebar` in its
+`SidebarFooter`, using `<UserMenu variant="row" />`. **Do not add
+another `UserMenu` instance** to a header, page, or any other
+surface — there is one account control, in one place, on every
+viewport. Mobile users open the sidebar (`☰` in the chrome bar) to
+reach it; desktop users see it at the bottom of the always-visible
+sidebar. This frees the mobile top bar for page-specific actions.
+
+If you need to surface a sub-action (e.g. "Sign out" from a settings
+page), link the user to `/settings` or use the existing
+`DropdownMenuItem`s — don't fork a parallel menu.
 
 ## New primitive = new surface
 
