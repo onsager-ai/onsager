@@ -2,12 +2,18 @@
 //!
 //!     cargo run -p xtask -- gen-event-docs           # write docs/events.md
 //!     cargo run -p xtask -- gen-event-docs --check   # verify in sync
+//!     cargo run -p xtask -- lint-seams               # check the seam rule
 //!
 //! The event catalog is derived from `crates/onsager-spine/src/factory_event.rs`
 //! by parsing the `FactoryEventKind` enum and the `event_type()` /
 //! `stream_type()` match arms. Adding a variant + its match arms automatically
 //! extends the catalog on the next run; CI runs `--check` so a missing run
 //! fails the build.
+//!
+//! `lint-seams` enforces the canonical seam rule from ADR 0004 / spec #131
+//! Lever B — see [`lint_seams`] for the full check list.
+
+mod lint_seams;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -25,9 +31,16 @@ fn main() -> ExitCode {
 
     let result = match cmd.as_deref() {
         Some("gen-event-docs") => parse_gen_event_docs_flags(args).and_then(run_gen_event_docs),
+        Some("lint-seams") => {
+            if args.next().is_some() {
+                Err(anyhow!("lint-seams takes no arguments"))
+            } else {
+                lint_seams::run()
+            }
+        }
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage: cargo run -p xtask -- <gen-event-docs> [--check]"
+            "usage: cargo run -p xtask -- <gen-event-docs|lint-seams> [--check]"
         )),
     };
 

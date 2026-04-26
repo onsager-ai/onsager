@@ -13,3 +13,4 @@ path = "src/main.rs"
 anyhow.workspace = true
 syn = { version = "2", features = ["full", "extra-traits"] }
 quote = "1"
+toml = "0.8"

@@ -11,7 +11,9 @@ use axum::response::{IntoResponse, Response};
 
 /// Base URL for the synodic governance API (internal, not exposed by Railway).
 fn synodic_base_url() -> String {
+    // seam-allow: dashboard governance proxy; Railway only exposes stiglab. Tracked separately from spec #131; revisit once governance UI moves under Lever F.
     let port = std::env::var("SYNODIC_PORT").unwrap_or_else(|_| "3001".to_string());
+    // seam-allow: dashboard governance proxy; Railway only exposes stiglab. Tracked separately from spec #131; revisit once governance UI moves under Lever F.
     std::env::var("SYNODIC_URL").unwrap_or_else(|_| format!("http://localhost:{port}"))
 }
 

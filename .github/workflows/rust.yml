@@ -84,6 +84,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Verify docs/events.md is in sync with FactoryEventKind
         run: cargo run -p xtask --quiet -- gen-event-docs --check
+      - name: Seam-rule lint (ADR 0004 / spec #131 Lever B)
+        run: cargo run -p xtask --quiet -- lint-seams
       - name: Apply database migrations
         run: |
           psql "$DATABASE_URL" -f crates/onsager-spine/migrations/001_initial.sql
