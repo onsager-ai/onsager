@@ -384,7 +384,10 @@ export function PersonalAccessTokensPage() {
   const patsQuery = useQuery({
     queryKey: ["pats"],
     queryFn: api.listPats,
-    enabled: !authEnabled || !!user,
+    // PATs only make sense for an authenticated user — anonymous mode
+    // renders the "unavailable" stub below, so don't fire a doomed
+    // request that would just 401 and clutter logs.
+    enabled: authEnabled && !!user,
   })
   const workspacesQuery = useQuery({
     queryKey: ["workspaces"],

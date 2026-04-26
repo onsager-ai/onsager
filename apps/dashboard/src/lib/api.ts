@@ -559,7 +559,9 @@ export const api = {
   createPat: (body: {
     name: string;
     tenant_id?: string | null;
-    expires_at: string | null;
+    // v1: an explicit ISO-8601 future timestamp is required. The "never
+    // expires" affordance is intentionally not exposed in this release.
+    expires_at: string;
   }) =>
     request<CreatePatResponse>('/pats', {
       method: 'POST',
