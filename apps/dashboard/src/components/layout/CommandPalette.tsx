@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
@@ -118,81 +119,87 @@ function CommandPaletteDialog() {
   return (
     <>
       <CommandDialog open={open} onOpenChange={setOpen}>
-        <CommandInput placeholder="Type a command or search…" />
-        <CommandList>
+        {/* shadcn's CommandDialog wraps in <DialogContent> but NOT in
+            <Command>; the cmdk primitives below need a Command parent
+            for context, otherwise CommandInput throws and the dialog
+            tears down the tree (blank screen). */}
+        <Command>
+          <CommandInput placeholder="Type a command or search…" />
+          <CommandList>
           <CommandEmpty>No results.</CommandEmpty>
 
-          <CommandGroup heading="Create">
-            <CommandItem
-              keywords={["new", "factory", "github"]}
-              onSelect={() => go("/workflows/start")}
-            >
-              <Zap className="mr-2 h-4 w-4" />
-              New workflow
-            </CommandItem>
-            {canAuth && (
+            <CommandGroup heading="Create">
               <CommandItem
-                keywords={["new"]}
-                onSelect={() => run(() => setSessionOpen(true))}
+                keywords={["new", "factory", "github"]}
+                onSelect={() => go("/workflows/start")}
               >
+                <Zap className="mr-2 h-4 w-4" />
+                New workflow
+              </CommandItem>
+              {canAuth && (
+                <CommandItem
+                  keywords={["new"]}
+                  onSelect={() => run(() => setSessionOpen(true))}
+                >
+                  <Terminal className="mr-2 h-4 w-4" />
+                  New session
+                </CommandItem>
+              )}
+              {canAuth && (
+                <CommandItem
+                  keywords={["new", "tenant"]}
+                  onSelect={() => run(() => setWorkspaceOpen(true))}
+                >
+                  <Building2 className="mr-2 h-4 w-4" />
+                  New workspace
+                </CommandItem>
+              )}
+            </CommandGroup>
+
+            <CommandSeparator />
+
+            <CommandGroup heading="Go to">
+              <CommandItem keywords={["overview"]} onSelect={() => go("/")}>
+                <Factory className="mr-2 h-4 w-4" />
+                Factory overview
+              </CommandItem>
+              {canAuth && (
+                <CommandItem onSelect={() => go("/workspaces")}>
+                  <Building2 className="mr-2 h-4 w-4" />
+                  Workspaces
+                </CommandItem>
+              )}
+              <CommandItem onSelect={() => go("/workflows")}>
+                <GitBranch className="mr-2 h-4 w-4" />
+                Workflows
+              </CommandItem>
+              <CommandItem onSelect={() => go("/artifacts")}>
+                <Package className="mr-2 h-4 w-4" />
+                Artifacts
+              </CommandItem>
+              <CommandItem onSelect={() => go("/spine")}>
+                <Activity className="mr-2 h-4 w-4" />
+                Event spine
+              </CommandItem>
+              <CommandItem onSelect={() => go("/governance")}>
+                <Shield className="mr-2 h-4 w-4" />
+                Governance
+              </CommandItem>
+              <CommandItem onSelect={() => go("/sessions")}>
                 <Terminal className="mr-2 h-4 w-4" />
-                New session
+                Sessions
               </CommandItem>
-            )}
-            {canAuth && (
-              <CommandItem
-                keywords={["new", "tenant"]}
-                onSelect={() => run(() => setWorkspaceOpen(true))}
-              >
-                <Building2 className="mr-2 h-4 w-4" />
-                New workspace
+              <CommandItem onSelect={() => go("/nodes")}>
+                <Server className="mr-2 h-4 w-4" />
+                Nodes
               </CommandItem>
-            )}
-          </CommandGroup>
-
-          <CommandSeparator />
-
-          <CommandGroup heading="Go to">
-            <CommandItem keywords={["overview"]} onSelect={() => go("/")}>
-              <Factory className="mr-2 h-4 w-4" />
-              Factory overview
-            </CommandItem>
-            {canAuth && (
-              <CommandItem onSelect={() => go("/workspaces")}>
-                <Building2 className="mr-2 h-4 w-4" />
-                Workspaces
+              <CommandItem onSelect={() => go("/settings")}>
+                <SettingsIcon className="mr-2 h-4 w-4" />
+                Settings
               </CommandItem>
-            )}
-            <CommandItem onSelect={() => go("/workflows")}>
-              <GitBranch className="mr-2 h-4 w-4" />
-              Workflows
-            </CommandItem>
-            <CommandItem onSelect={() => go("/artifacts")}>
-              <Package className="mr-2 h-4 w-4" />
-              Artifacts
-            </CommandItem>
-            <CommandItem onSelect={() => go("/spine")}>
-              <Activity className="mr-2 h-4 w-4" />
-              Event spine
-            </CommandItem>
-            <CommandItem onSelect={() => go("/governance")}>
-              <Shield className="mr-2 h-4 w-4" />
-              Governance
-            </CommandItem>
-            <CommandItem onSelect={() => go("/sessions")}>
-              <Terminal className="mr-2 h-4 w-4" />
-              Sessions
-            </CommandItem>
-            <CommandItem onSelect={() => go("/nodes")}>
-              <Server className="mr-2 h-4 w-4" />
-              Nodes
-            </CommandItem>
-            <CommandItem onSelect={() => go("/settings")}>
-              <SettingsIcon className="mr-2 h-4 w-4" />
-              Settings
-            </CommandItem>
-          </CommandGroup>
-        </CommandList>
+            </CommandGroup>
+          </CommandList>
+        </Command>
       </CommandDialog>
 
       {sessionOpen && (
