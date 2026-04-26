@@ -194,7 +194,11 @@ pub async fn create_task(
 }
 
 /// Fetch all user credentials, decrypt them, and return as a HashMap.
-async fn fetch_user_credentials(
+///
+/// Used by both `POST /api/tasks` (direct user-triggered sessions) and
+/// `POST /api/shaping` (forge-dispatched workflow sessions, see issue
+/// #156). Visible to sibling route modules; not part of the public API.
+pub(super) async fn fetch_user_credentials(
     state: &AppState,
     user_id: &str,
 ) -> Option<HashMap<String, String>> {

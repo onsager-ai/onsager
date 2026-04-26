@@ -282,6 +282,13 @@ pub enum FactoryEventKind {
         session_id: String,
         request_id: String,
         error: String,
+        /// Artifact this session was shaping (issue #156). Optional so
+        /// non-shaping sessions (direct task POSTs) don't emit a
+        /// meaningless id. When present, forge's workflow signal
+        /// listener writes a `Failure` outcome to the agent-session
+        /// signal cache so the gate fails loudly instead of stalling.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        artifact_id: Option<String>,
     },
 
     /// A session was aborted (e.g. node lost, deadline exceeded).

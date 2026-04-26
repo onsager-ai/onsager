@@ -136,6 +136,7 @@ where
         artifact: &Artifact,
         stage_index: u32,
         shaping_intent: &serde_json::Value,
+        created_by: Option<&str>,
     ) -> GateOutcome {
         // Happy path: signal has already arrived.
         if let Some(outcome) = self
@@ -172,6 +173,10 @@ where
                 inputs: vec![],
                 constraints: vec![],
                 deadline: None,
+                // Owner identity (issue #156). Stiglab uses this to
+                // decrypt the matching CLAUDE_CODE_OAUTH_TOKEN; without
+                // it the agent boots with no auth and exits immediately.
+                created_by: created_by.map(str::to_owned),
             };
             // Fire-and-forget: the workflow path resolves via the
             // `stiglab.session_completed` listener writing into the
@@ -249,14 +254,17 @@ where
     fn evaluate(
         &self,
         artifact: &Artifact,
-        _workflow: &Workflow,
+        workflow: &Workflow,
         stage_index: u32,
         gate: &GateSpec,
     ) -> GateOutcome {
         match gate {
-            GateSpec::AgentSession { shaping_intent } => {
-                self.evaluate_agent_session(artifact, stage_index, shaping_intent)
-            }
+            GateSpec::AgentSession { shaping_intent } => self.evaluate_agent_session(
+                artifact,
+                stage_index,
+                shaping_intent,
+                workflow.created_by.as_deref(),
+            ),
             GateSpec::ExternalCheck { check_name } => {
                 self.evaluate_external_check(artifact, check_name)
             }
@@ -300,17 +308,20 @@ mod tests {
 
     struct CountingStiglab {
         dispatches: AtomicU32,
+        last_created_by: Mutex<Option<Option<String>>>,
     }
     impl CountingStiglab {
         fn new() -> Self {
             Self {
                 dispatches: AtomicU32::new(0),
+                last_created_by: Mutex::new(None),
             }
         }
     }
     impl StiglabDispatcher for CountingStiglab {
         fn dispatch(&self, req: &ShapingRequest) -> ShapingResult {
             self.dispatches.fetch_add(1, Ordering::SeqCst);
+            *self.last_created_by.lock().unwrap() = Some(req.created_by.clone());
             ShapingResult {
                 request_id: req.request_id.clone(),
                 outcome: ShapingOutcome::Completed,
@@ -356,6 +367,7 @@ mod tests {
             active: true,
             preset_id: None,
             workspace_install_ref: None,
+            created_by: None,
         }
     }
 
@@ -555,6 +567,76 @@ mod tests {
         assert!(cache
             .get(artifact.artifact_id.as_str(), AGENT_SESSION_SIGNAL)
             .is_none());
+    }
+
+    #[test]
+    fn agent_session_forwards_workflow_created_by_to_dispatch() {
+        // Issue #156: forge populates `ShapingRequest.created_by` from
+        // the workflow's owner so stiglab can decrypt that user's
+        // `CLAUDE_CODE_OAUTH_TOKEN`. Without this, the spawned agent
+        // boots with no auth and exits immediately.
+        let cache = SignalCache::new();
+        let stiglab = CountingStiglab::new();
+        let evaluator = LiveGateEvaluator::new(cache, stiglab, AllowSynodic);
+        let artifact = make_artifact();
+        let wf = Workflow {
+            workflow_id: "wf".into(),
+            name: "t".into(),
+            trigger: crate::core::workflow::TriggerSpec::GithubIssueWebhook {
+                repo: "a/b".into(),
+                label: "ai".into(),
+            },
+            stages: vec![],
+            active: true,
+            preset_id: None,
+            workspace_install_ref: None,
+            created_by: Some("user_owner_42".into()),
+        };
+        let gate = GateSpec::AgentSession {
+            shaping_intent: serde_json::Value::Null,
+        };
+
+        evaluator.evaluate(&artifact, &wf, 0, &gate);
+        let captured = evaluator
+            .stiglab
+            .last_created_by
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("dispatch should have been called");
+        assert_eq!(captured.as_deref(), Some("user_owner_42"));
+    }
+
+    #[test]
+    fn agent_session_resolves_fail_when_signal_is_failure() {
+        // Issue #156: when stiglab.session_failed lands for an in-flight
+        // workflow artifact, the workflow_signal_listener writes a
+        // `Failure` outcome to the signal cache. The next tick must
+        // surface it as `GateOutcome::Fail` so the artifact parks in
+        // `workflow_parked_reason` instead of stalling at `Pending`
+        // and re-dispatching forever.
+        let cache = SignalCache::new();
+        let evaluator = LiveGateEvaluator::new(cache.clone(), CountingStiglab::new(), AllowSynodic);
+        let artifact = make_artifact();
+        let wf = make_workflow();
+        let gate = GateSpec::AgentSession {
+            shaping_intent: serde_json::Value::Null,
+        };
+
+        cache.push(
+            artifact.artifact_id.as_str(),
+            crate::core::signal_cache::Signal {
+                kind: AGENT_SESSION_SIGNAL.into(),
+                outcome: SignalOutcome::Failure("stdout closed without result event".into()),
+            },
+        );
+        assert_eq!(
+            evaluator.evaluate(&artifact, &wf, 0, &gate),
+            GateOutcome::Fail("stdout closed without result event".into())
+        );
+        // And the gate did NOT dispatch a new session in response to the
+        // failure — the cache hit fires before the dispatch path.
+        assert_eq!(evaluator.stiglab.dispatches.load(Ordering::SeqCst), 0);
     }
 
     #[test]

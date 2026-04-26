@@ -117,16 +117,25 @@ impl SpineEmitter {
     }
 
     /// Emit a session-failed event.
+    ///
+    /// `artifact_id` links the failure to the factory pipeline artifact
+    /// the session was shaping (issue #156). Pass `None` for direct task
+    /// POSTs that don't originate from a `ShapingRequest`. When `Some`,
+    /// forge's workflow signal listener writes a `Failure` outcome to
+    /// the agent-session signal cache so the gate fails loudly and the
+    /// artifact stops re-dispatching.
     pub async fn emit_session_failed(
         &self,
         session_id: &str,
         request_id: &str,
         error: &str,
+        artifact_id: Option<&str>,
     ) -> Result<i64, sqlx::Error> {
         self.emit(FactoryEventKind::StiglabSessionFailed {
             session_id: session_id.to_string(),
             request_id: request_id.to_string(),
             error: error.to_string(),
+            artifact_id: artifact_id.map(str::to_owned),
         })
         .await
     }

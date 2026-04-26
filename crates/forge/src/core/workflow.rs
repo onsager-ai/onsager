@@ -122,6 +122,13 @@ pub struct Workflow {
     pub preset_id: Option<String>,
     #[serde(default)]
     pub workspace_install_ref: Option<String>,
+    /// User this workflow runs on behalf of (issue #156). Threaded into
+    /// `ShapingRequest.created_by` so stiglab can decrypt the matching
+    /// `CLAUDE_CODE_OAUTH_TOKEN`. `None` for workflows that pre-date the
+    /// migration; their dispatches fail loudly via `stiglab.session_failed`
+    /// until the owner re-activates the workflow (which re-mirrors the row).
+    #[serde(default)]
+    pub created_by: Option<String>,
 }
 
 impl Workflow {
@@ -199,6 +206,7 @@ mod tests {
             active: true,
             preset_id: None,
             workspace_install_ref: None,
+            created_by: None,
         };
         assert_eq!(wf.trigger_artifact_kind(), "github-issue");
     }
@@ -229,6 +237,7 @@ mod tests {
             active: true,
             preset_id: None,
             workspace_install_ref: None,
+            created_by: None,
         };
 
         assert_eq!(wf.stage(0).map(|s| s.name.as_str()), Some("first"));
@@ -263,6 +272,7 @@ mod tests {
             active: true,
             preset_id: Some("github_issue_to_pr".into()),
             workspace_install_ref: Some("install_42".into()),
+            created_by: Some("user_42".into()),
         };
 
         let json = serde_json::to_value(&wf).unwrap();

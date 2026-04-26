@@ -496,6 +496,7 @@ A session terminated with an error.
 | `session_id` | `String` |  |
 | `request_id` | `String` |  |
 | `error` | `String` |  |
+| `artifact_id` | `Option<String>` | Artifact this session was shaping (issue #156). Optional so non-shaping sessions (direct task POSTs) don't emit a meaningless id. When present, forge's workflow signal listener writes a `Failure` outcome to the agent-session signal cache so the gate fails loudly instead of stalling. _(optional)_ |
 
 ### `stiglab.session_aborted`
 

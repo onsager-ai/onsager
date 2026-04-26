@@ -343,6 +343,12 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
             inputs: decision.inputs.clone(),
             constraints: decision.constraints.clone(),
             deadline: decision.deadline,
+            // Legacy kernel path predates per-workflow ownership (issue
+            // #156). These are direct-shaping decisions that don't flow
+            // through a workflow, so there's no `workflow.created_by` to
+            // forward; stiglab will spawn the agent without OAuth and
+            // the resulting failure surfaces via session_failed.
+            created_by: None,
         };
 
         output.events.push(PipelineEvent::ShapingDispatched {
