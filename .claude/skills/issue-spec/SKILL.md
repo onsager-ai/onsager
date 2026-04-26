@@ -176,6 +176,49 @@ Examples: `spec(stiglab): add session timeout`, `spec(dashboard): fix node statu
 - Any open questions that need human decisions
 - Sub-issue links if the spec was split
 
+## The seam rule (restated for spec authors)
+
+Every spec on Onsager inherits this constraint — drafting one means
+checking that the proposed design respects it before publishing:
+
+> HTTP APIs exist only at external boundaries:
+> - **User-facing endpoints** called by the dashboard.
+> - **Webhooks** called by external services (GitHub, etc.).
+>
+> Subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
+> **exclusively** via the spine: events on the bus + reads against
+> shared spine tables. No subsystem makes HTTP calls to another
+> subsystem. No subsystem imports another subsystem's crate.
+
+If your spec needs a new cross-subsystem interaction, the Design
+section must:
+
+- Describe the interaction as event(s) on the spine, not as an HTTP
+  request between two subsystems.
+- Name the producing subsystem, the consuming subsystem, and at least
+  one event type (preferably an existing `FactoryEventKind` variant or
+  a clearly proposed new one).
+- Land the producer + consumer + (when introduced) registry entry as
+  one PR — see the "producer with no consumer" drift pattern in the
+  root `CLAUDE.md`.
+
+If your spec needs a new shared piece of state, the spine wins — the
+Design section must propose a spine table (with a discriminator
+column if it's tenant-scoped) rather than a per-subsystem table that
+mirrors a spine concept.
+
+If your spec is a rename or migration, do not propose a `serde(alias)`
+shim, a `*_mirror.rs` translator module, or a "legacy compat" type
+alias as the destination — those are bridge debt by construction
+(spec #131 Lever B will hard-fail them in CI). Database schema
+migrations are the only multi-step exception and stay governed by
+the existing `migrations/NNN_*.sql` convention.
+
+When the spec is large enough that the seam rule pushes the work into
+two PRs (a back-end emit + a front-end consume, for instance), keep
+them in one spec and split into sub-issues — one per PR — rather than
+splitting the spec.
+
 ## Area label taxonomy (Onsager monorepo)
 
 Pick one or more, aligned with `crates/` and `apps/`:
