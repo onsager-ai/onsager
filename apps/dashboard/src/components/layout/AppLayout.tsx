@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { AppSidebar } from "./AppSidebar"
 import { OnsagerLogo } from "./OnsagerLogo"
-import { QuickCreateMenu } from "./QuickCreateMenu"
+import { CommandPaletteProvider, CommandPaletteTrigger } from "./CommandPalette"
 import {
   PageHeaderProvider,
   usePageHeaderState,
@@ -15,7 +15,9 @@ import {
 export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <PageHeaderProvider>
-      <AppLayoutInner>{children}</AppLayoutInner>
+      <CommandPaletteProvider>
+        <AppLayoutInner>{children}</AppLayoutInner>
+      </CommandPaletteProvider>
     </PageHeaderProvider>
   )
 }
@@ -35,7 +37,7 @@ function AppLayoutInner({ children }: { children: ReactNode }) {
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-6" />
           <div className="ml-auto flex items-center gap-2">
-            <QuickCreateMenu />
+            <CommandPaletteTrigger />
           </div>
         </header>
         {/* min-h-0 is required for flex-1 + overflow-y-auto to engage in a
@@ -80,11 +82,11 @@ function MobileHeader() {
           </Link>
         )}
       </div>
-      {/* Page-specific actions, then global QuickCreate. UserMenu lives
-          in the sidebar footer on mobile to reclaim header space. */}
+      {/* Page-specific actions, then the global ⌘K palette. UserMenu
+          lives in the sidebar footer to reclaim header space. */}
       <div className="flex items-center gap-1">
         {actions}
-        <QuickCreateMenu />
+        <CommandPaletteTrigger />
       </div>
     </header>
   )

@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import { Link, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -55,14 +56,21 @@ export function WorkflowDetailPage() {
   const workflow = data?.workflow
   const runs = runsData?.runs ?? []
 
-  // Mobile chrome: back arrow + workflow name + icon-only Pause/Delete
-  // live in the global top bar. Desktop renders the page-level block
-  // below (md:flex). Header stays registered while loading so the bar
-  // doesn't flicker between "Onsager" and the workflow name.
+  // Mobile chrome: back arrow + workflow name + ⋯ overflow with
+  // Pause/Delete live in the global top bar. Desktop renders the
+  // page-level block below (md:flex). Header stays registered while
+  // loading so the bar doesn't flicker between "Onsager" and the
+  // workflow name. Memoize the JSX action node — the dashboard-ui rule
+  // says JSX `actions` should be `useMemo`d.
+  const headerActions = useMemo(
+    () =>
+      workflow ? <WorkflowActions workflow={workflow} variant="menu" /> : null,
+    [workflow],
+  )
   usePageHeader({
     title: workflow?.name ?? "Workflow",
     backTo: "/workflows",
-    actions: workflow ? <WorkflowActions workflow={workflow} compact /> : null,
+    actions: headerActions,
   })
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>

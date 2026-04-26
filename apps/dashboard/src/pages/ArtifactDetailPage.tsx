@@ -1,6 +1,6 @@
 import { useParams, Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { api, ApiError, type OverrideGateRequestBody } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -124,58 +124,65 @@ export function ArtifactDetailPage() {
     abortMutation.isPending ||
     overrideMutation.isPending
 
-  // Mobile chrome: back + artifact name + overflow menu (Retry / Override
-  // / Abort). Desktop renders the same 4 actions inline below.
+  // Mobile chrome: back + artifact name + ⋯ overflow menu. Desktop
+  // renders the same 4 actions as inline buttons below. Memoized per
+  // the dashboard-ui rule on JSX `actions`.
+  const headerActions = useMemo(
+    () =>
+      artifact ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                aria-label="Artifact actions"
+              />
+            }
+          >
+            <MoreHorizontal className="h-5 w-5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem
+              disabled={busy || isTerminal}
+              onClick={() => retryMutation.mutate()}
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Retry
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={busy || archived}
+              onClick={() => handleOverride("allow")}
+            >
+              <ShieldCheck className="mr-2 h-4 w-4" />
+              Override gate: Allow
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={busy || archived}
+              onClick={() => handleOverride("deny")}
+            >
+              <ShieldCheck className="mr-2 h-4 w-4" />
+              Override gate: Deny
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={busy || archived}
+              onClick={handleAbort}
+            >
+              <Ban className="mr-2 h-4 w-4" />
+              Abort
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [artifact, busy, isTerminal, archived],
+  )
   usePageHeader({
     title: artifact?.name ?? "Artifact",
     backTo: "/artifacts",
-    actions: artifact ? (
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9"
-              aria-label="Artifact actions"
-            />
-          }
-        >
-          <MoreHorizontal className="h-5 w-5" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuItem
-            disabled={busy || isTerminal}
-            onClick={() => retryMutation.mutate()}
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Retry
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={busy || archived}
-            onClick={() => handleOverride("allow")}
-          >
-            <ShieldCheck className="mr-2 h-4 w-4" />
-            Override gate: Allow
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={busy || archived}
-            onClick={() => handleOverride("deny")}
-          >
-            <ShieldCheck className="mr-2 h-4 w-4" />
-            Override gate: Deny
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            variant="destructive"
-            disabled={busy || archived}
-            onClick={handleAbort}
-          >
-            <Ban className="mr-2 h-4 w-4" />
-            Abort
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    ) : null,
+    actions: headerActions,
   })
 
   if (isLoading) {

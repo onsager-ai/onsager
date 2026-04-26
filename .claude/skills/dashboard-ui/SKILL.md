@@ -1,6 +1,6 @@
 ---
 name: dashboard-ui
-description: Enforce shadcn/ui component usage in apps/dashboard, the "avoid manual input" UX principle, AND the mobile chrome rules — pages declare title/back/actions via usePageHeader (one global mobile bar, icon-only actions, no per-page sticky headers), html/body never scroll (rubber-band disabled, the app shell's <main> is the only scroll container), and account/avatar lives in the sidebar footer. Linkable fields (repo owner/name, installation IDs, project slugs, URLs) must be solved with OAuth pickers or deep-links-out, never typed inputs. Native HTML form and interactive elements (input, select, button, textarea, checkbox, radio, dialog, etc.) are forbidden — use the shadcn/ui primitives under @/components/ui instead. Trigger when editing or creating .tsx files under apps/dashboard/, when adding forms/buttons/inputs/selects/modals to the web app, when wiring up GitHub/Railway/OAuth integrations, when adding/changing a page header / back arrow / page title / sticky toolbar / mobile chrome / sidebar footer, or when the user mentions "shadcn", "UI component", "form control", "dashboard component", "manual input", "paste URL", "linkable field", "page header", "page title", "back arrow", "mobile bar", "rubber-band", "overscroll", "borrow UX from Railway/Vercel/Claude".
+description: Enforce shadcn/ui component usage in apps/dashboard, the "avoid manual input" UX principle, AND the mobile chrome rules — pages declare title/back/actions via usePageHeader (one global mobile bar; a single primary action stays inline, two or more collapse to a `⋯` overflow menu; no per-page sticky headers); html/body never scroll (rubber-band disabled, the app shell's <main> is the only scroll container); account/avatar lives in the sidebar footer; "create" and navigation are unified in a global ⌘K command palette (CommandPaletteProvider) — no chrome `+` button, no FABs. Linkable fields (repo owner/name, installation IDs, project slugs, URLs) must be solved with OAuth pickers or deep-links-out, never typed inputs. Native HTML form and interactive elements (input, select, button, textarea, checkbox, radio, dialog, etc.) are forbidden — use the shadcn/ui primitives under @/components/ui instead. Trigger when editing or creating .tsx files under apps/dashboard/, when adding forms/buttons/inputs/selects/modals to the web app, when wiring up GitHub/Railway/OAuth integrations, when adding/changing a page header / back arrow / page title / sticky toolbar / mobile chrome / sidebar footer / command palette / quick-create / FAB / `+` button, or when the user mentions "shadcn", "UI component", "form control", "dashboard component", "manual input", "paste URL", "linkable field", "page header", "page title", "back arrow", "mobile bar", "rubber-band", "overscroll", "command palette", "⌘K", "Cmd+K", "Ctrl+K", "overflow menu", "FAB", "borrow UX from Railway/Vercel/Claude".
 ---
 
 # dashboard-ui
@@ -216,11 +216,15 @@ usePageHeader({
 - **Hide the page H1 on mobile** with `hidden md:block` — the bar's
   title replaces it. Keep description text and any subtitle below it
   visible on both viewports.
-- **Mobile actions are icon-only.** Use `size="icon"` ghost buttons
-  with `aria-label` + `title`. Two icons inline is the cap; for three
-  or more, collapse into a single `⋯` (`MoreHorizontal`)
-  `DropdownMenu` with full-width `DropdownMenuItem` rows showing the
-  label + icon.
+- **Mobile actions are icon-only, and overflow when there's more than
+  one.** A single primary action stays inline (one ghost-icon button,
+  `aria-label` + `title`). **Two or more actions collapse into a
+  single `⋯` (`MoreHorizontal`) `DropdownMenu`** with full-width
+  `DropdownMenuItem` rows showing label + icon — including
+  destructive items via `variant="destructive"`. The bar is busy
+  enough with title + back + ⌘K trigger; multiple action icons make
+  the title truncate aggressively and create inconsistency between
+  pages. Predictable beats compact.
 - **Memoize JSX `actions` (and JSX `title`).** The hook's effect
   re-runs when its deps change, so a fresh JSX object every render
   triggers needless setState. Wrap with `useMemo` keyed on the data
@@ -234,13 +238,15 @@ usePageHeader({
   during scroll on mobile, the answer is almost always
   `usePageHeader`.
 
-### Existing actions, compact variants
+### Existing actions: shared component, two variants
 
-When the same action set has both desktop labels and a mobile
-icon-only render, parameterise the action component with `compact`
-(see `WorkflowActions`) — don't duplicate. The page passes
-`compact` to the slot registration and the unparameterised version to
-its desktop block.
+When the same action set has both a desktop labeled-button rendering
+and a mobile overflow-menu rendering, parameterise the action
+component with a `variant` prop — don't duplicate the mutations.
+`WorkflowActions` is the canonical example: `variant="buttons"` for
+the desktop block, `variant="menu"` for the mobile slot registration.
+Both variants share the same `useMutation` setup and confirmation
+`Dialog`; only the trigger surface differs.
 
 ## App shell scrolling — body never scrolls, `<main>` does
 
@@ -277,6 +283,51 @@ Already wired in:
 - **Safe-area insets**: `<main>` already adds
   `pb-[calc(env(safe-area-inset-bottom)+1rem)]` on mobile. Don't
   re-apply at the page level.
+
+## Global "do something" surface — the command palette, not `+`
+
+The dashboard ships **one** chrome-level action: a search-icon trigger
+that opens a `CommandDialog` (cmdk) with `Create` and `Go to` groups.
+Trigger lives in the mobile bar and the desktop header; the dialog
+itself is rendered once at the layout level via
+`CommandPaletteProvider`, with the `⌘K` / `Ctrl+K` hotkey bound
+globally.
+
+### Rules
+
+- **Don't add a `+` button to chrome.** A global "create" `+` doesn't
+  scale: every new primitive forces a chrome redesign, and on
+  info-only pages it has nothing to offer. The palette absorbs all
+  create actions.
+- **Don't add a second palette instance.** Mount
+  `<CommandPaletteProvider>` once (already in `AppLayout`); use
+  `<CommandPaletteTrigger />` to render the search icon in any chrome
+  surface. Multiple providers means multiple dialogs and a duplicated
+  hotkey listener.
+- **All "create primitive X" entries live in the palette.** When
+  adding a new primitive, register an item in the `Create` group of
+  `CommandPalette.tsx`. Provide a stub `CreateXSheet` /
+  `NewXDialog` that the palette opens, the same way
+  `CreateSessionSheet` / `NewWorkspaceDialog` are wired today.
+- **Page-level "Create" buttons can still exist** — e.g. the "Create
+  workflow" button on `/workflows`. Those are page-context
+  shortcuts; the palette is the global one. Don't drop the page-level
+  one to "force" palette use.
+- **Don't reach for FABs (floating action buttons).** Discoverable
+  affordances belong in the palette; an extra floating element on
+  every page restarts the chrome-debt cycle the palette exists to
+  end.
+
+### Item conventions
+
+- Use lowercase action labels for created items: "New workflow",
+  "New session", "New workspace" (not "Create…" or "Add…").
+- Use lowercase capitalized destinations for navigation: "Workflows",
+  "Artifacts", etc. (matches the sidebar labels).
+- Add `keywords={["new", "github", …]}` for synonyms users will
+  type — cmdk fuzzy-matches keywords alongside the visible label.
+- Gate auth-required items on `authEnabled && !!user`. Anonymous
+  users shouldn't see "New workspace" → 401.
 
 ## Account / user menu lives in the sidebar footer
 
