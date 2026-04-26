@@ -54,6 +54,37 @@ still defines `HttpStiglabDispatcher` (≈52–304) and `HttpSynodicGate`
 (≈344–397), and instantiates them against sibling-subsystem ports in
 `run` (≈469–490). New code must not add to that pattern.
 
+## Internal aesthetic
+
+Care about the inside the same way you'd care about the outside. The wires
+inside an Apple product are routed and dressed even though no user will ever
+open the case. We hold the codebase to the same standard: the seams between
+subsystems, the shape of internal modules, the consistency of names and
+errors, the absence of dead wires — these are first-class quality, not
+cleanup chores deferred until "after the feature lands."
+
+This is a value, not a checklist. Three operating principles fall out of it:
+
+- **Internal symmetry is a feature.** When two things are *the same concept*,
+  they should have the same shape — same name, same type, same error model,
+  same write path. Asymmetry between equivalent things (`TriggerKind` here,
+  `TriggerSpec` there; one creation path setting `current_version=0`, another
+  setting `=1`) is a defect, even when nothing user-visible is broken.
+- **No dangling wires.** Code marked `#[allow(dead_code)]` "for later," event
+  types with no consumer, endpoints with no UI caller, and compat aliases with
+  no removal date are all the same defect: a wire connected at one end. Either
+  finish the connection in the same PR, or remove the loose end.
+- **The inside is reviewable.** Files that grow past ~500 LOC, modules that
+  mix unrelated concerns, error types that change shape across a subsystem
+  boundary — these aren't style preferences, they're tax on every future
+  reader. Splitting and unifying them is real work, worth scheduling.
+
+The seam rule above and the "Architectural drift patterns to watch" list
+below are both operational projections of this value onto the seams between
+subsystems. Internal-quality work that doesn't fit those projections —
+interior-to-a-subsystem hygiene — is equally in scope and should be specced
+and shipped on the same footing as feature work.
+
 ## Architectural drift patterns to watch
 
 Loose runtime coupling is correct and stays — but the seams it creates are
