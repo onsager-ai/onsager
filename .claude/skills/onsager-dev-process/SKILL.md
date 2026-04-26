@@ -98,9 +98,31 @@ Implement the spec's Plan items in order. Keep commits small and focused.
 Commit messages should be imperative and under 72 chars.
 
 Respect the architectural invariant: subsystems (`forge`, `stiglab`,
-`synodic`, `ising`) do not import each other. If your spec forces a
-cross-subsystem dependency, split it into parent + sub-issues before
-continuing.
+`synodic`, `ising`) do not import each other. The seam rule (canonical
+form, also persisted in root `CLAUDE.md` and each subsystem's
+`CLAUDE.md`) makes this concrete:
+
+> HTTP APIs exist only at external boundaries:
+> - **User-facing endpoints** called by the dashboard.
+> - **Webhooks** called by external services (GitHub, etc.).
+>
+> Subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
+> **exclusively** via the spine: events on the bus + reads against
+> shared spine tables. No subsystem makes HTTP calls to another
+> subsystem. No subsystem imports another subsystem's crate.
+
+If implementation surfaces a need to break this rule — a sibling-port
+HTTP call, a `*_mirror.rs` translator, a `serde(alias)` shim, a "for
+compat" type alias — stop. The right move is one of: emit an event +
+listener pair (cross-subsystem coordination), collapse the schema into
+the spine with a discriminator (shared state), or land the rename in
+one PR (no aliases). If the spec doesn't yet describe that path,
+update the spec first; do not add a bridge "for now". Spec #131 Lever
+B will hard-fail these in CI, so a bridge that ships today is a
+revert tomorrow.
+
+The `onsager-pre-push` skill includes a seam-rule self-check that
+scans the diff for these violations before push.
 
 ### 4. Pre-push
 

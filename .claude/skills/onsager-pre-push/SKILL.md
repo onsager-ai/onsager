@@ -230,6 +230,55 @@ is explicitly trivial). This is the local counterpart to the
    fix), skip steps 6.1–6.4 and plan to apply the `trivial` label to the
    PR immediately after `mcp__github__create_pull_request`. Use sparingly.
 
+### 6.5. Seam-rule self-check
+
+Before pushing, look at the diff once more against the canonical rule:
+
+> HTTP APIs exist only at external boundaries:
+> - **User-facing endpoints** called by the dashboard.
+> - **Webhooks** called by external services (GitHub, etc.).
+>
+> Subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
+> **exclusively** via the spine: events on the bus + reads against
+> shared spine tables. No subsystem makes HTTP calls to another
+> subsystem. No subsystem imports another subsystem's crate.
+
+Run a focused diff scan — Lever B of spec #131 will eventually hard-fail
+each of these in CI; until that lands, catch them locally:
+
+```bash
+git diff origin/main...HEAD -- 'crates/forge/**' 'crates/stiglab/**' \
+  'crates/synodic/**' 'crates/ising/**'
+```
+
+Flag any of:
+
+- **New sibling-subsystem HTTP client.** A new `reqwest::Client` /
+  `hyper::Client` constructed in `forge|stiglab|synodic|ising` whose
+  URL targets a sibling-subsystem port (3000, 3001, …) or service
+  name. The right shape is event emit + listener pair.
+- **New cross-subsystem Cargo dep.** Subsystem A's `Cargo.toml`
+  declaring B as a dep, e.g. `forge` adding `stiglab = { path = ... }`.
+  Subsystems may depend only on `onsager-{artifact, warehouse,
+  protocol, spine, registry, delivery}` per their existing manifests.
+- **New `serde(alias = …)`.** Renames must land atomically; aliases
+  ossify (PR #107 is the canonical case).
+- **New `*_mirror.rs` file or "translator" module.** The spine is
+  already the source of truth; mirror modules drift (PR #129 / Lever
+  D is removing the live one).
+- **New `pub type X = Y` "for compatibility".** Same problem as a
+  serde alias.
+- **New `FactoryEventKind` variant without a consumer.** Producer +
+  consumer should land together (PR #127 drift pattern). Lever E will
+  make this CI-enforceable.
+- **New API endpoint with no dashboard caller, or new dashboard
+  client method with no backend handler.** PR #108 drift pattern;
+  ship both halves in one PR (or two PRs gated by a contract test).
+
+If any of these appear, fix the seam before pushing — do not file a
+follow-up issue and ship the bridge. (Database schema migrations are
+the only exception; they remain governed by `migrations/NNN_*.sql`.)
+
 ### 7. Push
 
 ```bash

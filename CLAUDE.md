@@ -30,6 +30,29 @@ must NOT import each other, and must NOT be statically linked into the same
 binary. The `onsager` dispatcher has zero business dependencies -- it discovers
 subsystem binaries on PATH.
 
+## The seam rule (canonical)
+
+> HTTP APIs exist only at external boundaries:
+> - **User-facing endpoints** called by the dashboard.
+> - **Webhooks** called by external services (GitHub, etc.).
+>
+> Subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
+> **exclusively** via the spine: events on the bus + reads against
+> shared spine tables. No subsystem makes HTTP calls to another
+> subsystem. No subsystem imports another subsystem's crate.
+
+This is the rule. ADR 0001 set it; spec #131 is collapsing the
+remaining places it is informally stated or informally enforced into
+six levers (A–F: persisted rule → mechanical guardrails → finish ADR
+0001 migration → spine as SoT → registry-backed event types →
+API/UI contract enforcement). Until the levers all land, the rule is
+review-time discipline; treat the drift patterns below as the working
+heuristics.
+
+Live violation (Lever C target): `crates/forge/src/cmd/serve.rs:65–180`
+still constructs `HttpStiglabDispatcher` and `HttpSynodicGate` against
+sibling subsystem ports. New code must not add to that pattern.
+
 ## Architectural drift patterns to watch
 
 Loose runtime coupling is correct and stays — but the seams it creates are
@@ -64,7 +87,7 @@ follow-up issue with a `bridge-debt` label and a target removal date.
   to outlive their intended window. File a `bridge-debt` issue at rename
   time; remove the alias on the target date, not "eventually".
 
-The strategy spec #131 captures the full reasoning and the five-lever plan
+The strategy spec #131 captures the full reasoning and the six-lever plan
 to make these contracts enforced rather than informal. Until that lands,
 treat the patterns above as review-time heuristics.
 

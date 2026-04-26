@@ -30,6 +30,41 @@ All subsystems live under `crates/` in the workspace root:
 Each depends on `onsager-spine` via `path = "../onsager-spine"`.
 Subsystems must NOT import each other.
 
+## The seam rule (canonical)
+
+> HTTP APIs exist only at external boundaries:
+> - **User-facing endpoints** called by the dashboard.
+> - **Webhooks** called by external services (GitHub, etc.).
+>
+> Subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
+> **exclusively** via the spine: events on the bus + reads against
+> shared spine tables. No subsystem makes HTTP calls to another
+> subsystem. No subsystem imports another subsystem's crate.
+
+What this means for the spine specifically:
+
+- **Spine = mechanism, not a subsystem.** It does not have a sibling
+  HTTP surface and is not addressable on a port. Subsystems link the
+  library; they coordinate by writing/reading `events` / `events_ext`
+  rows and listening on `pg_notify`.
+- **New event types are the cross-subsystem contract.** When a new
+  `FactoryEventKind` variant is added here, the producer and at least
+  one consumer must land in the same PR (or two PRs gated by a contract
+  test). A producer with no consumer is the drift pattern from PR #127;
+  Lever E will make this CI-enforceable via a registry manifest.
+- **Don't grow a sync RPC API on the spine.** If a question feels like
+  "stiglab needs to ask synodic *now*", the answer is an event +
+  listener pair, not a request/response surface. ADR 0001 documents
+  why; spec #131 is closing the last place this is still violated.
+- **Spine tables are the single source of truth.** Subsystem-private
+  tables that mirror a spine concept (e.g. `tenant_workflows` ↔
+  `workflows`, PR #129) are the Lever D drift pattern: collapse into
+  the spine table with a discriminator column rather than building a
+  mirror.
+
+See [ADR 0001](../../docs/adr/0001-event-bus-coordination-model.md) for
+the original decision and spec #131 for the six-lever enforcement plan.
+
 ## Build & Test
 
 ```bash
