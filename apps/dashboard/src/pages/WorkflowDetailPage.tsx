@@ -66,7 +66,10 @@ export function WorkflowDetailPage() {
 
   return (
     <div className="space-y-4 md:space-y-6">
-      <div className="space-y-2">
+      {/* Sticky on mobile so Pause/Delete stay at the top while content
+          scrolls beneath. Negative margins extend the bg under the
+          parent's p-4 so nothing peeks through above this header. */}
+      <div className="sticky top-0 z-20 -mx-4 -mt-4 space-y-2 border-b bg-background/95 px-4 pb-3 pt-4 backdrop-blur supports-backdrop-filter:bg-background/80 md:static md:mx-0 md:mt-0 md:border-0 md:bg-transparent md:px-0 md:pb-0 md:pt-0 md:backdrop-blur-none">
         <BackLink />
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">

@@ -31,7 +31,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <UserMenu />
           </div>
         </header>
-        <main className="flex-1 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:p-6 md:pb-6">
+        <main className="flex-1 overflow-y-auto overscroll-contain p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:p-6 md:pb-6">
           {children}
         </main>
       </SidebarInset>
