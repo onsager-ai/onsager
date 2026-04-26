@@ -9,7 +9,7 @@ use crate::core::User;
 
 use crate::server::auth::{
     self, exchange_code, generate_session_token, generate_state, get_github_user,
-    github_authorize_url, AuthUser,
+    github_authorize_url, AuthUser, RequestPrincipal,
 };
 use crate::server::db;
 use crate::server::sso::{
@@ -539,6 +539,10 @@ pub async fn sso_finish(
 
 /// GET /api/auth/me — Return current authenticated user
 pub async fn me(State(state): State<AppState>, auth_user: AuthUser) -> impl IntoResponse {
+    let via = match auth_user.principal {
+        RequestPrincipal::Pat { .. } => "pat",
+        RequestPrincipal::Session => "session",
+    };
     Json(serde_json::json!({
         "user": {
             "id": auth_user.user_id,
@@ -547,6 +551,7 @@ pub async fn me(State(state): State<AppState>, auth_user: AuthUser) -> impl Into
             "github_avatar_url": auth_user.github_avatar_url,
         },
         "auth_enabled": state.config.auth_enabled(),
+        "via": via,
     }))
 }
 

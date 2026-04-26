@@ -106,7 +106,7 @@ pub async fn create_task(
     // tenant-owned project (issue #59). Non-members get 404 via
     // `assert_tenant_member` so project IDs can't be enumerated.
     if let Some(ref project_id) = request.project_id {
-        let Some(caller_id) = user_id else {
+        if user_id.is_none() {
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(serde_json::json!({
@@ -131,7 +131,7 @@ pub async fn create_task(
         };
         if let Err(r) = crate::server::routes::tenants::assert_tenant_member(
             &state.db,
-            caller_id,
+            &auth_user,
             &project.tenant_id,
         )
         .await

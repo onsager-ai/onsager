@@ -2,11 +2,15 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use ring::aead;
+use ring::digest;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::Deserialize;
 
 use crate::server::db;
+use crate::server::sso::secrets_equal;
 use crate::server::state::AppState;
 
 // ── Credential Encryption (AES-256-GCM) ──
@@ -152,9 +156,161 @@ pub fn generate_state() -> String {
     hex::encode(bytes)
 }
 
+// ── Personal Access Tokens (issue #143) ──
+
+/// Token namespace prefix. Matches GitHub's `ghp_` style so secret scanners
+/// can recognize Onsager PATs in source-control / log scrapes.
+pub const PAT_TOKEN_NAMESPACE: &str = "ons_pat_";
+
+/// Length of the prefix stored in the DB for display + indexed lookup.
+/// `ons_pat_` (8 chars) + 4 chars of token entropy = 12 chars total.
+pub const PAT_PREFIX_LEN: usize = 12;
+
+/// Number of random bytes mixed into a PAT after the namespace prefix.
+const PAT_RANDOM_BYTES: usize = 32;
+
+/// A freshly generated PAT, ready to be persisted (`hash`) and shown to the
+/// user exactly once (`token`).
+pub struct GeneratedPat {
+    /// The full token to hand to the user. Begins with `ons_pat_`.
+    pub token: String,
+    /// First [`PAT_PREFIX_LEN`] characters of `token`. Stored in the clear
+    /// for display + lookup.
+    pub prefix: String,
+    /// Hex-encoded SHA-256 of `token`. The only thing persisted to the DB
+    /// from the secret material.
+    pub hash: String,
+}
+
+/// Generate a fresh personal access token. The full token is `ons_pat_` plus
+/// 32 random url-safe bytes — about 256 bits of entropy after the namespace
+/// prefix. Only the hash is stored; the caller is responsible for showing
+/// `token` to the user exactly once.
+pub fn generate_pat_token() -> GeneratedPat {
+    let rng = SystemRandom::new();
+    let mut bytes = [0u8; PAT_RANDOM_BYTES];
+    rng.fill(&mut bytes).expect("rng failed to generate bytes");
+    let token = format!("{PAT_TOKEN_NAMESPACE}{}", URL_SAFE_NO_PAD.encode(bytes));
+    let prefix = pat_prefix(&token);
+    let hash = hash_pat_token(&token);
+    GeneratedPat {
+        token,
+        prefix,
+        hash,
+    }
+}
+
+/// Hex-encoded SHA-256 of the raw token. Used both at insert time and on
+/// every verification.
+pub fn hash_pat_token(token: &str) -> String {
+    let digest = digest::digest(&digest::SHA256, token.as_bytes());
+    hex::encode(digest.as_ref())
+}
+
+/// Return the lookup prefix for a token. Always [`PAT_PREFIX_LEN`] chars
+/// when the token is well-formed; for malformed (too-short) tokens returns
+/// the entire string so callers can compare without panicking.
+pub fn pat_prefix(token: &str) -> String {
+    if token.len() >= PAT_PREFIX_LEN {
+        token[..PAT_PREFIX_LEN].to_string()
+    } else {
+        token.to_string()
+    }
+}
+
+/// Outcome of verifying a PAT against the DB. The `Invalid` arms are split
+/// from `Ok` so the extractor can return the right `WWW-Authenticate` body
+/// without leaking which step failed. `UserPat` is boxed to keep the enum
+/// itself pointer-sized — most call sites match the small arms.
+#[derive(Debug)]
+pub enum PatVerifyOutcome {
+    Ok(Box<db::UserPat>),
+    /// Prefix matched no row, or the hash didn't match any candidate row.
+    Unknown,
+    /// Row matched but is revoked or past its `expires_at`.
+    Revoked,
+    Expired,
+}
+
+/// Verify a presented PAT. Looks up candidate rows by `token_prefix`, then
+/// constant-time compares the SHA-256 hash against each candidate. The
+/// prefix is non-secret; the hash compare is the actual identity check.
+pub async fn verify_pat(
+    pool: &sqlx::AnyPool,
+    presented_token: &str,
+) -> anyhow::Result<PatVerifyOutcome> {
+    if !presented_token.starts_with(PAT_TOKEN_NAMESPACE) {
+        return Ok(PatVerifyOutcome::Unknown);
+    }
+    let prefix = pat_prefix(presented_token);
+    let presented_hash = hash_pat_token(presented_token);
+    let candidates = db::find_pats_by_prefix(pool, &prefix).await?;
+    if candidates.is_empty() {
+        return Ok(PatVerifyOutcome::Unknown);
+    }
+
+    let mut matched: Option<db::UserPat> = None;
+    for (pat, stored_hash) in candidates {
+        if secrets_equal(&presented_hash, &stored_hash) {
+            matched = Some(pat);
+            // Don't break — keep iterating to keep the work uniform across
+            // collision and non-collision paths. The hash space makes >1
+            // match astronomically unlikely; the loop is still O(n) on the
+            // (non-secret) prefix bucket.
+        }
+    }
+
+    let Some(pat) = matched else {
+        return Ok(PatVerifyOutcome::Unknown);
+    };
+
+    if pat.revoked_at.is_some() {
+        return Ok(PatVerifyOutcome::Revoked);
+    }
+    if let Some(exp) = pat.expires_at {
+        if exp < chrono::Utc::now() {
+            return Ok(PatVerifyOutcome::Expired);
+        }
+    }
+    Ok(PatVerifyOutcome::Ok(Box::new(pat)))
+}
+
 // ── Auth Extractor ──
 
-/// Authenticated user extracted from request cookies.
+/// Whether the request was authenticated via a browser session cookie or a
+/// PAT bearer token. Surfaced on [`AuthUser`] so destructive endpoints can
+/// gate behavior on the principal kind.
+#[derive(Debug, Clone)]
+pub enum RequestPrincipal {
+    /// Cookie-based session (the existing `stiglab_session` flow), or the
+    /// synthetic anonymous principal when auth is disabled.
+    Session,
+    /// PAT-authenticated request. `pat_id` identifies the issuing token row;
+    /// `tenant_id` pins the request to a single workspace when set on the PAT.
+    Pat {
+        pat_id: String,
+        tenant_id: Option<String>,
+    },
+}
+
+impl RequestPrincipal {
+    pub fn is_pat(&self) -> bool {
+        matches!(self, RequestPrincipal::Pat { .. })
+    }
+
+    /// The tenant a PAT is pinned to, if any. `None` for sessions and for
+    /// PATs that aren't workspace-scoped.
+    pub fn pinned_tenant_id(&self) -> Option<&str> {
+        match self {
+            RequestPrincipal::Pat {
+                tenant_id: Some(t), ..
+            } => Some(t.as_str()),
+            _ => None,
+        }
+    }
+}
+
+/// Authenticated user extracted from request cookies or a PAT Bearer token.
 /// When auth is disabled (no GitHub config), returns a synthetic anonymous user.
 #[derive(Debug, Clone)]
 pub struct AuthUser {
@@ -162,6 +318,7 @@ pub struct AuthUser {
     pub github_login: String,
     pub github_name: Option<String>,
     pub github_avatar_url: Option<String>,
+    pub principal: RequestPrincipal,
 }
 
 impl AuthUser {
@@ -171,8 +328,35 @@ impl AuthUser {
             github_login: "anonymous".to_string(),
             github_name: None,
             github_avatar_url: None,
+            principal: RequestPrincipal::Session,
         }
     }
+}
+
+/// Pull the bearer token (if any) out of the `Authorization` header.
+pub fn parse_bearer_token(parts: &Parts) -> Option<String> {
+    let v = parts
+        .headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
+    let token = v.strip_prefix("Bearer ")?.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
+fn unauthorized_invalid_token() -> Response {
+    Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .header(
+            axum::http::header::WWW_AUTHENTICATE,
+            "Bearer error=\"invalid_token\"",
+        )
+        .body(axum::body::Body::from("invalid token"))
+        .unwrap()
 }
 
 impl FromRequestParts<AppState> for AuthUser {
@@ -187,7 +371,81 @@ impl FromRequestParts<AppState> for AuthUser {
             return Ok(AuthUser::anonymous());
         }
 
-        // Extract session cookie
+        // 1) Try PAT Bearer token first. A valid PAT wins over any cookie
+        //    on the same request — cookie + Bearer normally doesn't happen
+        //    in practice, but a CLI smoke test of the dashboard shouldn't
+        //    silently fall through to the browser session.
+        if let Some(token) = parse_bearer_token(parts) {
+            if token.starts_with(PAT_TOKEN_NAMESPACE) {
+                match verify_pat(&state.db, &token).await {
+                    Ok(PatVerifyOutcome::Ok(pat)) => {
+                        let user = match db::get_user(&state.db, &pat.user_id).await {
+                            Ok(Some(u)) => u,
+                            Ok(None) => {
+                                tracing::warn!(
+                                    pat_id = %pat.id,
+                                    "PAT references missing user — rejecting"
+                                );
+                                return Err(unauthorized_invalid_token());
+                            }
+                            Err(e) => {
+                                tracing::error!("PAT auth: failed to load user: {e}");
+                                return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                            }
+                        };
+
+                        // Best-effort touch — failure must not block the
+                        // request. Capture client metadata before the move.
+                        let pool = state.db.clone();
+                        let pat_id = pat.id.clone();
+                        let ip = parts
+                            .headers
+                            .get("x-forwarded-for")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|s| s.split(',').next())
+                            .map(|s| s.trim().to_string());
+                        let ua = parts
+                            .headers
+                            .get(axum::http::header::USER_AGENT)
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string());
+                        tokio::spawn(async move {
+                            if let Err(e) =
+                                db::touch_user_pat(&pool, &pat_id, ip.as_deref(), ua.as_deref())
+                                    .await
+                            {
+                                tracing::warn!(pat_id = %pat_id, "failed to touch PAT: {e}");
+                            }
+                        });
+
+                        return Ok(AuthUser {
+                            user_id: user.id,
+                            github_login: user.github_login,
+                            github_name: user.github_name,
+                            github_avatar_url: user.github_avatar_url,
+                            principal: RequestPrincipal::Pat {
+                                pat_id: pat.id,
+                                tenant_id: pat.tenant_id,
+                            },
+                        });
+                    }
+                    Ok(PatVerifyOutcome::Unknown)
+                    | Ok(PatVerifyOutcome::Revoked)
+                    | Ok(PatVerifyOutcome::Expired) => {
+                        return Err(unauthorized_invalid_token());
+                    }
+                    Err(e) => {
+                        tracing::error!("PAT verification failed: {e}");
+                        return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                    }
+                }
+            }
+            // Other Bearer tokens (e.g. SSO exchange secret on /sso/redeem)
+            // are owned by their dedicated routes — fall through so the
+            // cookie path still works for the dashboard.
+        }
+
+        // 2) Fall back to the session cookie.
         let session_id = parts
             .headers
             .get(axum::http::header::COOKIE)
@@ -206,6 +464,7 @@ impl FromRequestParts<AppState> for AuthUser {
                 github_login: auth_session.user.github_login,
                 github_name: auth_session.user.github_name,
                 github_avatar_url: auth_session.user.github_avatar_url,
+                principal: RequestPrincipal::Session,
             }),
             Ok(None) => Err((StatusCode::UNAUTHORIZED, "session expired").into_response()),
             Err(e) => {
@@ -343,5 +602,59 @@ mod tests {
         assert_eq!(user.user_id, "anonymous");
         assert_eq!(user.github_login, "anonymous");
         assert!(user.github_name.is_none());
+        assert!(matches!(user.principal, RequestPrincipal::Session));
+    }
+
+    #[test]
+    fn test_generate_pat_token_shape() {
+        let pat = generate_pat_token();
+        assert!(
+            pat.token.starts_with(PAT_TOKEN_NAMESPACE),
+            "token should start with the namespace prefix"
+        );
+        assert_eq!(pat.prefix.len(), PAT_PREFIX_LEN);
+        assert_eq!(pat.prefix, &pat.token[..PAT_PREFIX_LEN]);
+        // SHA-256 hex is 64 chars.
+        assert_eq!(pat.hash.len(), 64);
+        assert_eq!(pat.hash, hash_pat_token(&pat.token));
+    }
+
+    #[test]
+    fn test_generate_pat_token_uniqueness() {
+        let a = generate_pat_token();
+        let b = generate_pat_token();
+        assert_ne!(a.token, b.token);
+        assert_ne!(a.hash, b.hash);
+    }
+
+    #[test]
+    fn test_hash_pat_token_deterministic() {
+        let token = "ons_pat_abc123";
+        assert_eq!(hash_pat_token(token), hash_pat_token(token));
+        assert_ne!(hash_pat_token(token), hash_pat_token("ons_pat_abc124"));
+    }
+
+    #[test]
+    fn test_pat_prefix_short_token_doesnt_panic() {
+        let s = pat_prefix("abc");
+        assert_eq!(s, "abc");
+    }
+
+    #[test]
+    fn test_request_principal_helpers() {
+        assert!(!RequestPrincipal::Session.is_pat());
+        assert_eq!(RequestPrincipal::Session.pinned_tenant_id(), None);
+        let p = RequestPrincipal::Pat {
+            pat_id: "p1".into(),
+            tenant_id: Some("t1".into()),
+        };
+        assert!(p.is_pat());
+        assert_eq!(p.pinned_tenant_id(), Some("t1"));
+        let p2 = RequestPrincipal::Pat {
+            pat_id: "p2".into(),
+            tenant_id: None,
+        };
+        assert!(p2.is_pat());
+        assert_eq!(p2.pinned_tenant_id(), None);
     }
 }

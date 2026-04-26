@@ -70,6 +70,30 @@ export interface Credential {
   updated_at: string;
 }
 
+// Personal Access Tokens (issue #143). The full token value is only ever
+// returned by `createPat`; subsequent `listPats` calls expose prefix +
+// metadata only. `tenant_id` pins the PAT to a workspace; `null` means
+// "all workspaces the user belongs to".
+export interface Pat {
+  id: string;
+  name: string;
+  tenant_id: string | null;
+  token_prefix: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  last_used_ip: string | null;
+  last_used_user_agent: string | null;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+export interface CreatePatResponse {
+  pat: Pat;
+  /// Returned exactly once on creation. After this response, the only way
+  /// to recover access is to mint a new token.
+  token: string;
+}
+
 // Workspace (tenant) / membership / GitHub App installation / project
 // types, issue #59 (Phase 0).
 export interface Workspace {
@@ -524,9 +548,27 @@ export const api = {
     }),
   getHealth: () => request<{ status: string; version: string }>('/health'),
   // Auth
-  getMe: () => request<{ user: User; auth_enabled: boolean }>('/auth/me'),
+  getMe: () =>
+    request<{ user: User; auth_enabled: boolean; via?: 'session' | 'pat' }>(
+      '/auth/me',
+    ),
   logout: () =>
     request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+  // Personal Access Tokens (issue #143)
+  listPats: () => request<{ pats: Pat[] }>('/pats'),
+  createPat: (body: {
+    name: string;
+    tenant_id?: string | null;
+    expires_at: string | null;
+  }) =>
+    request<CreatePatResponse>('/pats', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  revokePat: (id: string) =>
+    request<{ ok: boolean }>(`/pats/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
   // Credentials
   getCredentials: () =>
     request<{ credentials: Credential[] }>('/credentials'),
