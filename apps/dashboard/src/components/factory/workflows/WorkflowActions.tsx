@@ -23,9 +23,12 @@ import {
 // webhook and a label side effect, not a typo.
 export interface WorkflowActionsProps {
   workflow: Workflow
+  // Icon-only rendering for the mobile header slot. Falls back to
+  // labeled buttons in the page-level desktop block.
+  compact?: boolean
 }
 
-export function WorkflowActions({ workflow }: WorkflowActionsProps) {
+export function WorkflowActions({ workflow, compact = false }: WorkflowActionsProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [confirming, setConfirming] = useState(false)
@@ -49,42 +52,50 @@ export function WorkflowActions({ workflow }: WorkflowActionsProps) {
     },
   })
 
+  const toggleLabel = isActive
+    ? "Pause"
+    : workflow.status === "draft"
+      ? "Publish"
+      : "Resume"
+  const ToggleIcon = isActive ? Pause : Play
+
   return (
     <div
-      className="flex flex-wrap items-center gap-2"
+      className={
+        compact
+          ? "flex items-center gap-1"
+          : "flex flex-wrap items-center gap-2"
+      }
       data-testid="workflow-actions"
     >
       <Button
         type="button"
-        variant={isActive ? "outline" : "default"}
-        size="sm"
+        variant={compact ? "ghost" : isActive ? "outline" : "default"}
+        size={compact ? "icon" : "sm"}
+        className={compact ? "h-9 w-9" : undefined}
         disabled={toggle.isPending}
         onClick={() => toggle.mutate(!isActive)}
+        aria-label={compact ? toggleLabel : undefined}
+        title={compact ? toggleLabel : undefined}
       >
-        {isActive ? (
-          <>
-            <Pause className="h-4 w-4" />
-            Pause
-          </>
-        ) : (
-          <>
-            <Play className="h-4 w-4" />
-            {workflow.status === "draft" ? "Publish" : "Resume"}
-          </>
-        )}
+        <ToggleIcon className="h-4 w-4" />
+        {!compact && toggleLabel}
       </Button>
 
       <Button
         type="button"
-        variant="outline"
-        size="sm"
+        variant={compact ? "ghost" : "outline"}
+        size={compact ? "icon" : "sm"}
+        className={compact ? "h-9 w-9" : undefined}
         onClick={() => setConfirming(true)}
+        aria-label={compact ? "Delete" : undefined}
+        title={compact ? "Delete" : undefined}
       >
         <Trash2 className="h-4 w-4" />
-        Delete
+        {!compact && "Delete"}
       </Button>
 
-      {toggle.isError && (
+      {!compact && toggle.isError && (
         <p className="w-full text-xs text-destructive">
           {toggle.error instanceof Error
             ? toggle.error.message

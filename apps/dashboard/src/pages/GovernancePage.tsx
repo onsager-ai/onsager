@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 const TYPE_LABELS: Record<string, string> = {
   tool_call_error: "Tool Error",
@@ -35,6 +36,7 @@ const SEVERITY_VARIANT: Record<string, "destructive" | "default" | "secondary" |
 const EVENT_TYPES = ["", "tool_call_error", "hallucination", "compliance_violation", "misalignment"]
 
 export function GovernancePage() {
+  usePageHeader({ title: "Governance" })
   const [filter, setFilter] = useState("")
   const queryClient = useQueryClient()
 
@@ -88,7 +90,7 @@ export function GovernancePage() {
     <div className="space-y-4 md:space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight md:text-2xl">Governance</h1>
+          <h1 className="hidden text-2xl font-bold tracking-tight md:block">Governance</h1>
           <p className="text-sm text-muted-foreground">
             AI agent governance events and rules.
           </p>

@@ -26,6 +26,7 @@ import {
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import type { SessionSpend, SpineArtifact, SpineEvent } from "@/lib/api"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -90,6 +91,7 @@ function PipelineStats({ artifacts }: { artifacts: SpineArtifact[] }) {
 }
 
 export function FactoryOverviewPage() {
+  usePageHeader({ title: "Factory" })
   // Gate every poll on resolved auth state so we don't flood the
   // browser console / network tab with 401s before login. Every query
   // on this page hits an auth-required endpoint (artifacts, governance
@@ -179,7 +181,7 @@ export function FactoryOverviewPage() {
   return (
     <div className="space-y-4 md:space-y-6">
       <div>
-        <h1 className="text-xl font-bold tracking-tight md:text-2xl">Factory</h1>
+        <h1 className="hidden text-2xl font-bold tracking-tight md:block">Factory</h1>
         <p className="text-sm text-muted-foreground">
           Production pipeline overview — artifacts, events, and factory health.
         </p>

@@ -14,6 +14,7 @@ import {
 import { ChevronRight, Plus } from "lucide-react"
 import { Link } from "react-router-dom"
 import { CreateArtifactSheet } from "@/components/factory/CreateArtifactSheet"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -24,6 +25,7 @@ const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "o
 }
 
 export function ArtifactsPage() {
+  usePageHeader({ title: "Artifacts" })
   const { data, isLoading } = useQuery({
     queryKey: ["artifacts"],
     queryFn: api.getArtifacts,
@@ -36,7 +38,7 @@ export function ArtifactsPage() {
     <div className="space-y-4 md:space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight md:text-2xl">Artifacts</h1>
+          <h1 className="hidden text-2xl font-bold tracking-tight md:block">Artifacts</h1>
           <p className="text-sm text-muted-foreground">
             Production artifacts managed by Forge.
           </p>

@@ -8,8 +8,10 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { WorkflowBuilderSheet } from "@/components/factory/workflows/WorkflowBuilderSheet"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 export function WorkflowsPage() {
+  usePageHeader({ title: "Workflows" })
   const { user, authEnabled } = useAuth()
   const authed = authEnabled ? !!user : true
   const [creating, setCreating] = useState(false)
@@ -25,7 +27,7 @@ export function WorkflowsPage() {
     <div className="space-y-4 md:space-y-6">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h1 className="text-xl font-bold tracking-tight md:text-2xl">Workflows</h1>
+          <h1 className="hidden text-2xl font-bold tracking-tight md:block">Workflows</h1>
           <p className="text-sm text-muted-foreground">
             Triggers that drive artifacts through stages. Tap a workflow to view.
           </p>

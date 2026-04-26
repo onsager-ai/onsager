@@ -1,5 +1,6 @@
 import { Building2, Factory, GitBranch, Server, Terminal, Settings, Shield, Package, Activity } from "lucide-react"
 import { OnsagerLogo } from "./OnsagerLogo"
+import { UserMenu } from "./UserMenu"
 import { Link, useLocation } from "react-router-dom"
 import {
   Sidebar,
@@ -134,8 +135,9 @@ export function AppSidebar() {
         })}
         <SetupChecklist progress={setupProgress} />
       </SidebarContent>
-      <SidebarFooter className="border-t p-4">
-        <span className="text-xs text-muted-foreground">v0.1.0</span>
+      <SidebarFooter className="gap-1 border-t p-2">
+        <UserMenu variant="row" />
+        <span className="px-2 text-xs text-muted-foreground">v0.1.0</span>
       </SidebarFooter>
     </Sidebar>
   )

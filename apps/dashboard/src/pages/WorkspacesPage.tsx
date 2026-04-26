@@ -10,12 +10,14 @@ import { Plus } from "lucide-react"
 import { WorkspaceCard } from "@/components/workspaces/WorkspaceCard"
 import { WorkspaceOnboarding } from "@/components/workspaces/WorkspaceOnboarding"
 import { NewWorkspaceDialog } from "@/components/workspaces/NewWorkspaceDialog"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 /**
  * Top-level Workspaces page. Owns the list, the create flow, and the
  * first-run onboarding hero. Replaces the former Settings → Workspaces card.
  */
 export function WorkspacesPage() {
+  usePageHeader({ title: "Workspaces" })
   const { user, authEnabled } = useAuth()
   const canLoadWorkspaces = Boolean(authEnabled && user)
   const { data, isLoading } = useQuery({
@@ -42,7 +44,7 @@ export function WorkspacesPage() {
     <div className="space-y-4 md:space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold tracking-tight md:text-2xl">
+          <h1 className="hidden text-2xl font-bold tracking-tight md:block">
             Workspaces
           </h1>
           <p className="max-w-prose text-sm text-muted-foreground">

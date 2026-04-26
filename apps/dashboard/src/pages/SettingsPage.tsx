@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ArrowRight, Building2, Trash2, Plus, KeyRound, User } from "lucide-react"
+import { usePageHeader } from "@/components/layout/PageHeader"
 
 const KNOWN_CREDENTIALS = [
   {
@@ -20,6 +21,7 @@ const KNOWN_CREDENTIALS = [
 ]
 
 export function SettingsPage() {
+  usePageHeader({ title: "Settings" })
   const { user, authEnabled } = useAuth()
   const queryClient = useQueryClient()
   const [newCredName, setNewCredName] = useState("")
@@ -63,7 +65,7 @@ export function SettingsPage() {
   return (
     <div className="space-y-4 md:space-y-6">
       <div>
-        <h1 className="text-xl font-bold tracking-tight md:text-2xl">Settings</h1>
+        <h1 className="hidden text-2xl font-bold tracking-tight md:block">Settings</h1>
         <p className="text-sm text-muted-foreground">
           Manage your profile and credentials.
         </p>
