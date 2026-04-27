@@ -192,7 +192,7 @@ pub struct ArtifactVersion {
 }
 
 /// URI + optional checksum pointing to external content storage.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContentRef {
     /// URI to the content (git ref, S3 key, Notion page, etc.).
     pub uri: String,
