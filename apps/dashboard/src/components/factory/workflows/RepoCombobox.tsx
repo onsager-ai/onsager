@@ -44,11 +44,15 @@ export function RepoCombobox({
 }: RepoComboboxProps) {
   const [open, setOpen] = useState(false)
 
+  // Gate the fan-out on the popover being open: workspaces with many
+  // installs would otherwise issue N parallel requests on every render
+  // of the trigger sheet, even before the user touches the picker.
+  // staleTime keeps subsequent opens snappy via the React Query cache.
   const queries = useQueries({
     queries: installations.map((inst) => ({
       queryKey: ["installation-repos", tenantId, inst.id],
       queryFn: () => api.listInstallationRepos(tenantId, inst.id),
-      enabled: !!tenantId,
+      enabled: !!tenantId && open,
       staleTime: 30_000,
       retry: false,
     })),
@@ -65,7 +69,11 @@ export function RepoCombobox({
 
   const totalRepos = grouped.reduce((sum, g) => sum + g.repos.length, 0)
   const isLoading = queries.some((q) => q.isLoading)
-  const isError = queries.length > 0 && queries.every((q) => q.isError)
+  // Partial-failure aware: surface a banner when *any* install errored,
+  // but still render the groups that came back successfully so a single
+  // bad install doesn't hide the rest.
+  const hasError = queries.some((q) => q.isError)
+  const allErrored = queries.length > 0 && queries.every((q) => q.isError)
 
   const selectedLabel =
     repoOwner && repoName ? `${repoOwner}/${repoName}` : null
@@ -132,14 +140,21 @@ export function RepoCombobox({
                 Loading repositories…
               </div>
             )}
-            {!isLoading && isError && (
+            {!isLoading && allErrored && (
               <div className="px-3 py-6 text-center text-sm text-destructive">
                 Couldn&apos;t load repositories. Check the GitHub install.
               </div>
             )}
-            {!isLoading && !isError && totalRepos === 0 && (
+            {!isLoading && hasError && !allErrored && (
+              <div className="px-3 py-2 text-xs text-destructive">
+                Couldn&apos;t load some installs — list may be incomplete.
+              </div>
+            )}
+            {!isLoading && !allErrored && (
               <CommandEmpty>
-                No repositories accessible to this install.
+                {totalRepos === 0
+                  ? "No repositories accessible to this install."
+                  : "No matching repositories."}
               </CommandEmpty>
             )}
             {grouped.map(({ install, repos }) =>
