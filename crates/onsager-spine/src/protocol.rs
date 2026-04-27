@@ -120,7 +120,7 @@ pub struct GateContext {
 }
 
 /// The action Forge proposes and Synodic evaluates.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProposedAction {
     /// Human-readable description.
     pub description: String,
@@ -136,7 +136,7 @@ pub struct GateRequest {
 }
 
 /// Escalation context — returned when Synodic cannot decide autonomously.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EscalationContext {
     pub escalation_id: String,
     pub reason: String,
@@ -149,7 +149,7 @@ pub struct EscalationContext {
 /// Gate verdict from Synodic to Forge (forge-v0.1 §6.2).
 ///
 /// Forge honors this unconditionally. There is no override mechanism.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "verdict", rename_all = "snake_case")]
 pub enum GateVerdict {
     Allow,
