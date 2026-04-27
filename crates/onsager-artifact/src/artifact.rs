@@ -100,6 +100,7 @@ pub enum Kind {
     Code,
     Document,
     PullRequest,
+    GithubIssue,
     /// User-defined kind not in the built-in set.
     Custom(String),
 }
@@ -110,6 +111,7 @@ impl fmt::Display for Kind {
             Kind::Code => write!(f, "code"),
             Kind::Document => write!(f, "document"),
             Kind::PullRequest => write!(f, "pull_request"),
+            Kind::GithubIssue => write!(f, "github_issue"),
             Kind::Custom(s) => write!(f, "{s}"),
         }
     }

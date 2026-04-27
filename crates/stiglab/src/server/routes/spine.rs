@@ -39,13 +39,23 @@ pub struct SpineEvent {
 pub struct SpineArtifact {
     pub id: String,
     pub kind: String,
-    pub name: String,
+    /// Provider-authored title for the artifact. NULL for reference-only
+    /// external-source artifacts (#170) — clients hydrate via the
+    /// `/api/projects/:id/{issues,pulls}` proxy.
+    pub name: Option<String>,
     pub state: String,
-    pub owner: String,
+    /// Provider-authored author/login. Same NULL convention as `name`.
+    pub owner: Option<String>,
     pub current_version: i32,
     pub consumers: serde_json::Value,
+    /// External-system handle (e.g. `github:project:abc:issue:42`) used to
+    /// join skeleton rows with live proxy responses.
+    pub external_ref: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Last webhook touch — used to render "last seen N min ago" placeholders
+    /// when the proxy is rate-limited (#170 fail-open).
+    pub last_observed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -179,8 +189,25 @@ pub async fn list_events(
     }
 }
 
+/// Filters for `GET /api/spine/artifacts`. All optional.
+#[derive(Debug, Deserialize)]
+pub struct ListArtifactsQuery {
+    /// Filter by `kind` discriminator (e.g. `pull_request`, `github_issue`).
+    pub kind: Option<String>,
+    /// Filter by `metadata->>'project_id'`. Used by the dashboard `/issues`
+    /// inbox to scope to the workspace's project.
+    pub project_id: Option<String>,
+}
+
 /// GET /api/spine/artifacts — list artifacts from the spine.
-pub async fn list_artifacts(State(state): State<AppState>) -> impl IntoResponse {
+///
+/// Supports `?kind=` and `?project_id=` filters so the dashboard's per-page
+/// queries (Factory PRs, Issues inbox) can target a single discriminated
+/// slice without scanning the whole table client-side.
+pub async fn list_artifacts(
+    State(state): State<AppState>,
+    Query(filters): Query<ListArtifactsQuery>,
+) -> impl IntoResponse {
     let spine = match &state.spine {
         Some(s) => s,
         None => {
@@ -194,12 +221,47 @@ pub async fn list_artifacts(State(state): State<AppState>) -> impl IntoResponse 
 
     let pool = spine.pool();
 
-    let result = sqlx::query_as::<_, SpineArtifact>(
-        "SELECT artifact_id AS id, kind, name, state, owner, current_version, consumers, created_at, updated_at \
-         FROM artifacts ORDER BY updated_at DESC LIMIT 100",
-    )
-    .fetch_all(pool)
-    .await;
+    // Build the query with optional WHERE clauses. sqlx::Postgres binds use
+    // `$N` positional placeholders; we keep this simple by branching on the
+    // (kind, project_id) combinations rather than building a string.
+    let base = "SELECT artifact_id AS id, kind, name, state, owner, current_version, \
+                consumers, external_ref, created_at, updated_at, last_observed_at \
+                FROM artifacts";
+    let result = match (filters.kind.as_deref(), filters.project_id.as_deref()) {
+        (Some(kind), Some(project_id)) => {
+            sqlx::query_as::<_, SpineArtifact>(&format!(
+                "{base} WHERE kind = $1 AND metadata->>'project_id' = $2 \
+                 ORDER BY updated_at DESC LIMIT 100"
+            ))
+            .bind(kind)
+            .bind(project_id)
+            .fetch_all(pool)
+            .await
+        }
+        (Some(kind), None) => {
+            sqlx::query_as::<_, SpineArtifact>(&format!(
+                "{base} WHERE kind = $1 ORDER BY updated_at DESC LIMIT 100"
+            ))
+            .bind(kind)
+            .fetch_all(pool)
+            .await
+        }
+        (None, Some(project_id)) => {
+            sqlx::query_as::<_, SpineArtifact>(&format!(
+                "{base} WHERE metadata->>'project_id' = $1 ORDER BY updated_at DESC LIMIT 100"
+            ))
+            .bind(project_id)
+            .fetch_all(pool)
+            .await
+        }
+        (None, None) => {
+            sqlx::query_as::<_, SpineArtifact>(&format!(
+                "{base} ORDER BY updated_at DESC LIMIT 100"
+            ))
+            .fetch_all(pool)
+            .await
+        }
+    };
 
     match result {
         Ok(artifacts) => Json(serde_json::json!({ "artifacts": artifacts })).into_response(),
@@ -273,7 +335,8 @@ pub async fn register_artifact(
 
             // Query back the inserted artifact.
             let artifact = sqlx::query_as::<_, SpineArtifact>(
-                "SELECT artifact_id AS id, kind, name, state, owner, current_version, consumers, created_at, updated_at \
+                "SELECT artifact_id AS id, kind, name, state, owner, current_version, consumers, \
+                 external_ref, created_at, updated_at, last_observed_at \
                  FROM artifacts WHERE artifact_id = $1",
             )
             .bind(&artifact_id)
@@ -326,7 +389,8 @@ pub async fn get_artifact(
     let pool = spine.pool();
 
     let artifact = sqlx::query_as::<_, SpineArtifact>(
-        "SELECT artifact_id AS id, kind, name, state, owner, current_version, consumers, created_at, updated_at \
+        "SELECT artifact_id AS id, kind, name, state, owner, current_version, consumers, \
+         external_ref, created_at, updated_at, last_observed_at \
          FROM artifacts WHERE artifact_id = $1",
     )
     .bind(&id)

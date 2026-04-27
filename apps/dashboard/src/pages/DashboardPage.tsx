@@ -16,7 +16,7 @@ export function DashboardPage() {
   })
   const { data: artifactsData } = useQuery({
     queryKey: ["artifacts"],
-    queryFn: api.getArtifacts,
+    queryFn: () => api.getArtifacts(),
     refetchInterval: 10000,
   })
 

@@ -82,10 +82,14 @@ pub async fn handle(
         .get("number")
         .and_then(|n| n.as_u64())
         .ok_or_else(|| anyhow::anyhow!("missing pr.number"))?;
-    let title = pr
+    // PR title is fetched live by the proxy; the message field on
+    // `GitCommitPushed` keeps a synchronize-time snapshot purely for the
+    // spine event payload (events are immutable historical facts, not a
+    // denormalization of current state — the artifact row stays clean).
+    let sync_message = pr
         .get("title")
         .and_then(|t| t.as_str())
-        .unwrap_or("(untitled)")
+        .unwrap_or("")
         .to_string();
     let url = pr
         .get("html_url")
@@ -115,12 +119,6 @@ pub async fn handle(
         .and_then(|s| s.as_str())
         .unwrap_or("")
         .to_string();
-    let owner_login = pr
-        .get("user")
-        .and_then(|u| u.get("login"))
-        .and_then(|l| l.as_str())
-        .unwrap_or("unknown")
-        .to_string();
 
     let next_state = match (act, merged) {
         (PrAction::Opened, _) => PrLifecycleState::InProgress,
@@ -129,21 +127,20 @@ pub async fn handle(
         (PrAction::Closed, false) => PrLifecycleState::Archived,
     };
 
-    let artifact = db::upsert_pr_artifact(
-        &state.pool,
-        &project.id,
-        pr_number,
-        &title,
-        &owner_login,
-        next_state,
-    )
-    .await?;
+    // Reference-only upsert (#171): no `name` / `owner` writes — the proxy
+    // hydrates those from GitHub on dashboard render.
+    let artifact =
+        db::upsert_pr_artifact_ref(&state.pool, &project.id, pr_number, next_state).await?;
 
     // Bump version on synchronize / close so the artifact's lifecycle reflects
-    // commit-by-commit progress.
+    // commit-by-commit progress (powers ising's PR-churn signal per #62).
     if matches!(act, PrAction::Synchronize | PrAction::Closed) {
         let _ = db::bump_pr_artifact(&state.pool, &artifact.artifact_id, Some(next_state)).await?;
     }
+
+    // The dashboard-facing live-hydration cache lives in stiglab; staleness
+    // there is bounded by its TTL window. Portal does not need to push
+    // invalidations cross-process.
 
     // Emit the matching spine event under namespace `git`.
     let stream_id = pr_stream_id(&project.id, pr_number);
@@ -157,7 +154,7 @@ pub async fn handle(
         PrAction::Synchronize => FactoryEventKind::GitCommitPushed {
             artifact_id: ArtifactId::new(artifact.artifact_id.clone()),
             sha: head_sha.clone(),
-            message: title.clone(),
+            message: sync_message.clone(),
             session_id: String::new(),
         },
         PrAction::Closed if merged => FactoryEventKind::GitPrMerged {

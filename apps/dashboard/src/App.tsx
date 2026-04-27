@@ -18,6 +18,9 @@ const FactoryOverviewPage = lazy(() =>
 const ArtifactsPage = lazy(() =>
   import("@/pages/ArtifactsPage").then((m) => ({ default: m.ArtifactsPage })),
 )
+const IssuesPage = lazy(() =>
+  import("@/pages/IssuesPage").then((m) => ({ default: m.IssuesPage })),
+)
 const ArtifactDetailPage = lazy(() =>
   import("@/pages/ArtifactDetailPage").then((m) => ({ default: m.ArtifactDetailPage })),
 )
@@ -239,6 +242,10 @@ function AppRoutes() {
                     <Route
                       path="/artifacts/:id"
                       element={<LazyRoute variant="detail"><ArtifactDetailPage /></LazyRoute>}
+                    />
+                    <Route
+                      path="/issues"
+                      element={<LazyRoute variant="list"><IssuesPage /></LazyRoute>}
                     />
                     <Route
                       path="/spine"

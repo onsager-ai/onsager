@@ -1,21 +1,22 @@
 //! `issues` event handler.
 //!
-//! Two responsibilities in v1:
-//! - `opened` / `labeled` carrying the `spec` label → materialize a `queued`
-//!   factory task row + emit a portal-namespaced spine event.
-//! - On the linked spec issue, mirror PR open/merge to add/remove the
-//!   `in-progress` label (Phase 2 migration of `.github/workflows/pr-spec-sync.yml`)
-//!   — that path is owned by `pull_request.rs`; this file only handles the
-//!   issues side of materialization.
+//! Per spec #167 / #170, every `issues.opened` materializes a *reference-only*
+//! `Kind::GithubIssue` skeleton artifact — no body, no labels, no title, no
+//! author copied to the spine. Provider-authored fields are served live by
+//! the `/api/projects/:id/issues` proxy in `handlers::api`. Lifecycle moves
+//! (`closed` / `reopened`) flip the skeleton's `state`; everything else
+//! (`edited`, `labeled`, `unlabeled`, `assigned`, …) bumps `current_version`
+//! and refreshes `last_observed_at` so ising sees activity deltas without
+//! the spine carrying the actual change.
+//!
+//! Cache invalidation: every webhook touch evicts the project's proxy
+//! entries so the next dashboard fetch reflects the change before TTL.
 
 use onsager_spine::EventMetadata;
 use serde_json::Value;
 
-use crate::db::{self, InstallationRecord};
+use crate::db::{self, InstallationRecord, IssueLifecycleState};
 use crate::state::AppState;
-
-/// Label whose presence on an issue triggers task materialization.
-pub const SPEC_LABEL: &str = "spec";
 
 pub async fn handle(
     state: &AppState,
@@ -27,9 +28,16 @@ pub async fn handle(
         .and_then(|v| v.as_str())
         .unwrap_or_default();
 
-    if action != "opened" && action != "labeled" {
-        return Ok(serde_json::json!({"action": action, "ignored": true}));
-    }
+    // Actions we react to: `opened` / `reopened` create or revive the
+    // skeleton; `closed` archives it; the rest bump `current_version`.
+    // Forward-compat: unknown actions ack quietly.
+    let category = match action {
+        "opened" | "reopened" => IssueAction::Open,
+        "closed" => IssueAction::Close,
+        "edited" | "labeled" | "unlabeled" | "assigned" | "unassigned" | "milestoned"
+        | "demilestoned" | "pinned" | "unpinned" => IssueAction::Touch,
+        _ => return Ok(serde_json::json!({"action": action, "ignored": true})),
+    };
 
     let repo = payload
         .get("repository")
@@ -54,35 +62,6 @@ pub async fn handle(
         return Ok(serde_json::json!({"action": action, "ignored": "is_pr"}));
     }
 
-    let labels: Vec<String> = issue
-        .get("labels")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|l| l.get("name").and_then(|n| n.as_str()).map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default();
-    let has_spec = labels.iter().any(|l| l == SPEC_LABEL);
-
-    // For `labeled`, only materialize if the *added* label is `spec`. This
-    // keeps materialization a single-shot transition rather than a no-op
-    // every time someone touches labels on a spec issue.
-    if action == "labeled" {
-        let added = payload
-            .get("label")
-            .and_then(|l| l.get("name"))
-            .and_then(|n| n.as_str())
-            .unwrap_or_default();
-        if added != SPEC_LABEL {
-            return Ok(serde_json::json!({"action": action, "ignored": "not-spec-label"}));
-        }
-    }
-
-    if !has_spec {
-        return Ok(serde_json::json!({"action": action, "ignored": "no-spec-label"}));
-    }
-
     let project =
         match db::find_project_for_repo(&state.pool, &installation.id, owner, name).await? {
             Some(p) => p,
@@ -93,35 +72,41 @@ pub async fn handle(
         .get("number")
         .and_then(|n| n.as_u64())
         .ok_or_else(|| anyhow::anyhow!("missing issue.number"))?;
-    let title = issue
-        .get("title")
-        .and_then(|t| t.as_str())
-        .unwrap_or("(untitled)")
-        .to_string();
-    let body = issue
-        .get("body")
-        .and_then(|b| b.as_str())
-        .map(str::to_owned);
+    let github_state = issue
+        .get("state")
+        .and_then(|s| s.as_str())
+        .unwrap_or("open");
 
-    let source_ref = format!("github:{owner}/{name}:issue#{issue_number}");
-    let task = db::upsert_factory_task(
-        &state.pool,
-        &project.id,
-        "spec_issue",
-        &source_ref,
-        &title,
-        body.as_deref(),
-    )
-    .await?;
+    // Skeleton upsert. Open → draft, closed → archived. The proxy hydrates
+    // title / labels / assignees on demand.
+    let lifecycle = match category {
+        IssueAction::Close => IssueLifecycleState::Archived,
+        IssueAction::Open => IssueLifecycleState::Draft,
+        IssueAction::Touch => IssueLifecycleState::from_github(github_state),
+    };
+    let artifact =
+        db::upsert_issue_artifact_ref(&state.pool, &project.id, issue_number, lifecycle).await?;
 
-    // Emit a `portal.task_materialized` extension event so the dashboard /
-    // ising can react. Stays under the `portal` namespace because it's a
-    // backlog-state mutation, not a git event.
+    // For `Touch`, additionally bump `current_version` so ising sees an
+    // activity delta. `upsert_issue_artifact_ref` already touches the
+    // `last_observed_at` timestamp on every call.
+    if matches!(category, IssueAction::Touch) {
+        let _ = db::touch_artifact(&state.pool, &artifact.artifact_id).await?;
+    }
+
+    // The dashboard-facing live-hydration cache lives in stiglab; staleness
+    // there is bounded by its TTL window (default 60s). Portal does not
+    // need to push invalidations cross-process — TTL-bounded drift is
+    // strictly better than denormalized writes (#170 design).
+
+    // Emit a `portal.task_materialized` extension event so dashboard / ising
+    // consumers see a uniform stream. The event name stays for back-compat
+    // with #60 — only the payload reflects the new reference-only shape.
     let metadata = EventMetadata {
         actor: "onsager-portal".into(),
         ..Default::default()
     };
-    let stream_id = format!("portal:task:{}", task.id);
+    let stream_id = format!("portal:issue:{}", artifact.artifact_id);
     state
         .spine
         .append_ext(
@@ -129,11 +114,15 @@ pub async fn handle(
             "portal",
             "portal.task_materialized",
             serde_json::json!({
-                "task_id": task.id,
+                "artifact_id": artifact.artifact_id,
                 "project_id": project.id,
-                "source": task.source,
-                "source_ref": task.source_ref,
-                "title": task.title,
+                "external_ref": db::issue_external_ref(&project.id, issue_number),
+                "issue_number": issue_number,
+                "lifecycle": match lifecycle {
+                    IssueLifecycleState::Draft => "draft",
+                    IssueLifecycleState::Archived => "archived",
+                },
+                "action": action,
             }),
             &metadata,
             None,
@@ -141,8 +130,19 @@ pub async fn handle(
         .await?;
 
     Ok(serde_json::json!({
-        "task_id": task.id,
+        "artifact_id": artifact.artifact_id,
         "project_id": project.id,
-        "source_ref": task.source_ref,
+        "issue_number": issue_number,
+        "lifecycle": match lifecycle {
+            IssueLifecycleState::Draft => "draft",
+            IssueLifecycleState::Archived => "archived",
+        },
     }))
+}
+
+#[derive(Debug, Clone, Copy)]
+enum IssueAction {
+    Open,
+    Close,
+    Touch,
 }

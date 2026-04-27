@@ -10,7 +10,6 @@
 //! projects, sessions, artifacts, vertical_lineage) are created by stiglab
 //! and onsager-spine; the portal is a read-or-append-only consumer.
 
-use chrono::{DateTime, Utc};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 
 /// Open a fresh connection pool against `database_url`. Caller is responsible
@@ -130,6 +129,15 @@ pub struct PrArtifactRow {
     pub current_version: i32,
 }
 
+/// Issue artifact lookup result. Same shape as `PrArtifactRow` but typed
+/// separately so callers can't accidentally cross-write — issues live under
+/// `Kind::GithubIssue`, PRs under `Kind::PullRequest`.
+#[derive(Debug, Clone)]
+pub struct IssueArtifactRow {
+    pub artifact_id: String,
+    pub current_version: i32,
+}
+
 /// Look up the artifact previously upserted for `(project_id, pr_number)`.
 /// Returns `None` for the very first webhook event on a PR.
 pub async fn find_pr_artifact(
@@ -150,21 +158,25 @@ pub async fn find_pr_artifact(
     }))
 }
 
-/// Insert (or fetch) the canonical PR artifact for `(project_id, pr_number)`.
-/// First-write wins; subsequent calls return the existing row. Idempotency is
-/// anchored on `external_ref` (the spine's `artifacts.external_ref` is not
-/// `UNIQUE` workspace-wide, so we serialize concurrent upserts through a
-/// transaction-scoped advisory lock keyed by the ref).
+/// Upsert the canonical reference-only PR artifact for `(project_id, pr_number)`.
 ///
-/// On a hit we also refresh `name` / `owner` / `state` so the artifact row
-/// reflects the latest webhook payload — otherwise a PR retitle or author
-/// change never propagates to the dashboard.
-pub async fn upsert_pr_artifact(
+/// Per spec #170/#171, the spine never copies GitHub-authored fields. The
+/// row carries identity (`external_ref`, `kind`, `metadata.pr_number`) and
+/// our derived `state` only — `name` / `owner` are written NULL and the
+/// dashboard hydrates them via the live `/api/projects/:id/pulls` proxy.
+///
+/// `last_observed_at` is stamped on every webhook touch so the dashboard
+/// can render "last seen N min ago" placeholders when the proxy is rate-
+/// limited (#170 fail-open decision).
+///
+/// Idempotency is anchored on `external_ref`. The spine's column is not
+/// `UNIQUE` workspace-wide (artifact_adapters across subsystems may share
+/// it legitimately), so concurrent upserts serialize through a transaction-
+/// scoped advisory lock keyed by the ref.
+pub async fn upsert_pr_artifact_ref(
     pool: &PgPool,
     project_id: &str,
     pr_number: u64,
-    name: &str,
-    owner: &str,
     state: PrLifecycleState,
 ) -> anyhow::Result<PrArtifactRow> {
     let external_ref = pr_external_ref(project_id, pr_number);
@@ -173,10 +185,6 @@ pub async fn upsert_pr_artifact(
 
     let mut tx = pool.begin().await?;
 
-    // Serialize upserts for the same external_ref. Needed because the spine
-    // schema does not enforce UNIQUE(external_ref) (artifact_adapters across
-    // subsystems may legitimately share the column), so we can't let the
-    // DB dedup for us via ON CONFLICT.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(&external_ref)
         .execute(&mut *tx)
@@ -184,13 +192,11 @@ pub async fn upsert_pr_artifact(
 
     let row: (String, i32) = if let Some(existing) = sqlx::query_as::<_, (String, i32)>(
         "UPDATE artifacts \
-            SET name = $2, owner = $3, state = $4 \
+            SET state = $2, last_observed_at = NOW() \
           WHERE external_ref = $1 \
       RETURNING artifact_id, current_version",
     )
     .bind(&external_ref)
-    .bind(name)
-    .bind(owner)
     .bind(artifact_state)
     .fetch_optional(&mut *tx)
     .await?
@@ -200,14 +206,12 @@ pub async fn upsert_pr_artifact(
         sqlx::query_as(
             "INSERT INTO artifacts \
                 (artifact_id, kind, name, owner, created_by, state, current_version, \
-                 external_ref, workspace_id, metadata) \
-             VALUES ($1, 'pull_request', $2, $3, 'onsager-portal', $4, 1, $5, $6, \
-                     jsonb_build_object('project_id', $6::text, 'pr_number', $7::bigint)) \
+                 external_ref, workspace_id, metadata, last_observed_at) \
+             VALUES ($1, 'pull_request', NULL, NULL, 'onsager-portal', $2, 1, $3, $4, \
+                     jsonb_build_object('project_id', $4::text, 'pr_number', $5::bigint), NOW()) \
              RETURNING artifact_id, current_version",
         )
         .bind(&new_id)
-        .bind(name)
-        .bind(owner)
         .bind(artifact_state)
         .bind(&external_ref)
         .bind(project_id)
@@ -222,6 +226,81 @@ pub async fn upsert_pr_artifact(
         artifact_id: row.0,
         current_version: row.1,
     })
+}
+
+/// Upsert a reference-only GitHub-issue artifact for `(project_id, issue_number)`.
+///
+/// Matches `upsert_pr_artifact_ref` in shape — identity + derived state, no
+/// provider-authored fields. State maps issue-open → `draft`, issue-closed
+/// → `archived`, mirroring the existing artifact-state CHECK enum without
+/// introducing new vocabulary.
+pub async fn upsert_issue_artifact_ref(
+    pool: &PgPool,
+    project_id: &str,
+    issue_number: u64,
+    state: IssueLifecycleState,
+) -> anyhow::Result<IssueArtifactRow> {
+    let external_ref = issue_external_ref(project_id, issue_number);
+    let new_id = format!("art_iss_{}", uuid::Uuid::new_v4().simple());
+    let artifact_state = state.as_artifact_state();
+
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(&external_ref)
+        .execute(&mut *tx)
+        .await?;
+
+    let row: (String, i32) = if let Some(existing) = sqlx::query_as::<_, (String, i32)>(
+        "UPDATE artifacts \
+            SET state = $2, last_observed_at = NOW() \
+          WHERE external_ref = $1 \
+      RETURNING artifact_id, current_version",
+    )
+    .bind(&external_ref)
+    .bind(artifact_state)
+    .fetch_optional(&mut *tx)
+    .await?
+    {
+        existing
+    } else {
+        sqlx::query_as(
+            "INSERT INTO artifacts \
+                (artifact_id, kind, name, owner, created_by, state, current_version, \
+                 external_ref, workspace_id, metadata, last_observed_at) \
+             VALUES ($1, 'github_issue', NULL, NULL, 'onsager-portal', $2, 1, $3, $4, \
+                     jsonb_build_object('project_id', $4::text, 'issue_number', $5::bigint), NOW()) \
+             RETURNING artifact_id, current_version",
+        )
+        .bind(&new_id)
+        .bind(artifact_state)
+        .bind(&external_ref)
+        .bind(project_id)
+        .bind(issue_number as i64)
+        .fetch_one(&mut *tx)
+        .await?
+    };
+
+    tx.commit().await?;
+
+    Ok(IssueArtifactRow {
+        artifact_id: row.0,
+        current_version: row.1,
+    })
+}
+
+/// Bump `current_version` and refresh `last_observed_at` without touching
+/// `state`. Used for issue edits / label changes — events that signal
+/// activity but don't move the open/closed lifecycle.
+pub async fn touch_artifact(pool: &PgPool, artifact_id: &str) -> anyhow::Result<i32> {
+    let row: (i32,) = sqlx::query_as(
+        "UPDATE artifacts SET current_version = current_version + 1, last_observed_at = NOW() \
+         WHERE artifact_id = $1 RETURNING current_version",
+    )
+    .bind(artifact_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.0)
 }
 
 /// Bump the artifact version and (optionally) transition its lifecycle state.
@@ -252,11 +331,16 @@ pub async fn bump_pr_artifact(
     Ok(row.0)
 }
 
-/// Stable external reference key. `project_id` plus `pr_number` is the
-/// (project, PR) identity, so the same PR number across two projects never
-/// collides.
+/// Stable external reference key for a PR. `project_id` plus `pr_number` is
+/// the (project, PR) identity, so the same PR number across two projects
+/// never collides.
 pub fn pr_external_ref(project_id: &str, pr_number: u64) -> String {
     format!("github:project:{project_id}:pr:{pr_number}")
+}
+
+/// Stable external reference key for a GitHub issue. Mirrors `pr_external_ref`.
+pub fn issue_external_ref(project_id: &str, issue_number: u64) -> String {
+    format!("github:project:{project_id}:issue:{issue_number}")
 }
 
 /// Subset of `ArtifactState` the portal cares about for PR rows.
@@ -279,69 +363,42 @@ impl PrLifecycleState {
     }
 }
 
-// ── Factory tasks (portal-owned) ──────────────────────────────────────────
-
-/// A factory task row materialized from a webhook event (or, eventually, a
-/// dashboard form). `state` follows a small lifecycle: `queued → spawned →
-/// closed`. v1 only ever creates `queued` rows.
-#[derive(Debug, Clone)]
-pub struct FactoryTask {
-    pub id: String,
-    pub project_id: String,
-    pub source: String,
-    pub source_ref: String,
-    pub title: String,
-    pub body: Option<String>,
-    pub state: String,
-    pub created_at: DateTime<Utc>,
+/// Subset of `ArtifactState` the portal cares about for issue rows. Maps
+/// GitHub issue state to the existing artifact-state CHECK enum without
+/// introducing new vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueLifecycleState {
+    /// Open issue.
+    Draft,
+    /// Closed issue (any reason).
+    Archived,
 }
 
-/// Insert a `queued` task row, idempotent on `(project_id, source_ref)`.
-/// Returns the row that survives (newly inserted or pre-existing).
-pub async fn upsert_factory_task(
-    pool: &PgPool,
-    project_id: &str,
-    source: &str,
-    source_ref: &str,
-    title: &str,
-    body: Option<&str>,
-) -> anyhow::Result<FactoryTask> {
-    let id = format!("ftk_{}", uuid::Uuid::new_v4().simple());
-    let now = Utc::now();
-    let row: (String, String, String, String, String, Option<String>, String, DateTime<Utc>) =
-        sqlx::query_as(
-            "WITH ins AS (
-                 INSERT INTO factory_tasks (id, project_id, source, source_ref, title, body, state, created_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7) \
-                 ON CONFLICT (project_id, source_ref) DO NOTHING \
-                 RETURNING id, project_id, source, source_ref, title, body, state, created_at \
-             ) \
-             SELECT id, project_id, source, source_ref, title, body, state, created_at FROM ins \
-             UNION ALL \
-             SELECT id, project_id, source, source_ref, title, body, state, created_at FROM factory_tasks \
-                 WHERE project_id = $2 AND source_ref = $4 AND NOT EXISTS (SELECT 1 FROM ins) \
-             LIMIT 1",
-        )
-        .bind(&id)
-        .bind(project_id)
-        .bind(source)
-        .bind(source_ref)
-        .bind(title)
-        .bind(body)
-        .bind(now)
-        .fetch_one(pool)
-        .await?;
-    Ok(FactoryTask {
-        id: row.0,
-        project_id: row.1,
-        source: row.2,
-        source_ref: row.3,
-        title: row.4,
-        body: row.5,
-        state: row.6,
-        created_at: row.7,
-    })
+impl IssueLifecycleState {
+    fn as_artifact_state(self) -> &'static str {
+        match self {
+            IssueLifecycleState::Draft => "draft",
+            IssueLifecycleState::Archived => "archived",
+        }
+    }
+
+    /// Map a GitHub `state` string (`"open"` / `"closed"`) to our enum.
+    pub fn from_github(state: &str) -> Self {
+        match state {
+            "closed" => Self::Archived,
+            _ => Self::Draft,
+        }
+    }
 }
+
+// ── Factory tasks (legacy) ────────────────────────────────────────────────
+//
+// The `factory_tasks` table from #60 is no longer written by any path —
+// reference-only artifact rows (`Kind::GithubIssue`) now serve the inbox
+// concept the table was created for. The migration in `migrate.rs` keeps
+// the table present so historical rows remain queryable; the writer
+// function was removed when the last caller (issues webhook + backfill)
+// switched to ref-only writes per #167.
 
 // ── Verdict dedup (Phase 2) ───────────────────────────────────────────────
 

@@ -5,6 +5,7 @@ pub mod health;
 pub mod nodes;
 pub mod pats;
 pub mod portal;
+pub mod projects;
 pub mod sessions;
 pub mod shaping;
 pub mod spine;
