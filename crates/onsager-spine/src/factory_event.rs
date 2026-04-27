@@ -212,6 +212,17 @@ pub enum FactoryEventKind {
         gate_id: String,
         artifact_id: ArtifactId,
         gate_point: GatePoint,
+        /// Full gate-evaluation payload — the same shape Synodic
+        /// previously consumed as the `POST /api/gate` request body.
+        /// `None` on events written before this field was added (spec
+        /// #131 / ADR 0004 Lever C phase 2). When `None`, Synodic's
+        /// listener cannot evaluate and must skip the request.
+        ///
+        /// Top-level `gate_id`, `artifact_id`, and `gate_point` are
+        /// kept for stream indexing and dashboard filtering; the
+        /// duplication with `request.context` is intentional.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<crate::protocol::GateRequest>,
     },
 
     /// GateVerdict received from Synodic.
@@ -283,6 +294,29 @@ pub enum FactoryEventKind {
         /// Optional for the same reasons as `branch`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pr_number: Option<u64>,
+    },
+
+    /// Full `ShapingResult` produced by a Stiglab session, ready for
+    /// Forge to act on. Replaces the legacy synchronous
+    /// `forge → stiglab POST /api/shaping` HTTP response per spec #131
+    /// / ADR 0004 Lever C.
+    ///
+    /// Emitted in addition to (not instead of) `stiglab.session_completed`:
+    /// the lifecycle event signals "this session finished" (used by the
+    /// dashboard and node telemetry); this event signals "the artifact
+    /// outputs are ready for the next pipeline stage" (used by Forge's
+    /// state machine to advance / seal). Stiglab emits it only for
+    /// sessions that were dispatched as shaping requests — direct task
+    /// POSTs that produce no `ShapingResult` skip it.
+    StiglabShapingResultReady {
+        /// Artifact this shaping was for. Hoisted so `stream_id()` can
+        /// route the event without parsing the embedded result.
+        artifact_id: ArtifactId,
+        /// Full result payload — the same shape Forge previously
+        /// consumed as the `POST /api/shaping` response body.
+        /// `request_id` inside this struct correlates back to the
+        /// originating `forge.shaping_dispatched`.
+        result: crate::protocol::ShapingResult,
     },
 
     /// A session terminated with an error.
@@ -688,6 +722,7 @@ impl FactoryEventKind {
             Self::StiglabSessionDispatched { .. } => "stiglab.session_dispatched",
             Self::StiglabSessionRunning { .. } => "stiglab.session_running",
             Self::StiglabSessionCompleted { .. } => "stiglab.session_completed",
+            Self::StiglabShapingResultReady { .. } => "stiglab.shaping_result_ready",
             Self::StiglabSessionFailed { .. } => "stiglab.session_failed",
             Self::StiglabSessionAborted { .. } => "stiglab.session_aborted",
             Self::StiglabEventUpgraded { .. } => "stiglab.event_upgraded",
@@ -766,6 +801,7 @@ impl FactoryEventKind {
             | Self::StiglabSessionDispatched { .. }
             | Self::StiglabSessionRunning { .. }
             | Self::StiglabSessionCompleted { .. }
+            | Self::StiglabShapingResultReady { .. }
             | Self::StiglabSessionFailed { .. }
             | Self::StiglabSessionAborted { .. }
             | Self::StiglabEventUpgraded { .. }
@@ -849,6 +885,7 @@ impl FactoryEventKind {
             | Self::StiglabSessionFailed { session_id, .. }
             | Self::StiglabSessionAborted { session_id, .. }
             | Self::StiglabEventUpgraded { session_id, .. } => session_id.clone(),
+            Self::StiglabShapingResultReady { artifact_id, .. } => artifact_id.to_string(),
             Self::StiglabNodeRegistered { node_id, .. }
             | Self::StiglabNodeDeregistered { node_id, .. }
             | Self::StiglabNodeHeartbeatMissed { node_id, .. } => node_id.clone(),

@@ -66,7 +66,7 @@ pub struct ShapingRequest {
 }
 
 /// Error detail attached to failed or aborted shaping results.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ErrorDetail {
     pub code: String,
     pub message: String,
@@ -75,7 +75,7 @@ pub struct ErrorDetail {
 }
 
 /// Shaping result from Stiglab back to Forge (forge-v0.1 §5.2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShapingResult {
     /// Echoed from the original request.
     pub request_id: String,
@@ -102,7 +102,7 @@ pub struct ShapingResult {
 // ===========================================================================
 
 /// Context for a gate evaluation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GateContext {
     /// Which gate point is being consulted.
     pub gate_point: GatePoint,
@@ -129,7 +129,7 @@ pub struct ProposedAction {
 }
 
 /// Gate request from Forge to Synodic (forge-v0.1 §6.2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GateRequest {
     pub context: GateContext,
     pub proposed_action: ProposedAction,
