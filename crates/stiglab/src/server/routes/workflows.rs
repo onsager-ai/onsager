@@ -11,7 +11,6 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::Utc;
 use serde::Deserialize;
-use sqlx::AnyPool;
 use uuid::Uuid;
 
 use crate::core::preset::{resolve_preset, PRESET_IDS};
@@ -56,21 +55,12 @@ async fn mirror_to_spine(state: &AppState, workflow_id: &str) {
     }
 }
 
-#[allow(clippy::result_large_err)]
-async fn require_workspace_member(
-    pool: &AnyPool,
-    user_id: &str,
-    workspace_id: &str,
-) -> Result<(), Response> {
-    match db::is_workspace_member(pool, workspace_id, user_id).await {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(not_found("workspace not found")),
-        Err(e) => {
-            tracing::error!("failed to check workspace membership: {e}");
-            Err(StatusCode::INTERNAL_SERVER_ERROR.into_response())
-        }
-    }
-}
+// Workspace membership + PAT scope is enforced via the shared
+// `super::require_workspace_access` helper in `routes/mod.rs`.  A local
+// "just check membership" version would skip the PAT scope check and let
+// a workspace-pinned PAT touch any workspace its user belongs to.
+
+use super::require_workspace_access;
 
 fn not_found(msg: &str) -> Response {
     (
@@ -265,7 +255,7 @@ pub async fn create_workflow(
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &user_id, &body.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &body.workspace_id).await {
         return r;
     }
 
@@ -351,7 +341,7 @@ pub async fn list_workflows(
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &user_id, &q.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &q.workspace_id).await {
         return r;
     }
     match workflow_db::list_workflows_for_workspace(&state.db, &q.workspace_id).await {
@@ -381,7 +371,7 @@ pub async fn get_workflow(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_workspace_member(&state.db, &user_id, &workflow.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workflow.workspace_id).await {
         return r;
     }
     let stages = match workflow_db::list_stages_for_workflow(&state.db, &workflow_id).await {
@@ -426,7 +416,7 @@ pub async fn list_workflow_runs(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_workspace_member(&state.db, &user_id, &workflow.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workflow.workspace_id).await {
         return r;
     }
     let stages = match workflow_db::list_stages_for_workflow(&state.db, &workflow_id).await {
@@ -581,7 +571,7 @@ pub async fn patch_workflow(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_workspace_member(&state.db, &user_id, &workflow.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workflow.workspace_id).await {
         return r;
     }
 
@@ -641,7 +631,7 @@ pub async fn delete_workflow(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_workspace_member(&state.db, &user_id, &workflow.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workflow.workspace_id).await {
         return r;
     }
 
