@@ -174,7 +174,7 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
         "CREATE TABLE IF NOT EXISTS user_pats (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
-            workspace_id TEXT,
+            workspace_id TEXT NOT NULL,
             name TEXT NOT NULL,
             token_prefix TEXT NOT NULL,
             token_hash TEXT NOT NULL,
@@ -1202,7 +1202,7 @@ pub async fn user_has_credential_in(
 pub struct UserPat {
     pub id: String,
     pub user_id: String,
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub name: String,
     pub token_prefix: String,
     pub expires_at: Option<chrono::DateTime<Utc>>,
@@ -1241,10 +1241,16 @@ impl TryFrom<UserPatRow> for UserPat {
     type Error = anyhow::Error;
 
     fn try_from(row: UserPatRow) -> anyhow::Result<Self> {
+        // Schema is NOT NULL post-#163; surfacing NULL here would mean an
+        // older DB that hasn't run the backfill — fail loudly rather than
+        // re-introduce the Option higher up the stack.
+        let workspace_id = row.workspace_id.ok_or_else(|| {
+            anyhow::anyhow!("user_pats.workspace_id is NULL; run migration backfill")
+        })?;
         Ok(UserPat {
             id: row.id,
             user_id: row.user_id,
-            workspace_id: row.workspace_id,
+            workspace_id,
             name: row.name,
             token_prefix: row.token_prefix,
             expires_at: parse_optional_ts(row.expires_at)?,
@@ -1265,7 +1271,7 @@ pub async fn insert_user_pat(
     pool: &AnyPool,
     id: &str,
     user_id: &str,
-    workspace_id: Option<&str>,
+    workspace_id: &str,
     name: &str,
     token_prefix: &str,
     token_hash: &str,

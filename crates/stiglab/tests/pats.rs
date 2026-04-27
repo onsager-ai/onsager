@@ -97,6 +97,10 @@ async fn seed_workspace_with_member(pool: &AnyPool, user_id: &str, slug: &str) -
 
 /// Mint a PAT directly via the DB layer, bypassing `POST /api/pats`. Used
 /// to set up auth state before exercising other endpoints.
+///
+/// PATs are workspace-scoped post-#163; when the caller doesn't already
+/// have a workspace in scope, pass `None` and `mint_pat` seeds a throwaway
+/// one for the user just so the row satisfies the NOT NULL constraint.
 async fn mint_pat(
     pool: &AnyPool,
     user_id: &str,
@@ -104,6 +108,20 @@ async fn mint_pat(
     name: &str,
     expires_at: Option<chrono::DateTime<Utc>>,
 ) -> (String, String) {
+    let synthetic_ws;
+    let workspace_id: &str = match workspace_id {
+        Some(w) => w,
+        None => {
+            let ws = seed_workspace_with_member(
+                pool,
+                user_id,
+                &format!("pat-{}", &Uuid::new_v4().to_string()[..8]),
+            )
+            .await;
+            synthetic_ws = ws.id;
+            synthetic_ws.as_str()
+        }
+    };
     let generated = generate_pat_token();
     let id = Uuid::new_v4().to_string();
     db::insert_user_pat(

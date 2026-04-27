@@ -20,11 +20,9 @@ use crate::server::state::AppState;
 #[derive(Debug, Deserialize)]
 pub struct CreatePatBody {
     pub name: String,
-    /// Workspace scope-down. When set, requests authenticated by the new
-    /// PAT are pinned to this workspace — calls touching another workspace
-    /// 403.
-    #[serde(default)]
-    pub workspace_id: Option<String>,
+    /// Workspace the PAT is scoped to.  Every PAT is workspace-pinned
+    /// post-#163; requests touching another workspace 403.
+    pub workspace_id: String,
     /// Required by the API surface; the dashboard always sends one of the
     /// 7/30/60/90/custom-date choices. `null` is reserved for a future
     /// "never expires" affordance.
@@ -124,31 +122,36 @@ pub async fn create_pat(
             .into_response();
     }
 
-    // If the caller pinned the PAT to a workspace, they must be a member of
-    // it — otherwise the token would be created for a workspace they can't
-    // address.
-    if let Some(ref workspace_id) = body.workspace_id {
-        match db::is_workspace_member(&state.db, workspace_id, &user_id).await {
-            Ok(true) => {}
-            Ok(false) => {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(serde_json::json!({
-                        "error": "not a member of the requested workspace",
-                    })),
-                )
-                    .into_response();
-            }
-            Err(e) => {
-                tracing::error!("create_pat: failed to check workspace membership: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-            }
+    // The caller must be a member of the workspace they're pinning the
+    // PAT to — otherwise the token would be created for a workspace they
+    // can't address.
+    let workspace_id = body.workspace_id.trim();
+    if workspace_id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "workspace_id is required" })),
+        )
+            .into_response();
+    }
+    match db::is_workspace_member(&state.db, workspace_id, &user_id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "not a member of the requested workspace",
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("create_pat: failed to check workspace membership: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
         }
     }
 
     let generated = generate_pat_token();
     let id = Uuid::new_v4().to_string();
-    let workspace_id = body.workspace_id.as_deref();
 
     if let Err(e) = db::insert_user_pat(
         &state.db,
@@ -181,7 +184,7 @@ pub async fn create_pat(
     let pat = db::UserPat {
         id: id.clone(),
         user_id: user_id.clone(),
-        workspace_id: body.workspace_id.clone(),
+        workspace_id: workspace_id.to_string(),
         name: name.to_string(),
         token_prefix: generated.prefix.clone(),
         expires_at: Some(expires_at),
