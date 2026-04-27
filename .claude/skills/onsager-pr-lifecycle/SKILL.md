@@ -17,6 +17,27 @@ routines aren't configured.
 - Don't open PRs unless the user explicitly asks. Creating one is a
   one-way door in this project's workflow.
 
+For exact tool names, params, and the easy-to-miss gotchas (body
+replace-vs-merge, label replace-vs-merge, the spec-link regex), see
+[`references/github-ops.md`](references/github-ops.md). The prose below
+explains *why*; the reference is the *how*.
+
+## Bundled scripts
+
+For Claude, all GitHub ops go through `mcp__github__*` — see the reference
+above. The `scripts/` folder is for **human and CI** use, where MCP isn't
+available, and is deliberately limited to read-only audits.
+
+| Script | Purpose | Auth |
+|--------|---------|------|
+| [`scripts/audit-open-prs.sh`](scripts/audit-open-prs.sh) | List every open PR and flag those missing a spec link / `trivial` label. Mirrors `pr-spec-sync.yml`'s regex. | `GITHUB_TOKEN` |
+
+Don't add write-side scripts here. Anything that mutates GitHub state for
+Claude belongs as an `mcp__github__*` call documented in
+`references/github-ops.md`; anything that mutates state for humans
+belongs in a Claude routine or workflow under `.github/workflows/`,
+not in this skill's `scripts/`.
+
 ## Spec-issue linking (mandatory)
 
 Every PR must either:
