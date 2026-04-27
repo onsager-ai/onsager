@@ -8,7 +8,7 @@
 //! separate from the emitter so the serve loop can build the event without
 //! also running the validation / dedup pipeline.
 
-use onsager_protocol::Insight;
+use onsager_spine::protocol::Insight;
 use onsager_spine::factory_event::{
     EventRef, FactoryEventKind, InsightScope, RuleProposalAction, RuleProposalClass,
 };
@@ -139,7 +139,7 @@ fn subject_ref_from_scope(scope: &InsightScope) -> String {
 mod tests {
     use super::*;
     use onsager_artifact::ArtifactId;
-    use onsager_protocol::FactoryEventRef;
+    use onsager_spine::protocol::FactoryEventRef;
     use onsager_spine::factory_event::InsightKind;
 
     fn make_insight(scope: InsightScope) -> Insight {

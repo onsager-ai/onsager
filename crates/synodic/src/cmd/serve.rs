@@ -467,8 +467,8 @@ async fn propose_escalation_resolution(
 async fn gate_handler(
     State(store): State<Arc<dyn Storage>>,
     State(engine_cache): State<Arc<EngineCache>>,
-    Json(req): Json<onsager_protocol::GateRequest>,
-) -> Result<Json<onsager_protocol::GateVerdict>, AppError> {
+    Json(req): Json<onsager_spine::protocol::GateRequest>,
+) -> Result<Json<onsager_spine::protocol::GateVerdict>, AppError> {
     // Cached: if no rule has been added/updated/deleted since the last call,
     // we reuse the compiled `InterceptEngine` (issue #32). The only DB cost
     // on a hit is one cheap `(COUNT, MAX(updated_at))` aggregate.

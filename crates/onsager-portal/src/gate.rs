@@ -113,7 +113,7 @@ impl GateClient {
     }
 }
 
-/// Wire-format mirror of `onsager_protocol::GateVerdict`. Kept local so the
+/// Wire-format mirror of `onsager_spine::protocol::GateVerdict`. Kept local so the
 /// portal doesn't pull in the protocol crate just for one DTO; if it ever
 /// needs more shapes, it can adopt the protocol crate then.
 #[derive(Debug, Deserialize)]

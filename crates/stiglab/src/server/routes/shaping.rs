@@ -52,7 +52,7 @@ pub struct StatusQuery {
 pub async fn create_shaping(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<onsager_protocol::ShapingRequest>,
+    Json(req): Json<onsager_spine::protocol::ShapingRequest>,
 ) -> impl IntoResponse {
     // Idempotency: prefer the explicit header so callers can override, fall
     // back to request_id which Forge already promises is stable across retries
@@ -341,7 +341,7 @@ async fn terminal_response(session: &Session) -> axum::response::Response {
     // the status endpoint non-idempotent and spam duplicates for every
     // poll after a session terminates.
     let artifact_id_str = session.artifact_id.clone().unwrap_or_default();
-    let synthesized_req = onsager_protocol::ShapingRequest {
+    let synthesized_req = onsager_spine::protocol::ShapingRequest {
         request_id: session.task_id.clone(),
         artifact_id: onsager_artifact::ArtifactId::new(&artifact_id_str),
         target_version: session.artifact_version.unwrap_or(0).max(0) as u32,

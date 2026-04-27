@@ -9,7 +9,7 @@
 
 use std::collections::HashSet;
 
-use onsager_protocol::Insight;
+use onsager_spine::protocol::Insight;
 
 /// Configuration for the insight emitter.
 #[derive(Debug, Clone)]
@@ -138,7 +138,7 @@ impl InsightEmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use onsager_protocol::FactoryEventRef;
+    use onsager_spine::protocol::FactoryEventRef;
     use onsager_spine::factory_event::{InsightKind, InsightScope};
 
     fn make_insight(id: &str, confidence: f64) -> Insight {

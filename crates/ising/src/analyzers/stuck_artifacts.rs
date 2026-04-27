@@ -7,7 +7,7 @@
 //! attempts without reaching a terminal or release state, emit a Waste insight.
 
 use onsager_artifact::ArtifactState;
-use onsager_protocol::{FactoryEventRef, Insight};
+use onsager_spine::protocol::{FactoryEventRef, Insight};
 use onsager_spine::factory_event::{InsightKind, InsightScope};
 
 use crate::core::analyzer::Analyzer;

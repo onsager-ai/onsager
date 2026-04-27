@@ -4,7 +4,7 @@
 //! for evaluation by the existing `InterceptEngine`, and converts the
 //! resulting `InterceptResponse` back into a `GateVerdict`.
 
-use onsager_protocol::{GateRequest, GateVerdict};
+use onsager_spine::protocol::{GateRequest, GateVerdict};
 use onsager_spine::factory_event::GatePoint;
 
 use crate::core::intercept::{InterceptRequest, InterceptResponse};
@@ -74,7 +74,7 @@ pub fn intercept_to_gate_verdict(resp: &InterceptResponse) -> GateVerdict {
 mod tests {
     use super::*;
     use onsager_artifact::{ArtifactId, ArtifactState, Kind};
-    use onsager_protocol::{GateContext, ProposedAction};
+    use onsager_spine::protocol::{GateContext, ProposedAction};
 
     fn tool_level_request() -> GateRequest {
         GateRequest {

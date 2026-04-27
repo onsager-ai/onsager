@@ -19,7 +19,7 @@ use forge::core::workflow_gates::{
 };
 use forge::core::workflow_signal_listener::classify_signal;
 use onsager_artifact::ArtifactState;
-use onsager_protocol::{GateRequest, GateVerdict, ShapingRequest, ShapingResult};
+use onsager_spine::protocol::{GateRequest, GateVerdict, ShapingRequest, ShapingResult};
 use onsager_spine::factory_event::{FactoryEventKind, ShapingOutcome};
 
 struct AllowSynodic;

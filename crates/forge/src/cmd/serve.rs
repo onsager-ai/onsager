@@ -9,7 +9,7 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 
 use onsager_artifact::Kind;
-use onsager_protocol::{
+use onsager_spine::protocol::{
     EscalationContext, GateRequest, GateVerdict, ShapingRequest, ShapingResult,
 };
 use onsager_spine::factory_event::ShapingOutcome;
@@ -195,7 +195,7 @@ impl StiglabDispatcher for HttpStiglabDispatcher {
                     quality_signals: vec![],
                     session_id: String::new(),
                     duration_ms: 0,
-                    error: Some(onsager_protocol::ErrorDetail {
+                    error: Some(onsager_spine::protocol::ErrorDetail {
                         code: "dispatch_error".into(),
                         message: e.to_string(),
                         retriable: Some(true),

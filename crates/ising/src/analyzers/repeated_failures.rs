@@ -6,7 +6,7 @@
 //! Signal: if more than N of the last M shaping requests for a given scope
 //! have failed, emit a Failure insight. Default: N=3, M=5.
 
-use onsager_protocol::{FactoryEventRef, Insight};
+use onsager_spine::protocol::{FactoryEventRef, Insight};
 use onsager_spine::factory_event::{InsightKind, InsightScope};
 
 use crate::core::analyzer::Analyzer;

@@ -5,7 +5,6 @@ members = [
     "crates/onsager-warehouse",
     "crates/onsager-delivery",
     "crates/onsager-registry",
-    "crates/onsager-protocol",
     "crates/onsager-spine",
     "crates/onsager",
     "crates/onsager-portal",

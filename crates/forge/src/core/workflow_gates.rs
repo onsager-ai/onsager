@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use onsager_artifact::Artifact;
-use onsager_protocol::{GateContext, GateRequest, GateVerdict, ProposedAction};
+use onsager_spine::protocol::{GateContext, GateRequest, GateVerdict, ProposedAction};
 use onsager_spine::factory_event::GatePoint;
 
 use super::pipeline::{StiglabDispatcher, SynodicGate};
@@ -164,7 +164,7 @@ where
                 );
                 return GateOutcome::Pending;
             }
-            let request = onsager_protocol::ShapingRequest {
+            let request = onsager_spine::protocol::ShapingRequest {
                 request_id: ulid::Ulid::new().to_string(),
                 artifact_id: artifact.artifact_id.clone(),
                 target_version: artifact.current_version + 1,
@@ -294,7 +294,7 @@ mod tests {
     use crate::core::pipeline::{StiglabDispatcher, SynodicGate};
     use crate::core::stage_runner::GateEvaluator;
     use onsager_artifact::Kind;
-    use onsager_protocol::{ShapingRequest, ShapingResult};
+    use onsager_spine::protocol::{ShapingRequest, ShapingResult};
     use onsager_spine::factory_event::ShapingOutcome;
     use std::sync::atomic::{AtomicU32, Ordering};
 

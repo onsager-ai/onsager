@@ -1,16 +1,22 @@
-//! Inter-subsystem protocol types — the typed request/response contracts
-//! between Forge, Stiglab, Synodic, and Ising.
+//! Inter-subsystem request/response payload types — the typed shapes that
+//! Forge ↔ Stiglab and Forge ↔ Synodic exchange via spine events.
 //!
-//! See `specs/subsystem-map-v0.1.md §4.1` for the four direct protocols and
-//! `specs/forge-v0.1.md §5-7` for the detailed contracts.
+//! These types previously lived in the `onsager-protocol` crate, where they
+//! described HTTP request/response contracts. Per spec #131 / ADR 0004
+//! Lever C, the HTTP transport between subsystems is gone and these shapes
+//! now travel as spine event payloads. The crate moved here so the wire
+//! format and the carrier (the spine) live together.
+//!
+//! See `specs/forge-v0.1.md §5-7` for the field-level contracts.
 
 use chrono::{DateTime, Utc};
 use onsager_artifact::{ArtifactId, ArtifactState, ContentRef, Kind, QualitySignal};
-use onsager_spine::{GatePoint, InsightKind, InsightScope, ShapingOutcome};
 use serde::{Deserialize, Serialize};
 
+use crate::factory_event::{GatePoint, InsightKind, InsightScope, ShapingOutcome};
+
 // ===========================================================================
-// Forge → Stiglab: Imperative dispatch protocol
+// Forge → Stiglab: shaping dispatch payloads
 // ===========================================================================
 
 /// A reference to another artifact used as horizontal lineage input.
@@ -85,7 +91,7 @@ pub struct ShapingResult {
 }
 
 // ===========================================================================
-// Forge → Synodic: Gated governance protocol
+// Forge → Synodic: gate evaluation payloads
 // ===========================================================================
 
 /// Context for a gate evaluation.
@@ -146,7 +152,7 @@ pub enum GateVerdict {
 }
 
 // ===========================================================================
-// Stiglab → Synodic: Tool-level gated protocol
+// Stiglab → Synodic: tool-level gate payloads
 // ===========================================================================
 
 /// Tool-level gate request from inside a Stiglab session.
@@ -170,7 +176,7 @@ pub enum ToolGateVerdict {
 }
 
 // ===========================================================================
-// Ising → Forge: Advisory insight protocol
+// Ising → Forge: advisory insight payloads
 // ===========================================================================
 
 /// A reference to a factory event used as evidence for an insight.

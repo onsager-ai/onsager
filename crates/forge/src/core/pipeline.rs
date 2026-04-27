@@ -13,7 +13,7 @@
 //! ```
 
 use onsager_artifact::{ArtifactState, BundleId};
-use onsager_protocol::{
+use onsager_spine::protocol::{
     GateContext, GateRequest, GateVerdict, ProposedAction, ShapingDecision, ShapingRequest,
     ShapingResult,
 };
@@ -538,7 +538,7 @@ mod tests {
     /// call. Tests use this to verify the pipeline threads insights from
     /// the shared cache into the scheduling kernel (issue #36).
     struct CapturingKernel {
-        seen: std::sync::Mutex<Vec<Vec<onsager_protocol::Insight>>>,
+        seen: std::sync::Mutex<Vec<Vec<onsager_spine::protocol::Insight>>>,
     }
     impl SchedulingKernel for CapturingKernel {
         fn decide(&self, world: &WorldState) -> Option<ShapingDecision> {
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn tick_feeds_insight_cache_into_world_state() {
-        use onsager_protocol::{FactoryEventRef, Insight};
+        use onsager_spine::protocol::{FactoryEventRef, Insight};
         use onsager_spine::{InsightKind, InsightScope};
 
         let cache = InsightCache::default();
@@ -861,7 +861,7 @@ mod tests {
                     quality_signals: vec![],
                     session_id: "mock_session".into(),
                     duration_ms: 100,
-                    error: Some(onsager_protocol::ErrorDetail {
+                    error: Some(onsager_spine::protocol::ErrorDetail {
                         code: "test_failure".into(),
                         message: "mock failure".into(),
                         retriable: Some(true),
