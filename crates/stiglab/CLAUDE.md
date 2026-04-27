@@ -34,9 +34,9 @@ What this means for stiglab specifically:
   lands; stiglab consumes it and emits `stiglab.session_completed` (or
   the equivalent error event) when the session resolves.
 - **Cargo deps.** `stiglab` may depend on `onsager-{artifact,
-  protocol, registry, spine}` (and on `onsager-protocol` only until
-  Lever C deletes that crate; matches the current
-  `crates/stiglab/Cargo.toml`). It must NOT depend on `forge`,
+  registry, spine}` (the protocol DTOs now live in
+  `onsager_spine::protocol` per #131 Lever C; the standalone
+  `onsager-protocol` crate is gone). It must NOT depend on `forge`,
   `synodic`, or `ising`. CI will hard-fail this once Lever B's
   architecture lint lands.
 - **Spine as single source of truth.** `src/server/workflow_db.rs` +

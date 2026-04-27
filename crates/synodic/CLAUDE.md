@@ -33,10 +33,11 @@ What this means for synodic specifically:
   `synodic.gate_verdict` arrived in window" — the same `escalate /
   deny / allow` choice applies to event-time math, not HTTP timeouts.
   The default stays `escalate` (forge invariant #5).
-- **Cargo deps.** `synodic` may depend on `onsager-{artifact, protocol,
-  spine}` (and on `onsager-protocol` only until Lever C deletes that
-  crate). It must NOT depend on `forge`, `stiglab`, or `ising`. CI
-  will hard-fail this once Lever B's architecture lint lands.
+- **Cargo deps.** `synodic` may depend on `onsager-{artifact,
+  spine}` (the protocol DTOs now live in `onsager_spine::protocol`
+  per #131 Lever C; the standalone `onsager-protocol` crate is gone).
+  It must NOT depend on `forge`, `stiglab`, or `ising`. CI will
+  hard-fail this once Lever B's architecture lint lands.
 - **Verdict shape stays in the registry.** Per ADR 0003, `MergeRule`
   for verdict channels lives in `onsager-registry`. Synodic produces
   partial updates that get folded by the registry-declared rule — do
