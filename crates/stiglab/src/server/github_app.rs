@@ -202,8 +202,8 @@ struct ListReposResponse {
 }
 
 /// List repositories this installation can access. Paginated up to 200;
-/// tenants with more repos should opt-in via direct project CRUD rather
-/// than the dropdown (per #58 "opt-in per repo, never auto-mirror").
+/// workspaces with more repos should opt-in via direct project CRUD
+/// rather than the dropdown (per #58 "opt-in per repo, never auto-mirror").
 pub async fn list_installation_repos(
     token: &InstallationToken,
 ) -> anyhow::Result<Vec<AccessibleRepo>> {

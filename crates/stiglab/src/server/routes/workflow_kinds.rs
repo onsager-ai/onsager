@@ -33,7 +33,7 @@ pub struct ListResponse {
 /// GET /api/workflow/kinds — return the registry's built-in workflow kinds.
 ///
 /// Public by design: the dashboard fetches this without a session to render
-/// the workflow-builder's kind picker before the user has picked a tenant.
+/// the workflow-builder's kind picker before the user has picked a workspace.
 pub async fn list_workflow_kinds() -> Response {
     let kinds = workflow_builtin_types()
         .into_iter()

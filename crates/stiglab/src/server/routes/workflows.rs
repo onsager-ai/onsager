@@ -1,9 +1,9 @@
 //! Workflow CRUD routes (issue #81).
 //!
-//! All routes are tenant-scoped and auth-gated. Non-members get a 404
-//! (matching the `tenants.rs` pattern — private-resource surface). Repo
-//! scope and label creation live in `server::workflow_activation`; this
-//! module just handles the HTTP shape + input validation.
+//! All routes are workspace-scoped and auth-gated. Non-members get a 404
+//! (matching the `workspaces.rs` pattern — private-resource surface).
+//! Repo scope and label creation live in `server::workflow_activation`;
+//! this module just handles the HTTP shape + input validation.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -27,7 +27,7 @@ use crate::server::workflow_activation::{
 use crate::server::workflow_db;
 use crate::server::workflow_spine_mirror;
 
-/// Push the current `tenant_workflows` row + its stages into the spine
+/// Push the current `workspace_workflows` row + its stages into the spine
 /// `workflows` schema forge reads. Best-effort: a failure here means the
 /// workflow won't fire until the next successful sync (via another CRUD or
 /// startup backfill), but we don't abort the request — the stiglab-side
@@ -57,16 +57,16 @@ async fn mirror_to_spine(state: &AppState, workflow_id: &str) {
 }
 
 #[allow(clippy::result_large_err)]
-async fn require_tenant_member(
+async fn require_workspace_member(
     pool: &AnyPool,
     user_id: &str,
-    tenant_id: &str,
+    workspace_id: &str,
 ) -> Result<(), Response> {
-    match db::is_tenant_member(pool, tenant_id, user_id).await {
+    match db::is_workspace_member(pool, workspace_id, user_id).await {
         Ok(true) => Ok(()),
-        Ok(false) => Err(not_found("tenant not found")),
+        Ok(false) => Err(not_found("workspace not found")),
         Err(e) => {
-            tracing::error!("failed to check tenant membership: {e}");
+            tracing::error!("failed to check workspace membership: {e}");
             Err(StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
     }
@@ -149,7 +149,7 @@ const CLAUDE_AUTH_CREDENTIAL_NAMES: &[&str] = &["CLAUDE_CODE_OAUTH_TOKEN", "ANTH
 
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkflowBody {
-    pub tenant_id: String,
+    pub workspace_id: String,
     pub name: String,
     pub trigger_kind: String,
     pub repo_owner: String,
@@ -265,7 +265,7 @@ pub async fn create_workflow(
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &body.tenant_id).await {
+    if let Err(r) = require_workspace_member(&state.db, &user_id, &body.workspace_id).await {
         return r;
     }
 
@@ -281,7 +281,7 @@ pub async fn create_workflow(
     let now = Utc::now();
     let workflow = Workflow {
         id: workflow_id.clone(),
-        tenant_id: body.tenant_id.clone(),
+        workspace_id: body.workspace_id.clone(),
         name: body.name.trim().to_string(),
         trigger_kind,
         repo_owner: body.repo_owner.trim().to_string(),
@@ -336,10 +336,10 @@ pub async fn create_workflow(
         .into_response()
 }
 
-/// GET /api/workflows?tenant_id=... — list workflows for a tenant.
+/// GET /api/workflows?workspace_id=... — list workflows for a workspace.
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
-    pub tenant_id: String,
+    pub workspace_id: String,
 }
 
 pub async fn list_workflows(
@@ -351,10 +351,10 @@ pub async fn list_workflows(
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &q.tenant_id).await {
+    if let Err(r) = require_workspace_member(&state.db, &user_id, &q.workspace_id).await {
         return r;
     }
-    match workflow_db::list_workflows_for_tenant(&state.db, &q.tenant_id).await {
+    match workflow_db::list_workflows_for_workspace(&state.db, &q.workspace_id).await {
         Ok(workflows) => Json(serde_json::json!({ "workflows": workflows })).into_response(),
         Err(e) => {
             tracing::error!("failed to list workflows: {e}");
@@ -381,7 +381,7 @@ pub async fn get_workflow(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &workflow.tenant_id).await {
+    if let Err(r) = require_workspace_member(&state.db, &user_id, &workflow.workspace_id).await {
         return r;
     }
     let stages = match workflow_db::list_stages_for_workflow(&state.db, &workflow_id).await {
@@ -405,7 +405,7 @@ pub struct RunsQuery {
 /// status derived from `artifacts.current_stage_index` and
 /// `workflow_parked_reason`.
 ///
-/// Stage IDs come from `tenant_workflow_stages` (stiglab DB) in `seq`
+/// Stage IDs come from `workspace_workflow_stages` (stiglab DB) in `seq`
 /// order; the per-run stage list aligns 1:1 with that ordering so the
 /// dashboard can zip stages by index.
 pub async fn list_workflow_runs(
@@ -426,7 +426,7 @@ pub async fn list_workflow_runs(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &workflow.tenant_id).await {
+    if let Err(r) = require_workspace_member(&state.db, &user_id, &workflow.workspace_id).await {
         return r;
     }
     let stages = match workflow_db::list_stages_for_workflow(&state.db, &workflow_id).await {
@@ -581,7 +581,7 @@ pub async fn patch_workflow(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &workflow.tenant_id).await {
+    if let Err(r) = require_workspace_member(&state.db, &user_id, &workflow.workspace_id).await {
         return r;
     }
 
@@ -641,7 +641,7 @@ pub async fn delete_workflow(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_tenant_member(&state.db, &user_id, &workflow.tenant_id).await {
+    if let Err(r) = require_workspace_member(&state.db, &user_id, &workflow.workspace_id).await {
         return r;
     }
 
@@ -893,7 +893,7 @@ mod tests {
 
     fn base_body() -> CreateWorkflowBody {
         CreateWorkflowBody {
-            tenant_id: "t1".into(),
+            workspace_id: "w1".into(),
             name: "sdd".into(),
             trigger_kind: "github-issue-webhook".into(),
             repo_owner: "acme".into(),

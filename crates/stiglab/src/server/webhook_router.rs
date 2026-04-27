@@ -79,7 +79,7 @@ pub fn route_issues_labeled(payload: &Value, matched: &[Workflow]) -> Vec<Routed
                     "issue_number": issue_number,
                     "title": title,
                     "label": label_name,
-                    "tenant_id": w.tenant_id,
+                    "workspace_id": w.workspace_id,
                 }),
             },
         })
@@ -211,7 +211,7 @@ mod tests {
     fn sample_workflow(label: &str) -> Workflow {
         Workflow {
             id: "wf_1".to_string(),
-            tenant_id: "t1".to_string(),
+            workspace_id: "w1".to_string(),
             name: "sdd".to_string(),
             trigger_kind: TriggerKind::GithubIssueWebhook,
             repo_owner: "acme".to_string(),

@@ -19,7 +19,9 @@ use ring::hmac;
 use sqlx::pool::PoolOptions;
 use sqlx::AnyPool;
 use stiglab::core::workflow::{TriggerKind, Workflow, WorkflowStage};
-use stiglab::core::{GateKind, GitHubAccountType, GitHubAppInstallation, Tenant, TenantMember};
+use stiglab::core::{
+    GateKind, GitHubAccountType, GitHubAppInstallation, Workspace, WorkspaceMember,
+};
 use stiglab::server::auth::encrypt_credential;
 use stiglab::server::config::ServerConfig;
 use stiglab::server::db;
@@ -42,9 +44,9 @@ async fn test_pool() -> AnyPool {
     pool
 }
 
-async fn seed_tenant_and_installation(pool: &AnyPool, install_numeric_id: i64) -> String {
-    let tenant_id = Uuid::new_v4().to_string();
-    // Seed a user row for the tenant creator.
+async fn seed_workspace_and_installation(pool: &AnyPool, install_numeric_id: i64) -> String {
+    let workspace_id = Uuid::new_v4().to_string();
+    // Seed a user row for the workspace creator.
     sqlx::query(
         "INSERT INTO users (id, github_id, github_login, created_at, updated_at) \
          VALUES ($1, $2, $3, $4, $4)",
@@ -57,18 +59,18 @@ async fn seed_tenant_and_installation(pool: &AnyPool, install_numeric_id: i64) -
     .await
     .unwrap();
 
-    let t = Tenant {
-        id: tenant_id.clone(),
-        slug: format!("t-{}", &tenant_id[..8]),
+    let w = Workspace {
+        id: workspace_id.clone(),
+        slug: format!("w-{}", &workspace_id[..8]),
         name: "workspace".into(),
         created_by: "u1".into(),
         created_at: Utc::now(),
     };
-    db::insert_tenant(pool, &t).await.unwrap();
-    db::insert_tenant_member(
+    db::insert_workspace(pool, &w).await.unwrap();
+    db::insert_workspace_member(
         pool,
-        &TenantMember {
-            tenant_id: tenant_id.clone(),
+        &WorkspaceMember {
+            workspace_id: workspace_id.clone(),
             user_id: "u1".into(),
             joined_at: Utc::now(),
         },
@@ -79,7 +81,7 @@ async fn seed_tenant_and_installation(pool: &AnyPool, install_numeric_id: i64) -
     let cipher = encrypt_credential(TEST_KEY_HEX, "webhook-shared-secret").unwrap();
     let install = GitHubAppInstallation {
         id: Uuid::new_v4().to_string(),
-        tenant_id: tenant_id.clone(),
+        workspace_id: workspace_id.clone(),
         install_id: install_numeric_id,
         account_login: "acme".into(),
         account_type: GitHubAccountType::Organization,
@@ -89,17 +91,17 @@ async fn seed_tenant_and_installation(pool: &AnyPool, install_numeric_id: i64) -
         .await
         .unwrap();
 
-    tenant_id
+    workspace_id
 }
 
 /// Seed an installation as the OAuth-callback flow does — row exists, but
 /// no per-install webhook-secret cipher is stored. The global App secret
 /// from `GITHUB_APP_WEBHOOK_SECRET` is expected to cover it.
-async fn seed_tenant_and_installation_without_cipher(
+async fn seed_workspace_and_installation_without_cipher(
     pool: &AnyPool,
     install_numeric_id: i64,
 ) -> String {
-    let tenant_id = Uuid::new_v4().to_string();
+    let workspace_id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO users (id, github_id, github_login, created_at, updated_at) \
          VALUES ($1, $2, $3, $4, $4)",
@@ -112,18 +114,18 @@ async fn seed_tenant_and_installation_without_cipher(
     .await
     .unwrap();
 
-    let t = Tenant {
-        id: tenant_id.clone(),
-        slug: format!("t-{}", &tenant_id[..8]),
+    let w = Workspace {
+        id: workspace_id.clone(),
+        slug: format!("w-{}", &workspace_id[..8]),
         name: "workspace".into(),
         created_by: "u1".into(),
         created_at: Utc::now(),
     };
-    db::insert_tenant(pool, &t).await.unwrap();
-    db::insert_tenant_member(
+    db::insert_workspace(pool, &w).await.unwrap();
+    db::insert_workspace_member(
         pool,
-        &TenantMember {
-            tenant_id: tenant_id.clone(),
+        &WorkspaceMember {
+            workspace_id: workspace_id.clone(),
             user_id: "u1".into(),
             joined_at: Utc::now(),
         },
@@ -133,7 +135,7 @@ async fn seed_tenant_and_installation_without_cipher(
 
     let install = GitHubAppInstallation {
         id: Uuid::new_v4().to_string(),
-        tenant_id: tenant_id.clone(),
+        workspace_id: workspace_id.clone(),
         install_id: install_numeric_id,
         account_login: "acme".into(),
         account_type: GitHubAccountType::Organization,
@@ -143,14 +145,14 @@ async fn seed_tenant_and_installation_without_cipher(
         .await
         .unwrap();
 
-    tenant_id
+    workspace_id
 }
 
-async fn seed_active_workflow(pool: &AnyPool, tenant_id: &str, install_id: i64, label: &str) {
+async fn seed_active_workflow(pool: &AnyPool, workspace_id: &str, install_id: i64, label: &str) {
     let now = Utc::now();
     let wf = Workflow {
         id: format!("wf_{}", Uuid::new_v4()),
-        tenant_id: tenant_id.to_string(),
+        workspace_id: workspace_id.to_string(),
         name: "sdd".into(),
         trigger_kind: TriggerKind::GithubIssueWebhook,
         repo_owner: "acme".into(),
@@ -221,8 +223,8 @@ fn issues_labeled_payload(install_id: i64, label: &str) -> Vec<u8> {
 async fn webhook_with_valid_signature_returns_202() {
     let pool = test_pool().await;
     let install_id = 987;
-    let tenant_id = seed_tenant_and_installation(&pool, install_id).await;
-    seed_active_workflow(&pool, &tenant_id, install_id, "spec").await;
+    let workspace_id = seed_workspace_and_installation(&pool, install_id).await;
+    seed_active_workflow(&pool, &workspace_id, install_id, "spec").await;
 
     let state = app_state(pool);
     let config = state.config.clone();
@@ -255,8 +257,8 @@ async fn webhook_alias_under_github_app_prefix_returns_202() {
     // catches it.
     let pool = test_pool().await;
     let install_id = 987;
-    let tenant_id = seed_tenant_and_installation(&pool, install_id).await;
-    seed_active_workflow(&pool, &tenant_id, install_id, "spec").await;
+    let workspace_id = seed_workspace_and_installation(&pool, install_id).await;
+    seed_active_workflow(&pool, &workspace_id, install_id, "spec").await;
 
     let state = app_state(pool);
     let config = state.config.clone();
@@ -285,7 +287,7 @@ async fn webhook_alias_under_github_app_prefix_returns_202() {
 async fn webhook_with_bad_signature_returns_401() {
     let pool = test_pool().await;
     let install_id = 987;
-    seed_tenant_and_installation(&pool, install_id).await;
+    seed_workspace_and_installation(&pool, install_id).await;
 
     let state = app_state(pool);
     let config = state.config.clone();
@@ -313,7 +315,7 @@ async fn webhook_with_bad_signature_returns_401() {
 async fn webhook_without_signature_returns_401() {
     let pool = test_pool().await;
     let install_id = 987;
-    seed_tenant_and_installation(&pool, install_id).await;
+    seed_workspace_and_installation(&pool, install_id).await;
 
     let state = app_state(pool);
     let config = state.config.clone();
@@ -421,7 +423,7 @@ async fn webhook_with_global_app_secret_is_verified_and_accepted() {
     // cipher — the `GITHUB_APP_WEBHOOK_SECRET` env var is the fallback.
     let pool = test_pool().await;
     let install_id = 126368686;
-    seed_tenant_and_installation_without_cipher(&pool, install_id).await;
+    seed_workspace_and_installation_without_cipher(&pool, install_id).await;
     let mut state = app_state(pool);
     let mut cfg = state.config.clone();
     cfg.github_app_webhook_secret = Some("railway-app-secret".into());
@@ -453,7 +455,7 @@ async fn webhook_with_global_app_secret_is_verified_and_accepted() {
 async fn webhook_with_global_app_secret_rejects_bad_signature() {
     let pool = test_pool().await;
     let install_id = 126368686;
-    seed_tenant_and_installation_without_cipher(&pool, install_id).await;
+    seed_workspace_and_installation_without_cipher(&pool, install_id).await;
     let mut state = app_state(pool);
     let mut cfg = state.config.clone();
     cfg.github_app_webhook_secret = Some("railway-app-secret".into());
