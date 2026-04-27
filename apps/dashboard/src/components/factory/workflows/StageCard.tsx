@@ -91,7 +91,7 @@ export function StageCard({ stage, index, onChange, onRemove }: StageCardProps) 
       <Sheet open={editing} onOpenChange={setEditing}>
         <SheetContent
           side={isMobile ? "bottom" : "right"}
-          className={isMobile ? "h-[85dvh] rounded-t-xl" : ""}
+          className={isMobile ? "h-[85dvh] rounded-t-xl" : "sm:max-w-lg"}
         >
           <SheetHeader>
             <SheetTitle>Edit stage</SheetTitle>

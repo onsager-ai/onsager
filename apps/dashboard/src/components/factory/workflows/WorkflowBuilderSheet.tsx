@@ -44,7 +44,11 @@ export function WorkflowBuilderSheet({ open, onOpenChange }: WorkflowBuilderShee
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={isMobile ? "bottom" : "right"}
-        className={isMobile ? "h-[90dvh] rounded-t-xl" : "sm:max-w-xl"}
+        className={
+          isMobile
+            ? "h-[90dvh] rounded-t-xl"
+            : "sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl"
+        }
       >
         <SheetHeader>
           <SheetTitle>Create workflow</SheetTitle>
