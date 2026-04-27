@@ -25,14 +25,20 @@ use crate::server::db;
 
 /// Authorize an `AuthUser` against a target workspace.
 ///
-/// Two checks, in order:
+/// Three checks, in order:
 ///
-/// 1. **PAT scope (403 on mismatch).** If the principal is a PAT pinned to
+/// 1. **Anonymous bypass.** When auth is disabled the extractor returns
+///    a synthetic `anonymous` principal that will never appear in
+///    `workspace_members`.  Spec #161 states that `authEnabled=false`
+///    mode stays unchanged, so we treat the anonymous principal as
+///    blanket-authorized.  Auth-enabled deployments keep the strict
+///    checks below.
+/// 2. **PAT scope (403 on mismatch).** If the principal is a PAT pinned to
 ///    a workspace, the request must target that exact workspace. The
 ///    caller already proved membership at PAT-mint time, so hiding the
 ///    workspace's existence is moot — surface `pat_workspace_scope_mismatch`
 ///    so client tooling can react.
-/// 2. **Membership (404 on miss).** Otherwise the caller must be a member
+/// 3. **Membership (404 on miss).** Otherwise the caller must be a member
 ///    of the workspace; non-members get a flat 404 to avoid leaking
 ///    workspace existence.
 ///
@@ -48,6 +54,9 @@ pub async fn require_workspace_access(
 ) -> Result<(), Response> {
     if workspace_id.trim().is_empty() {
         return Err(missing_workspace_query());
+    }
+    if auth_user.user_id == "anonymous" {
+        return Ok(());
     }
     if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
         if pinned != workspace_id {

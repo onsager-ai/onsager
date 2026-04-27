@@ -152,7 +152,7 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
         "CREATE TABLE IF NOT EXISTS user_credentials (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
-            workspace_id TEXT,
+            workspace_id TEXT NOT NULL,
             name TEXT NOT NULL,
             encrypted_value TEXT NOT NULL,
             created_at TEXT NOT NULL,

@@ -513,8 +513,8 @@ pub async fn list_all_projects_for_user(
     auth_user: AuthUser,
     axum::extract::Query(q): axum::extract::Query<ListProjectsQuery>,
 ) -> Response {
-    if require_auth_user(&auth_user).is_err() {
-        return require_auth_user(&auth_user).err().unwrap();
+    if let Err(r) = require_auth_user(&auth_user) {
+        return r;
     }
     let workspace_id = match q.workspace.as_deref() {
         Some(w) if !w.trim().is_empty() => w,

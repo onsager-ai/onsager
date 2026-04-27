@@ -132,16 +132,18 @@ pub async fn session_logs(
                 ));
             }
         };
-        if let Err(_resp) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
-            // The helper already produced the right status (403 PAT vs
-            // 404 non-member); the SSE-typed return forces us to map it
-            // back into a JSON tuple.  We err on the side of 404 here
-            // for the same existence-leak reason — a caller that can't
-            // see the workspace shouldn't see the session id either.
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "session not found" })),
-            ));
+        if let Err(resp) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            // Preserve the helper's 403-vs-404 split — 403 carries the
+            // pat_workspace_scope_mismatch contract, 404 is the
+            // existence-hiding default.  The SSE return type forces us
+            // to remap into a JSON tuple, but the status must stay.
+            let status = resp.status();
+            let body = if status == StatusCode::FORBIDDEN {
+                serde_json::json!({ "error": "pat_workspace_scope_mismatch" })
+            } else {
+                serde_json::json!({ "error": "session not found" })
+            };
+            return Err((status, Json(body)));
         }
     }
 
