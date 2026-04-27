@@ -138,8 +138,8 @@ impl InsightEmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use onsager_spine::protocol::FactoryEventRef;
     use onsager_spine::factory_event::{InsightKind, InsightScope};
+    use onsager_spine::protocol::FactoryEventRef;
 
     fn make_insight(id: &str, confidence: f64) -> Insight {
         Insight {

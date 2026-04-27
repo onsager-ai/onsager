@@ -13,8 +13,8 @@ use onsager_artifact::{
     Artifact, ArtifactId, ArtifactState, ArtifactVersion, ArtifactVersionId, ContentRef, Kind,
     VerticalLineage,
 };
-use onsager_spine::protocol::ShapingResult;
 use onsager_spine::factory_event::ShapingOutcome;
+use onsager_spine::protocol::ShapingResult;
 
 /// In-memory artifact store. Production implementations would back this
 /// with PostgreSQL; this provides the domain logic and invariant enforcement.

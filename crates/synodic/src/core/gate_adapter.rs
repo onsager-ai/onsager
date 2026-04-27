@@ -4,8 +4,8 @@
 //! for evaluation by the existing `InterceptEngine`, and converts the
 //! resulting `InterceptResponse` back into a `GateVerdict`.
 
-use onsager_spine::protocol::{GateRequest, GateVerdict};
 use onsager_spine::factory_event::GatePoint;
+use onsager_spine::protocol::{GateRequest, GateVerdict};
 
 use crate::core::intercept::{InterceptRequest, InterceptResponse};
 

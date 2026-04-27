@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use onsager_artifact::Artifact;
-use onsager_spine::protocol::{GateContext, GateRequest, GateVerdict, ProposedAction};
 use onsager_spine::factory_event::GatePoint;
+use onsager_spine::protocol::{GateContext, GateRequest, GateVerdict, ProposedAction};
 
 use super::pipeline::{StiglabDispatcher, SynodicGate};
 use super::signal_cache::{SignalCache, SignalOutcome};
@@ -294,8 +294,8 @@ mod tests {
     use crate::core::pipeline::{StiglabDispatcher, SynodicGate};
     use crate::core::stage_runner::GateEvaluator;
     use onsager_artifact::Kind;
-    use onsager_spine::protocol::{ShapingRequest, ShapingResult};
     use onsager_spine::factory_event::ShapingOutcome;
+    use onsager_spine::protocol::{ShapingRequest, ShapingResult};
     use std::sync::atomic::{AtomicU32, Ordering};
 
     struct CountingStiglab {

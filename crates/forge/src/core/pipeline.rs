@@ -13,11 +13,11 @@
 //! ```
 
 use onsager_artifact::{ArtifactState, BundleId};
+use onsager_spine::factory_event::{GatePoint, ShapingOutcome, VerdictSummary};
 use onsager_spine::protocol::{
     GateContext, GateRequest, GateVerdict, ProposedAction, ShapingDecision, ShapingRequest,
     ShapingResult,
 };
-use onsager_spine::factory_event::{GatePoint, ShapingOutcome, VerdictSummary};
 use onsager_warehouse::{Outputs, SealError, SealRequest, Warehouse};
 
 use super::artifact_store::ArtifactStore;
