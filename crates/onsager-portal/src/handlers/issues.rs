@@ -3,14 +3,14 @@
 //! Per spec #167 / #170, every `issues.opened` materializes a *reference-only*
 //! `Kind::GithubIssue` skeleton artifact — no body, no labels, no title, no
 //! author copied to the spine. Provider-authored fields are served live by
-//! the `/api/projects/:id/issues` proxy in `handlers::api`. Lifecycle moves
-//! (`closed` / `reopened`) flip the skeleton's `state`; everything else
-//! (`edited`, `labeled`, `unlabeled`, `assigned`, …) bumps `current_version`
-//! and refreshes `last_observed_at` so ising sees activity deltas without
-//! the spine carrying the actual change.
+//! the `/api/projects/:id/issues` proxy in `crates/stiglab/src/server/routes/projects.rs`.
+//! Lifecycle moves (`closed` / `reopened`) flip the skeleton's `state`;
+//! everything else (`edited`, `labeled`, `unlabeled`, `assigned`, …) bumps
+//! `current_version` and refreshes `last_observed_at` so ising sees activity
+//! deltas without the spine carrying the actual change.
 //!
-//! Cache invalidation: every webhook touch evicts the project's proxy
-//! entries so the next dashboard fetch reflects the change before TTL.
+//! This handler does not perform proxy-cache invalidation — the cache lives
+//! in stiglab and freshness relies on its TTL window (default 60s).
 
 use onsager_spine::EventMetadata;
 use serde_json::Value;
