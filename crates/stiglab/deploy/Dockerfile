@@ -18,7 +18,6 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates/onsager-spine/Cargo.toml    crates/onsager-spine/Cargo.toml
 COPY crates/onsager-artifact/Cargo.toml crates/onsager-artifact/Cargo.toml
-COPY crates/onsager-protocol/Cargo.toml crates/onsager-protocol/Cargo.toml
 COPY crates/onsager-warehouse/Cargo.toml crates/onsager-warehouse/Cargo.toml
 COPY crates/onsager-delivery/Cargo.toml crates/onsager-delivery/Cargo.toml
 COPY crates/onsager-registry/Cargo.toml crates/onsager-registry/Cargo.toml
@@ -35,7 +34,6 @@ COPY xtask/Cargo.toml                   xtask/Cargo.toml
 RUN mkdir -p \
       crates/onsager-spine/src \
       crates/onsager-artifact/src \
-      crates/onsager-protocol/src \
       crates/onsager-warehouse/src \
       crates/onsager-delivery/src \
       crates/onsager-registry/src \
@@ -50,7 +48,6 @@ RUN mkdir -p \
     && touch \
       crates/onsager-spine/src/lib.rs \
       crates/onsager-artifact/src/lib.rs \
-      crates/onsager-protocol/src/lib.rs \
       crates/onsager-warehouse/src/lib.rs \
       crates/onsager-delivery/src/lib.rs \
       crates/onsager-registry/src/lib.rs \
