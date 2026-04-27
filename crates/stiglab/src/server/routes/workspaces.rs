@@ -497,18 +497,33 @@ pub async fn list_projects(
     }
 }
 
-/// GET /api/projects — List every project the current user can access,
-/// across all their workspaces. Powers the cross-workspace project
-/// selector in `CreateSessionSheet`.
+#[derive(Debug, serde::Deserialize)]
+pub struct ListProjectsQuery {
+    #[serde(default)]
+    pub workspace: Option<String>,
+}
+
+/// GET /api/projects?workspace=W — List projects in `W` the current
+/// user can access (issue #164).  Per the list-endpoint contract,
+/// `?workspace=` is required and validated through
+/// `require_workspace_access`; cross-workspace project listing is no
+/// longer a single-call surface.
 pub async fn list_all_projects_for_user(
     State(state): State<AppState>,
     auth_user: AuthUser,
+    axum::extract::Query(q): axum::extract::Query<ListProjectsQuery>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id,
-        Err(r) => return r,
+    if let Err(r) = require_auth_user(&auth_user) {
+        return r;
+    }
+    let workspace_id = match q.workspace.as_deref() {
+        Some(w) if !w.trim().is_empty() => w,
+        _ => return super::missing_workspace_query(),
     };
-    match db::list_projects_for_user(&state.db, user_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
+        return r;
+    }
+    match db::list_projects_for_workspace(&state.db, workspace_id).await {
         Ok(projects) => Json(serde_json::json!({ "projects": projects })).into_response(),
         Err(e) => {
             tracing::error!("failed to list projects: {e}");

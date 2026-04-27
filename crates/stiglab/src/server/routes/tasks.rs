@@ -102,10 +102,29 @@ pub async fn create_task(
         Some(auth_user.user_id.as_str())
     };
 
+    // Authenticated callers must scope the session to a workspace via
+    // `project_id` (issue #164).  A NULL-workspace session would be
+    // invisible to its own creator under the new workspace-filtered
+    // list/detail surface — better to reject up front than to mint
+    // unreachable rows.  The only path that may legitimately omit
+    // `project_id` is anonymous / `authEnabled=false` mode, which
+    // bypasses workspace filtering entirely (see
+    // `routes::require_workspace_access`).
+    if user_id.is_some() && request.project_id.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "project_id is required",
+                "detail": "authenticated sessions must be scoped to a project (and therefore a workspace) — pick one to dispatch into"
+            })),
+        )
+            .into_response();
+    }
+
     // Validate project membership if the caller scoped the session to a
     // workspace-owned project (issue #59). Non-members get 404 via
     // `assert_workspace_member` so project IDs can't be enumerated.
-    if let Some(ref project_id) = request.project_id {
+    let session_workspace_id = if let Some(ref project_id) = request.project_id {
         if user_id.is_none() {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -138,13 +157,17 @@ pub async fn create_task(
         {
             return r;
         }
-    }
+        Some(project.workspace_id)
+    } else {
+        None
+    };
 
     if let Err(e) = db::insert_session_with_user_and_project(
         &state.db,
         &session,
         user_id,
         request.project_id.as_deref(),
+        session_workspace_id.as_deref(),
     )
     .await
     {
@@ -152,11 +175,12 @@ pub async fn create_task(
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
 
-    // Fetch user credentials to pass to the agent
-    let credentials = if let Some(uid) = user_id {
-        fetch_user_credentials(&state, uid).await
-    } else {
-        None
+    // Fetch user credentials scoped to the session's workspace (issue
+    // #164).  Sessions without a workspace (no project_id) get no
+    // credentials — the legacy global-credential fallback is gone.
+    let credentials = match (user_id, session_workspace_id.as_deref()) {
+        (Some(uid), Some(ws)) => fetch_user_credentials(&state, uid, ws).await,
+        _ => None,
     };
 
     // Dispatch to agent via WebSocket
@@ -193,18 +217,22 @@ pub async fn create_task(
         .into_response()
 }
 
-/// Fetch all user credentials, decrypt them, and return as a HashMap.
+/// Fetch a user's credentials for a specific workspace, decrypt them,
+/// and return as a HashMap.
 ///
 /// Used by both `POST /api/tasks` (direct user-triggered sessions) and
 /// `POST /api/shaping` (forge-dispatched workflow sessions, see issue
-/// #156). Visible to sibling route modules; not part of the public API.
+/// #156). Per issue #164 credentials are workspace-scoped — passing the
+/// session's `workspace_id` is mandatory; there is no global fallback.
+/// Visible to sibling route modules; not part of the public API.
 pub(super) async fn fetch_user_credentials(
     state: &AppState,
     user_id: &str,
+    workspace_id: &str,
 ) -> Option<HashMap<String, String>> {
     let key = state.config.credential_key.as_deref()?;
 
-    let encrypted_creds = db::get_all_user_credential_values(&state.db, user_id)
+    let encrypted_creds = db::get_all_user_credential_values(&state.db, user_id, workspace_id)
         .await
         .ok()?;
 
@@ -219,7 +247,9 @@ pub(super) async fn fetch_user_credentials(
                 result.insert(name, value);
             }
             Err(e) => {
-                tracing::error!("failed to decrypt credential {name} for user {user_id}: {e}");
+                tracing::error!(
+                    "failed to decrypt credential {name} for user {user_id} in workspace {workspace_id}: {e}"
+                );
             }
         }
     }

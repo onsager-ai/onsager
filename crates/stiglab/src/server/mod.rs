@@ -94,13 +94,16 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         //   OAuth app directly.
         .route("/api/auth/sso/redeem", post(routes::auth::sso_redeem))
         .route("/api/auth/sso/finish", get(routes::auth::sso_finish))
-        // Credential routes
+        // Credential routes — per-workspace as of issue #164.  The
+        // unscoped `/api/credentials` and `/api/credentials/{name}`
+        // surfaces are removed (not aliased), per CLAUDE.md "no dangling
+        // wires" / "compat aliases that ossify".
         .route(
-            "/api/credentials",
+            "/api/workspaces/{workspace}/credentials",
             get(routes::credentials::list_credentials),
         )
         .route(
-            "/api/credentials/{name}",
+            "/api/workspaces/{workspace}/credentials/{name}",
             put(routes::credentials::set_credential).delete(routes::credentials::delete_credential),
         )
         // Personal Access Tokens (issue #143)
