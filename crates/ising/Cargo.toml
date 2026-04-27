@@ -15,7 +15,6 @@ path = "src/main.rs"
 
 [dependencies]
 onsager-artifact = { path = "../onsager-artifact" }
-onsager-protocol = { path = "../onsager-protocol" }
 onsager-spine = { path = "../onsager-spine" }
 
 serde = { workspace = true }

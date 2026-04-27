@@ -12,7 +12,7 @@
 //! threshold the kind sits.
 
 use chrono::Duration;
-use onsager_protocol::{FactoryEventRef, Insight};
+use onsager_spine::protocol::{FactoryEventRef, Insight};
 use onsager_spine::factory_event::{InsightKind, InsightScope};
 
 use crate::core::analyzer::Analyzer;

@@ -20,7 +20,6 @@ sqlite = ["sqlx/sqlite"]
 
 [dependencies]
 onsager-artifact = { path = "../onsager-artifact" }
-onsager-protocol = { path = "../onsager-protocol" }
 onsager-spine = { path = "../onsager-spine" }
 
 # Merged from harness-core and harness-cli

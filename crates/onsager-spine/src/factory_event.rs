@@ -948,7 +948,7 @@ pub enum EscalationResolution {
 
 /// Reference to a spine event used as evidence for a signal (`insight.emitted`
 /// variant carries a `Vec<EventRef>`). This is the spine-native counterpart to
-/// `onsager_protocol::FactoryEventRef` — kept in the spine crate so the event
+/// `onsager_spine::protocol::FactoryEventRef` — kept in the spine crate so the event
 /// vocabulary has no protocol-crate dependency.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventRef {

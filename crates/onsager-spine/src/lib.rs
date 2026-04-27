@@ -26,17 +26,19 @@
 //! - `onsager-warehouse` — `Bundle`, `Warehouse`, `FilesystemWarehouse`.
 //! - `onsager-delivery` — `Consumer`, `Delivery`, `Receipt`.
 //! - `onsager-registry` — type catalog, adapters, gate evaluators, seed loader.
-//! - `onsager-protocol` — inter-subsystem request/response types.
 //!
 //! Spine keeps what every subsystem needs to speak to the event bus: the
-//! `EventStore`, the `Listener`, `Namespace`, and the `FactoryEvent`
-//! envelope. Artifact value objects are re-exported here for backward
-//! compatibility.
+//! `EventStore`, the `Listener`, `Namespace`, the `FactoryEvent` envelope,
+//! and the typed request/response payloads carried inside those events
+//! (`protocol`, formerly the `onsager-protocol` crate; merged in per
+//! ADR 0004 / spec #131 Lever C). Artifact value objects are re-exported
+//! here for backward compatibility.
 
 pub mod extension_event;
 pub mod factory_event;
 pub mod listener;
 pub mod namespace;
+pub mod protocol;
 pub mod store;
 
 // Backward-compat re-exports of the artifact value objects. Spine depends on

@@ -11,7 +11,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use onsager_protocol::Insight;
+use onsager_spine::protocol::Insight;
 
 /// Default cache capacity. Small on purpose — insights are advisory priors
 /// for the scheduler, and stale ones waste kernel cycles.
@@ -77,7 +77,7 @@ impl Default for InsightCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use onsager_protocol::FactoryEventRef;
+    use onsager_spine::protocol::FactoryEventRef;
     use onsager_spine::{InsightKind, InsightScope};
 
     fn make(id: &str) -> Insight {

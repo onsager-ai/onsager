@@ -13,7 +13,7 @@ use onsager_artifact::{
     Artifact, ArtifactId, ArtifactState, ArtifactVersion, ArtifactVersionId, ContentRef, Kind,
     VerticalLineage,
 };
-use onsager_protocol::ShapingResult;
+use onsager_spine::protocol::ShapingResult;
 use onsager_spine::factory_event::ShapingOutcome;
 
 /// In-memory artifact store. Production implementations would back this

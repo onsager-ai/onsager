@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use onsager_protocol::{FactoryEventRef, Insight};
+use onsager_spine::protocol::{FactoryEventRef, Insight};
 use onsager_spine::{
     EventHandler, EventNotification, EventStore, InsightKind, InsightScope, Listener,
 };

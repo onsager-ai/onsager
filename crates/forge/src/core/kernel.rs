@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use onsager_artifact::{Artifact, ArtifactState};
-use onsager_protocol::{Insight, ShapingDecision};
+use onsager_spine::protocol::{Insight, ShapingDecision};
 use onsager_spine::factory_event::FactoryEvent;
 
 /// The world state visible to the scheduling kernel (forge-v0.1 §4.2).
