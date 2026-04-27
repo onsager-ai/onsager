@@ -208,6 +208,15 @@ Subsystem-specific env vars worth calling out:
   parse errors always deny regardless of policy — those are protocol bugs
   that should surface loudly.
 
+## File editing (Claude Code tools)
+
+Prefer the `Edit` tool over `Write` for any change to an existing file. Full
+rewrites with `Write` stream-idle-timeout on files larger than ~150 lines and
+there is no automatic retry — a stalled `Write` silently leaves the file in
+its previous state or, worse, half-written. If a rewrite is genuinely
+necessary, split it: write a smaller initial version, then extend with
+follow-up `Edit` calls.
+
 ## Session defaults (Claude Code cloud)
 
 If the current branch name starts with `claude/` (the prefix cloud sessions
