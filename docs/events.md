@@ -341,6 +341,7 @@ ShapingRequest sent to Stiglab.
 | `request_id` | `String` |  |
 | `artifact_id` | `ArtifactId` |  |
 | `target_version` | `u32` |  |
+| `request` | `Option<crate::protocol::ShapingRequest>` | Full shaping payload — the same shape Stiglab previously consumed as the `POST /api/shaping` request body. `None` on events written before this field was added (spec #131 / ADR 0004 Lever C phase 3). When `None`, Stiglab's listener cannot spawn a session and must skip the request.  Top-level `request_id`, `artifact_id`, and `target_version` are kept for stream indexing and dashboard filtering; the duplication with `request` is intentional. _(optional)_ |
 
 ### `forge.shaping_returned`
 

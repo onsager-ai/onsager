@@ -191,6 +191,17 @@ pub enum FactoryEventKind {
         request_id: String,
         artifact_id: ArtifactId,
         target_version: u32,
+        /// Full shaping payload — the same shape Stiglab previously
+        /// consumed as the `POST /api/shaping` request body. `None` on
+        /// events written before this field was added (spec #131 / ADR
+        /// 0004 Lever C phase 3). When `None`, Stiglab's listener cannot
+        /// spawn a session and must skip the request.
+        ///
+        /// Top-level `request_id`, `artifact_id`, and `target_version`
+        /// are kept for stream indexing and dashboard filtering; the
+        /// duplication with `request` is intentional.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<crate::protocol::ShapingRequest>,
     },
 
     /// ShapingResult received from Stiglab.
@@ -1417,6 +1428,76 @@ mod tests {
         let back: FactoryEventKind = serde_json::from_value(json_with).unwrap();
         assert_eq!(back, event_with);
         assert_eq!(back.event_type(), "forge.gate_requested");
+    }
+
+    #[test]
+    fn forge_shaping_dispatched_request_field_serde_compat() {
+        use crate::protocol::ShapingRequest;
+
+        // 1. With request = None, the field is omitted from the wire form
+        //    (skip_serializing_if), keeping legacy JSON shape on emit.
+        let event_without = FactoryEventKind::ForgeShapingDispatched {
+            request_id: "req_no_payload".into(),
+            artifact_id: ArtifactId::new("art_legacy_shape"),
+            target_version: 3,
+            request: None,
+        };
+        let json_without = serde_json::to_value(&event_without).unwrap();
+        assert!(
+            json_without.get("request").is_none(),
+            "request: None must be omitted on serialization, got: {json_without}"
+        );
+
+        // 2. Legacy JSON lacking the `request` field deserializes with
+        //    request = None — the #[serde(default)] contract that lets
+        //    pre-Lever-C events still parse.
+        let legacy_json = serde_json::json!({
+            "type": "forge_shaping_dispatched",
+            "request_id": "req_legacy",
+            "artifact_id": "art_legacy_shape",
+            "target_version": 1,
+        });
+        let parsed: FactoryEventKind = serde_json::from_value(legacy_json).unwrap();
+        match parsed {
+            FactoryEventKind::ForgeShapingDispatched { request, .. } => {
+                assert!(
+                    request.is_none(),
+                    "legacy JSON must default request to None"
+                );
+            }
+            other => panic!("expected ForgeShapingDispatched, got {other:?}"),
+        }
+
+        // 3. With request = Some(...), full payload round-trips. The
+        //    Stiglab listener depends on the inner ShapingRequest staying
+        //    byte-stable across upgrades.
+        let event_with = FactoryEventKind::ForgeShapingDispatched {
+            request_id: "req_full".into(),
+            artifact_id: ArtifactId::new("art_full_shape"),
+            target_version: 5,
+            request: Some(ShapingRequest {
+                request_id: "req_full".into(),
+                artifact_id: ArtifactId::new("art_full_shape"),
+                target_version: 5,
+                shaping_intent: serde_json::json!({"prompt": "do the thing"}),
+                inputs: vec![],
+                constraints: vec![],
+                deadline: None,
+                created_by: Some("user_42".into()),
+            }),
+        };
+        let json_with = serde_json::to_value(&event_with).unwrap();
+        assert_eq!(json_with["type"], "forge_shaping_dispatched");
+        assert_eq!(json_with["request"]["request_id"], "req_full");
+        assert_eq!(
+            json_with["request"]["shaping_intent"]["prompt"],
+            "do the thing"
+        );
+        assert_eq!(json_with["request"]["created_by"], "user_42");
+
+        let back: FactoryEventKind = serde_json::from_value(json_with).unwrap();
+        assert_eq!(back, event_with);
+        assert_eq!(back.event_type(), "forge.shaping_dispatched");
     }
 
     #[test]

@@ -16,12 +16,15 @@ use onsager_spine::protocol::{
 use onsager_spine::EventStore;
 
 use crate::core::artifact_store::ArtifactStore;
+use crate::core::gate_verdict_listener;
 use crate::core::insight_cache::InsightCache;
 use crate::core::insight_listener;
 use crate::core::kernel::BaselineKernel;
+use crate::core::pending::{PendingShapings, PendingVerdicts};
 use crate::core::persistence;
 use crate::core::pipeline::{ForgePipeline, PipelineEvent, StiglabDispatcher, SynodicGate};
 use crate::core::session_listener::{self, SessionCompleted, SessionCompletedHandler};
+use crate::core::shaping_result_listener;
 use crate::core::signal_cache::SignalCache;
 use crate::core::stage_runner::{self, StageEvent};
 use crate::core::trigger_subscriber::{
@@ -416,6 +419,17 @@ struct ForgeSharedState {
     /// endpoint exposes them.
     #[allow(dead_code)]
     signals: SignalCache,
+    /// Verdicts parked from `synodic.gate_verdict` by
+    /// [`gate_verdict_listener`] (spec #131 / ADR 0004 Lever C, phase 3).
+    /// Phase 4 wires the pipeline tick to claim entries on the resume
+    /// path. Held in shared state so the HTTP API and the tick loop see
+    /// the same map.
+    #[allow(dead_code)]
+    pending_verdicts: PendingVerdicts,
+    /// Shaping results parked from `stiglab.shaping_result_ready` by
+    /// [`shaping_result_listener`]. Same wiring story as above.
+    #[allow(dead_code)]
+    pending_shapings: PendingShapings,
 }
 
 type SharedForge = Arc<RwLock<ForgeSharedState>>;
@@ -534,11 +548,19 @@ pub fn run(database_url: &str, tick_ms: u64) {
         // branch that silently disagrees with the DB.
         let signals = SignalCache::new();
 
+        // Phase-3 parking maps for the Lever C event-driven flow. The
+        // listeners spawned below populate these; phase 4 wires the
+        // pipeline tick to consume them.
+        let pending_verdicts = PendingVerdicts::new();
+        let pending_shapings = PendingShapings::new();
+
         let shared = Arc::new(RwLock::new(ForgeSharedState {
             pipeline,
             kernel: BaselineKernel::new(),
             spine,
             signals: signals.clone(),
+            pending_verdicts: pending_verdicts.clone(),
+            pending_shapings: pending_shapings.clone(),
         }));
 
         // Start HTTP API.
@@ -820,6 +842,77 @@ pub fn run(database_url: &str, tick_ms: u64) {
             };
             if let Err(e) = workflow_signal_listener::run(store, signals_for_listener, None).await {
                 tracing::error!("forge: workflow signal listener exited: {e}");
+            }
+        });
+
+        // Spawn the Lever C verdict listener (spec #131 / ADR 0004 phase 3).
+        // Tails `synodic.gate_verdict`, parses the typed variant, and
+        // parks the embedded `GateVerdict` in `pending_verdicts` keyed by
+        // its `gate_id`. Phase 4 wires the pipeline tick's resume path
+        // to claim entries from this map; until then the listener
+        // accumulates verdicts so the schema is exercised end-to-end.
+        //
+        // Warm-start at `max_event_id` so a fresh boot doesn't replay
+        // every historical verdict — same rationale as the insight
+        // listener above. A phase-6 follow-up persists a per-process
+        // cursor so a crash doesn't drop in-flight verdicts.
+        let verdict_shared = shared.clone();
+        let pending_verdicts_for_listener = pending_verdicts.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = verdict_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: gate_verdict listener disabled (no spine connection)");
+                return;
+            };
+            let since = match store.max_event_id().await {
+                Ok(cursor) => cursor,
+                Err(e) => {
+                    tracing::warn!(
+                        "forge: max_event_id lookup failed ({e}); starting gate_verdict \
+                         listener from the beginning"
+                    );
+                    None
+                }
+            };
+            if let Err(e) =
+                gate_verdict_listener::run(store, pending_verdicts_for_listener, since).await
+            {
+                tracing::error!("forge: gate_verdict listener exited: {e}");
+            }
+        });
+
+        // Spawn the Lever C shaping-result listener. Tails
+        // `stiglab.shaping_result_ready`, parses the typed variant, and
+        // parks the embedded `ShapingResult` in `pending_shapings` keyed
+        // by its `request_id`. Same warm-start strategy.
+        let shaping_shared = shared.clone();
+        let pending_shapings_for_listener = pending_shapings.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = shaping_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: shaping_result listener disabled (no spine connection)");
+                return;
+            };
+            let since = match store.max_event_id().await {
+                Ok(cursor) => cursor,
+                Err(e) => {
+                    tracing::warn!(
+                        "forge: max_event_id lookup failed ({e}); starting shaping_result \
+                         listener from the beginning"
+                    );
+                    None
+                }
+            };
+            if let Err(e) =
+                shaping_result_listener::run(store, pending_shapings_for_listener, since).await
+            {
+                tracing::error!("forge: shaping_result listener exited: {e}");
             }
         });
 
@@ -1189,6 +1282,13 @@ async fn get_artifact(
 }
 
 /// Emit a pipeline event to the event spine.
+///
+/// Carrier events (`forge.shaping_dispatched`, `forge.gate_requested`)
+/// are serialized through the typed [`FactoryEventKind`] so the full
+/// `request` payload travels alongside the routing fields. Stiglab's
+/// shaping listener and Synodic's gate listener consume the embedded
+/// payload directly — phase 3 of spec #131 / ADR 0004 Lever C — instead
+/// of falling back to a sibling-subsystem HTTP roundtrip.
 async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
     let metadata = onsager_spine::EventMetadata {
         correlation_id: None,
@@ -1196,6 +1296,9 @@ async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
         actor: "forge".to_string(),
     };
 
+    // Match-and-serialize via FactoryEventKind variants where the schema
+    // exists; fall back to hand-rolled JSON for events that don't have a
+    // typed variant yet (forge.error, forge.gate_verdict, forge.shaping_returned).
     let (stream_id, event_type, data) = match event {
         PipelineEvent::DecisionMade(d) => (
             format!("forge:{}", d.artifact_id),
@@ -1210,15 +1313,21 @@ async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
             request_id,
             artifact_id,
             target_version,
-        } => (
-            format!("forge:{artifact_id}"),
-            "forge.shaping_dispatched",
-            serde_json::json!({
-                "request_id": request_id,
-                "artifact_id": artifact_id,
-                "target_version": target_version,
-            }),
-        ),
+            request,
+        } => {
+            let kind = onsager_spine::factory_event::FactoryEventKind::ForgeShapingDispatched {
+                request_id: request_id.clone(),
+                artifact_id: onsager_artifact::ArtifactId::new(artifact_id),
+                target_version: *target_version,
+                request: Some(request.clone()),
+            };
+            let data = serde_json::to_value(&kind).expect("FactoryEventKind must serialize");
+            (
+                format!("forge:{artifact_id}"),
+                "forge.shaping_dispatched",
+                data,
+            )
+        }
         PipelineEvent::ShapingReturned {
             request_id,
             artifact_id,
@@ -1233,16 +1342,20 @@ async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
             }),
         ),
         PipelineEvent::GateRequested {
+            gate_id,
             artifact_id,
             gate_point,
-        } => (
-            format!("forge:{artifact_id}"),
-            "forge.gate_requested",
-            serde_json::json!({
-                "artifact_id": artifact_id,
-                "gate_point": format!("{gate_point:?}"),
-            }),
-        ),
+            request,
+        } => {
+            let kind = onsager_spine::factory_event::FactoryEventKind::ForgeGateRequested {
+                gate_id: gate_id.clone(),
+                artifact_id: onsager_artifact::ArtifactId::new(artifact_id),
+                gate_point: *gate_point,
+                request: Some(request.clone()),
+            };
+            let data = serde_json::to_value(&kind).expect("FactoryEventKind must serialize");
+            (format!("forge:{artifact_id}"), "forge.gate_requested", data)
+        }
         PipelineEvent::GateVerdictReceived {
             artifact_id,
             gate_point,

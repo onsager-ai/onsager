@@ -5,6 +5,7 @@ pub mod github_app;
 pub mod handler;
 pub mod proxy_cache;
 pub mod routes;
+pub mod shaping_listener;
 pub mod spine;
 pub mod sso;
 pub mod state;

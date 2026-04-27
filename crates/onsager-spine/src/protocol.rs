@@ -20,7 +20,7 @@ use crate::factory_event::{GatePoint, InsightKind, InsightScope, ShapingOutcome}
 // ===========================================================================
 
 /// A reference to another artifact used as horizontal lineage input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactRef {
     pub artifact_id: ArtifactId,
     pub version: u32,
@@ -28,7 +28,7 @@ pub struct ArtifactRef {
 }
 
 /// A constraint that Stiglab must respect during shaping.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Constraint {
     /// Constraint type (e.g., "max_tokens", "tool_allowlist", "timeout_ms").
     #[serde(rename = "type")]
@@ -38,7 +38,7 @@ pub struct Constraint {
 }
 
 /// Shaping request from Forge to Stiglab (forge-v0.1 §5.2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShapingRequest {
     /// Unique request ID (ULID). Forge never mutates this. Used for
     /// idempotent dispatch (forge invariant #6).

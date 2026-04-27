@@ -48,5 +48,6 @@ jsonwebtoken = { workspace = true }
 tokio-tungstenite = { workspace = true }
 clap = { workspace = true }
 hostname = "0.4"
+async-trait = { workspace = true }
 
 [dev-dependencies]

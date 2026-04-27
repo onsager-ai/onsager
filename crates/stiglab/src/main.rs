@@ -130,6 +130,38 @@ async fn run_server(
         }
     }
 
+    // Spawn the forge.shaping_dispatched listener (spec #131 / ADR 0004
+    // Lever C, phase 3). Replaces the legacy `forge → POST /api/shaping`
+    // HTTP path with an event-driven flow: the listener consumes each
+    // request, calls the same dispatch core the HTTP route uses, and
+    // reuses idempotency via `request_id` so spine redelivery never
+    // produces a duplicate session. Result correlation flows back via
+    // `stiglab.shaping_result_ready` from the agent message handler.
+    //
+    // Warm-start at `max_event_id` so a fresh boot doesn't replay every
+    // historical request. Phase 6 will persist a per-process cursor.
+    if let Some(spine) = state.spine.as_ref() {
+        let listener_store = spine.store_clone();
+        let listener_state = state.clone();
+        tokio::spawn(async move {
+            let since = match listener_store.max_event_id().await {
+                Ok(cursor) => cursor,
+                Err(e) => {
+                    tracing::warn!(
+                        "stiglab: max_event_id lookup failed ({e}); starting \
+                         shaping_dispatched listener from the beginning"
+                    );
+                    None
+                }
+            };
+            if let Err(e) =
+                stiglab::server::shaping_listener::run(listener_store, listener_state, since).await
+            {
+                tracing::error!("stiglab: shaping_dispatched listener exited: {e}");
+            }
+        });
+    }
+
     // Start built-in runner if enabled
     if !no_runner {
         let runner_node_name = node_name.unwrap_or_else(|| "built-in-runner".to_string());
