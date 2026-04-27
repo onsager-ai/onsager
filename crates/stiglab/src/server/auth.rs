@@ -286,10 +286,11 @@ pub enum RequestPrincipal {
     /// synthetic anonymous principal when auth is disabled.
     Session,
     /// PAT-authenticated request.  `pat_id` identifies the issuing token row;
-    /// `workspace_id` pins the request to a single workspace when set on the PAT.
+    /// `workspace_id` pins the request to that workspace — every PAT is
+    /// workspace-scoped post-#163, so this is mandatory at the type level.
     Pat {
         pat_id: String,
-        workspace_id: Option<String>,
+        workspace_id: String,
     },
 }
 
@@ -298,14 +299,11 @@ impl RequestPrincipal {
         matches!(self, RequestPrincipal::Pat { .. })
     }
 
-    /// The workspace a PAT is pinned to, if any.  `None` for sessions and
-    /// for PATs that aren't workspace-scoped.
+    /// The workspace a PAT is pinned to.  `None` for cookie/session
+    /// principals; PAT principals are always pinned.
     pub fn pinned_workspace_id(&self) -> Option<&str> {
         match self {
-            RequestPrincipal::Pat {
-                workspace_id: Some(w),
-                ..
-            } => Some(w.as_str()),
+            RequestPrincipal::Pat { workspace_id, .. } => Some(workspace_id.as_str()),
             _ => None,
         }
     }
@@ -647,15 +645,9 @@ mod tests {
         assert_eq!(RequestPrincipal::Session.pinned_workspace_id(), None);
         let p = RequestPrincipal::Pat {
             pat_id: "p1".into(),
-            workspace_id: Some("w1".into()),
+            workspace_id: "w1".into(),
         };
         assert!(p.is_pat());
         assert_eq!(p.pinned_workspace_id(), Some("w1"));
-        let p2 = RequestPrincipal::Pat {
-            pat_id: "p2".into(),
-            workspace_id: None,
-        };
-        assert!(p2.is_pat());
-        assert_eq!(p2.pinned_workspace_id(), None);
     }
 }
