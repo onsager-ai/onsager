@@ -65,6 +65,135 @@ pub struct StatusQuery {
     pub wait: Option<String>,
 }
 
+/// Outcome of [`dispatch_shaping_inner`] — distinguishes a freshly created
+/// session from one returned via the idempotency-key fast path.
+#[derive(Debug)]
+pub enum DispatchOutcome {
+    /// A new session was inserted and dispatched. The `Session` is the
+    /// version this server holds in memory (state may have been advanced
+    /// to `Dispatched` after the WS send).
+    Created(Session),
+    /// A previous request with the same idempotency key already produced
+    /// a session. The caller should return this session's identity rather
+    /// than spawning a duplicate.
+    Idempotent(Session),
+    /// No connected agent could pick up the dispatch — caller decides
+    /// whether to error (HTTP 503) or retry on the next event.
+    NoAvailableNode,
+}
+
+/// Core shaping-dispatch logic shared by the HTTP route and the
+/// `forge.shaping_dispatched` spine listener (spec #131 / ADR 0004
+/// Lever C, phase 3). No HTTP-level concerns leak in or out — security
+/// gating, header parsing, and response shaping stay in the HTTP wrapper.
+///
+/// `idempotency_key` is the durable handle the caller uses to collapse
+/// retries onto a single session. The HTTP route prefers the explicit
+/// `Idempotency-Key` header, falling back to `request_id`; the listener
+/// path keys on `request_id` directly since spine events are stable per
+/// emission.
+pub async fn dispatch_shaping_inner(
+    state: &AppState,
+    req: &onsager_spine::protocol::ShapingRequest,
+    idempotency_key: &str,
+) -> Result<DispatchOutcome, anyhow::Error> {
+    // Idempotency fast path — the definitive check is the conflict-aware
+    // insert below; this lookup just lets the common case skip the work.
+    if !idempotency_key.is_empty() {
+        match db::find_session_by_idempotency_key(&state.db, idempotency_key).await {
+            Ok(Some(existing)) => return Ok(DispatchOutcome::Idempotent(existing)),
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!("idempotency lookup failed: {e}");
+                // Fall through and treat as a new request.
+            }
+        }
+    }
+
+    let task = adapter::shaping_request_to_task(req);
+
+    let target_node = match db::find_least_loaded_node(&state.db).await? {
+        Some(node) => node,
+        None => return Ok(DispatchOutcome::NoAvailableNode),
+    };
+
+    let mut session = Session {
+        id: Uuid::new_v4().to_string(),
+        task_id: task.id.clone(),
+        node_id: target_node.id.clone(),
+        state: SessionState::Pending,
+        prompt: task.prompt.clone(),
+        output: None,
+        working_dir: task.working_dir.clone(),
+        artifact_id: Some(req.artifact_id.to_string()),
+        artifact_version: Some(req.target_version as i32),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+
+    if idempotency_key.is_empty() {
+        db::insert_session(&state.db, &session).await?;
+    } else {
+        match db::insert_session_with_idempotency_key(&state.db, &session, idempotency_key).await? {
+            true => { /* new session inserted */ }
+            false => {
+                // Concurrent insert with the same key won the race; load
+                // and return the persisted row so callers converge.
+                if let Some(existing) =
+                    db::find_session_by_idempotency_key(&state.db, idempotency_key).await?
+                {
+                    return Ok(DispatchOutcome::Idempotent(existing));
+                }
+                return Err(anyhow::anyhow!(
+                    "idempotency conflict on {idempotency_key} but no session visible"
+                ));
+            }
+        }
+    }
+
+    // Fetch user credentials when the request carries `created_by`. Direct
+    // callers that don't set it keep the legacy `None` behavior — the
+    // resulting session_failed event surfaces the broken state via
+    // forge's signal listener.
+    let credentials = match req.created_by.as_deref() {
+        Some(uid) => super::tasks::fetch_user_credentials(state, uid).await,
+        None => None,
+    };
+
+    // Dispatch to the agent over WebSocket.
+    {
+        let agents = state.agents.read().await;
+        if let Some(agent) = agents.get(&target_node.id) {
+            let msg = ServerMessage::DispatchTask {
+                task: Box::new(task.clone()),
+                session_id: session.id.clone(),
+                credentials,
+            };
+            if let Ok(json) = serde_json::to_string(&msg) {
+                let _ = agent
+                    .sender
+                    .send(axum::extract::ws::Message::Text(json.into()));
+            }
+            db::update_session_state(&state.db, &session.id, SessionState::Dispatched).await?;
+            session.state = SessionState::Dispatched;
+        } else {
+            tracing::warn!(
+                "agent for node {} not connected, session stays pending",
+                target_node.id
+            );
+        }
+    }
+
+    // Emit session-started spine event.
+    if let Some(ref spine) = state.spine {
+        let _ = spine
+            .emit_session_started(&session.id, &req.request_id, &target_node.id)
+            .await;
+    }
+
+    Ok(DispatchOutcome::Created(session))
+}
+
 /// `POST /api/shaping` — accept a shaping request and return immediately.
 pub async fn create_shaping(
     State(state): State<AppState>,
@@ -128,149 +257,29 @@ pub async fn create_shaping(
         .map(str::to_string)
         .unwrap_or_else(|| req.request_id.clone());
 
-    // Fast path: if a session for this key already exists, return it. The
-    // definitive check is performed on insert (ON CONFLICT DO NOTHING) to
-    // close the lookup/insert race. Echo the session's original request_id
-    // (persisted as task_id) rather than the caller's — a retry with a
-    // different request_id but the same Idempotency-Key should return the
-    // original request's identity.
-    if !idempotency_key.is_empty() {
-        match db::find_session_by_idempotency_key(&state.db, &idempotency_key).await {
-            Ok(Some(existing)) => {
-                let rid = existing.task_id.clone();
-                return accepted_response(&existing, &rid);
-            }
-            Ok(None) => {}
-            Err(e) => {
-                tracing::warn!("idempotency lookup failed: {e}");
-                // Fall through and treat as a new request.
-            }
+    match dispatch_shaping_inner(&state, &req, &idempotency_key).await {
+        Ok(DispatchOutcome::Created(session)) => accepted_response(&session, &req.request_id),
+        Ok(DispatchOutcome::Idempotent(existing)) => {
+            // Echo the original request_id (persisted as task_id) so a
+            // retry with a different request_id but the same key
+            // converges on the original session's identity.
+            let rid = existing.task_id.clone();
+            accepted_response(&existing, &rid)
         }
-    }
-
-    let task = adapter::shaping_request_to_task(&req);
-
-    // Find target node (auto-assign to least loaded).
-    let target_node = match db::find_least_loaded_node(&state.db).await {
-        Ok(Some(node)) => node,
-        Ok(None) => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({ "error": "no available nodes for dispatch" })),
-            )
-                .into_response();
-        }
+        Ok(DispatchOutcome::NoAvailableNode) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "no available nodes for dispatch" })),
+        )
+            .into_response(),
         Err(e) => {
-            tracing::error!("failed to find node: {e}");
-            return (
+            tracing::error!("shaping dispatch failed: {e}");
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": e.to_string() })),
             )
-                .into_response();
-        }
-    };
-
-    let mut session = Session {
-        id: Uuid::new_v4().to_string(),
-        task_id: task.id.clone(),
-        node_id: target_node.id.clone(),
-        state: SessionState::Pending,
-        prompt: task.prompt.clone(),
-        output: None,
-        working_dir: task.working_dir.clone(),
-        artifact_id: Some(req.artifact_id.to_string()),
-        artifact_version: Some(req.target_version as i32),
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-    };
-
-    if idempotency_key.is_empty() {
-        if let Err(e) = db::insert_session(&state.db, &session).await {
-            tracing::error!("failed to insert session: {e}");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
-    } else {
-        match db::insert_session_with_idempotency_key(&state.db, &session, &idempotency_key).await {
-            Ok(true) => { /* new session inserted */ }
-            Ok(false) => {
-                // Concurrent POST with the same key won the race. Load and
-                // return whichever session is actually persisted so the
-                // caller converges on a single session id.
-                match db::find_session_by_idempotency_key(&state.db, &idempotency_key).await {
-                    Ok(Some(existing)) => {
-                        let rid = existing.task_id.clone();
-                        return accepted_response(&existing, &rid);
-                    }
-                    Ok(None) | Err(_) => {
-                        return (
-                            StatusCode::CONFLICT,
-                            Json(serde_json::json!({
-                                "error": "idempotency conflict but no session visible"
-                            })),
-                        )
-                            .into_response();
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::error!("failed to insert session: {e}");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": e.to_string() })),
-                )
-                    .into_response();
-            }
+                .into_response()
         }
     }
-
-    // Fetch user credentials when the request carries a `created_by`
-    // (issue #156). Without this the spawned agent has no
-    // `CLAUDE_CODE_OAUTH_TOKEN` and exits immediately with "stdout closed
-    // without result event". Direct callers without `created_by` keep the
-    // legacy `None` behavior — the resulting session_failed event surfaces
-    // the broken state via forge's signal listener.
-    let credentials = match req.created_by.as_deref() {
-        Some(uid) => super::tasks::fetch_user_credentials(&state, uid).await,
-        None => None,
-    };
-
-    // Dispatch to agent via WebSocket.
-    {
-        let agents = state.agents.read().await;
-        if let Some(agent) = agents.get(&target_node.id) {
-            let msg = ServerMessage::DispatchTask {
-                task: Box::new(task.clone()),
-                session_id: session.id.clone(),
-                credentials,
-            };
-            if let Ok(json) = serde_json::to_string(&msg) {
-                let _ = agent
-                    .sender
-                    .send(axum::extract::ws::Message::Text(json.into()));
-            }
-            let _ =
-                db::update_session_state(&state.db, &session.id, SessionState::Dispatched).await;
-            session.state = SessionState::Dispatched;
-        } else {
-            tracing::warn!(
-                "agent for node {} not connected, session stays pending",
-                target_node.id
-            );
-        }
-    }
-
-    // Emit session started event to spine.
-    if let Some(ref spine) = state.spine {
-        let _ = spine
-            .emit_session_started(&session.id, &req.request_id, &target_node.id)
-            .await;
-    }
-
-    accepted_response(&session, &req.request_id)
 }
 
 /// `GET /api/shaping/{session_id}?wait=Ns` — return the current shaping

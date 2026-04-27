@@ -36,19 +36,32 @@ pub struct TickOutput {
 #[derive(Debug)]
 pub enum PipelineEvent {
     DecisionMade(ShapingDecision),
+    /// A shaping request was sent to Stiglab. Carries the full
+    /// `ShapingRequest` payload so the spine emitter can populate the
+    /// `request` field on `forge.shaping_dispatched` (spec #131 / ADR
+    /// 0004 Lever C, phase 3) — Stiglab's listener spawns a session
+    /// directly off the event without a follow-up HTTP roundtrip.
     ShapingDispatched {
         request_id: String,
         artifact_id: String,
         target_version: u32,
+        request: ShapingRequest,
     },
     ShapingReturned {
         request_id: String,
         artifact_id: String,
         outcome: String,
     },
+    /// A gate request was sent to Synodic. Carries the full
+    /// `GateRequest` payload + the `gate_id` correlation key so the
+    /// spine emitter can populate `forge.gate_requested` and the
+    /// `synodic.gate_verdict` listener can resume the parked
+    /// pipeline decision keyed on the same id (phase 3).
     GateRequested {
+        gate_id: String,
         artifact_id: String,
         gate_point: GatePoint,
+        request: GateRequest,
     },
     GateVerdictReceived {
         artifact_id: String,
@@ -300,8 +313,10 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
         };
 
         output.events.push(PipelineEvent::GateRequested {
+            gate_id: ulid::Ulid::new().to_string(),
             artifact_id: decision.artifact_id.to_string(),
             gate_point: GatePoint::PreDispatch,
+            request: pre_dispatch_gate.clone(),
         });
 
         let verdict = self.synodic.evaluate(&pre_dispatch_gate);
@@ -355,6 +370,7 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
             request_id: request_id.clone(),
             artifact_id: decision.artifact_id.to_string(),
             target_version: decision.target_version,
+            request: shaping_request.clone(),
         });
 
         let result = self.stiglab.dispatch(&shaping_request);
@@ -398,8 +414,10 @@ impl<S: StiglabDispatcher, G: SynodicGate> ForgePipeline<S, G> {
         };
 
         output.events.push(PipelineEvent::GateRequested {
+            gate_id: ulid::Ulid::new().to_string(),
             artifact_id: decision.artifact_id.to_string(),
             gate_point: GatePoint::StateTransition,
+            request: transition_gate.clone(),
         });
 
         let transition_verdict = self.synodic.evaluate(&transition_gate);

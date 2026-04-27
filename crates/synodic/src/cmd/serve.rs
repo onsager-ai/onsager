@@ -148,7 +148,7 @@ impl ServeCmd {
         // handle (issue #36 Step 2). A missing spine handle is non-fatal —
         // the HTTP API stays up and operators can attach the spine later
         // by restarting with a postgres `DATABASE_URL`.
-        if let Some(spine_arc) = spine {
+        if let Some(spine_arc) = spine.clone() {
             let listener_storage = Arc::clone(&state.storage);
             let spine_for_listener = (*spine_arc).clone();
             tokio::spawn(async move {
@@ -157,6 +157,45 @@ impl ServeCmd {
                         .await
                 {
                     tracing::error!("synodic: rule_proposed listener exited: {e}");
+                }
+            });
+        }
+
+        // Spawn the forge.gate_requested listener (spec #131 / ADR 0004
+        // Lever C, phase 3). Replaces the legacy `forge → POST /api/gate`
+        // HTTP path with an event-driven flow: the listener consumes
+        // each request, runs the cached `InterceptEngine`, and emits
+        // `synodic.gate_verdict` keyed on the same `gate_id` so Forge
+        // can match the verdict back to its parked pipeline decision.
+        //
+        // Warm-start at `max_event_id` so a fresh boot doesn't replay
+        // every historical request — same rationale as the proposal
+        // listener above. A phase-6 follow-up persists a per-process
+        // cursor so a crash mid-decision doesn't drop in-flight gates.
+        if let Some(spine_arc) = spine {
+            let listener_storage = Arc::clone(&state.storage);
+            let listener_engine_cache = Arc::clone(&state.engine_cache);
+            let spine_for_listener = (*spine_arc).clone();
+            tokio::spawn(async move {
+                let since = match spine_for_listener.max_event_id().await {
+                    Ok(cursor) => cursor,
+                    Err(e) => {
+                        tracing::warn!(
+                            "synodic: max_event_id lookup failed ({e}); starting \
+                             gate_requested listener from the beginning"
+                        );
+                        None
+                    }
+                };
+                if let Err(e) = crate::core::gate_listener::run(
+                    spine_for_listener,
+                    listener_storage,
+                    listener_engine_cache,
+                    since,
+                )
+                .await
+                {
+                    tracing::error!("synodic: gate_requested listener exited: {e}");
                 }
             });
         }

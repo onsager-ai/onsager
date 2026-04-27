@@ -1,6 +1,7 @@
 pub mod clustering;
 pub mod engine_cache;
 pub mod gate_adapter;
+pub mod gate_listener;
 pub mod intercept;
 pub mod llm;
 pub mod pipeline;

@@ -39,6 +39,14 @@ impl SpineEmitter {
         self.store.pool()
     }
 
+    /// Clone the underlying [`EventStore`] handle so listener tasks can
+    /// own a handle without borrowing through the emitter. `EventStore`
+    /// is internally `Clone` over the `PgPool` it wraps, so this is
+    /// cheap (one `Arc` clone per pool).
+    pub fn store_clone(&self) -> EventStore {
+        self.store.clone()
+    }
+
     /// Emit a raw event to the extension event table under a given namespace.
     /// Used for events that don't map to a `FactoryEventKind` variant (e.g.,
     /// artifact registration from the dashboard).
@@ -112,6 +120,27 @@ impl SpineEmitter {
             token_usage,
             branch: branch.map(str::to_owned),
             pr_number,
+        })
+        .await
+    }
+
+    /// Emit a `stiglab.shaping_result_ready` event carrying the full
+    /// `ShapingResult` payload so Forge's `shaping_result_listener` can
+    /// resume the parked pipeline decision (spec #131 / ADR 0004
+    /// Lever C, phase 3). Emitted alongside `stiglab.session_completed`:
+    /// the lifecycle event signals "this session finished" (used by the
+    /// dashboard); this event signals "the artifact outputs are ready
+    /// for the next pipeline stage" (used by Forge's state machine).
+    /// Sessions without an artifact link skip this — see
+    /// `handler.rs::handle_agent_message` for the gate.
+    pub async fn emit_shaping_result_ready(
+        &self,
+        artifact_id: onsager_artifact::ArtifactId,
+        result: onsager_spine::protocol::ShapingResult,
+    ) -> Result<i64, sqlx::Error> {
+        self.emit(FactoryEventKind::StiglabShapingResultReady {
+            artifact_id,
+            result,
         })
         .await
     }

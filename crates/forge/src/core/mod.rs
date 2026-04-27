@@ -1,12 +1,15 @@
 //! Core Forge logic — scheduling kernel, artifact store, pipeline, and state machine.
 
 pub mod artifact_store;
+pub mod gate_verdict_listener;
 pub mod insight_cache;
 pub mod insight_listener;
 pub mod kernel;
+pub mod pending;
 pub mod persistence;
 pub mod pipeline;
 pub mod session_listener;
+pub mod shaping_result_listener;
 pub mod signal_cache;
 pub mod stage_runner;
 pub mod state;

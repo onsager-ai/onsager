@@ -1,7 +1,7 @@
 //! Shared logic for processing AgentMessage events (used by both the WebSocket
 //! handler and the built-in runner).
 
-use crate::core::{AgentMessage, SessionState};
+use crate::core::{adapter, AgentMessage, SessionState};
 use sqlx::AnyPool;
 use tokio::sync::broadcast;
 
@@ -148,6 +148,23 @@ pub async fn handle_agent_message(
                 {
                     tracing::warn!("failed to emit session_completed spine event: {e}");
                 }
+
+                // Emit `stiglab.shaping_result_ready` carrying the full
+                // `ShapingResult` so Forge's pipeline can resume the
+                // parked decision (spec #131 / ADR 0004 Lever C, phase 3).
+                // The lifecycle event above stays for dashboard / node
+                // telemetry; this event is the actionable signal Forge
+                // consumes via `shaping_result_listener`. Sessions
+                // without an artifact link are direct task POSTs that
+                // never produced a shaping request — skip them so we
+                // don't fabricate result events with empty fields.
+                if let Some(artifact_id) = artifact_id.as_deref() {
+                    if let Err(e) =
+                        emit_shaping_result_for_session(pool, spine, &session_id, artifact_id).await
+                    {
+                        tracing::warn!("failed to emit shaping_result_ready spine event: {e}");
+                    }
+                }
             }
         }
         AgentMessage::SessionFailed { session_id, error } => {
@@ -253,6 +270,62 @@ async fn git_context_for_session(
         }
     });
     (branch, project_id, artifact_id)
+}
+
+/// Build a `ShapingResult` from a terminal session row and emit it as
+/// `stiglab.shaping_result_ready` (spec #131 / ADR 0004 Lever C, phase 3).
+///
+/// We synthesize a minimal `ShapingRequest` envelope from the session's
+/// stored `task_id` (= original request_id) and artifact link so the
+/// existing `session_to_shaping_result` adapter produces the same
+/// `ShapingResult` shape Forge previously consumed as the synchronous
+/// `POST /api/shaping` response body. Fields not stored on the session
+/// row (inputs, constraints, deadline) default to empty — Forge's
+/// pipeline never reads them off the result, only the request, so the
+/// adapter stays consistent with the HTTP path it replaces.
+async fn emit_shaping_result_for_session(
+    pool: &AnyPool,
+    spine: &SpineEmitter,
+    session_id: &str,
+    artifact_id: &str,
+) -> anyhow::Result<()> {
+    let Some(session) = db::get_session(pool, session_id).await? else {
+        // Session was deleted between message handling and this call —
+        // nothing to emit. Logged at debug to avoid noise on race.
+        tracing::debug!(
+            session_id,
+            "shaping_result emit: session row vanished before lookup"
+        );
+        return Ok(());
+    };
+
+    let synthesized_req = onsager_spine::protocol::ShapingRequest {
+        request_id: session.task_id.clone(),
+        artifact_id: onsager_artifact::ArtifactId::new(artifact_id),
+        target_version: session.artifact_version.unwrap_or(0).max(0) as u32,
+        shaping_intent: serde_json::json!({}),
+        inputs: vec![],
+        constraints: vec![],
+        deadline: None,
+        // Owner identity isn't persisted on the session row; not used
+        // by `session_to_shaping_result`, kept here to satisfy the
+        // struct shape.
+        created_by: None,
+    };
+
+    let duration_ms = session
+        .updated_at
+        .signed_duration_since(session.created_at)
+        .num_milliseconds()
+        .max(0) as u64;
+
+    let result = adapter::session_to_shaping_result(&synthesized_req, &session, duration_ms);
+
+    spine
+        .emit_shaping_result_ready(onsager_artifact::ArtifactId::new(artifact_id), result)
+        .await
+        .map_err(anyhow::Error::from)?;
+    Ok(())
 }
 
 /// Persist a `(session_id, branch, project_id)` row in the portal-managed
