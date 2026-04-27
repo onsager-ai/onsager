@@ -337,10 +337,9 @@ pub async fn list_workflows(
     auth_user: AuthUser,
     axum::extract::Query(q): axum::extract::Query<ListQuery>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id.to_string(),
-        Err(r) => return r,
-    };
+    if let Err(r) = require_auth_user(&auth_user) {
+        return r;
+    }
     if let Err(r) = require_workspace_access(&state.db, &auth_user, &q.workspace_id).await {
         return r;
     }
@@ -359,10 +358,9 @@ pub async fn get_workflow(
     auth_user: AuthUser,
     Path(workflow_id): Path<String>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id.to_string(),
-        Err(r) => return r,
-    };
+    if let Err(r) = require_auth_user(&auth_user) {
+        return r;
+    }
     let workflow = match workflow_db::get_workflow(&state.db, &workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return not_found("workflow not found"),
@@ -404,10 +402,9 @@ pub async fn list_workflow_runs(
     Path(workflow_id): Path<String>,
     axum::extract::Query(q): axum::extract::Query<RunsQuery>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id.to_string(),
-        Err(r) => return r,
-    };
+    if let Err(r) = require_auth_user(&auth_user) {
+        return r;
+    }
     let workflow = match workflow_db::get_workflow(&state.db, &workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return not_found("workflow not found"),
@@ -559,10 +556,9 @@ pub async fn patch_workflow(
     headers: axum::http::HeaderMap,
     Json(body): Json<PatchWorkflowBody>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id.to_string(),
-        Err(r) => return r,
-    };
+    if let Err(r) = require_auth_user(&auth_user) {
+        return r;
+    }
     let workflow = match workflow_db::get_workflow(&state.db, &workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return not_found("workflow not found"),
@@ -619,10 +615,9 @@ pub async fn delete_workflow(
     auth_user: AuthUser,
     Path(workflow_id): Path<String>,
 ) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id.to_string(),
-        Err(r) => return r,
-    };
+    if let Err(r) = require_auth_user(&auth_user) {
+        return r;
+    }
     let workflow = match workflow_db::get_workflow(&state.db, &workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return not_found("workflow not found"),

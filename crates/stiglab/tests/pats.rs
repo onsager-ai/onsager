@@ -398,6 +398,7 @@ async fn pat_bearer_takes_precedence_over_cookie() {
 async fn create_pat_returns_token_once_then_listing_hides_it() {
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-create").await;
     // Bootstrap auth via a session cookie so we can create a PAT.
     let session_token = stiglab::server::auth::generate_session_token();
     db::create_auth_session(
@@ -418,7 +419,12 @@ async fn create_pat_returns_token_once_then_listing_hides_it() {
         .header(header::COOKIE, format!("stiglab_session={session_token}"))
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
-            serde_json::json!({ "name": "ci", "expires_at": exp }).to_string(),
+            serde_json::json!({
+                "name": "ci",
+                "workspace_id": workspace.id,
+                "expires_at": exp,
+            })
+            .to_string(),
         ))
         .unwrap();
     let resp = app_.clone().oneshot(create).await.unwrap();
@@ -449,6 +455,7 @@ async fn create_pat_returns_token_once_then_listing_hides_it() {
 async fn create_pat_409s_on_duplicate_name() {
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-dup").await;
     let session_token = stiglab::server::auth::generate_session_token();
     db::create_auth_session(
         &pool,
@@ -462,6 +469,7 @@ async fn create_pat_409s_on_duplicate_name() {
     let app_ = app(state);
 
     let exp = (Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+    let workspace_id = workspace.id.clone();
     let make = || {
         Request::builder()
             .method("POST")
@@ -469,7 +477,12 @@ async fn create_pat_409s_on_duplicate_name() {
             .header(header::COOKIE, format!("stiglab_session={session_token}"))
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
-                serde_json::json!({ "name": "ci", "expires_at": exp }).to_string(),
+                serde_json::json!({
+                    "name": "ci",
+                    "workspace_id": workspace_id,
+                    "expires_at": exp,
+                })
+                .to_string(),
             ))
             .unwrap()
     };
@@ -487,6 +500,7 @@ async fn create_pat_409s_on_duplicate_name() {
 async fn create_pat_rejects_empty_name() {
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-empty").await;
     let session_token = stiglab::server::auth::generate_session_token();
     db::create_auth_session(
         &pool,
@@ -507,7 +521,12 @@ async fn create_pat_rejects_empty_name() {
                 .header(header::COOKIE, format!("stiglab_session={session_token}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "name": "  ", "expires_at": exp }).to_string(),
+                    serde_json::json!({
+                        "name": "  ",
+                        "workspace_id": workspace.id,
+                        "expires_at": exp,
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -523,6 +542,7 @@ async fn create_pat_rejects_missing_expires_at() {
     // long-lived token today.
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-noexp").await;
     let session_token = stiglab::server::auth::generate_session_token();
     db::create_auth_session(
         &pool,
@@ -535,8 +555,15 @@ async fn create_pat_rejects_missing_expires_at() {
     let state = AppState::new(pool, auth_enabled_config(), None);
 
     for body in [
-        serde_json::json!({ "name": "ci", "expires_at": null }),
-        serde_json::json!({ "name": "ci" }),
+        serde_json::json!({
+            "name": "ci",
+            "workspace_id": workspace.id,
+            "expires_at": null,
+        }),
+        serde_json::json!({
+            "name": "ci",
+            "workspace_id": workspace.id,
+        }),
     ] {
         let resp = app(state.clone())
             .oneshot(
@@ -560,6 +587,7 @@ async fn create_pat_response_carries_no_store_cache_headers() {
     // intermediary must be told not to cache it.
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-headers").await;
     let session_token = stiglab::server::auth::generate_session_token();
     db::create_auth_session(
         &pool,
@@ -580,7 +608,12 @@ async fn create_pat_response_carries_no_store_cache_headers() {
                 .header(header::COOKIE, format!("stiglab_session={session_token}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "name": "ci", "expires_at": exp }).to_string(),
+                    serde_json::json!({
+                        "name": "ci",
+                        "workspace_id": workspace.id,
+                        "expires_at": exp,
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
