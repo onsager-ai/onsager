@@ -101,7 +101,7 @@ pub struct WorkflowStage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workflow {
     pub id: String,
-    pub tenant_id: String,
+    pub workspace_id: String,
     pub name: String,
     pub trigger_kind: TriggerKind,
     /// Required for `github-issue-webhook`: the repo and label to watch.

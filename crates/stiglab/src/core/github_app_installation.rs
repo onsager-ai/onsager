@@ -35,12 +35,13 @@ impl FromStr for GitHubAccountType {
     }
 }
 
-/// A GitHub App installation linked to a tenant. A tenant may have 0..N
-/// installations (typical: exactly one; but cross-org tenants can link more).
+/// A GitHub App installation linked to a workspace.  A workspace may have
+/// 0..N installations (typical: exactly one; but cross-org workspaces can
+/// link more).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubAppInstallation {
     pub id: String,
-    pub tenant_id: String,
+    pub workspace_id: String,
     pub install_id: i64,
     pub account_login: String,
     pub account_type: GitHubAccountType,
