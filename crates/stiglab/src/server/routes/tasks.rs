@@ -103,8 +103,8 @@ pub async fn create_task(
     };
 
     // Validate project membership if the caller scoped the session to a
-    // tenant-owned project (issue #59). Non-members get 404 via
-    // `assert_tenant_member` so project IDs can't be enumerated.
+    // workspace-owned project (issue #59). Non-members get 404 via
+    // `assert_workspace_member` so project IDs can't be enumerated.
     if let Some(ref project_id) = request.project_id {
         if user_id.is_none() {
             return (
@@ -129,10 +129,10 @@ pub async fn create_task(
                 return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
             }
         };
-        if let Err(r) = crate::server::routes::tenants::assert_tenant_member(
+        if let Err(r) = crate::server::routes::workspaces::assert_workspace_member(
             &state.db,
             &auth_user,
-            &project.tenant_id,
+            &project.workspace_id,
         )
         .await
         {

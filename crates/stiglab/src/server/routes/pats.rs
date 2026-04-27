@@ -21,9 +21,10 @@ use crate::server::state::AppState;
 pub struct CreatePatBody {
     pub name: String,
     /// Workspace scope-down. When set, requests authenticated by the new
-    /// PAT are pinned to this tenant — calls touching another tenant 403.
+    /// PAT are pinned to this workspace — calls touching another workspace
+    /// 403.
     #[serde(default)]
-    pub tenant_id: Option<String>,
+    pub workspace_id: Option<String>,
     /// Required by the API surface; the dashboard always sends one of the
     /// 7/30/60/90/custom-date choices. `null` is reserved for a future
     /// "never expires" affordance.
@@ -47,7 +48,7 @@ fn pat_summary(pat: &db::UserPat) -> serde_json::Value {
     serde_json::json!({
         "id": pat.id,
         "name": pat.name,
-        "tenant_id": pat.tenant_id,
+        "workspace_id": pat.workspace_id,
         "token_prefix": pat.token_prefix,
         "expires_at": pat.expires_at,
         "last_used_at": pat.last_used_at,
@@ -124,10 +125,10 @@ pub async fn create_pat(
     }
 
     // If the caller pinned the PAT to a workspace, they must be a member of
-    // it — otherwise the token would be created for a tenant they can't
+    // it — otherwise the token would be created for a workspace they can't
     // address.
-    if let Some(ref tenant_id) = body.tenant_id {
-        match db::is_tenant_member(&state.db, tenant_id, &user_id).await {
+    if let Some(ref workspace_id) = body.workspace_id {
+        match db::is_workspace_member(&state.db, workspace_id, &user_id).await {
             Ok(true) => {}
             Ok(false) => {
                 return (
@@ -139,7 +140,7 @@ pub async fn create_pat(
                     .into_response();
             }
             Err(e) => {
-                tracing::error!("create_pat: failed to check tenant membership: {e}");
+                tracing::error!("create_pat: failed to check workspace membership: {e}");
                 return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
             }
         }
@@ -147,13 +148,13 @@ pub async fn create_pat(
 
     let generated = generate_pat_token();
     let id = Uuid::new_v4().to_string();
-    let tenant_id = body.tenant_id.as_deref();
+    let workspace_id = body.workspace_id.as_deref();
 
     if let Err(e) = db::insert_user_pat(
         &state.db,
         &id,
         &user_id,
-        tenant_id,
+        workspace_id,
         name,
         &generated.prefix,
         &generated.hash,
@@ -180,7 +181,7 @@ pub async fn create_pat(
     let pat = db::UserPat {
         id: id.clone(),
         user_id: user_id.clone(),
-        tenant_id: body.tenant_id.clone(),
+        workspace_id: body.workspace_id.clone(),
         name: name.to_string(),
         token_prefix: generated.prefix.clone(),
         expires_at: Some(expires_at),

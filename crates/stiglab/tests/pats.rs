@@ -8,7 +8,7 @@
 //!   * the destructive-credential guardrail (PUT-overwrite + DELETE) maps
 //!     to 403 `pat_destructive_blocked`,
 //!   * `GET /api/auth/me` reports `via: "pat" | "session"`,
-//!   * tenant-scoped PATs reject calls to a different workspace, and
+//!   * workspace-scoped PATs reject calls to a different workspace, and
 //!   * `last_used_at` advances on a successful PAT auth.
 //!
 //! Reuses the in-memory SQLite + `build_router` harness established by
@@ -19,7 +19,7 @@ use axum::http::{header, Request, StatusCode};
 use chrono::Utc;
 use sqlx::pool::PoolOptions;
 use sqlx::AnyPool;
-use stiglab::core::{Tenant, TenantMember, User};
+use stiglab::core::{User, Workspace, WorkspaceMember};
 use stiglab::server::auth::{generate_pat_token, hash_pat_token, PAT_PREFIX_LEN};
 use stiglab::server::config::ServerConfig;
 use stiglab::server::db;
@@ -75,24 +75,24 @@ async fn seed_user(pool: &AnyPool) -> User {
     user
 }
 
-async fn seed_tenant_with_member(pool: &AnyPool, user_id: &str, slug: &str) -> Tenant {
+async fn seed_workspace_with_member(pool: &AnyPool, user_id: &str, slug: &str) -> Workspace {
     let now = Utc::now();
-    let tenant = Tenant {
+    let workspace = Workspace {
         id: Uuid::new_v4().to_string(),
         slug: slug.into(),
         name: slug.into(),
         created_by: user_id.into(),
         created_at: now,
     };
-    let member = TenantMember {
-        tenant_id: tenant.id.clone(),
+    let member = WorkspaceMember {
+        workspace_id: workspace.id.clone(),
         user_id: user_id.into(),
         joined_at: now,
     };
-    db::insert_tenant_with_creator(pool, &tenant, &member)
+    db::insert_workspace_with_creator(pool, &workspace, &member)
         .await
         .unwrap();
-    tenant
+    workspace
 }
 
 /// Mint a PAT directly via the DB layer, bypassing `POST /api/pats`. Used
@@ -100,7 +100,7 @@ async fn seed_tenant_with_member(pool: &AnyPool, user_id: &str, slug: &str) -> T
 async fn mint_pat(
     pool: &AnyPool,
     user_id: &str,
-    tenant_id: Option<&str>,
+    workspace_id: Option<&str>,
     name: &str,
     expires_at: Option<chrono::DateTime<Utc>>,
 ) -> (String, String) {
@@ -110,7 +110,7 @@ async fn mint_pat(
         pool,
         &id,
         user_id,
-        tenant_id,
+        workspace_id,
         name,
         &generated.prefix,
         &generated.hash,
@@ -794,20 +794,20 @@ async fn last_used_at_advances_after_pat_auth() {
     assert!(populated, "last_used_at should be set after a PAT auth");
 }
 
-// ── Tenant scope ──
+// ── Workspace scope ──
 
 #[tokio::test]
-async fn tenant_scoped_pat_can_read_its_own_workspace() {
+async fn workspace_scoped_pat_can_read_its_own_workspace() {
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
-    let tenant = seed_tenant_with_member(&pool, &user.id, "wsa").await;
-    let (_, token) = mint_pat(&pool, &user.id, Some(&tenant.id), "wsa-ci", None).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "wsa").await;
+    let (_, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "wsa-ci", None).await;
     let state = AppState::new(pool, auth_enabled_config(), None);
 
     let resp = app(state)
         .oneshot(
             bearer(
-                Request::builder().uri(format!("/api/tenants/{}", tenant.id)),
+                Request::builder().uri(format!("/api/workspaces/{}", workspace.id)),
                 &token,
             )
             .body(Body::empty())
@@ -817,22 +817,22 @@ async fn tenant_scoped_pat_can_read_its_own_workspace() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let v = read_json(resp).await;
-    assert_eq!(v["tenant"]["id"], tenant.id);
+    assert_eq!(v["workspace"]["id"], workspace.id);
 }
 
 #[tokio::test]
-async fn tenant_scoped_pat_rejects_other_workspace() {
+async fn workspace_scoped_pat_rejects_other_workspace() {
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
-    let tenant_a = seed_tenant_with_member(&pool, &user.id, "wsa").await;
-    let tenant_b = seed_tenant_with_member(&pool, &user.id, "wsb").await;
-    let (_, token) = mint_pat(&pool, &user.id, Some(&tenant_a.id), "wsa-ci", None).await;
+    let workspace_a = seed_workspace_with_member(&pool, &user.id, "wsa").await;
+    let workspace_b = seed_workspace_with_member(&pool, &user.id, "wsb").await;
+    let (_, token) = mint_pat(&pool, &user.id, Some(&workspace_a.id), "wsa-ci", None).await;
     let state = AppState::new(pool, auth_enabled_config(), None);
 
     let resp = app(state)
         .oneshot(
             bearer(
-                Request::builder().uri(format!("/api/tenants/{}", tenant_b.id)),
+                Request::builder().uri(format!("/api/workspaces/{}", workspace_b.id)),
                 &token,
             )
             .body(Body::empty())
@@ -842,5 +842,5 @@ async fn tenant_scoped_pat_rejects_other_workspace() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     let v = read_json(resp).await;
-    assert_eq!(v["error"], "pat_tenant_scope_mismatch");
+    assert_eq!(v["error"], "pat_workspace_scope_mismatch");
 }

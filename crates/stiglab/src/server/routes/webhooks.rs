@@ -99,7 +99,7 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-    // Precedence: per-install cipher (manual tenant endpoint) → shared App
+    // Precedence: per-install cipher (manual workspace endpoint) → shared App
     // secret from `GITHUB_APP_WEBHOOK_SECRET` (Railway env var) when the
     // install row exists without a cipher. Unknown installations still fail
     // closed — the global fallback is only reachable for rows we registered.

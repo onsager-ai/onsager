@@ -16,7 +16,9 @@ pub mod ws;
 
 pub use sqlx::AnyPool;
 
-use axum::http::{header, HeaderValue};
+use axum::extract::OriginalUri;
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::response::IntoResponse;
 use axum::routing::{any, delete, get, post, put};
 use axum::Router;
 use tower::ServiceBuilder;
@@ -28,6 +30,31 @@ use tower_http::trace::TraceLayer;
 
 use config::ServerConfig;
 use state::AppState;
+
+/// 308 Permanent Redirect handler for legacy `/api/tenants/*` paths.
+///
+/// Rewrites `/api/tenants` → `/api/workspaces` (and any subpath) while
+/// preserving the original query string.  308 is the right status here:
+/// unlike 301, it forbids the client from changing the request method,
+/// so POST/PATCH/DELETE bodies replay against the new path verbatim.
+///
+/// This is bridge-debt — see the follow-up issue filed with #163.  The
+/// redirect goes away one release after #163 lands.
+async fn redirect_tenants_to_workspaces(OriginalUri(uri): OriginalUri) -> impl IntoResponse {
+    let path = uri.path();
+    // Strip the `/api/tenants` prefix; what remains is either empty or a
+    // `/...` suffix that we splice onto `/api/workspaces`.
+    let suffix = path.strip_prefix("/api/tenants").unwrap_or("");
+    let mut location = format!("/api/workspaces{suffix}");
+    if let Some(q) = uri.query() {
+        location.push('?');
+        location.push_str(q);
+    }
+    (
+        StatusCode::PERMANENT_REDIRECT,
+        [(header::LOCATION, location)],
+    )
+}
 
 /// Build the Axum router with all API routes, CORS, and optional static file serving.
 pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
@@ -82,55 +109,60 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             get(routes::pats::list_pats).post(routes::pats::create_pat),
         )
         .route("/api/pats/{id}", delete(routes::pats::delete_pat))
-        // Tenant / workspace routes (issue #59 — Phase 0)
+        // Workspace routes (issue #59 — Phase 0; renamed from "tenant" →
+        // "workspace" in issue #163).
         .route(
-            "/api/tenants",
-            get(routes::tenants::list_tenants).post(routes::tenants::create_tenant),
-        )
-        .route("/api/tenants/{id}", get(routes::tenants::get_tenant))
-        .route(
-            "/api/tenants/{id}/members",
-            get(routes::tenants::list_members),
+            "/api/workspaces",
+            get(routes::workspaces::list_workspaces).post(routes::workspaces::create_workspace),
         )
         .route(
-            "/api/tenants/{id}/github-installations",
-            get(routes::tenants::list_installations).post(routes::tenants::register_installation),
+            "/api/workspaces/{id}",
+            get(routes::workspaces::get_workspace),
         )
         .route(
-            "/api/tenants/{id}/github-installations/{install_id}",
-            axum::routing::delete(routes::tenants::delete_installation),
+            "/api/workspaces/{id}/members",
+            get(routes::workspaces::list_members),
         )
         .route(
-            "/api/tenants/{id}/github-installations/{install_id}/accessible-repos",
-            get(routes::tenants::list_accessible_repos),
+            "/api/workspaces/{id}/github-installations",
+            get(routes::workspaces::list_installations)
+                .post(routes::workspaces::register_installation),
         )
         .route(
-            "/api/tenants/{id}/github-installations/{install_id}/repos/{owner}/{repo}/labels",
-            get(routes::tenants::list_repo_labels),
+            "/api/workspaces/{id}/github-installations/{install_id}",
+            axum::routing::delete(routes::workspaces::delete_installation),
+        )
+        .route(
+            "/api/workspaces/{id}/github-installations/{install_id}/accessible-repos",
+            get(routes::workspaces::list_accessible_repos),
+        )
+        .route(
+            "/api/workspaces/{id}/github-installations/{install_id}/repos/{owner}/{repo}/labels",
+            get(routes::workspaces::list_repo_labels),
         )
         .route(
             "/api/github-app/config",
-            get(routes::tenants::github_app_config),
+            get(routes::workspaces::github_app_config),
         )
         .route(
             "/api/github-app/install-start",
-            get(routes::tenants::github_app_install_start),
+            get(routes::workspaces::github_app_install_start),
         )
         .route(
             "/api/github-app/callback",
-            get(routes::tenants::github_app_install_callback),
+            get(routes::workspaces::github_app_install_callback),
         )
         .route(
-            "/api/tenants/{id}/projects",
-            get(routes::tenants::list_projects).post(routes::tenants::add_project),
+            "/api/workspaces/{id}/projects",
+            get(routes::workspaces::list_projects).post(routes::workspaces::add_project),
         )
         .route(
             "/api/projects",
-            get(routes::tenants::list_all_projects_for_user),
+            get(routes::workspaces::list_all_projects_for_user),
         )
         .route(
             "/api/projects/{id}",
-            get(routes::tenants::get_project).delete(routes::tenants::delete_project),
+            get(routes::workspaces::get_project).delete(routes::workspaces::delete_project),
         )
         // Live-data hydration for reference-only artifacts (#170 / #167 / #171).
         // The dashboard joins skeleton rows from `/api/spine/artifacts?kind=...`
@@ -147,6 +179,15 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/projects/{id}/backfill",
             post(routes::projects::backfill_project),
         )
+        // Legacy `/api/tenants/*` paths — return 308 Permanent Redirect to
+        // the new `/api/workspaces/*` surface so existing clients (CLI,
+        // PATs, dashboards on older deploys) keep working for one release.
+        // See the bridge-debt follow-up issue filed alongside #163; the
+        // removal date is one release after #163 lands.  308 (not 301)
+        // preserves the request method and body so POST/PATCH/DELETE
+        // re-issue cleanly.
+        .route("/api/tenants", any(redirect_tenants_to_workspaces))
+        .route("/api/tenants/{*rest}", any(redirect_tenants_to_workspaces))
         // Governance proxy — forwards to synodic on internal port
         .route("/api/governance/{*path}", any(routes::governance::proxy))
         // Portal webhook proxy — forwards `/webhooks/github` to the

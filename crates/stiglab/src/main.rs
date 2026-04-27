@@ -120,7 +120,7 @@ async fn run_server(
 
     let state = AppState::new(pool.clone(), config.clone(), spine);
 
-    // Backfill the spine `workflows` schema from `tenant_workflows` so
+    // Backfill the spine `workflows` schema from `workspace_workflows` so
     // forge can resolve workflows created before the mirror landed (and
     // self-heal any drift caused by best-effort CRUD-time mirroring).
     if let Some(spine) = state.spine.as_ref() {

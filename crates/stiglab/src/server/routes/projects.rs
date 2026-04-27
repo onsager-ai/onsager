@@ -6,7 +6,7 @@
 //! endpoints in this module. Each endpoint:
 //!
 //! 1. Authenticates the user (`require_auth_user`).
-//! 2. Resolves the project and asserts tenant membership.
+//! 2. Resolves the project and asserts workspace membership.
 //! 3. Mints an installation token via `github_app::mint_installation_token`.
 //! 4. Fetches live data from GitHub through a per-process LRU+TTL cache
 //!    (`AppState::proxy_cache`). Cache hits skip the GitHub round-trip.
@@ -58,9 +58,9 @@ fn require_auth_user(auth_user: &AuthUser) -> Result<&str, Response> {
     }
 }
 
-/// Look up the project + assert the user is a member of its tenant. 404s
+/// Look up the project + assert the user is a member of its workspace. 404s
 /// for unknown projects and non-members alike (matches the project-scoped
-/// pattern in `tenants.rs`).
+/// pattern in `workspaces.rs`).
 async fn require_project_for_user(
     pool: &AnyPool,
     auth_user: &AuthUser,
@@ -75,11 +75,11 @@ async fn require_project_for_user(
             return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     };
-    match db::is_tenant_member(pool, &project.tenant_id, user_id).await {
+    match db::is_workspace_member(pool, &project.workspace_id, user_id).await {
         Ok(true) => Ok(project),
         Ok(false) => Err(not_found("project not found")),
         Err(e) => {
-            tracing::error!("failed to check tenant membership: {e}");
+            tracing::error!("failed to check workspace membership: {e}");
             Err(StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
     }

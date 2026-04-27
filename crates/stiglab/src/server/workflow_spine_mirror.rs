@@ -1,13 +1,13 @@
-// seam-allow: removed in Lever D (#149) — collapses tenant_workflows into spine workflows with a tenant_id discriminator
-//! Mirror stiglab's `tenant_workflows` rows into the spine `workflows` /
+// seam-allow: removed in Lever D (#149) — collapses workspace_workflows into spine workflows with a workspace_id discriminator
+//! Mirror stiglab's `workspace_workflows` rows into the spine `workflows` /
 //! `workflow_stages` tables that forge reads.
 //!
-//! Stiglab owns the multi-tenant CRUD schema (`tenant_workflows`); forge
-//! consumes the spine schema defined in `crates/onsager-spine/migrations/
-//! 006_workflows.sql`. Without this bridge, every `trigger.fired` event
-//! emitted by stiglab references a `workflow_id` forge can't resolve, and
-//! the trigger is dropped with a "trigger.fired for unknown workflow"
-//! warning (no artifact, no session).
+//! Stiglab owns the multi-workspace CRUD schema (`workspace_workflows`);
+//! forge consumes the spine schema defined in `crates/onsager-spine/
+//! migrations/006_workflows.sql`. Without this bridge, every
+//! `trigger.fired` event emitted by stiglab references a `workflow_id`
+//! forge can't resolve, and the trigger is dropped with a "trigger.fired
+//! for unknown workflow" warning (no artifact, no session).
 //!
 //! Called from every CRUD handler that mutates a workflow, plus a one-shot
 //! backfill on startup so workflows that pre-date this bridge sync over.
@@ -103,7 +103,7 @@ pub async fn delete(spine_pool: &PgPool, workflow_id: &str) -> anyhow::Result<()
     Ok(())
 }
 
-/// One-shot startup sync. Reads every `tenant_workflows` row plus its
+/// One-shot startup sync. Reads every `workspace_workflows` row plus its
 /// stages and upserts the spine schema. Idempotent; safe to run on every
 /// boot. Logs a warning per failed row but does not abort startup —
 /// individual translation failures shouldn't take stiglab down.
@@ -224,7 +224,7 @@ mod tests {
     fn trigger_config_pairs_repo_and_label() {
         let w = Workflow {
             id: "wf_x".into(),
-            tenant_id: "t".into(),
+            workspace_id: "w".into(),
             name: "x".into(),
             trigger_kind: TriggerKind::GithubIssueWebhook,
             repo_owner: "owner".into(),

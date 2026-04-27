@@ -136,7 +136,7 @@ pub const WEBHOOK_PATH: &str = "/api/webhooks/github";
 ///    activation request, falling back to `Host`. The gate exists
 ///    because these headers are spoofable by any client that can hit
 ///    stiglab directly without a proxy in front; trusting them in a
-///    non-proxied deploy lets a hostile client redirect the tenant's
+///    non-proxied deploy lets a hostile client redirect the workspace's
 ///    webhook deliveries to an attacker-controlled URL.
 ///
 /// Returns `None` when no layer yields anything — callers map this to
