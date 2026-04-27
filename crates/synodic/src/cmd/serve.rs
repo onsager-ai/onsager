@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::core::engine_cache::EngineCache;
-use crate::core::gate_adapter;
 use crate::core::storage::pool::{create_storage, resolve_database_url};
 use crate::core::storage::{
     CreateGovernanceEvent, GovernanceEvent, GovernanceEventFilters, RuleProposal, Storage,
@@ -134,7 +133,9 @@ impl ServeCmd {
             .route("/events/{id}/resolve", patch(resolve_event))
             .route("/stats", get(get_stats))
             .route("/rules", get(list_rules))
-            .route("/gate", post(gate_handler))
+            // `/gate` removed in Lever C phase 5 (#148) — forge calls
+            // synodic via the spine (`forge.gate_requested` →
+            // `synodic.gate_verdict`) instead of HTTP.
             // Rule proposal queue (issue #36 Step 2)
             .route("/rule-proposals", get(list_rule_proposals))
             .route("/rule-proposals/{id}/resolve", patch(resolve_rule_proposal))
@@ -499,26 +500,12 @@ async fn propose_escalation_resolution(
     Ok(StatusCode::ACCEPTED)
 }
 
-// ---------------------------------------------------------------------------
-// Gate handler (Onsager protocol)
-// ---------------------------------------------------------------------------
-
-async fn gate_handler(
-    State(store): State<Arc<dyn Storage>>,
-    State(engine_cache): State<Arc<EngineCache>>,
-    Json(req): Json<onsager_spine::protocol::GateRequest>,
-) -> Result<Json<onsager_spine::protocol::GateVerdict>, AppError> {
-    // Cached: if no rule has been added/updated/deleted since the last call,
-    // we reuse the compiled `InterceptEngine` (issue #32). The only DB cost
-    // on a hit is one cheap `(COUNT, MAX(updated_at))` aggregate.
-    let engine = engine_cache.get_or_refresh(&*store).await?;
-
-    let intercept_req = gate_adapter::gate_request_to_intercept(&req);
-    let resp = engine.evaluate(&intercept_req);
-    let verdict = gate_adapter::intercept_to_gate_verdict(&resp);
-
-    Ok(Json(verdict))
-}
+// `POST /api/gate` was the legacy forge → synodic gate evaluation
+// entrypoint; deleted in Lever C phase 5 (#148). Forge now emits
+// `forge.gate_requested` directly onto the spine and `gate_listener`
+// in this crate consumes it, calling the cached `InterceptEngine` via
+// `engine_cache.get_or_refresh` and emitting `synodic.gate_verdict`
+// keyed on the same `gate_id`.
 
 // ---------------------------------------------------------------------------
 // Error handling

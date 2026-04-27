@@ -9,39 +9,37 @@
 use std::collections::HashMap;
 
 use forge::core::artifact_store::ArtifactStore;
-use forge::core::pipeline::{StiglabDispatcher, SynodicGate};
+use forge::core::pending::PendingVerdicts;
 use forge::core::signal_cache::{Signal, SignalCache, SignalOutcome};
 use forge::core::stage_runner::advance_workflow_artifacts;
 use forge::core::trigger_subscriber::{register_artifact_from_trigger, TriggerFired};
 use forge::core::workflow::{GateSpec, StageSpec, TriggerSpec, Workflow};
 use forge::core::workflow_gates::{
-    external_check_signal_kind, LiveGateEvaluator, AGENT_SESSION_SIGNAL,
+    external_check_signal_kind, GateEmitter, LiveGateEvaluator, AGENT_SESSION_SIGNAL,
 };
 use forge::core::workflow_signal_listener::classify_signal;
 use onsager_artifact::ArtifactState;
-use onsager_spine::factory_event::{FactoryEventKind, ShapingOutcome};
-use onsager_spine::protocol::{GateRequest, GateVerdict, ShapingRequest, ShapingResult};
+use onsager_spine::factory_event::FactoryEventKind;
+use onsager_spine::protocol::{GateRequest, GateVerdict, ShapingRequest};
 
-struct AllowSynodic;
-impl SynodicGate for AllowSynodic {
-    fn evaluate(&self, _req: &GateRequest) -> GateVerdict {
-        GateVerdict::Allow
-    }
+/// Test [`GateEmitter`] that simulates the synodic round-trip locally:
+/// every `emit_gate_requested` call immediately parks an `Allow`
+/// verdict in the shared `PendingVerdicts` map, so the next tick
+/// resolves the governance gate without standing up a real spine
+/// listener. The matching `forge.shaping_dispatched` /
+/// `forge.gate_requested` event payloads are validated separately by
+/// the per-listener unit tests in
+/// `crates/forge/src/core/workflow_gates.rs`.
+struct AutoAllowEmitter {
+    pending: PendingVerdicts,
 }
-
-struct NoopStiglab;
-impl StiglabDispatcher for NoopStiglab {
-    fn dispatch(&self, req: &ShapingRequest) -> ShapingResult {
-        ShapingResult {
-            request_id: req.request_id.clone(),
-            outcome: ShapingOutcome::Completed,
-            content_ref: None,
-            change_summary: String::new(),
-            quality_signals: vec![],
-            session_id: "sess".into(),
-            duration_ms: 0,
-            error: None,
-        }
+impl GateEmitter for AutoAllowEmitter {
+    fn emit_shaping_dispatched(&self, _request: &ShapingRequest) -> bool {
+        true
+    }
+    fn emit_gate_requested(&self, gate_id: &str, _request: &GateRequest) -> bool {
+        self.pending.insert(gate_id, GateVerdict::Allow);
+        true
     }
 }
 
@@ -128,7 +126,16 @@ fn artifact_walks_issue_to_pr_to_ci_to_merge() {
     let id = artifact.artifact_id.clone();
 
     let signals = SignalCache::new();
-    let evaluator = LiveGateEvaluator::new(signals.clone(), NoopStiglab, AllowSynodic);
+    let evaluator = {
+        let pending = PendingVerdicts::new();
+        LiveGateEvaluator::new(
+            signals.clone(),
+            AutoAllowEmitter {
+                pending: pending.clone(),
+            },
+            pending,
+        )
+    };
     let mut workflows = HashMap::new();
     workflows.insert(wf.workflow_id.clone(), wf);
 
@@ -146,8 +153,14 @@ fn artifact_walks_issue_to_pr_to_ci_to_merge() {
     );
     advance_workflow_artifacts(&workflows, &mut store, &evaluator);
     assert_eq!(store.get(&id).unwrap().current_stage_index, Some(1));
-    // Stage 1 is Governance (Allow) — advances to stage 2 same tick.
-    // Because AllowSynodic returns Allow synchronously, the next tick covers it.
+    // Stage 1 is Governance — phase 5 (Lever C) made this an
+    // emit-and-park flow: tick N emits forge.gate_requested (the
+    // AutoAllowEmitter parks an Allow verdict in pending_verdicts on
+    // the same call), tick N+1 resumes by claiming that verdict and
+    // returns Pass. Two ticks total — the synchronous-Allow assumption
+    // from the pre-phase-5 test is gone.
+    advance_workflow_artifacts(&workflows, &mut store, &evaluator);
+    assert_eq!(store.get(&id).unwrap().current_stage_index, Some(1));
     advance_workflow_artifacts(&workflows, &mut store, &evaluator);
     assert_eq!(store.get(&id).unwrap().current_stage_index, Some(2));
 
@@ -208,7 +221,16 @@ fn signal_listener_classifier_feeds_stage_runner() {
     let id = artifact.artifact_id.clone();
 
     let signals = SignalCache::new();
-    let evaluator = LiveGateEvaluator::new(signals.clone(), NoopStiglab, AllowSynodic);
+    let evaluator = {
+        let pending = PendingVerdicts::new();
+        LiveGateEvaluator::new(
+            signals.clone(),
+            AutoAllowEmitter {
+                pending: pending.clone(),
+            },
+            pending,
+        )
+    };
     let mut workflows = HashMap::new();
     workflows.insert(wf.workflow_id.clone(), wf);
 
@@ -251,7 +273,16 @@ fn deactivating_workflow_stops_new_triggers_but_allows_inflight_to_finish() {
 
     // But the in-flight artifact keeps progressing through the runner.
     let signals = SignalCache::new();
-    let evaluator = LiveGateEvaluator::new(signals.clone(), NoopStiglab, AllowSynodic);
+    let evaluator = {
+        let pending = PendingVerdicts::new();
+        LiveGateEvaluator::new(
+            signals.clone(),
+            AutoAllowEmitter {
+                pending: pending.clone(),
+            },
+            pending,
+        )
+    };
     let mut workflows = HashMap::new();
     workflows.insert(deactivated.workflow_id.clone(), deactivated);
 

@@ -21,18 +21,18 @@ What this means for synodic specifically:
   governance UI (rule lists, verdict views, etc.). Webhooks from
   external policy sources, if any.
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `stiglab`,
-  or `ising`. The legacy `HttpSynodicGate` path
-  (`crates/forge/src/cmd/serve.rs` ≈344–397, instantiated in `run`
-  ≈469–490) is the one remaining violation, and Lever C of spec #131
-  deletes it. Gate verdicts must flow as events: forge emits
-  `forge.gate_requested`; synodic consumes it and emits
-  `synodic.gate_verdict` with the decision.
-- **`SYNODIC_FAIL_POLICY` (forge-side).** When forge cannot reach the
-  HTTP gate today, it falls back per `SYNODIC_FAIL_POLICY` (default
-  `escalate`). Once Lever C lands, the equivalent failure mode is "no
-  `synodic.gate_verdict` arrived in window" — the same `escalate /
-  deny / allow` choice applies to event-time math, not HTTP timeouts.
-  The default stays `escalate` (forge invariant #5).
+  or `ising`. **Lever C status (#148): no remaining violation** —
+  `HttpSynodicGate` and the `POST /api/gate` route it called are gone
+  as of phase 5. Gate verdicts flow as events: forge emits
+  `forge.gate_requested`; synodic's `gate_listener` consumes it and
+  emits `synodic.gate_verdict` with the decision.
+- **Missing-in-window verdict policy (forge-side).** When `synodic.gate_verdict`
+  doesn't arrive within the deadline, the forge pipeline applies the
+  same `escalate / deny / allow` choice the legacy `SYNODIC_FAIL_POLICY`
+  used to apply to HTTP timeouts — the default stays `escalate`
+  (forge invariant #5). The phase-6 sub-issue (#186) tracks per-process
+  cursor persistence so a forge restart mid-gate doesn't drop the
+  verdict in flight.
 - **Cargo deps.** `synodic` may depend on `onsager-{artifact,
   spine}` (the protocol DTOs now live in `onsager_spine::protocol`
   per #131 Lever C; the standalone `onsager-protocol` crate is gone).

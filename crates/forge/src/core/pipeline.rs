@@ -97,51 +97,6 @@ pub enum PipelineEvent {
     Error(String),
 }
 
-/// Trait for dispatching shaping work to Stiglab.
-///
-/// Production implementations call Stiglab's HTTP API.
-/// Tests use mock implementations.
-pub trait StiglabDispatcher: Send + Sync {
-    /// Synchronous dispatch — used by the legacy `ForgePipeline` tick,
-    /// which folds the terminal `ShapingResult` back into the artifact
-    /// state inline. Blocks until Stiglab returns a terminal state or the
-    /// request deadline elapses.
-    fn dispatch(&self, request: &ShapingRequest) -> ShapingResult;
-
-    /// Fire-and-forget dispatch — used by the workflow stage runner's
-    /// `agent-session` gate. POSTs the shaping request and returns as
-    /// soon as Stiglab acknowledges; the runner does NOT wait for the
-    /// session to complete. Resolution comes via the
-    /// `stiglab.session_completed` event listener writing into the
-    /// signal cache, which the next tick observes.
-    ///
-    /// Returns `true` when Stiglab accepted the request, `false`
-    /// otherwise (network error, 5xx, …). The caller uses the return
-    /// value to decide whether to mark this dispatch as done — a
-    /// failed POST must not be marked dispatched, or the gate will
-    /// stall waiting for a completion signal that can never arrive.
-    ///
-    /// Default implementation falls back to the blocking `dispatch` for
-    /// backwards compatibility with mocks; production paths override
-    /// with a true non-blocking call so the Forge write lock isn't held
-    /// for the full shaping deadline when no agent is available.
-    fn dispatch_fire_and_forget(&self, request: &ShapingRequest) -> bool {
-        let result = self.dispatch(request);
-        !matches!(
-            result.outcome,
-            ShapingOutcome::Failed | ShapingOutcome::Aborted
-        )
-    }
-}
-
-/// Trait for consulting Synodic at gate points.
-///
-/// Production implementations call Synodic's gate API.
-/// Tests use mock implementations.
-pub trait SynodicGate: Send + Sync {
-    fn evaluate(&self, request: &GateRequest) -> GateVerdict;
-}
-
 /// Synchronous sealing sink — abstracts over the async warehouse for the
 /// sync pipeline (warehouse-and-delivery-v0.1 §5.1).
 ///
