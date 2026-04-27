@@ -41,8 +41,8 @@ What this means for stiglab specifically:
   architecture lint lands.
 - **Spine as single source of truth.** `src/server/workflow_db.rs` +
   `src/server/workflow_spine_mirror.rs` are the live drift example —
-  stiglab owns `tenant_workflows` while the spine owns `workflows`.
-  Lever D collapses these into the spine schema with a `tenant_id`
+  stiglab owns `workspace_workflows` while the spine owns `workflows`.
+  Lever D collapses these into the spine schema with a `workspace_id`
   discriminator, in one PR, alongside removal of the mirror module.
   New code: write to spine tables directly; do not extend the mirror.
 - **In-memory caches.** State the spine owns is read from the spine.
