@@ -6,6 +6,7 @@ use sqlx::AnyPool;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
 use crate::server::config::ServerConfig;
+use crate::server::proxy_cache::ProxyCache;
 use crate::server::spine::SpineEmitter;
 
 pub type WsSender = mpsc::UnboundedSender<Message>;
@@ -35,6 +36,11 @@ pub struct AppState {
     /// (Done or Failed). Powers `GET /api/shaping/{id}?wait=Ns` so the
     /// status endpoint doesn't need to poll the database (issue #31).
     pub session_completion_tx: broadcast::Sender<String>,
+    /// Short-TTL cache for `/api/projects/:id/{issues,pulls}` live-hydration
+    /// reads (#170). Reference-only artifact rows don't carry GitHub-authored
+    /// fields; the proxy fetches them on demand and this cache deduplicates
+    /// in-flight reads inside the TTL window (default 60s).
+    pub proxy_cache: Arc<ProxyCache>,
 }
 
 impl AppState {
@@ -46,6 +52,7 @@ impl AppState {
             config,
             spine,
             session_completion_tx,
+            proxy_cache: Arc::new(ProxyCache::from_env()),
         }
     }
 }

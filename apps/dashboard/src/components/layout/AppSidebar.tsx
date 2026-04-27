@@ -1,4 +1,4 @@
-import { Building2, Factory, GitBranch, Server, Terminal, Settings, Shield, Package, Activity } from "lucide-react"
+import { Building2, Factory, GitBranch, Inbox, Server, Terminal, Settings, Shield, Package, Activity } from "lucide-react"
 import { OnsagerLogo } from "./OnsagerLogo"
 import { UserMenu } from "./UserMenu"
 import { Link, useLocation } from "react-router-dom"
@@ -30,6 +30,10 @@ const navSections = [
     label: "Factory",
     items: [
       { title: "Overview", icon: Factory, path: "/" },
+      // Issues inbox (#168) — reference-only `Kind::GithubIssue` artifacts
+      // hydrated live via the portal proxy. Auth-gated because the inbox
+      // is workspace-scoped; anonymous mode has no projects to show.
+      { title: "Issues", icon: Inbox, path: "/issues", requiresAuth: true },
       // Workflows are workspace-scoped, so they only make sense when
       // there's an authenticated user to own them.
       { title: "Workflows", icon: GitBranch, path: "/workflows", requiresAuth: true },

@@ -3,6 +3,7 @@ pub mod config;
 pub mod db;
 pub mod github_app;
 pub mod handler;
+pub mod proxy_cache;
 pub mod routes;
 pub mod spine;
 pub mod sso;
@@ -130,6 +131,21 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route(
             "/api/projects/{id}",
             get(routes::tenants::get_project).delete(routes::tenants::delete_project),
+        )
+        // Live-data hydration for reference-only artifacts (#170 / #167 / #171).
+        // The dashboard joins skeleton rows from `/api/spine/artifacts?kind=...`
+        // with the hydrated payloads here on `external_ref`.
+        .route(
+            "/api/projects/{id}/issues",
+            get(routes::projects::list_project_issues),
+        )
+        .route(
+            "/api/projects/{id}/pulls",
+            get(routes::projects::list_project_pulls),
+        )
+        .route(
+            "/api/projects/{id}/backfill",
+            post(routes::projects::backfill_project),
         )
         // Governance proxy — forwards to synodic on internal port
         .route("/api/governance/{*path}", any(routes::governance::proxy))

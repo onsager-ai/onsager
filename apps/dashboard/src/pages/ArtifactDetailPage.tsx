@@ -215,7 +215,7 @@ export function ArtifactDetailPage() {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="hidden truncate text-2xl font-bold tracking-tight md:block">
-            {artifact.name}
+            {artifact.name ?? artifact.id}
           </h1>
           <p className="truncate text-sm text-muted-foreground font-mono">
             {artifact.id}
@@ -297,7 +297,7 @@ export function ArtifactDetailPage() {
         <Card>
           <CardContent className="px-3 py-3">
             <div className="text-xs text-muted-foreground">Owner</div>
-            <div className="font-medium">{artifact.owner}</div>
+            <div className="font-medium">{artifact.owner ?? "—"}</div>
           </CardContent>
         </Card>
         <Card>

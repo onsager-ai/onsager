@@ -235,13 +235,74 @@ export interface SpineEvent {
 export interface SpineArtifact {
   id: string;
   kind: string;
-  name: string;
-  owner: string;
+  /// Reference-only artifacts (`kind in ['github_issue', 'pull_request']`,
+  /// per spec #170) carry NULL here — the title is GitHub-authored and is
+  /// served by the live-hydration proxy at `/api/projects/:id/{issues,pulls}`.
+  /// Older PR rows materialized before the migration retain their stale
+  /// titles as best-effort fallback display.
+  name: string | null;
+  /// Reference-only artifacts carry NULL — see `name` for rationale.
+  owner: string | null;
   state: string;
   current_version: number;
   consumers?: string[];
+  /// Stable handle for joining skeleton rows with live proxy responses
+  /// (`github:project:{project_id}:{issue,pr}:{number}`).
+  external_ref?: string | null;
   created_at: string;
   updated_at: string;
+  /// Last webhook touch — drives the "last seen N min ago" placeholder
+  /// when the proxy is rate-limited (#170 fail-open).
+  last_observed_at?: string | null;
+}
+
+/// Live-hydrated GitHub issue from `GET /api/projects/:id/issues`. Joined
+/// with `SpineArtifact` rows (kind=`github_issue`) on `external_ref` to
+/// build the dashboard inbox view (#168).
+export interface ProjectIssueRow {
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  author: string | null;
+  labels: string[];
+  comments: number;
+  updated_at: string;
+}
+
+export interface ProjectPullRow {
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  author: string | null;
+  labels: string[];
+  draft: boolean;
+  merged: boolean;
+  updated_at: string;
+}
+
+export interface ProjectLiveListResponse<T> {
+  issues?: T[];
+  pulls?: T[];
+  /// `rate_limited` / `github_unreachable` per #170 fail-open. Dashboard
+  /// renders the artifact skeleton's `last_observed_at` placeholder.
+  error?: string;
+}
+
+export interface BackfillRequestBody {
+  cap?: number;
+  strategy?: 'recent' | 'active' | 'refract';
+  state?: 'open' | 'closed' | 'all';
+}
+
+export interface BackfillReport {
+  project_id: string;
+  repo: string;
+  cap: number;
+  issues_ingested: number;
+  pulls_ingested: number;
+  skipped: number;
 }
 
 export interface ArtifactDetail extends SpineArtifact {
@@ -730,7 +791,17 @@ export const api = {
     ).toString() : '';
     return request<{ events: SpineEvent[] }>(`/spine/events${qs}`);
   },
-  getArtifacts: () => request<{ artifacts: SpineArtifact[] }>('/spine/artifacts'),
+  getArtifacts: (filters?: { kind?: string; project_id?: string }) => {
+    const qs = filters
+      ? '?' +
+        new URLSearchParams(
+          Object.entries(filters)
+            .filter(([, v]) => v != null && v !== '')
+            .map(([k, v]) => [k, String(v)]),
+        ).toString()
+      : '';
+    return request<{ artifacts: SpineArtifact[] }>(`/spine/artifacts${qs}`);
+  },
   getArtifact: (id: string) => request<{ artifact: ArtifactDetail }>(`/spine/artifacts/${id}`),
   registerArtifact: (req: RegisterArtifactRequest) =>
     request<{ artifact: SpineArtifact }>('/spine/artifacts', {
@@ -820,4 +891,24 @@ export const api = {
     request<{ labels: GitHubLabel[] }>(
       `/tenants/${encodeURIComponent(tenantId)}/github-installations/${encodeURIComponent(installId)}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/labels`,
     ),
+  // Live-hydration proxy endpoints (specs #167, #170, #171). Dashboard
+  // joins skeleton rows from `getArtifacts({kind: ...})` with the rows
+  // returned here on `external_ref`.
+  listProjectIssues: (projectId: string, state?: 'open' | 'closed' | 'all') => {
+    const qs = state ? `?state=${state}` : '';
+    return request<ProjectLiveListResponse<ProjectIssueRow>>(
+      `/projects/${encodeURIComponent(projectId)}/issues${qs}`,
+    );
+  },
+  listProjectPulls: (projectId: string, state?: 'open' | 'closed' | 'all') => {
+    const qs = state ? `?state=${state}` : '';
+    return request<ProjectLiveListResponse<ProjectPullRow>>(
+      `/projects/${encodeURIComponent(projectId)}/pulls${qs}`,
+    );
+  },
+  backfillProject: (projectId: string, body: BackfillRequestBody = {}) =>
+    request<BackfillReport>(`/projects/${encodeURIComponent(projectId)}/backfill`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 };

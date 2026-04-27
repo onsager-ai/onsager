@@ -9,10 +9,18 @@
 //! webhook secret, and writes:
 //!
 //! - `events_ext` rows under namespace `git` (PR open/sync/close)
-//! - `artifacts` rows of `Kind::PullRequest` keyed by `(project_id, pr_number)`
-//! - `factory_tasks` rows for `issues.opened|labeled` carrying the `spec` label
+//! - `artifacts` skeleton rows for external items (`Kind::PullRequest`,
+//!   `Kind::GithubIssue`) — identity + our derived state only, no
+//!   provider-authored fields (per spec #170)
 //! - `vertical_lineage` rows when a webhook PR's `head.ref` matches a recent
 //!   stiglab session's working branch
+//!
+//! Provider-authored fields (PR/issue title, body, labels, author) are
+//! served by stiglab's user-facing API (`/api/projects/:id/{issues,pulls}`
+//! in `crates/stiglab/src/server/routes/projects.rs`), which hydrates live
+//! from GitHub through a short-TTL cache. The dashboard joins skeleton rows
+//! with the live response on `external_ref`. Portal does not expose
+//! user-facing endpoints — webhook ingress only.
 //!
 //! Portal-owned tables (`factory_tasks`, `pr_gate_verdicts`, `pr_branch_links`)
 //! are migrated at startup; everything else (tenant / installation / project /

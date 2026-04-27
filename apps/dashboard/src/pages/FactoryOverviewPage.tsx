@@ -103,7 +103,7 @@ export function FactoryOverviewPage() {
 
   const { data: artifactsData } = useQuery({
     queryKey: ["artifacts"],
-    queryFn: api.getArtifacts,
+    queryFn: () => api.getArtifacts(),
     refetchInterval: 5000,
     enabled,
   })

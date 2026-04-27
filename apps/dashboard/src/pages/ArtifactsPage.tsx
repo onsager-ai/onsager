@@ -28,7 +28,7 @@ export function ArtifactsPage() {
   usePageHeader({ title: "Artifacts" })
   const { data, isLoading } = useQuery({
     queryKey: ["artifacts"],
-    queryFn: api.getArtifacts,
+    queryFn: () => api.getArtifacts(),
     refetchInterval: 5000,
   })
 
@@ -111,7 +111,9 @@ export function ArtifactsPage() {
                             {a.state.replace("_", " ")}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-muted-foreground">{a.owner}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {a.owner ?? <span className="italic opacity-60">—</span>}
+                        </TableCell>
                         <TableCell className="font-mono">v{a.current_version}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {new Date(a.updated_at).toLocaleString()}
@@ -144,7 +146,7 @@ function ArtifactCard({ artifact }: { artifact: SpineArtifact }) {
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Badge variant="outline" className="shrink-0">{artifact.kind}</Badge>
-          <span className="truncate">{artifact.owner}</span>
+          <span className="truncate">{artifact.owner ?? "—"}</span>
           <span className="shrink-0 font-mono">v{artifact.current_version}</span>
         </div>
       </div>

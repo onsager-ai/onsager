@@ -53,6 +53,7 @@ import {
   Users,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { BackfillDialog } from "@/components/BackfillDialog"
 
 /**
  * Card rendering a single workspace with its GitHub installations, projects,
@@ -534,6 +535,13 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
   const [repoName, setRepoName] = useState("")
   const [defaultBranch, setDefaultBranch] = useState("")
   const [error, setError] = useState<string | null>(null)
+  // After a successful add-project, prompt the user to backfill the
+  // project's existing GitHub issues + PRs as reference-only artifacts (#168).
+  // Otherwise the inbox stays empty until the next webhook event arrives.
+  const [backfillCandidate, setBackfillCandidate] = useState<{
+    id: string
+    label: string
+  } | null>(null)
   const queryClient = useQueryClient()
 
   useImperativeHandle(
@@ -574,11 +582,19 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
         repo_name: repoName,
         default_branch: defaultBranch || undefined,
       }),
-    onSuccess: () => {
+    onSuccess: (created) => {
       queryClient.invalidateQueries({
         queryKey: ["workspace-projects", workspaceId],
       })
       queryClient.invalidateQueries({ queryKey: ["all-projects"] })
+      // Surface the backfill prompt — projects start with an empty inbox
+      // until either a webhook fires or the user backfills.
+      if (created?.project) {
+        setBackfillCandidate({
+          id: created.project.id,
+          label: `${created.project.repo_owner}/${created.project.repo_name}`,
+        })
+      }
       setAdding(false)
       setInstallationId("")
       setRepoOwner("")
@@ -766,6 +782,16 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
           </div>
         </form>
       )}
+      {backfillCandidate ? (
+        <BackfillDialog
+          projectId={backfillCandidate.id}
+          repoLabel={backfillCandidate.label}
+          open
+          onOpenChange={(o) => {
+            if (!o) setBackfillCandidate(null)
+          }}
+        />
+      ) : null}
     </div>
   )
 })

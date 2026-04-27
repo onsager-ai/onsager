@@ -25,9 +25,8 @@ use onsager_artifact::ArtifactId;
 use onsager_spine::factory_event::FactoryEventKind;
 use onsager_spine::{EventMetadata, EventStore};
 
-use crate::db::{self, PrLifecycleState};
+use crate::db::{self, IssueLifecycleState, PrLifecycleState};
 use crate::github::{Client, Issue, Pull};
-use crate::handlers::issues::SPEC_LABEL;
 
 /// Ingestion strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -57,7 +56,7 @@ pub struct BackfillReport {
     pub repo: String,
     pub cap: usize,
     pub prs_ingested: usize,
-    pub tasks_materialized: usize,
+    pub issues_ingested: usize,
     pub skipped: usize,
 }
 
@@ -126,15 +125,7 @@ pub async fn run(
             ("closed", false) => PrLifecycleState::Archived,
             _ => PrLifecycleState::InProgress,
         };
-        let artifact = db::upsert_pr_artifact(
-            pool,
-            &project.id,
-            pr.number,
-            &pr.title,
-            &pr.user.login,
-            next_state,
-        )
-        .await?;
+        let artifact = db::upsert_pr_artifact_ref(pool, &project.id, pr.number, next_state).await?;
         let event = if let Some(merge_sha) = pr
             .merge_commit_sha
             .clone()
@@ -179,48 +170,36 @@ pub async fn run(
     for issue in issues {
         if issue.is_pull_request() {
             // PRs come back through the issues endpoint too; skip — they
-            // were handled in the pulls loop with full PR metadata.
+            // were handled in the pulls loop.
             continue;
         }
-        if !issue.has_label(SPEC_LABEL) {
-            report.skipped += 1;
-            continue;
-        }
-        let source_ref = format!(
-            "github:{}/{}:issue#{}",
-            project.repo_owner, project.repo_name, issue.number
-        );
-        let task = db::upsert_factory_task(
-            pool,
-            &project.id,
-            "spec_issue",
-            &source_ref,
-            &issue.title,
-            issue.body.as_deref(),
-        )
-        .await?;
-        // Emit the same `portal.task_materialized` event the live webhook
-        // handler produces, so dashboard / ising consumers see a uniform
-        // stream whether the task came from backfill or a live `issues.opened`.
-        let stream_id = format!("portal:task:{}", task.id);
+        // Per spec #167: every issue becomes a reference-only skeleton
+        // artifact. No label gate, no body copy.
+        let lifecycle = IssueLifecycleState::from_github(&issue.state);
+        let artifact =
+            db::upsert_issue_artifact_ref(pool, &project.id, issue.number, lifecycle).await?;
+        let stream_id = format!("portal:issue:{}", artifact.artifact_id);
         spine
             .append_ext(
                 &stream_id,
                 "portal",
                 "portal.task_materialized",
                 serde_json::json!({
-                    "task_id": task.id,
+                    "artifact_id": artifact.artifact_id,
                     "project_id": project.id,
-                    "source": task.source,
-                    "source_ref": task.source_ref,
-                    "title": task.title,
+                    "external_ref": db::issue_external_ref(&project.id, issue.number),
+                    "issue_number": issue.number,
+                    "lifecycle": match lifecycle {
+                        IssueLifecycleState::Draft => "draft",
+                        IssueLifecycleState::Archived => "archived",
+                    },
                     "backfill": true,
                 }),
                 &metadata,
                 None,
             )
             .await?;
-        report.tasks_materialized += 1;
+        report.issues_ingested += 1;
     }
 
     Ok(report)
