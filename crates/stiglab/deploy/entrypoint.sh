@@ -63,9 +63,12 @@ fi
 # trust each other; an operator can pin a stable value via the env if
 # they want logs across restarts to authenticate to the same secret.
 if [ -z "$STIGLAB_INTERNAL_DISPATCH_TOKEN" ]; then
-    # 32 hex bytes = 128 bits of entropy, plenty for an in-container shared
-    # secret that's never written to disk and rotates on every redeploy.
-    STIGLAB_INTERNAL_DISPATCH_TOKEN="$(head -c 32 /dev/urandom | xxd -p -c 64)"
+    # 32 bytes of urandom rendered as 64 hex chars = 128 bits of entropy,
+    # plenty for an in-container shared secret that's never written to
+    # disk and rotates on every redeploy. `od` is in coreutils and ships
+    # on every Debian/Alpine slim base — `xxd` is NOT (it's a separate
+    # package in Debian and missing on most slim images).
+    STIGLAB_INTERNAL_DISPATCH_TOKEN="$(od -An -vN32 -tx1 /dev/urandom | tr -d ' \n')"
     echo "Generated ephemeral STIGLAB_INTERNAL_DISPATCH_TOKEN for forge↔stiglab dispatch"
 fi
 export STIGLAB_INTERNAL_DISPATCH_TOKEN
