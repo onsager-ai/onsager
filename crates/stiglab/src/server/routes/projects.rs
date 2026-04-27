@@ -25,6 +25,7 @@
 //! It mirrors the SQL shape used by `onsager-portal::db::upsert_*_artifact_ref`
 //! — a follow-up will consolidate the two writers into a shared spine helper.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use axum::extract::{Path, Query, State};
@@ -145,12 +146,66 @@ async fn mint_token(
     Ok(Some(token))
 }
 
-fn gh_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .user_agent("onsager-stiglab/0.1")
-        .timeout(Duration::from_secs(15))
-        .build()
-        .expect("reqwest build")
+/// Shared `reqwest::Client` for proxy + backfill calls. Building a client is
+/// relatively expensive (TLS + DNS + connection pool init) and only needs to
+/// happen once per process.
+fn gh_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("onsager-stiglab/0.1")
+            .timeout(Duration::from_secs(15))
+            .build()
+            .expect("reqwest build")
+    })
+}
+
+/// Validate the `state` query parameter against a fixed allowlist. The value
+/// flows directly into both the cache key (cardinality bound) and the
+/// upstream GitHub URL (no parameter injection); rejecting unknown values
+/// here is the whole defense.
+#[allow(clippy::result_large_err)]
+fn normalize_state(raw: Option<&str>) -> Result<&'static str, Response> {
+    match raw.unwrap_or("open") {
+        "open" => Ok("open"),
+        "closed" => Ok("closed"),
+        "all" => Ok("all"),
+        other => Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!("invalid state filter: {other}"),
+            })),
+        )
+            .into_response()),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Strategy {
+    /// Newest-first; cheapest. Default.
+    Recent,
+    /// Drop stale items (closed-but-unmerged PRs, closed issues) before
+    /// applying the cap.
+    Active,
+    /// Re-rank candidates (open before closed, more labels first) before
+    /// the cap. Same heuristic as `onsager-portal::backfill::Strategy::Refract`.
+    Refract,
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_strategy(raw: Option<&str>) -> Result<Strategy, Response> {
+    match raw.unwrap_or("recent") {
+        "recent" => Ok(Strategy::Recent),
+        "active" => Ok(Strategy::Active),
+        "refract" => Ok(Strategy::Refract),
+        other => Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!("invalid strategy: {other}"),
+            })),
+        )
+            .into_response()),
+    }
 }
 
 // ── GET /api/projects/:id/issues ──────────────────────────────────────────
@@ -203,7 +258,10 @@ pub async fn list_project_issues(
         Err(r) => return r,
     };
 
-    let state_q = filters.state.as_deref().unwrap_or("open");
+    let state_q = match normalize_state(filters.state.as_deref()) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
     let cache_key = format!("issues:{project_id}:{state_q}");
     if let Some(cached) = state.proxy_cache.get(&cache_key) {
         return Json(cached).into_response();
@@ -320,7 +378,10 @@ pub async fn list_project_pulls(
         Err(r) => return r,
     };
 
-    let state_q = filters.state.as_deref().unwrap_or("open");
+    let state_q = match normalize_state(filters.state.as_deref()) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
     let cache_key = format!("pulls:{project_id}:{state_q}");
     if let Some(cached) = state.proxy_cache.get(&cache_key) {
         return Json(cached).into_response();
@@ -462,7 +523,14 @@ pub async fn backfill_project(
         Err(r) => return r,
     };
     let cap = body.cap.unwrap_or(DEFAULT_CAP).min(HARD_CAP);
-    let state_q = body.state.as_deref().unwrap_or("open");
+    let state_q = match normalize_state(body.state.as_deref()) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let strategy = match normalize_strategy(body.strategy.as_deref()) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
 
     let token = match mint_token(&state.db, &project.github_app_installation_id).await {
         Ok(Some(t)) => t,
@@ -504,19 +572,41 @@ pub async fn backfill_project(
         skipped: 0,
     };
 
-    // Fetch issues (which include PRs in GitHub's response shape) and
-    // pulls separately so PR-side metadata (head_sha etc.) is available
-    // when we later need it.
+    // Fetch over-cap so the strategy filter has room to drop stale items
+    // before the shared budget is applied. `HARD_CAP` is the upper bound
+    // on what we'll actually write; `cap * 2` is the upper bound on what
+    // we *consider* (with a 200-item ceiling per fetch).
+    let fetch_cap = (cap * 2).min(HARD_CAP);
     let issues_url = format!(
         "https://api.github.com/repos/{owner}/{repo}/issues?state={state_q}&per_page=100",
         owner = project.repo_owner,
         repo = project.repo_name,
     );
-    let issues: Vec<LiveIssue> = match fetch_paginated(&token.token, &issues_url, cap).await {
+    let issues: Vec<LiveIssue> = match fetch_paginated(&token.token, &issues_url, fetch_cap).await {
         Ok(v) => v,
         Err(e) => return e,
     };
-    for i in issues.into_iter().take(cap) {
+    let pulls_url = format!(
+        "https://api.github.com/repos/{owner}/{repo}/pulls?state={state_q}&per_page=100",
+        owner = project.repo_owner,
+        repo = project.repo_name,
+    );
+    let pulls: Vec<LivePull> = match fetch_paginated(&token.token, &pulls_url, fetch_cap).await {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    let (issues, pulls) = apply_strategy(strategy, issues, pulls);
+
+    // Single budget across both kinds, so a `cap=100` request really tops
+    // out at 100 total writes (was 200 in the original). Issues consume
+    // first, then PRs.
+    let mut budget = cap;
+
+    for i in issues {
+        if budget == 0 {
+            break;
+        }
         if i.pull_request.is_some() {
             // PRs come back through the issues endpoint too — handle them
             // in the pulls loop below where we have full PR metadata.
@@ -527,7 +617,10 @@ pub async fn backfill_project(
             _ => "draft",
         };
         match upsert_issue_skeleton(pool, &project.id, i.number, lifecycle).await {
-            Ok(true) => report.issues_ingested += 1,
+            Ok(true) => {
+                report.issues_ingested += 1;
+                budget -= 1;
+            }
             Ok(false) => report.skipped += 1,
             Err(e) => {
                 tracing::warn!("issue skeleton upsert failed: {e}");
@@ -536,23 +629,20 @@ pub async fn backfill_project(
         }
     }
 
-    let pulls_url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/pulls?state={state_q}&per_page=100",
-        owner = project.repo_owner,
-        repo = project.repo_name,
-    );
-    let pulls: Vec<LivePull> = match fetch_paginated(&token.token, &pulls_url, cap).await {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    for p in pulls.into_iter().take(cap) {
+    for p in pulls {
+        if budget == 0 {
+            break;
+        }
         let lifecycle = match (p.state.as_str(), p.merged_at.is_some()) {
             (_, true) => "released",
             ("closed", false) => "archived",
             _ => "in_progress",
         };
         match upsert_pr_skeleton(pool, &project.id, p.number, lifecycle).await {
-            Ok(true) => report.pulls_ingested += 1,
+            Ok(true) => {
+                report.pulls_ingested += 1;
+                budget -= 1;
+            }
             Ok(false) => report.skipped += 1,
             Err(e) => {
                 tracing::warn!("pr skeleton upsert failed: {e}");
@@ -561,26 +651,56 @@ pub async fn backfill_project(
         }
     }
 
-    // Backfill changes the artifact set the dashboard reads; drop any
-    // cached responses for this project so the next list call sees the
-    // new rows immediately.
-    // (Cache is keyed by `issues:{id}:..` / `pulls:{id}:..`; clear by
-    // poking individual variants we know about.)
-    for s in ["open", "closed", "all"] {
-        state.proxy_cache.put(
-            format!("issues:{project_id}:{s}"),
-            serde_json::json!({ "issues": [] }),
-        );
-        state.proxy_cache.put(
-            format!("pulls:{project_id}:{s}"),
-            serde_json::json!({ "pulls": [] }),
-        );
-    }
-    // Above is a placeholder warm-up — invalidation proper requires
-    // a `clear` method we don't have yet; the next read after TTL will
-    // refresh. (Bounded by 60s; acceptable for v1.)
+    // Real eviction (#10): drop every cached list response keyed under
+    // this project so the next read repopulates from GitHub. Previous
+    // attempt overwrote with empty arrays, which caused subsequent reads
+    // to return empty results until TTL elapsed — bug.
+    state
+        .proxy_cache
+        .invalidate_prefix(&format!("issues:{project_id}:"));
+    state
+        .proxy_cache
+        .invalidate_prefix(&format!("pulls:{project_id}:"));
 
     Json(serde_json::json!(report)).into_response()
+}
+
+/// Apply the chosen ranking to the candidate sets before the shared cap.
+/// Mirrors the heuristics in `crates/onsager-portal/src/backfill/mod.rs` —
+/// kept in sync by hand for now; a follow-up should lift this into the
+/// onsager-spine helper that retires the duplicated upsert SQL.
+fn apply_strategy(
+    strategy: Strategy,
+    issues: Vec<LiveIssue>,
+    pulls: Vec<LivePull>,
+) -> (Vec<LiveIssue>, Vec<LivePull>) {
+    match strategy {
+        Strategy::Recent => (issues, pulls),
+        Strategy::Active => (
+            issues.into_iter().filter(|i| i.state == "open").collect(),
+            pulls
+                .into_iter()
+                .filter(|p| p.state == "open" || p.merged_at.is_some())
+                .collect(),
+        ),
+        Strategy::Refract => (refract_rank_issues(issues), refract_rank_pulls(pulls)),
+    }
+}
+
+fn refract_rank_issues(mut issues: Vec<LiveIssue>) -> Vec<LiveIssue> {
+    issues.sort_by(|a, b| {
+        let key = |i: &LiveIssue| (i.state == "open", i.labels.len());
+        key(b).cmp(&key(a))
+    });
+    issues
+}
+
+fn refract_rank_pulls(mut pulls: Vec<LivePull>) -> Vec<LivePull> {
+    pulls.sort_by(|a, b| {
+        let key = |p: &LivePull| (p.state == "open", p.merged_at.is_some());
+        key(b).cmp(&key(a))
+    });
+    pulls
 }
 
 // ── Skeleton upsert SQL ───────────────────────────────────────────────────
@@ -649,6 +769,12 @@ async fn fetch_paginated<T: serde::de::DeserializeOwned>(
 /// Insert a reference-only `Kind::GithubIssue` skeleton row, idempotent on
 /// `external_ref`. Returns `Ok(true)` if a new row was inserted, `Ok(false)`
 /// if a row already existed (the caller counts these as "skipped").
+///
+/// Concurrency: the spine schema does not enforce `UNIQUE(external_ref)`
+/// (other writers may legitimately share the column), so a naive
+/// "check then insert" races. We serialize concurrent upserts on the same
+/// `external_ref` via a transaction-scoped advisory lock — same pattern as
+/// `onsager-portal::db::upsert_pr_artifact_ref`.
 async fn upsert_issue_skeleton(
     pool: &PgPool,
     project_id: &str,
@@ -658,13 +784,19 @@ async fn upsert_issue_skeleton(
     let external_ref = format!("github:project:{project_id}:issue:{issue_number}");
     let new_id = format!("art_iss_{}", uuid::Uuid::new_v4().simple());
 
-    // Two-step upsert — same advisory-lock pattern as the portal.
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(&external_ref)
+        .execute(&mut *tx)
+        .await?;
+
     let existing: Option<(String,)> =
         sqlx::query_as("SELECT artifact_id FROM artifacts WHERE external_ref = $1")
             .bind(&external_ref)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *tx)
             .await?;
     if existing.is_some() {
+        tx.commit().await?;
         return Ok(false);
     }
     sqlx::query(
@@ -679,11 +811,14 @@ async fn upsert_issue_skeleton(
     .bind(&external_ref)
     .bind(project_id)
     .bind(issue_number as i64)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(true)
 }
 
+/// Insert a reference-only `Kind::PullRequest` skeleton row. Same idempotency
+/// guarantee as `upsert_issue_skeleton`.
 async fn upsert_pr_skeleton(
     pool: &PgPool,
     project_id: &str,
@@ -693,12 +828,19 @@ async fn upsert_pr_skeleton(
     let external_ref = format!("github:project:{project_id}:pr:{pr_number}");
     let new_id = format!("art_pr_{}", uuid::Uuid::new_v4().simple());
 
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(&external_ref)
+        .execute(&mut *tx)
+        .await?;
+
     let existing: Option<(String,)> =
         sqlx::query_as("SELECT artifact_id FROM artifacts WHERE external_ref = $1")
             .bind(&external_ref)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *tx)
             .await?;
     if existing.is_some() {
+        tx.commit().await?;
         return Ok(false);
     }
     sqlx::query(
@@ -713,7 +855,8 @@ async fn upsert_pr_skeleton(
     .bind(&external_ref)
     .bind(project_id)
     .bind(pr_number as i64)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(true)
 }

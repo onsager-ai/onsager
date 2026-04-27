@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ExternalLink, Inbox, RefreshCw } from "lucide-react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 
 import {
   api,
@@ -50,7 +50,12 @@ export function IssuesPage() {
   const { authEnabled, user } = useAuth()
   const authed = !authEnabled || !!user
 
-  const [projectId, setProjectId] = useState<string | null>(null)
+  // `?project=<id>` selects the active project on first render. Subsequent
+  // user picks via the dropdown override into local state, so deep-links
+  // stay clean while the picker still works.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const urlProjectId = searchParams.get("project")
+  const [projectIdOverride, setProjectIdOverride] = useState<string | null>(null)
   const [stateFilter, setStateFilter] = useState<StateFilter>("open")
 
   const projectsQuery = useQuery({
@@ -62,11 +67,20 @@ export function IssuesPage() {
     () => projectsQuery.data?.projects ?? [],
     [projectsQuery.data],
   )
-  const selectedProjectId = projectId ?? projects[0]?.id ?? null
+  const selectedProjectId =
+    projectIdOverride ?? urlProjectId ?? projects[0]?.id ?? null
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
   )
+
+  const setProjectId = (id: string) => {
+    setProjectIdOverride(id)
+    // Keep the URL in sync so the back/forward buttons + share-links work.
+    const next = new URLSearchParams(searchParams)
+    next.set("project", id)
+    setSearchParams(next, { replace: true })
+  }
 
   // Skeleton rows from the spine (kind=github_issue, scoped to project).
   // The hydrated fields come from the proxy below; we join on external_ref.
@@ -81,12 +95,16 @@ export function IssuesPage() {
     refetchInterval: 15_000,
   })
 
+  // Refetch cadence is independent of the server's proxy-cache TTL — the
+  // server-side TTL bounds upstream-GitHub freshness; the client-side
+  // interval bounds how often we *ask* the server. Picking 60s gives a
+  // sensible refresh rate without being chatty; tuning it doesn't affect
+  // correctness, only how quickly external changes appear without a
+  // manual reload.
   const liveQuery = useQuery({
     queryKey: ["project-issues", selectedProjectId, stateFilter],
     queryFn: () => api.listProjectIssues(selectedProjectId!, stateFilter),
     enabled: authed && !!selectedProjectId,
-    // Match the cache TTL on the server side; the dashboard re-fetches at
-    // the same cadence so users always see something close to fresh.
     refetchInterval: 60_000,
   })
 
@@ -98,20 +116,62 @@ export function IssuesPage() {
     return map
   }, [skeletonsQuery.data])
 
+  const proxyError = liveQuery.data?.error ?? null
+
+  // Drive the row set from the union of skeletons and live data so a proxy
+  // failure (rate_limited / github_unreachable) renders the cached
+  // skeleton rows rather than going blank — the page header banner already
+  // explains the degraded state. Live fields hydrate over the skeleton
+  // when both sides resolve.
   const rows: HydratedIssueRow[] = useMemo(() => {
     const live = liveQuery.data?.issues ?? []
-    return live.map((issue) => {
-      const externalRef =
-        selectedProjectId != null
-          ? `github:project:${selectedProjectId}:issue:${issue.number}`
-          : null
-      const skeleton =
-        externalRef != null ? skeletonsByExternalRef.get(externalRef) : null
-      return { issue, skeleton: skeleton ?? null }
-    })
-  }, [liveQuery.data, skeletonsByExternalRef, selectedProjectId])
+    const liveByExternalRef = new Map<string, ProjectIssueRow>()
+    if (selectedProjectId != null) {
+      for (const issue of live) {
+        liveByExternalRef.set(
+          `github:project:${selectedProjectId}:issue:${issue.number}`,
+          issue,
+        )
+      }
+    }
 
-  const proxyError = liveQuery.data?.error ?? null
+    // Skeleton-rooted entries: every artifact we know about, hydrated when
+    // possible.
+    const skeletonRows: HydratedIssueRow[] = []
+    for (const skeleton of skeletonsQuery.data?.artifacts ?? []) {
+      const live =
+        skeleton.external_ref != null
+          ? (liveByExternalRef.get(skeleton.external_ref) ?? null)
+          : null
+      skeletonRows.push({ issue: live, skeleton })
+    }
+
+    // Live-only entries: webhook hasn't created a skeleton yet (e.g. the
+    // very first time we observe an issue) but the proxy already returned
+    // it. Suppress these when the proxy errored — those are the empty-list
+    // case and we trust the skeletons alone.
+    const liveOnlyRows: HydratedIssueRow[] = []
+    if (!proxyError) {
+      for (const issue of live) {
+        if (selectedProjectId == null) {
+          liveOnlyRows.push({ issue, skeleton: null })
+          continue
+        }
+        const externalRef = `github:project:${selectedProjectId}:issue:${issue.number}`
+        if (!skeletonsByExternalRef.has(externalRef)) {
+          liveOnlyRows.push({ issue, skeleton: null })
+        }
+      }
+    }
+
+    return [...skeletonRows, ...liveOnlyRows]
+  }, [
+    liveQuery.data,
+    proxyError,
+    selectedProjectId,
+    skeletonsByExternalRef,
+    skeletonsQuery.data,
+  ])
 
   usePageHeader({
     title: "Issues",
@@ -176,7 +236,9 @@ export function IssuesPage() {
           {projects.length > 1 ? (
             <Select
               value={selectedProjectId ?? undefined}
-              onValueChange={(v) => setProjectId(v)}
+              onValueChange={(v) => {
+                if (v) setProjectId(v)
+              }}
             >
               <SelectTrigger className="w-56">
                 <SelectValue placeholder="Project" />
@@ -206,11 +268,12 @@ export function IssuesPage() {
         </div>
       </div>
 
-      {proxyError === "rate_limited" ? (
+      {proxyError ? (
         <Card>
           <CardContent className="py-3 text-sm text-muted-foreground">
-            GitHub rate limit reached. Showing skeleton rows; titles will return
-            in about a minute.
+            {proxyError === "rate_limited"
+              ? "GitHub rate limit reached. Showing skeleton rows; titles will return in about a minute."
+              : "Couldn't reach GitHub. Showing the last-known artifacts; titles will refresh once the connection recovers."}
           </CardContent>
         </Card>
       ) : null}
@@ -238,7 +301,7 @@ export function IssuesPage() {
             <>
               <div className="flex flex-col gap-2 md:hidden">
                 {rows.map((r) => (
-                  <IssueCard key={r.issue.number} row={r} />
+                  <IssueCard key={rowKey(r)} row={r} />
                 ))}
               </div>
               <div className="hidden md:block">
@@ -254,48 +317,55 @@ export function IssuesPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rows.map(({ issue }) => (
-                      <TableRow key={issue.number}>
-                        <TableCell className="max-w-md">
-                          <div className="truncate font-medium">{issue.title}</div>
-                          <div className="text-xs text-muted-foreground">
-                            #{issue.number}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={issue.state === "open" ? "default" : "secondary"}
-                          >
-                            {issue.state}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <LabelChips labels={issue.labels} />
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {issue.author ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {new Date(issue.updated_at).toLocaleString()}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            render={
-                              <a
-                                href={issue.html_url}
-                                target="_blank"
-                                rel="noreferrer"
-                              />
-                            }
-                          >
-                            <ExternalLink className="h-3.5 w-3.5" />
-                            <span className="sr-only">Open in GitHub</span>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {rows.map((r) => {
+                      const display = describeRow(r)
+                      return (
+                        <TableRow key={rowKey(r)}>
+                          <TableCell className="max-w-md">
+                            <div className="truncate font-medium">
+                              {display.title}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {display.subtitle}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={display.openState ? "default" : "secondary"}
+                            >
+                              {display.stateLabel}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <LabelChips labels={display.labels} />
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {display.author}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {display.updatedAt}
+                          </TableCell>
+                          <TableCell>
+                            {display.htmlUrl ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                render={
+                                  <a
+                                    href={display.htmlUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  />
+                                }
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                                <span className="sr-only">Open in GitHub</span>
+                              </Button>
+                            ) : null}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -308,36 +378,110 @@ export function IssuesPage() {
 }
 
 interface HydratedIssueRow {
-  issue: ProjectIssueRow
+  /// Live GitHub data, when the proxy returned it. NULL when the proxy
+  /// failed open and we're rendering the skeleton row alone.
+  issue: ProjectIssueRow | null
+  /// Local skeleton row. NULL on the very first observation if the proxy
+  /// returned an issue before the webhook fired.
   skeleton: SpineArtifact | null
 }
 
+interface RowDisplay {
+  title: string
+  subtitle: string
+  openState: boolean
+  stateLabel: string
+  labels: string[]
+  author: string
+  updatedAt: string
+  htmlUrl: string | null
+}
+
+/// Stable React key — uses the external_ref when available, otherwise
+/// derives one from the live issue. Both sides shouldn't ever be null
+/// for a row that survives the union, but the fallback keeps the type
+/// system honest.
+function rowKey(row: HydratedIssueRow): string {
+  if (row.skeleton?.external_ref) return row.skeleton.external_ref
+  if (row.issue) return `live:${row.issue.number}`
+  return row.skeleton?.id ?? Math.random().toString(36)
+}
+
+/// Project hydrated + skeleton rows down to the values the table/card
+/// renderers display. Skeleton-only rows derive their state from the
+/// artifact's lifecycle column and surface a "—" placeholder for fields
+/// only GitHub knows.
+function describeRow(row: HydratedIssueRow): RowDisplay {
+  const { issue, skeleton } = row
+  if (issue) {
+    return {
+      title: issue.title,
+      subtitle: `#${issue.number}`,
+      openState: issue.state === "open",
+      stateLabel: issue.state,
+      labels: issue.labels,
+      author: issue.author ?? "—",
+      updatedAt: new Date(issue.updated_at).toLocaleString(),
+      htmlUrl: issue.html_url,
+    }
+  }
+  // Skeleton-only fallback: artifact lifecycle in `state` (`draft` =
+  // open, `archived` = closed); titles aren't stored locally so we
+  // surface the artifact id as a placeholder.
+  const open = skeleton?.state === "draft"
+  const lastSeen = skeleton?.last_observed_at
+  return {
+    title: skeleton?.id ?? "(unavailable)",
+    subtitle: skeleton?.external_ref?.split(":issue:").pop() ?? "—",
+    openState: open,
+    stateLabel: open ? "open" : "closed",
+    labels: [],
+    author: "—",
+    updatedAt: lastSeen
+      ? `last seen ${new Date(lastSeen).toLocaleString()}`
+      : "—",
+    htmlUrl: null,
+  }
+}
+
 function IssueCard({ row }: { row: HydratedIssueRow }) {
-  const { issue } = row
-  return (
-    <a
-      href={issue.html_url}
-      target="_blank"
-      rel="noreferrer"
-      className="flex flex-col gap-1.5 rounded-lg border p-3 transition-colors active:bg-accent"
-    >
+  const display = describeRow(row)
+  const cardClass =
+    "flex flex-col gap-1.5 rounded-lg border p-3 transition-colors active:bg-accent"
+  const inner = (
+    <>
       <div className="flex items-start justify-between gap-2">
-        <span className="line-clamp-2 text-sm font-medium">{issue.title}</span>
+        <span className="line-clamp-2 text-sm font-medium">{display.title}</span>
         <Badge
-          variant={issue.state === "open" ? "default" : "secondary"}
+          variant={display.openState ? "default" : "secondary"}
           className="shrink-0"
         >
-          {issue.state}
+          {display.stateLabel}
         </Badge>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>#{issue.number}</span>
-        {issue.author ? <span>· {issue.author}</span> : null}
-        <span>· {new Date(issue.updated_at).toLocaleDateString()}</span>
+        <span>{display.subtitle}</span>
+        {display.author !== "—" ? <span>· {display.author}</span> : null}
+        <span>· {display.updatedAt}</span>
       </div>
-      {issue.labels.length > 0 ? <LabelChips labels={issue.labels} /> : null}
-    </a>
+      {display.labels.length > 0 ? (
+        <LabelChips labels={display.labels} />
+      ) : null}
+    </>
   )
+  if (display.htmlUrl) {
+    return (
+      <a
+        href={display.htmlUrl}
+        target="_blank"
+        rel="noreferrer"
+        className={cardClass}
+      >
+        {inner}
+      </a>
+    )
+  }
+  return <div className={cardClass}>{inner}</div>
 }
 
 function LabelChips({ labels }: { labels: string[] }) {
