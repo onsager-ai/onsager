@@ -3,7 +3,8 @@
 --
 -- Migration 004 added `workspace_id NOT NULL DEFAULT 'default'` to the
 -- artifact-pipeline registry tables (artifacts, artifact_types,
--- gate_evaluators, agent_profiles, artifact_adapters, registry_seed_marker).
+-- gate_evaluators, agent_profiles, artifact_adapters). It also added
+-- `workspace_id TEXT NOT NULL` to `registry_seed_marker` without a default.
 -- The workflow + warehouse + delivery tables shipped before that decision
 -- and were missed; this migration brings them onto the same shape so list
 -- endpoints can filter by workspace and the parent spec's contract test
