@@ -1,8 +1,7 @@
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
 import { ChevronRight, GitBranch, Tag } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { api, type AccessibleRepo, type GitHubAppInstallation } from "@/lib/api"
+import { type GitHubAppInstallation } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -13,14 +12,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { LabelCombobox } from "./LabelCombobox"
+import { RepoCombobox } from "./RepoCombobox"
 import type { WorkflowTriggerDraft } from "./workflow-draft"
 
 export interface TriggerCardProps {
@@ -77,12 +70,12 @@ export function TriggerCard({
       <Sheet open={editing} onOpenChange={setEditing}>
         <SheetContent
           side={isMobile ? "bottom" : "right"}
-          className={isMobile ? "h-[85dvh] rounded-t-xl" : ""}
+          className={isMobile ? "h-[85dvh] rounded-t-xl" : "sm:max-w-lg"}
         >
           <SheetHeader>
             <SheetTitle>Edit trigger</SheetTitle>
             <SheetDescription>
-              Pick the install, repo, and label that starts the workflow.
+              Pick the repo and label that starts the workflow.
             </SheetDescription>
           </SheetHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4">
@@ -115,89 +108,31 @@ function TriggerForm({
   value: WorkflowTriggerDraft
   onChange: (next: WorkflowTriggerDraft) => void
 }) {
-  const installItems = installations.map((i) => ({
-    value: i.id,
-    label: `${i.account_login} (${i.account_type})`,
-  }))
-  const { data: reposData } = useQuery({
-    queryKey: ["installation-repos", tenantId, value.install_id],
-    queryFn: () =>
-      value.install_id
-        ? api.listInstallationRepos(tenantId, value.install_id)
-        : Promise.resolve({ repos: [] as AccessibleRepo[] }),
-    enabled: !!tenantId && !!value.install_id,
-    staleTime: 30_000,
-  })
-  const repos = reposData?.repos ?? []
-  const repoItems = repos.map((r) => ({
-    value: `${r.owner}/${r.name}`,
-    label: `${r.owner}/${r.name}`,
-  }))
-  const repoValue =
-    value.repo_owner && value.repo_name
-      ? `${value.repo_owner}/${value.repo_name}`
-      : ""
-
   return (
     <>
       <div className="space-y-1.5">
-        <span className="text-sm font-medium">GitHub install</span>
-        <Select
-          value={value.install_id}
-          onValueChange={(v) =>
+        <span className="text-sm font-medium">Repository</span>
+        <RepoCombobox
+          tenantId={tenantId}
+          installations={installations}
+          installId={value.install_id}
+          repoOwner={value.repo_owner}
+          repoName={value.repo_name}
+          onChange={(next) =>
             onChange({
               ...value,
-              install_id: v ?? "",
-              repo_owner: "",
-              repo_name: "",
-              label: "",
+              install_id: next.install_id,
+              repo_owner: next.repo_owner,
+              repo_name: next.repo_name,
+              label:
+                next.install_id === value.install_id &&
+                next.repo_owner === value.repo_owner &&
+                next.repo_name === value.repo_name
+                  ? value.label
+                  : "",
             })
           }
-          items={installItems}
-          disabled={installations.length === 0}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={installations.length ? "Pick an install" : "No GitHub App installs yet"} />
-          </SelectTrigger>
-          <SelectContent>
-            {installItems.map((i) => (
-              <SelectItem key={i.value} value={i.value}>
-                {i.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="space-y-1.5">
-        <span className="text-sm font-medium">Repository</span>
-        <Select
-          value={repoValue}
-          onValueChange={(v) => {
-            const [owner, name] = (v ?? "").split("/")
-            onChange({
-              ...value,
-              repo_owner: owner ?? "",
-              repo_name: name ?? "",
-              label: "",
-            })
-          }}
-          items={repoItems}
-          disabled={!value.install_id || repos.length === 0}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue
-              placeholder={value.install_id ? "Pick a repository" : "Pick an install first"}
-            />
-          </SelectTrigger>
-          <SelectContent>
-            {repoItems.map((i) => (
-              <SelectItem key={i.value} value={i.value}>
-                {i.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        />
       </div>
 
       <div className="space-y-1.5">
@@ -214,7 +149,7 @@ function TriggerForm({
         ) : (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <GitBranch className="h-3.5 w-3.5" />
-            Pick an install and repo above.
+            Pick a repository above.
           </p>
         )}
       </div>
@@ -226,14 +161,11 @@ function summarizeTrigger(t: WorkflowTriggerDraft): {
   title: string
   detail: string
 } {
-  if (!t.install_id) {
+  if (!t.install_id || !t.repo_owner || !t.repo_name) {
     return {
-      title: "Pick an install",
+      title: "Pick a repository",
       detail: "GitHub issue label will start the workflow",
     }
-  }
-  if (!t.repo_owner || !t.repo_name) {
-    return { title: "Pick a repository", detail: "Install selected" }
   }
   if (!t.label) {
     return {
