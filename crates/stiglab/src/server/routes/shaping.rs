@@ -184,8 +184,24 @@ pub async fn create_shaping(
         updated_at: Utc::now(),
     };
 
+    // Resolve the session's workspace from the spine artifact row so the
+    // session row carries `workspace_id` (issue #164) and the credential
+    // lookup below is workspace-scoped.  `None` is fine: shaping tests
+    // and dev environments without a spine pool stay personal sessions
+    // (legacy behaviour), but the production flow always has a spine.
+    let session_workspace_id =
+        lookup_artifact_workspace(&state, &req.artifact_id.to_string()).await;
+
     if idempotency_key.is_empty() {
-        if let Err(e) = db::insert_session(&state.db, &session).await {
+        if let Err(e) = db::insert_session_with_user_and_project(
+            &state.db,
+            &session,
+            req.created_by.as_deref(),
+            None,
+            session_workspace_id.as_deref(),
+        )
+        .await
+        {
             tracing::error!("failed to insert session: {e}");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -194,7 +210,15 @@ pub async fn create_shaping(
                 .into_response();
         }
     } else {
-        match db::insert_session_with_idempotency_key(&state.db, &session, &idempotency_key).await {
+        match db::insert_session_with_idempotency_key_and_workspace(
+            &state.db,
+            &session,
+            &idempotency_key,
+            req.created_by.as_deref(),
+            session_workspace_id.as_deref(),
+        )
+        .await
+        {
             Ok(true) => { /* new session inserted */ }
             Ok(false) => {
                 // Concurrent POST with the same key won the race. Load and
@@ -228,14 +252,14 @@ pub async fn create_shaping(
     }
 
     // Fetch user credentials when the request carries a `created_by`
-    // (issue #156). Without this the spawned agent has no
-    // `CLAUDE_CODE_OAUTH_TOKEN` and exits immediately with "stdout closed
-    // without result event". Direct callers without `created_by` keep the
-    // legacy `None` behavior — the resulting session_failed event surfaces
-    // the broken state via forge's signal listener.
-    let credentials = match req.created_by.as_deref() {
-        Some(uid) => super::tasks::fetch_user_credentials(&state, uid).await,
-        None => None,
+    // (issue #156). Per issue #164 the lookup is workspace-scoped — we
+    // need both `created_by` *and* a resolved workspace. Direct callers
+    // without `created_by` keep the legacy `None` behavior — the
+    // resulting session_failed event surfaces the broken state via
+    // forge's signal listener.
+    let credentials = match (req.created_by.as_deref(), session_workspace_id.as_deref()) {
+        (Some(uid), Some(ws)) => super::tasks::fetch_user_credentials(&state, uid, ws).await,
+        _ => None,
     };
 
     // Dispatch to agent via WebSocket.
@@ -379,6 +403,26 @@ pub async fn get_shaping_status(
                 .into_response(),
         }
     }
+}
+
+/// Resolve the workspace for a shaping artifact via the spine
+/// `artifacts.workspace_id` column (issue #164).
+///
+/// `None` is returned when the spine is not connected (dev/test path
+/// without a Postgres pool), the artifact isn't yet persisted, or the
+/// row carries the schema-default `'default'` workspace.  Production
+/// flow always has a spine + a real workspace; the fallback keeps the
+/// legacy direct-shaping caller path intact (no credentials, no
+/// privilege).
+async fn lookup_artifact_workspace(state: &AppState, artifact_id: &str) -> Option<String> {
+    let spine = state.spine.as_ref()?;
+    sqlx::query_scalar::<_, String>("SELECT workspace_id FROM artifacts WHERE artifact_id = $1")
+        .bind(artifact_id)
+        .fetch_optional(spine.pool())
+        .await
+        .ok()
+        .flatten()
+        .filter(|w| w != "default")
 }
 
 fn accepted_response(session: &Session, request_id: &str) -> axum::response::Response {

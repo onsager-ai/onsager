@@ -152,11 +152,12 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
         "CREATE TABLE IF NOT EXISTS user_credentials (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
+            workspace_id TEXT,
             name TEXT NOT NULL,
             encrypted_value TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            UNIQUE(user_id, name)
+            UNIQUE(user_id, workspace_id, name)
         )",
     )
     .execute(pool)
@@ -506,6 +507,108 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // ── Per-workspace credentials (issue #164).
+    //
+    // Credentials were originally global per (user, name).  Issue #164 ties
+    // each credential row to a specific workspace so a user with access to
+    // multiple workspaces no longer ships the same OAuth token to agent
+    // sessions launched in unrelated workspaces.  See the canonical SQL at
+    // `migrations/0NN_workspace_credentials.sql` (human documentation; the
+    // live migration is the inlined DDL below).
+    //
+    // The CREATE TABLE above already declares the column on a fresh DB; the
+    // ALTERs here cover existing installs.  Backfill rule mirrors the PAT
+    // backfill from #163: rows get pinned to the user's first workspace
+    // membership; rows for users with zero memberships are deleted (an
+    // unscoped credential post-migration is unreachable from the new
+    // route shape and would be permanently orphaned).
+    let _ = sqlx::query("ALTER TABLE user_credentials ADD COLUMN workspace_id TEXT")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query(
+        "UPDATE user_credentials \
+         SET workspace_id = ( \
+             SELECT m.workspace_id FROM workspace_members m \
+             WHERE m.user_id = user_credentials.user_id \
+             ORDER BY m.joined_at ASC, m.workspace_id ASC \
+             LIMIT 1 \
+         ) \
+         WHERE workspace_id IS NULL",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query("DELETE FROM user_credentials WHERE workspace_id IS NULL")
+        .execute(pool)
+        .await;
+    // Postgres-only NOT NULL tightening; SQLite tests rebuild fresh from the
+    // CREATE TABLE above so the column is already typed correctly there.
+    let _ = sqlx::query("ALTER TABLE user_credentials ALTER COLUMN workspace_id SET NOT NULL")
+        .execute(pool)
+        .await;
+    // The legacy unique constraint was UNIQUE(user_id, name).  After the
+    // workspace split, two different workspaces may legitimately host the
+    // same credential name for the same user — drop the legacy index and
+    // re-create it as UNIQUE(user_id, workspace_id, name).  The fresh-DB
+    // CREATE TABLE above already uses the new shape.
+    let _ = sqlx::query(
+        "ALTER TABLE user_credentials DROP CONSTRAINT user_credentials_user_id_name_key",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query("DROP INDEX IF EXISTS user_credentials_user_id_name_key")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_credentials_user_workspace_name \
+         ON user_credentials (user_id, workspace_id, name)",
+    )
+    .execute(pool)
+    .await;
+
+    // ── Sessions: workspace_id (issue #164).
+    //
+    // Sessions were workspace-scoped only transitively, via the optional
+    // `project_id` column.  That left direct/personal sessions unfilterable
+    // and made the parent #161 contract test (W1 user must not see W2
+    // sessions) unprovable.  Backfill from the project's workspace where
+    // possible; sessions with no project stay NULL and the API filter just
+    // doesn't surface them in any workspace-scoped list.
+    let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN workspace_id TEXT")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query(
+        "UPDATE sessions \
+         SET workspace_id = ( \
+             SELECT p.workspace_id FROM projects p \
+             WHERE p.id = sessions.project_id \
+         ) \
+         WHERE workspace_id IS NULL AND project_id IS NOT NULL",
+    )
+    .execute(pool)
+    .await;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id \
+         ON sessions (workspace_id)",
+    )
+    .execute(pool)
+    .await?;
+
+    // ── github_app_installations: enforce 1:1 install_id → workspace_id
+    //    (issue #164).
+    //
+    // The fresh-DB CREATE TABLE above already declares
+    // `install_id BIGINT NOT NULL UNIQUE`, so this is a no-op for new
+    // deploys.  Older Postgres installs may have shipped without the
+    // UNIQUE — re-installing the same GitHub App into a different
+    // workspace must be a re-install flow, not a row update, and the
+    // database is the right place to enforce that contract.
+    let _ = sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_github_app_installations_install_id \
+         ON github_app_installations (install_id)",
+    )
+    .execute(pool)
+    .await;
+
     Ok(())
 }
 
@@ -707,10 +810,27 @@ pub async fn insert_session_with_idempotency_key(
     session: &Session,
     idempotency_key: &str,
 ) -> anyhow::Result<bool> {
+    insert_session_with_idempotency_key_and_workspace(pool, session, idempotency_key, None, None)
+        .await
+}
+
+/// Variant of `insert_session_with_idempotency_key` that also persists
+/// `user_id` and `workspace_id` (issue #164).  The shaping path uses
+/// this so workspace-scoped session listing has a non-NULL column to
+/// filter on, and so credential lookup at agent dispatch can run
+/// against the same workspace.
+pub async fn insert_session_with_idempotency_key_and_workspace(
+    pool: &AnyPool,
+    session: &Session,
+    idempotency_key: &str,
+    user_id: Option<&str>,
+    workspace_id: Option<&str>,
+) -> anyhow::Result<bool> {
     let affected = sqlx::query(
         "INSERT INTO sessions (id, task_id, node_id, state, prompt, output, working_dir, \
-                               artifact_id, artifact_version, idempotency_key, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
+                               user_id, workspace_id, artifact_id, artifact_version, \
+                               idempotency_key, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) \
          ON CONFLICT (idempotency_key) DO NOTHING",
     )
     .bind(&session.id)
@@ -720,6 +840,8 @@ pub async fn insert_session_with_idempotency_key(
     .bind(&session.prompt)
     .bind(&session.output)
     .bind(&session.working_dir)
+    .bind(user_id)
+    .bind(workspace_id)
     .bind(&session.artifact_id)
     .bind(session.artifact_version)
     .bind(idempotency_key)
@@ -1063,18 +1185,22 @@ pub struct UserCredential {
 pub async fn set_user_credential(
     pool: &AnyPool,
     user_id: &str,
+    workspace_id: &str,
     name: &str,
     encrypted_value: &str,
 ) -> anyhow::Result<()> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     sqlx::query(
-        "INSERT INTO user_credentials (id, user_id, name, encrypted_value, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $5)
-         ON CONFLICT(user_id, name) DO UPDATE SET encrypted_value = $4, updated_at = $5",
+        "INSERT INTO user_credentials \
+            (id, user_id, workspace_id, name, encrypted_value, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $6) \
+         ON CONFLICT(user_id, workspace_id, name) \
+            DO UPDATE SET encrypted_value = $5, updated_at = $6",
     )
     .bind(&id)
     .bind(user_id)
+    .bind(workspace_id)
     .bind(name)
     .bind(encrypted_value)
     .bind(&now)
@@ -1086,11 +1212,14 @@ pub async fn set_user_credential(
 pub async fn get_user_credentials(
     pool: &AnyPool,
     user_id: &str,
+    workspace_id: &str,
 ) -> anyhow::Result<Vec<UserCredential>> {
     let rows = sqlx::query_as::<_, UserCredentialRow>(
-        "SELECT name, created_at, updated_at FROM user_credentials WHERE user_id = $1 ORDER BY name",
+        "SELECT name, created_at, updated_at FROM user_credentials \
+         WHERE user_id = $1 AND workspace_id = $2 ORDER BY name",
     )
     .bind(user_id)
+    .bind(workspace_id)
     .fetch_all(pool)
     .await?;
     Ok(rows
@@ -1106,12 +1235,15 @@ pub async fn get_user_credentials(
 pub async fn get_user_credential_value(
     pool: &AnyPool,
     user_id: &str,
+    workspace_id: &str,
     name: &str,
 ) -> anyhow::Result<Option<String>> {
     let row = sqlx::query_scalar::<_, String>(
-        "SELECT encrypted_value FROM user_credentials WHERE user_id = $1 AND name = $2",
+        "SELECT encrypted_value FROM user_credentials \
+         WHERE user_id = $1 AND workspace_id = $2 AND name = $3",
     )
     .bind(user_id)
+    .bind(workspace_id)
     .bind(name)
     .fetch_optional(pool)
     .await?;
@@ -1121,11 +1253,14 @@ pub async fn get_user_credential_value(
 pub async fn get_all_user_credential_values(
     pool: &AnyPool,
     user_id: &str,
+    workspace_id: &str,
 ) -> anyhow::Result<Vec<(String, String)>> {
     let rows = sqlx::query_as::<_, CredentialKvRow>(
-        "SELECT name, encrypted_value FROM user_credentials WHERE user_id = $1",
+        "SELECT name, encrypted_value FROM user_credentials \
+         WHERE user_id = $1 AND workspace_id = $2",
     )
     .bind(user_id)
+    .bind(workspace_id)
     .fetch_all(pool)
     .await?;
     Ok(rows
@@ -1137,25 +1272,33 @@ pub async fn get_all_user_credential_values(
 pub async fn delete_user_credential(
     pool: &AnyPool,
     user_id: &str,
+    workspace_id: &str,
     name: &str,
 ) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM user_credentials WHERE user_id = $1 AND name = $2")
-        .bind(user_id)
-        .bind(name)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "DELETE FROM user_credentials \
+         WHERE user_id = $1 AND workspace_id = $2 AND name = $3",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .bind(name)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
 pub async fn user_credential_exists(
     pool: &AnyPool,
     user_id: &str,
+    workspace_id: &str,
     name: &str,
 ) -> anyhow::Result<bool> {
     let row = sqlx::query_scalar::<_, String>(
-        "SELECT name FROM user_credentials WHERE user_id = $1 AND name = $2",
+        "SELECT name FROM user_credentials \
+         WHERE user_id = $1 AND workspace_id = $2 AND name = $3",
     )
     .bind(user_id)
+    .bind(workspace_id)
     .bind(name)
     .fetch_optional(pool)
     .await?;
@@ -1163,10 +1306,11 @@ pub async fn user_credential_exists(
 }
 
 /// True if the user has at least one credential row matching one of
-/// `names`. Used by the workflow-activate gate (issue #156) to refuse
-/// activation when the owner has no Claude auth credential — without
-/// this check, the workflow would be active but every session would
-/// fail with "stdout closed without result event".
+/// `names` in `workspace_id`. Used by the workflow-activate gate
+/// (issue #156) to refuse activation when the owner has no Claude auth
+/// credential in the workflow's workspace — without this check, the
+/// workflow would be active but every session would fail with "stdout
+/// closed without result event".
 ///
 /// Checks by exact name match because the Claude CLI keys on specific
 /// env var names (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`).
@@ -1175,20 +1319,24 @@ pub async fn user_credential_exists(
 pub async fn user_has_credential_in(
     pool: &AnyPool,
     user_id: &str,
+    workspace_id: &str,
     names: &[&str],
 ) -> anyhow::Result<bool> {
     if names.is_empty() {
         return Ok(false);
     }
-    // Build `name IN ($2, $3, ...)` with placeholders matched to the
+    // Build `name IN ($3, $4, ...)` with placeholders matched to the
     // sqlx binding count — sqlx-AnyPool doesn't speak Postgres array
-    // params portably across SQLite.
-    let placeholders: Vec<String> = (2..=names.len() + 1).map(|i| format!("${i}")).collect();
+    // params portably across SQLite.  $1 = user_id, $2 = workspace_id.
+    let placeholders: Vec<String> = (3..=names.len() + 2).map(|i| format!("${i}")).collect();
     let sql = format!(
-        "SELECT name FROM user_credentials WHERE user_id = $1 AND name IN ({}) LIMIT 1",
+        "SELECT name FROM user_credentials \
+         WHERE user_id = $1 AND workspace_id = $2 AND name IN ({}) LIMIT 1",
         placeholders.join(", ")
     );
-    let mut q = sqlx::query_scalar::<_, String>(&sql).bind(user_id);
+    let mut q = sqlx::query_scalar::<_, String>(&sql)
+        .bind(user_id)
+        .bind(workspace_id);
     for n in names {
         q = q.bind(*n);
     }
@@ -1396,23 +1544,29 @@ pub async fn insert_session_with_user(
     session: &Session,
     user_id: Option<&str>,
 ) -> anyhow::Result<()> {
-    insert_session_with_user_and_project(pool, session, user_id, None).await
+    insert_session_with_user_and_project(pool, session, user_id, None, None).await
 }
 
 /// Variant that also binds a `project_id` when the session is scoped to a
 /// workspace-owned project (issue #59). Pre-existing sessions with a null
 /// `project_id` remain personal sessions forever.
+///
+/// `workspace_id` was added in issue #164 so list endpoints can filter
+/// without joining through projects. Sessions with no workspace context
+/// (legacy direct-shaping callers) keep `workspace_id IS NULL` and never
+/// surface in any workspace-scoped list.
 pub async fn insert_session_with_user_and_project(
     pool: &AnyPool,
     session: &Session,
     user_id: Option<&str>,
     project_id: Option<&str>,
+    workspace_id: Option<&str>,
 ) -> anyhow::Result<()> {
     sqlx::query(
         "INSERT INTO sessions (id, task_id, node_id, state, prompt, output, working_dir, \
-                               user_id, project_id, artifact_id, artifact_version, \
+                               user_id, project_id, workspace_id, artifact_id, artifact_version, \
                                created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
     )
     .bind(&session.id)
     .bind(&session.task_id)
@@ -1423,6 +1577,7 @@ pub async fn insert_session_with_user_and_project(
     .bind(&session.working_dir)
     .bind(user_id)
     .bind(project_id)
+    .bind(workspace_id)
     .bind(&session.artifact_id)
     .bind(session.artifact_version)
     .bind(session.created_at.to_rfc3339())
@@ -1444,6 +1599,27 @@ pub async fn list_sessions_for_user(pool: &AnyPool, user_id: &str) -> anyhow::Re
     rows.into_iter().map(|r| r.try_into()).collect()
 }
 
+/// List sessions scoped to a workspace (issue #164).
+///
+/// Returns only sessions whose `workspace_id` column matches.  Sessions
+/// without a workspace (legacy/direct-dispatch — see
+/// `insert_session_with_user_and_project`) are not surfaced by any
+/// workspace-scoped list.
+pub async fn list_sessions_for_workspace(
+    pool: &AnyPool,
+    workspace_id: &str,
+) -> anyhow::Result<Vec<Session>> {
+    let rows = sqlx::query_as::<_, SessionRow>(
+        "SELECT id, task_id, node_id, state, prompt, output, working_dir, \
+                artifact_id, artifact_version, created_at, updated_at \
+         FROM sessions WHERE workspace_id = $1 ORDER BY created_at DESC",
+    )
+    .bind(workspace_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
 pub async fn get_session_owner(pool: &AnyPool, session_id: &str) -> anyhow::Result<Option<String>> {
     let row = sqlx::query_scalar::<_, String>(
         "SELECT user_id FROM sessions WHERE id = $1 AND user_id IS NOT NULL",
@@ -1452,6 +1628,23 @@ pub async fn get_session_owner(pool: &AnyPool, session_id: &str) -> anyhow::Resu
     .fetch_optional(pool)
     .await?;
     Ok(row)
+}
+
+/// Look up the workspace a session is scoped to. `Ok(None)` covers two
+/// cases that callers handle the same way: the session row doesn't exist
+/// (404 from the route), or it exists but predates the workspace_id
+/// column / was created without workspace context (also 404 from any
+/// workspace-scoped route — there's no workspace to authz against).
+pub async fn get_session_workspace_id(
+    pool: &AnyPool,
+    session_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let row =
+        sqlx::query_scalar::<_, Option<String>>("SELECT workspace_id FROM sessions WHERE id = $1")
+            .bind(session_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.flatten())
 }
 
 // ── Row types for sqlx ──
@@ -2249,9 +2442,15 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        insert_session_with_user_and_project(&pool, &session, Some("u1"), Some(&project.id))
-            .await
-            .unwrap();
+        insert_session_with_user_and_project(
+            &pool,
+            &session,
+            Some("u1"),
+            Some(&project.id),
+            Some(&project.workspace_id),
+        )
+        .await
+        .unwrap();
 
         let live = count_live_sessions_for_project(&pool, &project.id)
             .await

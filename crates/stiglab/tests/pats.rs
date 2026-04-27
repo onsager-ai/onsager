@@ -694,15 +694,17 @@ async fn delete_pat_revokes_so_subsequent_use_401s() {
 async fn pat_can_create_credential_but_not_overwrite() {
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
-    let (_, token) = mint_pat(&pool, &user.id, None, "ci", None).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-cred-put").await;
+    let (_, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "ci", None).await;
     let state = AppState::new(pool, auth_enabled_config(), None);
     let app_ = app(state);
+    let put_uri = format!("/api/workspaces/{}/credentials/CI_TOKEN", workspace.id);
 
     // PUT to a brand-new credential name succeeds.
     let create = bearer(
         Request::builder()
             .method("PUT")
-            .uri("/api/credentials/CI_TOKEN")
+            .uri(&put_uri)
             .header(header::CONTENT_TYPE, "application/json"),
         &token,
     )
@@ -717,7 +719,7 @@ async fn pat_can_create_credential_but_not_overwrite() {
     let overwrite = bearer(
         Request::builder()
             .method("PUT")
-            .uri("/api/credentials/CI_TOKEN")
+            .uri(&put_uri)
             .header(header::CONTENT_TYPE, "application/json"),
         &token,
     )
@@ -735,22 +737,24 @@ async fn pat_can_create_credential_but_not_overwrite() {
 async fn pat_cannot_delete_credential() {
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-cred-del").await;
     // Pre-create a credential via the DB so the DELETE actually has
     // something to refer to.
     let key = stiglab::server::auth::generate_credential_key();
     let enc = stiglab::server::auth::encrypt_credential(&key, "abc").unwrap();
-    db::set_user_credential(&pool, &user.id, "CI_TOKEN", &enc)
+    db::set_user_credential(&pool, &user.id, &workspace.id, "CI_TOKEN", &enc)
         .await
         .unwrap();
-    let (_, token) = mint_pat(&pool, &user.id, None, "ci", None).await;
+    let (_, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "ci", None).await;
     let state = AppState::new(pool, auth_enabled_config(), None);
 
     let resp = app(state)
         .oneshot(
             bearer(
-                Request::builder()
-                    .method("DELETE")
-                    .uri("/api/credentials/CI_TOKEN"),
+                Request::builder().method("DELETE").uri(format!(
+                    "/api/workspaces/{}/credentials/CI_TOKEN",
+                    workspace.id
+                )),
                 &token,
             )
             .body(Body::empty())
@@ -768,9 +772,10 @@ async fn session_can_still_delete_credential_after_guardrail_added() {
     // Regression guard: the destructive guardrail must only fire for PATs.
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-cred-sess").await;
     let key = stiglab::server::auth::generate_credential_key();
     let enc = stiglab::server::auth::encrypt_credential(&key, "abc").unwrap();
-    db::set_user_credential(&pool, &user.id, "CI_TOKEN", &enc)
+    db::set_user_credential(&pool, &user.id, &workspace.id, "CI_TOKEN", &enc)
         .await
         .unwrap();
     let session_token = stiglab::server::auth::generate_session_token();
@@ -788,7 +793,10 @@ async fn session_can_still_delete_credential_after_guardrail_added() {
         .oneshot(
             Request::builder()
                 .method("DELETE")
-                .uri("/api/credentials/CI_TOKEN")
+                .uri(format!(
+                    "/api/workspaces/{}/credentials/CI_TOKEN",
+                    workspace.id
+                ))
                 .header(header::COOKIE, format!("stiglab_session={session_token}"))
                 .body(Body::empty())
                 .unwrap(),

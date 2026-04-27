@@ -46,6 +46,9 @@ pub async fn require_workspace_access(
     auth_user: &AuthUser,
     workspace_id: &str,
 ) -> Result<(), Response> {
+    if workspace_id.trim().is_empty() {
+        return Err(missing_workspace_query());
+    }
     if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
         if pinned != workspace_id {
             return Err((
@@ -70,4 +73,35 @@ pub async fn require_workspace_access(
             Err(StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
     }
+}
+
+/// 400 response for list endpoints called without `?workspace=`.
+///
+/// Per #164 the list-endpoint contract is "explicit workspace, always".  A
+/// missing or blank `?workspace=` is a client bug, not a "default to
+/// everything" — that was the parent #161 leak shape.  This helper keeps
+/// the response body shape uniform across every list route so the
+/// dashboard can match on `error == "missing_workspace_query"` without a
+/// per-route table.
+pub fn missing_workspace_query() -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({
+            "error": "missing_workspace_query",
+            "detail": "?workspace= is required",
+        })),
+    )
+        .into_response()
+}
+
+/// Standard 404 for "this row exists but you can't see it".  Defined here
+/// so detail routes (`GET/PATCH/DELETE /api/.../:id`) emit the same shape
+/// when the helper above isn't directly callable (e.g. when the row needs
+/// to load *first* and *then* be authz'd against its `workspace_id`).
+pub fn workspace_scoped_not_found(msg: &str) -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({ "error": msg })),
+    )
+        .into_response()
 }

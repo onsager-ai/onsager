@@ -1,9 +1,10 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
 use axum::Json;
 use futures_util::stream;
+use serde::Deserialize;
 use std::convert::Infallible;
 use std::time::Duration;
 
@@ -11,17 +12,34 @@ use crate::server::auth::AuthUser;
 use crate::server::db;
 use crate::server::state::AppState;
 
+use super::{require_workspace_access, workspace_scoped_not_found};
+
+/// Query string for `GET /api/sessions`.
+///
+/// Per issue #164, every workspace-scoped list endpoint requires
+/// `?workspace=` and rejects missing/blank values with 400 — explicit is
+/// better than "default to everything", which was the parent #161 leak
+/// shape.  Validation funnels through `require_workspace_access` which
+/// also enforces PAT pinning (403) and membership (404).
+#[derive(Debug, Deserialize)]
+pub struct ListSessionsQuery {
+    #[serde(default)]
+    pub workspace: Option<String>,
+}
+
 pub async fn list_sessions(
     State(state): State<AppState>,
     auth_user: AuthUser,
+    Query(q): Query<ListSessionsQuery>,
 ) -> impl IntoResponse {
-    let result = if auth_user.user_id == "anonymous" {
-        db::list_sessions(&state.db).await
-    } else {
-        db::list_sessions_for_user(&state.db, &auth_user.user_id).await
+    let workspace_id = match q.workspace.as_deref() {
+        Some(w) if !w.trim().is_empty() => w,
+        _ => return super::missing_workspace_query(),
     };
-
-    match result {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
+        return r;
+    }
+    match db::list_sessions_for_workspace(&state.db, workspace_id).await {
         Ok(sessions) => Json(serde_json::json!({ "sessions": sessions })).into_response(),
         Err(e) => {
             tracing::error!("failed to list sessions: {e}");
@@ -30,26 +48,29 @@ pub async fn list_sessions(
     }
 }
 
+/// `GET /api/sessions/:id` — Detail view for a single session.
+///
+/// Authz contract per issue #164: load the row first, then funnel the
+/// session's `workspace_id` through `require_workspace_access` so PAT
+/// pinning (403) and membership (404) are enforced uniformly.  Sessions
+/// without a workspace (legacy/anonymous direct dispatch) are 404 to
+/// any authenticated caller — they have no workspace to authz against.
 pub async fn get_session(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Path(session_id): Path<String>,
 ) -> impl IntoResponse {
-    // Verify ownership if auth is enabled
     if auth_user.user_id != "anonymous" {
-        match db::get_session_owner(&state.db, &session_id).await {
-            Ok(Some(owner)) if owner != auth_user.user_id => {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(serde_json::json!({ "error": "access denied" })),
-                )
-                    .into_response();
-            }
-            Ok(_) => {}
+        let workspace_id = match db::get_session_workspace_id(&state.db, &session_id).await {
+            Ok(Some(w)) => w,
+            Ok(None) => return workspace_scoped_not_found("session not found"),
             Err(e) => {
-                tracing::error!("failed to verify session ownership: {e}");
+                tracing::error!("failed to load session workspace: {e}");
                 return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
             }
+        };
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            return r;
         }
     }
 
@@ -81,11 +102,7 @@ pub async fn get_session(
             }))
             .into_response()
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "session not found" })),
-        )
-            .into_response(),
+        Ok(None) => workspace_scoped_not_found("session not found"),
         Err(e) => {
             tracing::error!("failed to get session: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
@@ -98,23 +115,33 @@ pub async fn session_logs(
     auth_user: AuthUser,
     Path(session_id): Path<String>,
 ) -> impl IntoResponse {
-    // Verify ownership if auth is enabled
     if auth_user.user_id != "anonymous" {
-        match db::get_session_owner(&state.db, &session_id).await {
-            Ok(Some(owner)) if owner != auth_user.user_id => {
+        let workspace_id = match db::get_session_workspace_id(&state.db, &session_id).await {
+            Ok(Some(w)) => w,
+            Ok(None) => {
                 return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(serde_json::json!({ "error": "access denied" })),
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "session not found" })),
                 ));
             }
-            Ok(_) => {}
             Err(e) => {
-                tracing::error!("failed to verify session ownership: {e}");
+                tracing::error!("failed to load session workspace: {e}");
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({ "error": e.to_string() })),
                 ));
             }
+        };
+        if let Err(_resp) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            // The helper already produced the right status (403 PAT vs
+            // 404 non-member); the SSE-typed return forces us to map it
+            // back into a JSON tuple.  We err on the side of 404 here
+            // for the same existence-leak reason — a caller that can't
+            // see the workspace shouldn't see the session id either.
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "session not found" })),
+            ));
         }
     }
 
