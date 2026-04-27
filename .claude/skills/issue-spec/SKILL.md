@@ -51,6 +51,14 @@ Skip when:
 - A one-line bug fix with an obvious reproduction. Just open a PR with `Fixes #existing`.
 - The feature already has a spec issue — extend that spec, don't create another.
 
+**Default is spec, not trivial.** If invocation of this skill is itself the
+decision — the user said "spec this" or the change clearly isn't a
+typo/one-liner — proceed straight to Discover. Do not stop to confirm
+spec-vs-`trivial`. The "Skip when" list is a self-veto for unambiguously
+trivial diffs; everything else is a spec by default. `trivial` is a
+sparingly-used escape hatch (see `onsager-dev-process` and
+`onsager-pre-push`), not a 50/50 fork to ask about.
+
 ## Setup
 
 | Parameter | Default | Example override |
@@ -61,7 +69,7 @@ Skip when:
 | **Labels** | Auto from type + area | `"spec, feat, area:stiglab"` |
 | **Parent** | None | `#42` (umbrella issue) |
 
-If the user says "spec session timeout", start immediately. Do not ask clarifying questions unless the topic is genuinely ambiguous.
+If the user says "spec session timeout", start immediately. Do not ask clarifying questions unless the topic is genuinely ambiguous — and do not ask whether the change should be a `trivial`-labeled PR instead. Invocation of this skill *is* the decision; the "Skip when" list above is the only place that question gets re-litigated, and only for unambiguously trivial diffs.
 
 ## Workflow
 
