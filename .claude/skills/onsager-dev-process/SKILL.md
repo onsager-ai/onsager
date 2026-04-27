@@ -165,6 +165,13 @@ If the PR is genuinely trivial (typo, doc-only, one-line obvious fix),
 apply the `trivial` label and skip the spec-linking requirement. Use
 sparingly — if reviewers flag it as needing context, escalate to a spec.
 
+**Decide before opening, not after.** The `pr-spec-sync.yml` workflow
+posts a "no spec link / no `trivial` label" comment on every PR that
+opens without one of the two. To keep that bot silent, answer the gate
+at PR creation: pass the `Closes #N` / `Part of #N` line in the PR
+body, or pass `labels: ["trivial"]` to `mcp__github__create_pull_request`.
+Don't push the PR and let the bot ask.
+
 ### 6. During review
 
 Trigger `onsager-pr-lifecycle` (or say "triage PR" / "CI is failing" /

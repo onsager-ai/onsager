@@ -215,7 +215,19 @@ create), treat PR creation and CI auto-fix as part of finishing the task —
 do not wait to be asked:
 
 1. Push the branch.
-2. Open a pull request.
+2. Open a pull request. **Before calling `mcp__github__create_pull_request`,
+   answer the spec-vs-trivial gate** (the same gate `pr-spec-sync.yml`
+   enforces) and bake the answer into the PR at creation time:
+   - If a spec issue exists or you should write one, include `Closes #N` or
+     `Part of #N` in the PR body.
+   - If the change is genuinely `trivial` (typo, doc-only, formatting,
+     one-line obvious fix — see `onsager-dev-process` for the full list),
+     pass `labels: ["trivial"]` on creation.
+   - Default is spec, not trivial. When in doubt, create the spec issue
+     first via the `issue-spec` skill, then open the PR with `Closes #N`.
+
+   This is the upstream answer to the bot's `<!-- pr-spec-sync:no-spec-link -->`
+   reminder — answering it at PR creation keeps the bot silent.
 3. Subscribe to PR activity so CI failures and review comments are auto-fixed.
 
 Skip this for branches that don't start with `claude/` (local/manual work).
