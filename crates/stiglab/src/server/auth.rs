@@ -285,11 +285,11 @@ pub enum RequestPrincipal {
     /// Cookie-based session (the existing `stiglab_session` flow), or the
     /// synthetic anonymous principal when auth is disabled.
     Session,
-    /// PAT-authenticated request. `pat_id` identifies the issuing token row;
-    /// `tenant_id` pins the request to a single workspace when set on the PAT.
+    /// PAT-authenticated request.  `pat_id` identifies the issuing token row;
+    /// `workspace_id` pins the request to a single workspace when set on the PAT.
     Pat {
         pat_id: String,
-        tenant_id: Option<String>,
+        workspace_id: Option<String>,
     },
 }
 
@@ -298,13 +298,14 @@ impl RequestPrincipal {
         matches!(self, RequestPrincipal::Pat { .. })
     }
 
-    /// The tenant a PAT is pinned to, if any. `None` for sessions and for
-    /// PATs that aren't workspace-scoped.
-    pub fn pinned_tenant_id(&self) -> Option<&str> {
+    /// The workspace a PAT is pinned to, if any.  `None` for sessions and
+    /// for PATs that aren't workspace-scoped.
+    pub fn pinned_workspace_id(&self) -> Option<&str> {
         match self {
             RequestPrincipal::Pat {
-                tenant_id: Some(t), ..
-            } => Some(t.as_str()),
+                workspace_id: Some(w),
+                ..
+            } => Some(w.as_str()),
             _ => None,
         }
     }
@@ -425,7 +426,7 @@ impl FromRequestParts<AppState> for AuthUser {
                             github_avatar_url: user.github_avatar_url,
                             principal: RequestPrincipal::Pat {
                                 pat_id: pat.id,
-                                tenant_id: pat.tenant_id,
+                                workspace_id: pat.workspace_id,
                             },
                         });
                     }
@@ -643,18 +644,18 @@ mod tests {
     #[test]
     fn test_request_principal_helpers() {
         assert!(!RequestPrincipal::Session.is_pat());
-        assert_eq!(RequestPrincipal::Session.pinned_tenant_id(), None);
+        assert_eq!(RequestPrincipal::Session.pinned_workspace_id(), None);
         let p = RequestPrincipal::Pat {
             pat_id: "p1".into(),
-            tenant_id: Some("t1".into()),
+            workspace_id: Some("w1".into()),
         };
         assert!(p.is_pat());
-        assert_eq!(p.pinned_tenant_id(), Some("t1"));
+        assert_eq!(p.pinned_workspace_id(), Some("w1"));
         let p2 = RequestPrincipal::Pat {
             pat_id: "p2".into(),
-            tenant_id: None,
+            workspace_id: None,
         };
         assert!(p2.is_pat());
-        assert_eq!(p2.pinned_tenant_id(), None);
+        assert_eq!(p2.pinned_workspace_id(), None);
     }
 }

@@ -25,8 +25,8 @@ pub struct TaskRequest {
     pub model: Option<String>,
     pub system_prompt: Option<String>,
     pub permission_mode: Option<String>,
-    /// Optional tenant-owned project this session is scoped to (issue #59).
-    /// The server validates the caller is a member of the project's tenant;
+    /// Optional workspace-owned project this session is scoped to (issue #59).
+    /// The server validates the caller is a member of the project's workspace;
     /// omitted for personal sessions.
     #[serde(default)]
     pub project_id: Option<String>,

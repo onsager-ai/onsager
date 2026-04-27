@@ -8,10 +8,10 @@ pub mod project;
 pub mod protocol;
 pub mod session;
 pub mod task;
-pub mod tenant;
-pub mod tenant_member;
 pub mod user;
 pub mod workflow;
+pub mod workspace;
+pub mod workspace_member;
 
 pub use error::StiglabError;
 pub use event::Event;
@@ -21,10 +21,10 @@ pub use project::Project;
 pub use protocol::{AgentMessage, ServerMessage};
 pub use session::{Session, SessionState};
 pub use task::{Task, TaskRequest};
-pub use tenant::Tenant;
-pub use tenant_member::TenantMember;
 pub use user::User;
 pub use workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
+pub use workspace::Workspace;
+pub use workspace_member::WorkspaceMember;
 
 #[cfg(test)]
 mod tests {
