@@ -84,14 +84,26 @@ pub enum DispatchOutcome {
 
 /// Core shaping-dispatch logic shared by the HTTP route and the
 /// `forge.shaping_dispatched` spine listener (spec #131 / ADR 0004
-/// Lever C, phase 3). No HTTP-level concerns leak in or out — security
-/// gating, header parsing, and response shaping stay in the HTTP wrapper.
+/// Lever C, phase 3). HTTP-specific concerns — header parsing and
+/// response shaping — stay in the HTTP wrapper, but **trust decisions
+/// on request fields stay with the caller**. In particular,
+/// `req.created_by` drives credential lookup and the spawned agent's
+/// `CLAUDE_CODE_OAUTH_TOKEN` injection; the caller is responsible for
+/// ensuring that value came from a trusted source before calling here:
+///
+/// - `create_shaping` (HTTP) gates `created_by` behind the
+///   `X-Onsager-Internal-Dispatch` shared secret.
+/// - `shaping_listener` (spine) gates `created_by` behind a metadata
+///   `actor == "forge"` check on the spine event row.
+///
+/// Anything that doesn't pass its trust check must strip `created_by`
+/// to `None` before reaching this helper.
 ///
 /// `idempotency_key` is the durable handle the caller uses to collapse
 /// retries onto a single session. The HTTP route prefers the explicit
 /// `Idempotency-Key` header, falling back to `request_id`; the listener
-/// path keys on `request_id` directly since spine events are stable per
-/// emission.
+/// path uses the outer envelope's `request_id` after validating it
+/// matches the embedded payload.
 pub async fn dispatch_shaping_inner(
     state: &AppState,
     req: &onsager_spine::protocol::ShapingRequest,
