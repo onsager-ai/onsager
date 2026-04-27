@@ -1338,4 +1338,125 @@ mod tests {
         assert_eq!(deserialized, event);
         assert_eq!(deserialized.event_type(), "git.ci_completed");
     }
+
+    // -- Phase 2 (Lever C) wire-format regressions ------------------------
+    //
+    // Phase-3 listeners will rely on these events keeping their shape across
+    // upgrades; pin the additive-schema and round-trip behavior here.
+
+    #[test]
+    fn forge_gate_requested_request_field_serde_compat() {
+        use crate::protocol::{GateContext, GateRequest, ProposedAction};
+
+        // 1. With request = None, the field is omitted from the wire form
+        //    (skip_serializing_if), keeping legacy JSON shape on emit.
+        let event_without = FactoryEventKind::ForgeGateRequested {
+            gate_id: "gate_no_request".into(),
+            artifact_id: ArtifactId::new("art_legacy_shape"),
+            gate_point: GatePoint::PreDispatch,
+            request: None,
+        };
+        let json_without = serde_json::to_value(&event_without).unwrap();
+        assert!(
+            json_without.get("request").is_none(),
+            "request: None must be omitted on serialization, got: {json_without}"
+        );
+
+        // 2. Legacy JSON lacking the `request` field deserializes with
+        //    request = None — the #[serde(default)] contract that lets
+        //    pre-Lever-C events still parse.
+        let legacy_json = serde_json::json!({
+            "type": "forge_gate_requested",
+            "gate_id": "gate_legacy",
+            "artifact_id": "art_legacy_shape",
+            "gate_point": "pre_dispatch",
+        });
+        let parsed: FactoryEventKind = serde_json::from_value(legacy_json).unwrap();
+        match parsed {
+            FactoryEventKind::ForgeGateRequested { request, .. } => {
+                assert!(
+                    request.is_none(),
+                    "legacy JSON must default request to None"
+                );
+            }
+            other => panic!("expected ForgeGateRequested, got {other:?}"),
+        }
+
+        // 3. With request = Some(...), full payload round-trips. Phase 3
+        //    consumers depend on the inner GateRequest staying byte-stable.
+        let event_with = FactoryEventKind::ForgeGateRequested {
+            gate_id: "gate_full".into(),
+            artifact_id: ArtifactId::new("art_full_shape"),
+            gate_point: GatePoint::StateTransition,
+            request: Some(GateRequest {
+                context: GateContext {
+                    gate_point: GatePoint::StateTransition,
+                    artifact_id: ArtifactId::new("art_full_shape"),
+                    artifact_kind: Kind::Code,
+                    current_state: ArtifactState::InProgress,
+                    target_state: Some(ArtifactState::UnderReview),
+                    extra: None,
+                },
+                proposed_action: ProposedAction {
+                    description: "advance art_full_shape to UnderReview".into(),
+                    payload: serde_json::json!({"summary": "ok"}),
+                },
+            }),
+        };
+        let json_with = serde_json::to_value(&event_with).unwrap();
+        assert_eq!(json_with["type"], "forge_gate_requested");
+        assert_eq!(
+            json_with["request"]["context"]["gate_point"],
+            "state_transition"
+        );
+        assert_eq!(
+            json_with["request"]["proposed_action"]["description"],
+            "advance art_full_shape to UnderReview"
+        );
+
+        let back: FactoryEventKind = serde_json::from_value(json_with).unwrap();
+        assert_eq!(back, event_with);
+        assert_eq!(back.event_type(), "forge.gate_requested");
+    }
+
+    #[test]
+    fn stiglab_shaping_result_ready_roundtrip() {
+        use crate::protocol::ShapingResult;
+        use onsager_artifact::ContentRef;
+
+        let event = FactoryEventKind::StiglabShapingResultReady {
+            artifact_id: ArtifactId::new("art_shaped"),
+            result: ShapingResult {
+                request_id: "req_shaping_42".into(),
+                outcome: ShapingOutcome::Completed,
+                content_ref: Some(ContentRef {
+                    uri: "git://repo@abc123".into(),
+                    checksum: None,
+                }),
+                change_summary: "added auth middleware".into(),
+                quality_signals: vec![],
+                session_id: "sess_42".into(),
+                duration_ms: 12_500,
+                error: None,
+            },
+        };
+
+        // event_type / stream routing — phase-3 listeners filter on these.
+        assert_eq!(event.event_type(), "stiglab.shaping_result_ready");
+        assert_eq!(event.stream_type(), "stiglab");
+        assert_eq!(event.stream_id(), "art_shaped");
+
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "stiglab_shaping_result_ready");
+        assert_eq!(json["artifact_id"], "art_shaped");
+        assert_eq!(json["result"]["request_id"], "req_shaping_42");
+        assert_eq!(json["result"]["outcome"], "completed");
+        assert_eq!(json["result"]["content_ref"]["uri"], "git://repo@abc123");
+        // checksum and error are skip_serializing_if Option::is_none
+        assert!(json["result"]["content_ref"].get("checksum").is_none());
+        assert!(json["result"].get("error").is_none());
+
+        let back: FactoryEventKind = serde_json::from_value(json).unwrap();
+        assert_eq!(back, event);
+    }
 }
