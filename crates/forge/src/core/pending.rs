@@ -22,16 +22,99 @@
 //! which Synodic / Stiglab observe as a duplicate keyed by the same
 //! correlation id).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use onsager_spine::protocol::{GateVerdict, ShapingResult};
 
+/// Cap on parked entries per map. Each tick of phase 4's resume path
+/// drains exactly one entry per artifact, so steady-state size is
+/// bounded by the in-flight artifact count. The cap is a safety net
+/// for two failure modes:
+///
+/// 1. Producer bugs that emit verdicts/results for ids forge never
+///    parked (no consumer ever claims, entry leaks).
+/// 2. Phase-3 → phase-4 partial deploys: forge runs phase-3 binary
+///    (parks but never drains) for hours before the phase-4 binary
+///    rolls out.
+///
+/// 4096 fits a multi-day burst at typical factory volumes while
+/// keeping the worst-case footprint negligible. Eviction is FIFO on
+/// the order entries were inserted — a verdict that has been parked
+/// longer than 4096 newer arrivals is almost certainly orphaned and
+/// safe to drop. Phase 6 replaces this with persisted parking.
+const MAX_PENDING_ENTRIES: usize = 4096;
+
+/// Inner store backing both [`PendingVerdicts`] and [`PendingShapings`].
+/// Provides FIFO eviction once `max_entries` is exceeded so the maps
+/// can't grow without bound under the failure modes documented above.
+struct BoundedMap<V> {
+    inner: HashMap<String, V>,
+    /// Insertion order, used for FIFO eviction on overflow. Re-inserts
+    /// of an existing key reset its position.
+    order: VecDeque<String>,
+    max_entries: usize,
+}
+
+impl<V> BoundedMap<V> {
+    fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+            order: VecDeque::new(),
+            max_entries: MAX_PENDING_ENTRIES,
+        }
+    }
+
+    fn insert(&mut self, key: &str, value: V) {
+        // Re-insert: drop the old position so the new one lands at the
+        // back of the queue.
+        if self.inner.contains_key(key) {
+            self.order.retain(|existing| existing != key);
+        }
+        self.order.push_back(key.to_string());
+        self.inner.insert(key.to_string(), value);
+        while self.inner.len() > self.max_entries {
+            if let Some(oldest) = self.order.pop_front() {
+                if self.inner.remove(&oldest).is_some() {
+                    tracing::warn!(
+                        evicted_key = %oldest,
+                        "forge: pending map at capacity, evicted oldest entry"
+                    );
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn remove(&mut self, key: &str) -> Option<V> {
+        let removed = self.inner.remove(key);
+        if removed.is_some() {
+            self.order.retain(|existing| existing != key);
+        }
+        removed
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
 /// Verdicts pulled off the spine, keyed by `gate_id` (the correlation id
 /// Forge stamped on the originating `forge.gate_requested`).
-#[derive(Clone, Default)]
+///
+/// Bounded by [`MAX_PENDING_ENTRIES`] with FIFO eviction; see module doc.
+#[derive(Clone)]
 pub struct PendingVerdicts {
-    inner: Arc<Mutex<HashMap<String, GateVerdict>>>,
+    inner: Arc<Mutex<BoundedMap<GateVerdict>>>,
+}
+
+impl Default for PendingVerdicts {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(BoundedMap::new())),
+        }
+    }
 }
 
 impl PendingVerdicts {
@@ -47,7 +130,7 @@ impl PendingVerdicts {
         self.inner
             .lock()
             .expect("PendingVerdicts mutex poisoned")
-            .insert(gate_id.to_string(), verdict);
+            .insert(gate_id, verdict);
     }
 
     /// Claim the verdict for `gate_id`, removing it from the map. Returns
@@ -75,9 +158,19 @@ impl PendingVerdicts {
 
 /// Shaping results pulled off the spine, keyed by `request_id` (the id
 /// Forge stamped on the originating `forge.shaping_dispatched`).
-#[derive(Clone, Default)]
+///
+/// Bounded by [`MAX_PENDING_ENTRIES`] with FIFO eviction; see module doc.
+#[derive(Clone)]
 pub struct PendingShapings {
-    inner: Arc<Mutex<HashMap<String, ShapingResult>>>,
+    inner: Arc<Mutex<BoundedMap<ShapingResult>>>,
+}
+
+impl Default for PendingShapings {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(BoundedMap::new())),
+        }
+    }
 }
 
 impl PendingShapings {
@@ -89,7 +182,7 @@ impl PendingShapings {
         self.inner
             .lock()
             .expect("PendingShapings mutex poisoned")
-            .insert(request_id.to_string(), result);
+            .insert(request_id, result);
     }
 
     pub fn take(&self, request_id: &str) -> Option<ShapingResult> {
@@ -181,5 +274,45 @@ mod tests {
         assert_eq!(m.len(), 1);
         assert!(m.take("r2").is_some());
         assert!(m.is_empty());
+    }
+
+    #[test]
+    fn bounded_map_evicts_oldest_on_overflow() {
+        // Producer-bug guard: keep inserting orphaned verdicts and the
+        // map size must stay capped, not climb without bound. The
+        // oldest entry is the first one to go.
+        let mut m = BoundedMap::<u32>::new();
+        m.max_entries = 3;
+
+        m.insert("a", 1);
+        m.insert("b", 2);
+        m.insert("c", 3);
+        assert_eq!(m.len(), 3);
+
+        // Overflow → "a" evicted (FIFO).
+        m.insert("d", 4);
+        assert_eq!(m.len(), 3);
+        assert!(m.remove("a").is_none());
+        assert_eq!(m.remove("b"), Some(2));
+        assert_eq!(m.remove("c"), Some(3));
+        assert_eq!(m.remove("d"), Some(4));
+    }
+
+    #[test]
+    fn bounded_map_reinsert_resets_position() {
+        // Re-inserting an existing key moves it to the back of the
+        // queue, so it survives the next eviction wave.
+        let mut m = BoundedMap::<u32>::new();
+        m.max_entries = 2;
+
+        m.insert("a", 1);
+        m.insert("b", 2);
+        // Touch "a" — it's now newer than "b".
+        m.insert("a", 11);
+        // Insert "c" — evicts "b" (the oldest), not "a".
+        m.insert("c", 3);
+        assert!(m.remove("b").is_none());
+        assert_eq!(m.remove("a"), Some(11));
+        assert_eq!(m.remove("c"), Some(3));
     }
 }
