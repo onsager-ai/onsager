@@ -221,19 +221,26 @@ impl<W: Warehouse + 'static> SealSink for WarehouseSealSink<W> {
 /// pipeline parks one of these per tick when it emits a request event;
 /// the next tick consults the parking maps and advances the stage.
 ///
-/// Process-private and lost on restart. Phase 6 (#148 follow-up) moves
-/// this into a forge-private `pending_pipeline_decisions` table with
-/// replay on boot so a mid-tick crash doesn't drop in-flight decisions.
+/// Process-private and lost on restart. Phase 6 (#186) moves this into
+/// a forge-private `pending_pipeline_decisions` table with replay on
+/// boot so a mid-tick crash doesn't drop in-flight decisions.
+///
+/// `pub(crate)` (not `pub`): the parking lifecycle is an internal
+/// detail of the pipeline state machine — the public surface is the
+/// observable `PipelineEvent` stream + `is_parked()`. Keeping these
+/// types crate-private leaves the parking shape free to evolve
+/// (per-artifact concurrency, persistence) without breaking external
+/// callers.
 #[derive(Debug, Clone)]
-pub struct ParkedDecision {
-    pub decision: ShapingDecision,
+pub(crate) struct ParkedDecision {
+    pub(crate) decision: ShapingDecision,
     /// Snapshot of the artifact at the moment the decision was made.
     /// Held so the pipeline can build follow-up gate requests with the
     /// same `current_state` / `artifact_kind` it used initially —
     /// reading the live store mid-decision could surface a state
     /// changed by an out-of-band write.
-    pub artifact_snapshot: Artifact,
-    pub stage: ParkStage,
+    pub(crate) artifact_snapshot: Artifact,
+    pub(crate) stage: ParkStage,
 }
 
 /// Where a parked decision is in the lifecycle. Each variant carries
@@ -241,8 +248,14 @@ pub struct ParkedDecision {
 /// response from the parking maps. The `result` payload on the
 /// transition variant is `Box`ed so the enum's stack footprint stays
 /// small (the other variants are short strings).
+///
+/// `pub(crate)` for the same reason as [`ParkedDecision`]. The
+/// `Awaiting*` shared prefix mirrors the lifecycle vocabulary used in
+/// the module-level docstring and the resume helpers; `clippy`'s
+/// uniform-prefix lint is not worth the legibility cost here.
 #[derive(Debug, Clone)]
-pub enum ParkStage {
+#[allow(clippy::enum_variant_names)]
+pub(crate) enum ParkStage {
     AwaitingPreDispatchVerdict {
         gate_id: String,
     },
@@ -294,10 +307,12 @@ impl ForgePipeline {
         }
     }
 
-    /// Whether the pipeline is currently parked on a decision. Used by
-    /// tests to assert the state machine reached the expected park
-    /// without poking at private fields.
-    pub fn is_parked(&self) -> bool {
+    /// Whether the pipeline is currently parked on a decision. Test
+    /// helper: gated on `cfg(test)` because no production code reads
+    /// it today. If a future dashboard endpoint wants to surface
+    /// "in-flight" state, lift the gate to `pub(crate)`.
+    #[cfg(test)]
+    fn is_parked(&self) -> bool {
         self.parked.is_some()
     }
 
@@ -564,32 +579,39 @@ impl ForgePipeline {
     }
 
     /// Apply a state-transition verdict — the terminal stage of a
-    /// successful pipeline run.
+    /// successful pipeline run. Destructures `parked` so the boxed
+    /// `ShapingResult` can move out by value (no clone of a payload
+    /// the box was put there to keep small).
     fn advance_after_transition(
         &mut self,
         parked: ParkedDecision,
         verdict: GateVerdict,
         output: &mut TickOutput,
     ) {
-        let result = match parked.stage {
-            ParkStage::AwaitingTransitionVerdict { ref result, .. } => (**result).clone(),
+        let ParkedDecision {
+            decision,
+            artifact_snapshot,
+            stage,
+        } = parked;
+        let result = match stage {
+            ParkStage::AwaitingTransitionVerdict { result, .. } => *result,
             _ => unreachable!("advance_after_transition called from non-transition stage"),
         };
 
         output.events.push(PipelineEvent::GateVerdictReceived {
-            artifact_id: parked.decision.artifact_id.to_string(),
+            artifact_id: decision.artifact_id.to_string(),
             gate_point: GatePoint::StateTransition,
             verdict: summarize(&verdict),
         });
 
         match verdict {
             GateVerdict::Allow | GateVerdict::Modify { .. } => {
-                self.apply_transition(parked, result, output);
+                self.apply_transition(decision, artifact_snapshot, result, output);
             }
             GateVerdict::Deny { reason } => {
                 output.events.push(PipelineEvent::Error(format!(
                     "state transition gate denied for {}: {}",
-                    parked.decision.artifact_id, reason
+                    decision.artifact_id, reason
                 )));
             }
             GateVerdict::Escalate { .. } => {
@@ -599,15 +621,18 @@ impl ForgePipeline {
     }
 
     /// Seal-if-Released and advance the artifact. Called only from
-    /// the Allow/Modify branch of [`Self::advance_after_transition`].
+    /// the Allow/Modify branch of [`Self::advance_after_transition`],
+    /// which destructures the parked decision so the boxed
+    /// `ShapingResult` can flow through by value (no clone).
     fn apply_transition(
         &mut self,
-        parked: ParkedDecision,
+        decision: ShapingDecision,
+        artifact_snapshot: Artifact,
         result: ShapingResult,
         output: &mut TickOutput,
     ) {
-        let from_state = parked.artifact_snapshot.state;
-        let target_state = parked.decision.target_state;
+        let from_state = artifact_snapshot.state;
+        let target_state = decision.target_state;
 
         // warehouse-and-delivery-v0.1 §5.1: Released implies a sealed
         // bundle. Seal before advancing — if it fails the transition
@@ -617,18 +642,16 @@ impl ForgePipeline {
             target_state == ArtifactState::Released && result.outcome == ShapingOutcome::Completed;
         let sealed = if sealing_release {
             match &self.warehouse {
-                Some(warehouse) => {
-                    match warehouse.seal_release(&parked.decision.artifact_id, &result) {
-                        Ok(s) => Some(s),
-                        Err(e) => {
-                            output.events.push(PipelineEvent::Error(format!(
-                                "warehouse seal failed for {}: {}",
-                                parked.decision.artifact_id, e
-                            )));
-                            return;
-                        }
+                Some(warehouse) => match warehouse.seal_release(&decision.artifact_id, &result) {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        output.events.push(PipelineEvent::Error(format!(
+                            "warehouse seal failed for {}: {}",
+                            decision.artifact_id, e
+                        )));
+                        return;
                     }
-                }
+                },
                 None => None,
             }
         } else {
@@ -637,20 +660,20 @@ impl ForgePipeline {
 
         match self
             .store
-            .advance(&parked.decision.artifact_id, target_state, &result)
+            .advance(&decision.artifact_id, target_state, &result)
         {
             Ok(()) => {
                 output.events.push(PipelineEvent::ArtifactAdvanced {
-                    artifact_id: parked.decision.artifact_id.to_string(),
+                    artifact_id: decision.artifact_id.to_string(),
                     from_state,
                     to_state: target_state,
                 });
 
                 if let Some(sealed) = sealed {
                     self.store
-                        .record_version(&parked.decision.artifact_id, sealed.bundle_id.clone());
+                        .record_version(&decision.artifact_id, sealed.bundle_id.clone());
                     output.events.push(PipelineEvent::BundleSealed {
-                        artifact_id: parked.decision.artifact_id.to_string(),
+                        artifact_id: decision.artifact_id.to_string(),
                         bundle_id: sealed.bundle_id,
                         version: sealed.version,
                     });
@@ -659,7 +682,7 @@ impl ForgePipeline {
             Err(e) => {
                 output.events.push(PipelineEvent::Error(format!(
                     "failed to advance {}: {}",
-                    parked.decision.artifact_id, e
+                    decision.artifact_id, e
                 )));
             }
         }
@@ -1306,6 +1329,72 @@ mod tests {
             .any(|e| matches!(e, PipelineEvent::BundleSealed { .. })));
         let art = pipeline.store.get(&id).unwrap();
         assert_eq!(art.state, ArtifactState::UnderReview);
+        assert!(art.current_version_id.is_none());
+    }
+
+    #[test]
+    fn release_transition_advances_without_bundle_sealed_when_warehouse_absent() {
+        // Pipelines that don't attach a SealSink (legacy deployments)
+        // still advance to Released — they just don't emit a
+        // BundleSealed event. Regression coverage for the Allow branch
+        // of advance_after_transition when self.warehouse is None.
+        let pending_verdicts = PendingVerdicts::new();
+        let pending_shapings = PendingShapings::new();
+        let mut pipeline = ForgePipeline::new(pending_verdicts.clone(), pending_shapings.clone());
+        let id = pipeline.store.register(Kind::Code, "svc", "marvin");
+
+        // Walk through Draft → InProgress → UnderReview with the
+        // baseline kernel, then push to Released with the warehouse
+        // absent.
+        let baseline = BaselineKernel::new();
+        drive_to_completion(
+            &mut pipeline,
+            &pending_verdicts,
+            &pending_shapings,
+            &baseline,
+        );
+        drive_to_completion(
+            &mut pipeline,
+            &pending_verdicts,
+            &pending_shapings,
+            &baseline,
+        );
+        assert_eq!(
+            pipeline.store.get(&id).unwrap().state,
+            ArtifactState::UnderReview
+        );
+
+        let release = ReleaseKernel;
+        let out1 = pipeline.tick(&release);
+        let g = pre_dispatch_gate_id(&out1);
+        pending_verdicts.insert(&g, GateVerdict::Allow);
+        let out2 = pipeline.tick(&release);
+        let r = shaping_request_id(&out2);
+        pending_shapings.insert(&r, shaping_completed(&r));
+        let out3 = pipeline.tick(&release);
+        let t = transition_gate_id(&out3);
+        pending_verdicts.insert(&t, GateVerdict::Allow);
+        let out = pipeline.tick(&release);
+
+        // Released, no BundleSealed event.
+        assert!(out.events.iter().any(|e| {
+            matches!(
+                e,
+                PipelineEvent::ArtifactAdvanced {
+                    to_state: ArtifactState::Released,
+                    ..
+                }
+            )
+        }));
+        assert!(
+            !out.events
+                .iter()
+                .any(|e| matches!(e, PipelineEvent::BundleSealed { .. })),
+            "pipeline without SealSink must not emit BundleSealed"
+        );
+
+        let art = pipeline.store.get(&id).unwrap();
+        assert_eq!(art.state, ArtifactState::Released);
         assert!(art.current_version_id.is_none());
     }
 }
