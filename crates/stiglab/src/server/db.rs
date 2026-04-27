@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use crate::core::{
-    GitHubAppInstallation, Node, NodeStatus, Project, Session, SessionState, Tenant, TenantMember,
-    User,
+    GitHubAppInstallation, Node, NodeStatus, Project, Session, SessionState, User, Workspace,
+    WorkspaceMember,
 };
 use chrono::Utc;
 use sqlx::pool::PoolOptions;
@@ -166,15 +166,15 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     // authenticate non-browser callers as a specific user. The full token is
     // never stored — `token_hash` is the SHA-256 hex of the raw token, and
     // `token_prefix` is the first 12 characters for display + indexed lookup.
-    // `tenant_id` is an optional scope-down to a single workspace; when set,
-    // the request's tenant context is pinned and cross-tenant calls 403.
-    // `revoked_at` is a soft-delete: revoked rows stay for audit but fail
-    // verification.
+    // `workspace_id` is the workspace this PAT addresses; required since
+    // issue #163 (renamed from the legacy `tenant_id`).  Cross-workspace
+    // calls 403.  `revoked_at` is a soft-delete: revoked rows stay for audit
+    // but fail verification.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS user_pats (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
-            tenant_id TEXT,
+            workspace_id TEXT,
             name TEXT NOT NULL,
             token_prefix TEXT NOT NULL,
             token_hash TEXT NOT NULL,
@@ -242,10 +242,70 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // ── Tenant / membership / GitHub App / project tables (issue #59) ──
+    // ── Workspace / membership / GitHub App / project tables (issue #59;
+    //    renamed from "tenant" → "workspace" in issue #163).
+    //
+    // The block below reuses the same swallow-on-error pattern the earlier
+    // ALTERs use.  On a fresh DB the rename statements all fail with "no
+    // such table / column" and the subsequent CREATE TABLE IF NOT EXISTS
+    // statements build the schema directly under the new names.  On an
+    // existing DB the renames run once, the CREATE TABLE IF NOT EXISTS
+    // statements are no-ops, and the column-rename ALTERs realign the
+    // surface.  See `migrations/001_rename_tenant_to_workspace.sql` for the
+    // canonical SQL; the deletion rule for `user_pats` rows with no
+    // `workspace_members` membership is documented there.
+    let _ = sqlx::query("ALTER TABLE tenants RENAME TO workspaces")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE tenant_members RENAME TO workspace_members")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE tenant_workflows RENAME TO workspace_workflows")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE tenant_workflow_stages RENAME TO workspace_workflow_stages")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE workspace_members RENAME COLUMN tenant_id TO workspace_id")
+        .execute(pool)
+        .await;
+    let _ =
+        sqlx::query("ALTER TABLE github_app_installations RENAME COLUMN tenant_id TO workspace_id")
+            .execute(pool)
+            .await;
+    let _ = sqlx::query("ALTER TABLE projects RENAME COLUMN tenant_id TO workspace_id")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE workspace_workflows RENAME COLUMN tenant_id TO workspace_id")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE user_pats RENAME COLUMN tenant_id TO workspace_id")
+        .execute(pool)
+        .await;
+    // Old indexes referencing the renamed tables/columns can outlive the
+    // rename on Postgres if the index name doesn't auto-update; drop the
+    // legacy ones explicitly.  All `IF EXISTS`, all idempotent.
+    let _ = sqlx::query("DROP INDEX IF EXISTS idx_tenant_members_user_id")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("DROP INDEX IF EXISTS idx_github_app_installations_tenant_id")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("DROP INDEX IF EXISTS idx_projects_tenant_id")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("DROP INDEX IF EXISTS idx_tenant_workflows_tenant_id")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("DROP INDEX IF EXISTS idx_tenant_workflows_repo_active")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("DROP INDEX IF EXISTS idx_tenant_workflow_stages_workflow_id")
+        .execute(pool)
+        .await;
 
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS tenants (
+        "CREATE TABLE IF NOT EXISTS workspaces (
             id TEXT PRIMARY KEY,
             slug TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
@@ -257,18 +317,18 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .await?;
 
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS tenant_members (
-            tenant_id TEXT NOT NULL,
+        "CREATE TABLE IF NOT EXISTS workspace_members (
+            workspace_id TEXT NOT NULL,
             user_id TEXT NOT NULL,
             joined_at TEXT NOT NULL,
-            PRIMARY KEY (tenant_id, user_id)
+            PRIMARY KEY (workspace_id, user_id)
         )",
     )
     .execute(pool)
     .await?;
 
     sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_tenant_members_user_id ON tenant_members (user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_workspace_members_user_id ON workspace_members (user_id)",
     )
     .execute(pool)
     .await?;
@@ -276,7 +336,7 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS github_app_installations (
             id TEXT PRIMARY KEY,
-            tenant_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
             install_id BIGINT NOT NULL UNIQUE,
             account_login TEXT NOT NULL,
             account_type TEXT NOT NULL,
@@ -288,8 +348,8 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .await?;
 
     sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_github_app_installations_tenant_id \
-         ON github_app_installations (tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_github_app_installations_workspace_id \
+         ON github_app_installations (workspace_id)",
     )
     .execute(pool)
     .await?;
@@ -297,21 +357,49 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS projects (
             id TEXT PRIMARY KEY,
-            tenant_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
             github_app_installation_id TEXT NOT NULL,
             repo_owner TEXT NOT NULL,
             repo_name TEXT NOT NULL,
             default_branch TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            UNIQUE(tenant_id, repo_owner, repo_name)
+            UNIQUE(workspace_id, repo_owner, repo_name)
         )",
     )
     .execute(pool)
     .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_projects_tenant_id ON projects (tenant_id)")
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_projects_workspace_id ON projects (workspace_id)")
         .execute(pool)
         .await?;
+
+    // PAT backfill: rows with NULL `workspace_id` get pinned to the user's
+    // first workspace membership; rows with no membership at all are
+    // deleted (unusable — a workspace-less PAT can't address any
+    // workspace-scoped route, and after this migration `workspace_id` is
+    // mandatory at the API layer).  Postgres-only `ALTER COLUMN ... SET
+    // NOT NULL` is gated on the live install (SQLite tests rebuild the
+    // schema each run from the new CREATE TABLE above).  See
+    // `migrations/001_rename_tenant_to_workspace.sql` for the canonical
+    // SQL.
+    let _ = sqlx::query(
+        "UPDATE user_pats \
+         SET workspace_id = ( \
+             SELECT m.workspace_id FROM workspace_members m \
+             WHERE m.user_id = user_pats.user_id \
+             ORDER BY m.joined_at ASC, m.workspace_id ASC \
+             LIMIT 1 \
+         ) \
+         WHERE workspace_id IS NULL",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query("DELETE FROM user_pats WHERE workspace_id IS NULL")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE user_pats ALTER COLUMN workspace_id SET NOT NULL")
+        .execute(pool)
+        .await;
 
     // Attach sessions to projects (nullable; pre-existing sessions stay personal).
     // Same swallow-on-duplicate ALTER pattern as earlier migrations for
@@ -348,27 +436,29 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
 
     // ── Workflows (issue #81) ──────────────────────────────────────────
     //
-    // `workflows` — declarative blueprint persisted per tenant. The
-    // trigger is currently GitHub-specific so `repo_owner`, `repo_name`,
-    // `trigger_label`, and `install_id` are stored inline; a second
-    // trigger kind would factor these out.
+    // `workspace_workflows` — declarative blueprint persisted per
+    // workspace.  The trigger is currently GitHub-specific so `repo_owner`,
+    // `repo_name`, `trigger_label`, and `install_id` are stored inline; a
+    // second trigger kind would factor these out.
     //
-    // `workflow_stages` — ordered stage chain; stages walk in ascending
-    // `seq` order, never reorder. `params` holds kind-specific config as
-    // free-form JSON (TEXT for SQLite/Postgres portability through
-    // AnyPool).
+    // `workspace_workflow_stages` — ordered stage chain; stages walk in
+    // ascending `seq` order, never reorder.  `params` holds kind-specific
+    // config as free-form JSON (TEXT for SQLite/Postgres portability
+    // through AnyPool).
     //
     // No FK declarations — the rest of the stiglab schema uses app-layer
     // referential checks for the same SQLite/Postgres-portability reasons
     // documented above.
-    // Named `tenant_workflows` / `tenant_workflow_stages` to avoid colliding
-    // with the onsager-spine `006_workflows.sql` migration which also creates
-    // a `workflows` table with a different schema (spine's table is the factory
-    // workflow runtime; this one is the stiglab tenant-level blueprint store).
+    //
+    // Named `workspace_workflows` / `workspace_workflow_stages` (renamed
+    // from `tenant_workflows` in #163) to keep the workspace-scoped
+    // blueprint distinct from the onsager-spine `006_workflows.sql`
+    // migration's `workflows` table — that table is the factory workflow
+    // runtime; this one is the stiglab workspace-level blueprint store.
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS tenant_workflows (
+        "CREATE TABLE IF NOT EXISTS workspace_workflows (
             id TEXT PRIMARY KEY,
-            tenant_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
             name TEXT NOT NULL,
             trigger_kind TEXT NOT NULL,
             repo_owner TEXT NOT NULL,
@@ -385,19 +475,20 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
     sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_tenant_workflows_tenant_id ON tenant_workflows (tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_workspace_workflows_workspace_id \
+         ON workspace_workflows (workspace_id)",
     )
     .execute(pool)
     .await?;
     sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_tenant_workflows_repo_active \
-         ON tenant_workflows (repo_owner, repo_name, active)",
+        "CREATE INDEX IF NOT EXISTS idx_workspace_workflows_repo_active \
+         ON workspace_workflows (repo_owner, repo_name, active)",
     )
     .execute(pool)
     .await?;
 
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS tenant_workflow_stages (
+        "CREATE TABLE IF NOT EXISTS workspace_workflow_stages (
             id TEXT PRIMARY KEY,
             workflow_id TEXT NOT NULL,
             seq INTEGER NOT NULL,
@@ -409,8 +500,8 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
     sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_tenant_workflow_stages_workflow_id \
-         ON tenant_workflow_stages (workflow_id, seq)",
+        "CREATE INDEX IF NOT EXISTS idx_workspace_workflow_stages_workflow_id \
+         ON workspace_workflow_stages (workflow_id, seq)",
     )
     .execute(pool)
     .await?;
@@ -1111,7 +1202,7 @@ pub async fn user_has_credential_in(
 pub struct UserPat {
     pub id: String,
     pub user_id: String,
-    pub tenant_id: Option<String>,
+    pub workspace_id: Option<String>,
     pub name: String,
     pub token_prefix: String,
     pub expires_at: Option<chrono::DateTime<Utc>>,
@@ -1126,7 +1217,7 @@ pub struct UserPat {
 struct UserPatRow {
     id: String,
     user_id: String,
-    tenant_id: Option<String>,
+    workspace_id: Option<String>,
     name: String,
     token_prefix: String,
     expires_at: Option<String>,
@@ -1153,7 +1244,7 @@ impl TryFrom<UserPatRow> for UserPat {
         Ok(UserPat {
             id: row.id,
             user_id: row.user_id,
-            tenant_id: row.tenant_id,
+            workspace_id: row.workspace_id,
             name: row.name,
             token_prefix: row.token_prefix,
             expires_at: parse_optional_ts(row.expires_at)?,
@@ -1166,7 +1257,7 @@ impl TryFrom<UserPatRow> for UserPat {
     }
 }
 
-const PAT_FIELDS: &str = "id, user_id, tenant_id, name, token_prefix, expires_at, \
+const PAT_FIELDS: &str = "id, user_id, workspace_id, name, token_prefix, expires_at, \
                           last_used_at, last_used_ip, last_used_user_agent, created_at, revoked_at";
 
 #[allow(clippy::too_many_arguments)]
@@ -1174,20 +1265,20 @@ pub async fn insert_user_pat(
     pool: &AnyPool,
     id: &str,
     user_id: &str,
-    tenant_id: Option<&str>,
+    workspace_id: Option<&str>,
     name: &str,
     token_prefix: &str,
     token_hash: &str,
     expires_at: Option<chrono::DateTime<Utc>>,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO user_pats (id, user_id, tenant_id, name, token_prefix, token_hash, \
+        "INSERT INTO user_pats (id, user_id, workspace_id, name, token_prefix, token_hash, \
                                 scopes, expires_at, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
     .bind(id)
     .bind(user_id)
-    .bind(tenant_id)
+    .bind(workspace_id)
     .bind(name)
     .bind(token_prefix)
     .bind(token_hash)
@@ -1227,7 +1318,7 @@ pub async fn find_pats_by_prefix(
             let pat: UserPat = UserPatRow {
                 id: r.id,
                 user_id: r.user_id,
-                tenant_id: r.tenant_id,
+                workspace_id: r.workspace_id,
                 name: r.name,
                 token_prefix: r.token_prefix,
                 expires_at: r.expires_at,
@@ -1247,7 +1338,7 @@ pub async fn find_pats_by_prefix(
 struct UserPatWithHashRow {
     id: String,
     user_id: String,
-    tenant_id: Option<String>,
+    workspace_id: Option<String>,
     name: String,
     token_prefix: String,
     expires_at: Option<String>,
@@ -1303,7 +1394,7 @@ pub async fn insert_session_with_user(
 }
 
 /// Variant that also binds a `project_id` when the session is scoped to a
-/// tenant-owned project (issue #59). Pre-existing sessions with a null
+/// workspace-owned project (issue #59). Pre-existing sessions with a null
 /// `project_id` remain personal sessions forever.
 pub async fn insert_session_with_user_and_project(
     pool: &AnyPool,
@@ -1486,70 +1577,80 @@ struct CredentialKvRow {
     encrypted_value: String,
 }
 
-// ── Tenant / membership / installation / project CRUD (issue #59) ──
+// ── Workspace / membership / installation / project CRUD (issue #59;
+//    renamed in #163).
 
-pub async fn insert_tenant(pool: &AnyPool, tenant: &Tenant) -> anyhow::Result<()> {
+pub async fn insert_workspace(pool: &AnyPool, workspace: &Workspace) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO tenants (id, slug, name, created_by, created_at) \
+        "INSERT INTO workspaces (id, slug, name, created_by, created_at) \
          VALUES ($1, $2, $3, $4, $5)",
     )
-    .bind(&tenant.id)
-    .bind(&tenant.slug)
-    .bind(&tenant.name)
-    .bind(&tenant.created_by)
-    .bind(tenant.created_at.to_rfc3339())
+    .bind(&workspace.id)
+    .bind(&workspace.slug)
+    .bind(&workspace.name)
+    .bind(&workspace.created_by)
+    .bind(workspace.created_at.to_rfc3339())
     .execute(pool)
     .await?;
     Ok(())
 }
 
-/// Atomically insert a tenant and its creator-as-member row. Either both
-/// rows land or neither does — prevents a failed `tenant_members` insert
-/// from leaving an orphan workspace that permanently consumes its slug.
-pub async fn insert_tenant_with_creator(
+/// Atomically insert a workspace and its creator-as-member row.  Either
+/// both rows land or neither does — prevents a failed `workspace_members`
+/// insert from leaving an orphan workspace that permanently consumes its
+/// slug.
+pub async fn insert_workspace_with_creator(
     pool: &AnyPool,
-    tenant: &Tenant,
-    member: &TenantMember,
+    workspace: &Workspace,
+    member: &WorkspaceMember,
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
     sqlx::query(
-        "INSERT INTO tenants (id, slug, name, created_by, created_at) \
+        "INSERT INTO workspaces (id, slug, name, created_by, created_at) \
          VALUES ($1, $2, $3, $4, $5)",
     )
-    .bind(&tenant.id)
-    .bind(&tenant.slug)
-    .bind(&tenant.name)
-    .bind(&tenant.created_by)
-    .bind(tenant.created_at.to_rfc3339())
+    .bind(&workspace.id)
+    .bind(&workspace.slug)
+    .bind(&workspace.name)
+    .bind(&workspace.created_by)
+    .bind(workspace.created_at.to_rfc3339())
     .execute(&mut *tx)
     .await?;
-    sqlx::query("INSERT INTO tenant_members (tenant_id, user_id, joined_at) VALUES ($1, $2, $3)")
-        .bind(&member.tenant_id)
-        .bind(&member.user_id)
-        .bind(member.joined_at.to_rfc3339())
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "INSERT INTO workspace_members (workspace_id, user_id, joined_at) VALUES ($1, $2, $3)",
+    )
+    .bind(&member.workspace_id)
+    .bind(&member.user_id)
+    .bind(member.joined_at.to_rfc3339())
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }
 
-pub async fn get_tenant(pool: &AnyPool, tenant_id: &str) -> anyhow::Result<Option<Tenant>> {
-    let row = sqlx::query_as::<_, TenantRow>(
-        "SELECT id, slug, name, created_by, created_at FROM tenants WHERE id = $1",
+pub async fn get_workspace(
+    pool: &AnyPool,
+    workspace_id: &str,
+) -> anyhow::Result<Option<Workspace>> {
+    let row = sqlx::query_as::<_, WorkspaceRow>(
+        "SELECT id, slug, name, created_by, created_at FROM workspaces WHERE id = $1",
     )
-    .bind(tenant_id)
+    .bind(workspace_id)
     .fetch_optional(pool)
     .await?;
     row.map(|r| r.try_into()).transpose()
 }
 
-pub async fn list_tenants_for_user(pool: &AnyPool, user_id: &str) -> anyhow::Result<Vec<Tenant>> {
-    let rows = sqlx::query_as::<_, TenantRow>(
-        "SELECT t.id, t.slug, t.name, t.created_by, t.created_at \
-         FROM tenants t \
-         JOIN tenant_members m ON t.id = m.tenant_id \
+pub async fn list_workspaces_for_user(
+    pool: &AnyPool,
+    user_id: &str,
+) -> anyhow::Result<Vec<Workspace>> {
+    let rows = sqlx::query_as::<_, WorkspaceRow>(
+        "SELECT w.id, w.slug, w.name, w.created_by, w.created_at \
+         FROM workspaces w \
+         JOIN workspace_members m ON w.id = m.workspace_id \
          WHERE m.user_id = $1 \
-         ORDER BY t.created_at ASC",
+         ORDER BY w.created_at ASC",
     )
     .bind(user_id)
     .fetch_all(pool)
@@ -1557,53 +1658,58 @@ pub async fn list_tenants_for_user(pool: &AnyPool, user_id: &str) -> anyhow::Res
     rows.into_iter().map(|r| r.try_into()).collect()
 }
 
-pub async fn insert_tenant_member(pool: &AnyPool, member: &TenantMember) -> anyhow::Result<()> {
-    sqlx::query("INSERT INTO tenant_members (tenant_id, user_id, joined_at) VALUES ($1, $2, $3)")
-        .bind(&member.tenant_id)
-        .bind(&member.user_id)
-        .bind(member.joined_at.to_rfc3339())
-        .execute(pool)
-        .await?;
+pub async fn insert_workspace_member(
+    pool: &AnyPool,
+    member: &WorkspaceMember,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO workspace_members (workspace_id, user_id, joined_at) VALUES ($1, $2, $3)",
+    )
+    .bind(&member.workspace_id)
+    .bind(&member.user_id)
+    .bind(member.joined_at.to_rfc3339())
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
-pub async fn is_tenant_member(
+pub async fn is_workspace_member(
     pool: &AnyPool,
-    tenant_id: &str,
+    workspace_id: &str,
     user_id: &str,
 ) -> anyhow::Result<bool> {
     let row = sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM tenant_members WHERE tenant_id = $1 AND user_id = $2",
+        "SELECT user_id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
     )
-    .bind(tenant_id)
+    .bind(workspace_id)
     .bind(user_id)
     .fetch_optional(pool)
     .await?;
     Ok(row.is_some())
 }
 
-pub async fn list_tenant_members(
+pub async fn list_workspace_members(
     pool: &AnyPool,
-    tenant_id: &str,
-) -> anyhow::Result<Vec<TenantMember>> {
-    let rows = sqlx::query_as::<_, TenantMemberRow>(
-        "SELECT tenant_id, user_id, joined_at \
-         FROM tenant_members WHERE tenant_id = $1 ORDER BY joined_at ASC",
+    workspace_id: &str,
+) -> anyhow::Result<Vec<WorkspaceMember>> {
+    let rows = sqlx::query_as::<_, WorkspaceMemberRow>(
+        "SELECT workspace_id, user_id, joined_at \
+         FROM workspace_members WHERE workspace_id = $1 ORDER BY joined_at ASC",
     )
-    .bind(tenant_id)
+    .bind(workspace_id)
     .fetch_all(pool)
     .await?;
     rows.into_iter().map(|r| r.try_into()).collect()
 }
 
-/// `TenantMember` enriched with the member's GitHub profile so the
+/// `WorkspaceMember` enriched with the member's GitHub profile so the
 /// dashboard can render `@login` + avatar instead of the opaque user UUID.
 /// `LEFT JOIN` so a member row whose `users` row was somehow removed still
 /// surfaces (with nullable GitHub fields) rather than silently disappearing
 /// from the workspace's member list.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct TenantMemberWithUser {
-    pub tenant_id: String,
+pub struct WorkspaceMemberWithUser {
+    pub workspace_id: String,
     pub user_id: String,
     pub joined_at: chrono::DateTime<Utc>,
     pub github_login: Option<String>,
@@ -1612,8 +1718,8 @@ pub struct TenantMemberWithUser {
 }
 
 #[derive(sqlx::FromRow)]
-struct TenantMemberWithUserRow {
-    tenant_id: String,
+struct WorkspaceMemberWithUserRow {
+    workspace_id: String,
     user_id: String,
     joined_at: String,
     github_login: Option<String>,
@@ -1621,12 +1727,12 @@ struct TenantMemberWithUserRow {
     github_avatar_url: Option<String>,
 }
 
-impl TryFrom<TenantMemberWithUserRow> for TenantMemberWithUser {
+impl TryFrom<WorkspaceMemberWithUserRow> for WorkspaceMemberWithUser {
     type Error = anyhow::Error;
 
-    fn try_from(row: TenantMemberWithUserRow) -> anyhow::Result<Self> {
-        Ok(TenantMemberWithUser {
-            tenant_id: row.tenant_id,
+    fn try_from(row: WorkspaceMemberWithUserRow) -> anyhow::Result<Self> {
+        Ok(WorkspaceMemberWithUser {
+            workspace_id: row.workspace_id,
             user_id: row.user_id,
             joined_at: chrono::DateTime::parse_from_rfc3339(&row.joined_at)?.with_timezone(&Utc),
             github_login: row.github_login,
@@ -1636,19 +1742,19 @@ impl TryFrom<TenantMemberWithUserRow> for TenantMemberWithUser {
     }
 }
 
-pub async fn list_tenant_members_with_users(
+pub async fn list_workspace_members_with_users(
     pool: &AnyPool,
-    tenant_id: &str,
-) -> anyhow::Result<Vec<TenantMemberWithUser>> {
-    let rows = sqlx::query_as::<_, TenantMemberWithUserRow>(
-        "SELECT m.tenant_id, m.user_id, m.joined_at, \
+    workspace_id: &str,
+) -> anyhow::Result<Vec<WorkspaceMemberWithUser>> {
+    let rows = sqlx::query_as::<_, WorkspaceMemberWithUserRow>(
+        "SELECT m.workspace_id, m.user_id, m.joined_at, \
                 u.github_login, u.github_name, u.github_avatar_url \
-         FROM tenant_members m \
+         FROM workspace_members m \
          LEFT JOIN users u ON u.id = m.user_id \
-         WHERE m.tenant_id = $1 \
+         WHERE m.workspace_id = $1 \
          ORDER BY m.joined_at ASC",
     )
-    .bind(tenant_id)
+    .bind(workspace_id)
     .fetch_all(pool)
     .await?;
     rows.into_iter().map(|r| r.try_into()).collect()
@@ -1660,12 +1766,12 @@ pub async fn insert_github_app_installation(
     webhook_secret_cipher: Option<&str>,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO github_app_installations (id, tenant_id, install_id, account_login, \
+        "INSERT INTO github_app_installations (id, workspace_id, install_id, account_login, \
                                                account_type, webhook_secret_cipher, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(&install.id)
-    .bind(&install.tenant_id)
+    .bind(&install.workspace_id)
     .bind(install.install_id)
     .bind(&install.account_login)
     .bind(install.account_type.to_string())
@@ -1676,15 +1782,15 @@ pub async fn insert_github_app_installation(
     Ok(())
 }
 
-pub async fn list_github_app_installations_for_tenant(
+pub async fn list_github_app_installations_for_workspace(
     pool: &AnyPool,
-    tenant_id: &str,
+    workspace_id: &str,
 ) -> anyhow::Result<Vec<GitHubAppInstallation>> {
     let rows = sqlx::query_as::<_, GitHubAppInstallationRow>(
-        "SELECT id, tenant_id, install_id, account_login, account_type, created_at \
-         FROM github_app_installations WHERE tenant_id = $1 ORDER BY created_at ASC",
+        "SELECT id, workspace_id, install_id, account_login, account_type, created_at \
+         FROM github_app_installations WHERE workspace_id = $1 ORDER BY created_at ASC",
     )
-    .bind(tenant_id)
+    .bind(workspace_id)
     .fetch_all(pool)
     .await?;
     rows.into_iter().map(|r| r.try_into()).collect()
@@ -1695,7 +1801,7 @@ pub async fn get_github_app_installation(
     install_id: &str,
 ) -> anyhow::Result<Option<GitHubAppInstallation>> {
     let row = sqlx::query_as::<_, GitHubAppInstallationRow>(
-        "SELECT id, tenant_id, install_id, account_login, account_type, created_at \
+        "SELECT id, workspace_id, install_id, account_login, account_type, created_at \
          FROM github_app_installations WHERE id = $1",
     )
     .bind(install_id)
@@ -1705,14 +1811,14 @@ pub async fn get_github_app_installation(
 }
 
 /// Look up an installation by its **numeric GitHub install_id** (not the
-/// internal UUID). Used by the install callback to detect idempotent
-/// re-runs vs. cross-tenant linkage conflicts before inserting.
+/// internal UUID).  Used by the install callback to detect idempotent
+/// re-runs vs. cross-workspace linkage conflicts before inserting.
 pub async fn get_github_app_installation_by_install_id(
     pool: &AnyPool,
     install_id: i64,
 ) -> anyhow::Result<Option<GitHubAppInstallation>> {
     let row = sqlx::query_as::<_, GitHubAppInstallationRow>(
-        "SELECT id, tenant_id, install_id, account_login, account_type, created_at \
+        "SELECT id, workspace_id, install_id, account_login, account_type, created_at \
          FROM github_app_installations WHERE install_id = $1",
     )
     .bind(install_id)
@@ -1753,12 +1859,12 @@ pub async fn count_projects_for_installation(
 
 pub async fn insert_project(pool: &AnyPool, project: &Project) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO projects (id, tenant_id, github_app_installation_id, repo_owner, \
+        "INSERT INTO projects (id, workspace_id, github_app_installation_id, repo_owner, \
                                repo_name, default_branch, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(&project.id)
-    .bind(&project.tenant_id)
+    .bind(&project.workspace_id)
     .bind(&project.github_app_installation_id)
     .bind(&project.repo_owner)
     .bind(&project.repo_name)
@@ -1771,7 +1877,7 @@ pub async fn insert_project(pool: &AnyPool, project: &Project) -> anyhow::Result
 
 pub async fn get_project(pool: &AnyPool, project_id: &str) -> anyhow::Result<Option<Project>> {
     let row = sqlx::query_as::<_, ProjectRow>(
-        "SELECT id, tenant_id, github_app_installation_id, repo_owner, repo_name, \
+        "SELECT id, workspace_id, github_app_installation_id, repo_owner, repo_name, \
                 default_branch, created_at \
          FROM projects WHERE id = $1",
     )
@@ -1781,16 +1887,16 @@ pub async fn get_project(pool: &AnyPool, project_id: &str) -> anyhow::Result<Opt
     row.map(|r| r.try_into()).transpose()
 }
 
-pub async fn list_projects_for_tenant(
+pub async fn list_projects_for_workspace(
     pool: &AnyPool,
-    tenant_id: &str,
+    workspace_id: &str,
 ) -> anyhow::Result<Vec<Project>> {
     let rows = sqlx::query_as::<_, ProjectRow>(
-        "SELECT id, tenant_id, github_app_installation_id, repo_owner, repo_name, \
+        "SELECT id, workspace_id, github_app_installation_id, repo_owner, repo_name, \
                 default_branch, created_at \
-         FROM projects WHERE tenant_id = $1 ORDER BY created_at ASC",
+         FROM projects WHERE workspace_id = $1 ORDER BY created_at ASC",
     )
-    .bind(tenant_id)
+    .bind(workspace_id)
     .fetch_all(pool)
     .await?;
     rows.into_iter().map(|r| r.try_into()).collect()
@@ -1798,10 +1904,10 @@ pub async fn list_projects_for_tenant(
 
 pub async fn list_projects_for_user(pool: &AnyPool, user_id: &str) -> anyhow::Result<Vec<Project>> {
     let rows = sqlx::query_as::<_, ProjectRow>(
-        "SELECT p.id, p.tenant_id, p.github_app_installation_id, p.repo_owner, p.repo_name, \
+        "SELECT p.id, p.workspace_id, p.github_app_installation_id, p.repo_owner, p.repo_name, \
                 p.default_branch, p.created_at \
          FROM projects p \
-         JOIN tenant_members m ON p.tenant_id = m.tenant_id \
+         JOIN workspace_members m ON p.workspace_id = m.workspace_id \
          WHERE m.user_id = $1 \
          ORDER BY p.created_at ASC",
     )
@@ -1836,10 +1942,10 @@ pub async fn count_live_sessions_for_project(
     Ok(count)
 }
 
-// ── Row types (Tenant / membership / installation / project) ──
+// ── Row types (Workspace / membership / installation / project) ──
 
 #[derive(sqlx::FromRow)]
-struct TenantRow {
+struct WorkspaceRow {
     id: String,
     slug: String,
     name: String,
@@ -1847,11 +1953,11 @@ struct TenantRow {
     created_at: String,
 }
 
-impl TryFrom<TenantRow> for Tenant {
+impl TryFrom<WorkspaceRow> for Workspace {
     type Error = anyhow::Error;
 
-    fn try_from(row: TenantRow) -> anyhow::Result<Self> {
-        Ok(Tenant {
+    fn try_from(row: WorkspaceRow) -> anyhow::Result<Self> {
+        Ok(Workspace {
             id: row.id,
             slug: row.slug,
             name: row.name,
@@ -1862,18 +1968,18 @@ impl TryFrom<TenantRow> for Tenant {
 }
 
 #[derive(sqlx::FromRow)]
-struct TenantMemberRow {
-    tenant_id: String,
+struct WorkspaceMemberRow {
+    workspace_id: String,
     user_id: String,
     joined_at: String,
 }
 
-impl TryFrom<TenantMemberRow> for TenantMember {
+impl TryFrom<WorkspaceMemberRow> for WorkspaceMember {
     type Error = anyhow::Error;
 
-    fn try_from(row: TenantMemberRow) -> anyhow::Result<Self> {
-        Ok(TenantMember {
-            tenant_id: row.tenant_id,
+    fn try_from(row: WorkspaceMemberRow) -> anyhow::Result<Self> {
+        Ok(WorkspaceMember {
+            workspace_id: row.workspace_id,
             user_id: row.user_id,
             joined_at: chrono::DateTime::parse_from_rfc3339(&row.joined_at)?.with_timezone(&Utc),
         })
@@ -1883,7 +1989,7 @@ impl TryFrom<TenantMemberRow> for TenantMember {
 #[derive(sqlx::FromRow)]
 struct GitHubAppInstallationRow {
     id: String,
-    tenant_id: String,
+    workspace_id: String,
     install_id: i64,
     account_login: String,
     account_type: String,
@@ -1896,7 +2002,7 @@ impl TryFrom<GitHubAppInstallationRow> for GitHubAppInstallation {
     fn try_from(row: GitHubAppInstallationRow) -> anyhow::Result<Self> {
         Ok(GitHubAppInstallation {
             id: row.id,
-            tenant_id: row.tenant_id,
+            workspace_id: row.workspace_id,
             install_id: row.install_id,
             account_login: row.account_login,
             account_type: row
@@ -1911,7 +2017,7 @@ impl TryFrom<GitHubAppInstallationRow> for GitHubAppInstallation {
 #[derive(sqlx::FromRow)]
 struct ProjectRow {
     id: String,
-    tenant_id: String,
+    workspace_id: String,
     github_app_installation_id: String,
     repo_owner: String,
     repo_name: String,
@@ -1925,7 +2031,7 @@ impl TryFrom<ProjectRow> for Project {
     fn try_from(row: ProjectRow) -> anyhow::Result<Self> {
         Ok(Project {
             id: row.id,
-            tenant_id: row.tenant_id,
+            workspace_id: row.workspace_id,
             github_app_installation_id: row.github_app_installation_id,
             repo_owner: row.repo_owner,
             repo_name: row.repo_name,
@@ -1938,7 +2044,9 @@ impl TryFrom<ProjectRow> for Project {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{GitHubAccountType, Project, Session, SessionState, Tenant, TenantMember};
+    use crate::core::{
+        GitHubAccountType, Project, Session, SessionState, Workspace, WorkspaceMember,
+    };
     use chrono::Utc;
     use uuid::Uuid;
 
@@ -1971,41 +2079,41 @@ mod tests {
         .unwrap();
     }
 
-    fn new_tenant(created_by: &str) -> Tenant {
-        Tenant {
+    fn new_workspace(created_by: &str) -> Workspace {
+        Workspace {
             id: Uuid::new_v4().to_string(),
-            slug: format!("tenant-{}", Uuid::new_v4().simple()),
-            name: "Test Tenant".to_string(),
+            slug: format!("workspace-{}", Uuid::new_v4().simple()),
+            name: "Test Workspace".to_string(),
             created_by: created_by.to_string(),
             created_at: Utc::now(),
         }
     }
 
     #[tokio::test]
-    async fn tenant_crud_roundtrip() {
+    async fn workspace_crud_roundtrip() {
         let pool = test_pool().await;
         seed_user(&pool, "u1").await;
 
-        let tenant = new_tenant("u1");
-        insert_tenant(&pool, &tenant).await.unwrap();
+        let workspace = new_workspace("u1");
+        insert_workspace(&pool, &workspace).await.unwrap();
 
-        let fetched = get_tenant(&pool, &tenant.id).await.unwrap().unwrap();
-        assert_eq!(fetched.id, tenant.id);
-        assert_eq!(fetched.slug, tenant.slug);
+        let fetched = get_workspace(&pool, &workspace.id).await.unwrap().unwrap();
+        assert_eq!(fetched.id, workspace.id);
+        assert_eq!(fetched.slug, workspace.slug);
     }
 
     #[tokio::test]
-    async fn membership_query_and_list_tenants_for_user() {
+    async fn membership_query_and_list_workspaces_for_user() {
         let pool = test_pool().await;
         seed_user(&pool, "u1").await;
         seed_user(&pool, "u2").await;
 
-        let t = new_tenant("u1");
-        insert_tenant(&pool, &t).await.unwrap();
-        insert_tenant_member(
+        let w = new_workspace("u1");
+        insert_workspace(&pool, &w).await.unwrap();
+        insert_workspace_member(
             &pool,
-            &TenantMember {
-                tenant_id: t.id.clone(),
+            &WorkspaceMember {
+                workspace_id: w.id.clone(),
                 user_id: "u1".to_string(),
                 joined_at: Utc::now(),
             },
@@ -2013,27 +2121,27 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(is_tenant_member(&pool, &t.id, "u1").await.unwrap());
-        assert!(!is_tenant_member(&pool, &t.id, "u2").await.unwrap());
+        assert!(is_workspace_member(&pool, &w.id, "u1").await.unwrap());
+        assert!(!is_workspace_member(&pool, &w.id, "u2").await.unwrap());
 
-        let u1_tenants = list_tenants_for_user(&pool, "u1").await.unwrap();
-        assert_eq!(u1_tenants.len(), 1);
-        assert_eq!(u1_tenants[0].id, t.id);
+        let u1_workspaces = list_workspaces_for_user(&pool, "u1").await.unwrap();
+        assert_eq!(u1_workspaces.len(), 1);
+        assert_eq!(u1_workspaces[0].id, w.id);
 
-        let u2_tenants = list_tenants_for_user(&pool, "u2").await.unwrap();
-        assert!(u2_tenants.is_empty());
+        let u2_workspaces = list_workspaces_for_user(&pool, "u2").await.unwrap();
+        assert!(u2_workspaces.is_empty());
     }
 
     #[tokio::test]
-    async fn list_tenant_members_with_users_joins_github_profile() {
+    async fn list_workspace_members_with_users_joins_github_profile() {
         let pool = test_pool().await;
         seed_user(&pool, "u1").await;
-        let t = new_tenant("u1");
-        insert_tenant(&pool, &t).await.unwrap();
-        insert_tenant_member(
+        let w = new_workspace("u1");
+        insert_workspace(&pool, &w).await.unwrap();
+        insert_workspace_member(
             &pool,
-            &TenantMember {
-                tenant_id: t.id.clone(),
+            &WorkspaceMember {
+                workspace_id: w.id.clone(),
                 user_id: "u1".to_string(),
                 joined_at: Utc::now(),
             },
@@ -2041,7 +2149,9 @@ mod tests {
         .await
         .unwrap();
 
-        let members = list_tenant_members_with_users(&pool, &t.id).await.unwrap();
+        let members = list_workspace_members_with_users(&pool, &w.id)
+            .await
+            .unwrap();
         assert_eq!(members.len(), 1);
         // `seed_user` writes `github_login = user_id`, so this exercises the
         // JOIN without needing to fixture a realistic avatar URL.
@@ -2053,12 +2163,12 @@ mod tests {
     async fn installation_and_project_crud() {
         let pool = test_pool().await;
         seed_user(&pool, "u1").await;
-        let t = new_tenant("u1");
-        insert_tenant(&pool, &t).await.unwrap();
+        let w = new_workspace("u1");
+        insert_workspace(&pool, &w).await.unwrap();
 
         let install = GitHubAppInstallation {
             id: Uuid::new_v4().to_string(),
-            tenant_id: t.id.clone(),
+            workspace_id: w.id.clone(),
             install_id: 42,
             account_login: "acme".to_string(),
             account_type: GitHubAccountType::Organization,
@@ -2068,7 +2178,7 @@ mod tests {
             .await
             .unwrap();
 
-        let installs = list_github_app_installations_for_tenant(&pool, &t.id)
+        let installs = list_github_app_installations_for_workspace(&pool, &w.id)
             .await
             .unwrap();
         assert_eq!(installs.len(), 1);
@@ -2076,7 +2186,7 @@ mod tests {
 
         let project = Project {
             id: Uuid::new_v4().to_string(),
-            tenant_id: t.id.clone(),
+            workspace_id: w.id.clone(),
             github_app_installation_id: install.id.clone(),
             repo_owner: "acme".to_string(),
             repo_name: "widgets".to_string(),
@@ -2085,7 +2195,7 @@ mod tests {
         };
         insert_project(&pool, &project).await.unwrap();
 
-        let projects = list_projects_for_tenant(&pool, &t.id).await.unwrap();
+        let projects = list_projects_for_workspace(&pool, &w.id).await.unwrap();
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].repo_name, "widgets");
     }
@@ -2094,12 +2204,12 @@ mod tests {
     async fn delete_project_blocks_on_live_sessions() {
         let pool = test_pool().await;
         seed_user(&pool, "u1").await;
-        let t = new_tenant("u1");
-        insert_tenant(&pool, &t).await.unwrap();
+        let w = new_workspace("u1");
+        insert_workspace(&pool, &w).await.unwrap();
 
         let install = GitHubAppInstallation {
             id: Uuid::new_v4().to_string(),
-            tenant_id: t.id.clone(),
+            workspace_id: w.id.clone(),
             install_id: 7,
             account_login: "acme".to_string(),
             account_type: GitHubAccountType::Organization,
@@ -2111,7 +2221,7 @@ mod tests {
 
         let project = Project {
             id: Uuid::new_v4().to_string(),
-            tenant_id: t.id.clone(),
+            workspace_id: w.id.clone(),
             github_app_installation_id: install.id.clone(),
             repo_owner: "acme".to_string(),
             repo_name: "widgets".to_string(),
@@ -2156,46 +2266,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_tenant_with_creator_is_atomic() {
+    async fn insert_workspace_with_creator_is_atomic() {
         let pool = test_pool().await;
         seed_user(&pool, "u1").await;
-        let t = new_tenant("u1");
-        let m = TenantMember {
-            tenant_id: t.id.clone(),
+        let w = new_workspace("u1");
+        let m = WorkspaceMember {
+            workspace_id: w.id.clone(),
             user_id: "u1".to_string(),
             joined_at: Utc::now(),
         };
-        insert_tenant_with_creator(&pool, &t, &m).await.unwrap();
-        assert!(get_tenant(&pool, &t.id).await.unwrap().is_some());
-        assert!(is_tenant_member(&pool, &t.id, "u1").await.unwrap());
+        insert_workspace_with_creator(&pool, &w, &m).await.unwrap();
+        assert!(get_workspace(&pool, &w.id).await.unwrap().is_some());
+        assert!(is_workspace_member(&pool, &w.id, "u1").await.unwrap());
 
         // Reusing the same slug must fail and — because the helper uses a
         // transaction — must not create a new member row either.
-        let t2 = Tenant {
+        let w2 = Workspace {
             id: Uuid::new_v4().to_string(),
-            slug: t.slug.clone(),
-            ..new_tenant("u1")
+            slug: w.slug.clone(),
+            ..new_workspace("u1")
         };
-        let m2 = TenantMember {
-            tenant_id: t2.id.clone(),
+        let m2 = WorkspaceMember {
+            workspace_id: w2.id.clone(),
             user_id: "u1".to_string(),
             joined_at: Utc::now(),
         };
-        assert!(insert_tenant_with_creator(&pool, &t2, &m2).await.is_err());
-        assert!(get_tenant(&pool, &t2.id).await.unwrap().is_none());
-        assert!(!is_tenant_member(&pool, &t2.id, "u1").await.unwrap());
+        assert!(insert_workspace_with_creator(&pool, &w2, &m2)
+            .await
+            .is_err());
+        assert!(get_workspace(&pool, &w2.id).await.unwrap().is_none());
+        assert!(!is_workspace_member(&pool, &w2.id, "u1").await.unwrap());
     }
 
     #[tokio::test]
     async fn count_projects_for_installation_blocks_delete() {
         let pool = test_pool().await;
         seed_user(&pool, "u1").await;
-        let t = new_tenant("u1");
-        insert_tenant(&pool, &t).await.unwrap();
+        let w = new_workspace("u1");
+        insert_workspace(&pool, &w).await.unwrap();
 
         let install = GitHubAppInstallation {
             id: Uuid::new_v4().to_string(),
-            tenant_id: t.id.clone(),
+            workspace_id: w.id.clone(),
             install_id: 99,
             account_login: "acme".to_string(),
             account_type: GitHubAccountType::Organization,
@@ -2214,7 +2326,7 @@ mod tests {
 
         let project = Project {
             id: Uuid::new_v4().to_string(),
-            tenant_id: t.id.clone(),
+            workspace_id: w.id.clone(),
             github_app_installation_id: install.id.clone(),
             repo_owner: "acme".to_string(),
             repo_name: "widgets".to_string(),
@@ -2237,12 +2349,12 @@ mod tests {
         seed_user(&pool, "u1").await;
         seed_user(&pool, "u2").await;
 
-        let t1 = new_tenant("u1");
-        insert_tenant(&pool, &t1).await.unwrap();
-        insert_tenant_member(
+        let w1 = new_workspace("u1");
+        insert_workspace(&pool, &w1).await.unwrap();
+        insert_workspace_member(
             &pool,
-            &TenantMember {
-                tenant_id: t1.id.clone(),
+            &WorkspaceMember {
+                workspace_id: w1.id.clone(),
                 user_id: "u1".to_string(),
                 joined_at: Utc::now(),
             },
@@ -2252,7 +2364,7 @@ mod tests {
 
         let install = GitHubAppInstallation {
             id: Uuid::new_v4().to_string(),
-            tenant_id: t1.id.clone(),
+            workspace_id: w1.id.clone(),
             install_id: 1,
             account_login: "acme".to_string(),
             account_type: GitHubAccountType::User,
@@ -2263,7 +2375,7 @@ mod tests {
             .unwrap();
         let project = Project {
             id: Uuid::new_v4().to_string(),
-            tenant_id: t1.id.clone(),
+            workspace_id: w1.id.clone(),
             github_app_installation_id: install.id.clone(),
             repo_owner: "acme".to_string(),
             repo_name: "widgets".to_string(),
