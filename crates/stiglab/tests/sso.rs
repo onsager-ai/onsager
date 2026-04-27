@@ -50,6 +50,7 @@ fn base_config() -> ServerConfig {
         sso_exchange_secret: None,
         sso_return_host_allowlist: Vec::new(),
         sso_auth_domain: None,
+        internal_dispatch_token: None,
     }
 }
 

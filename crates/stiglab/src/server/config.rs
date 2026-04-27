@@ -32,6 +32,15 @@ pub struct ServerConfig {
     /// Cross-environment SSO — relying side. When set, `/api/auth/github`
     /// redirects here instead of talking to GitHub directly.
     pub sso_auth_domain: Option<String>,
+    /// Shared secret between forge (caller) and stiglab (callee) on the
+    /// internal `/api/shaping` HTTP path (issue #156). When set, only
+    /// requests carrying this token in the `X-Onsager-Internal-Dispatch`
+    /// header may set `created_by` and have stiglab decrypt that user's
+    /// credentials. Without it, attackers reaching the public endpoint
+    /// could exfiltrate any user's tokens by guessing their user_id.
+    /// Goes away with the seam (Lever C, spec #131 / #148) once
+    /// shaping moves to spine events.
+    pub internal_dispatch_token: Option<String>,
 }
 
 impl ServerConfig {
@@ -66,6 +75,9 @@ impl ServerConfig {
             .ok()
             .filter(|s| !s.is_empty())
             .map(|s| s.trim_end_matches('/').to_string());
+        let internal_dispatch_token = env::var("STIGLAB_INTERNAL_DISPATCH_TOKEN")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         let config = ServerConfig {
             host,
@@ -82,6 +94,7 @@ impl ServerConfig {
             sso_exchange_secret,
             sso_return_host_allowlist,
             sso_auth_domain,
+            internal_dispatch_token,
         };
 
         config.assert_sso_consistent();
@@ -166,6 +179,7 @@ mod tests {
             sso_exchange_secret: None,
             sso_return_host_allowlist: Vec::new(),
             sso_auth_domain: None,
+            internal_dispatch_token: None,
         }
     }
 

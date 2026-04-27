@@ -54,6 +54,22 @@ fi
 # via HTTP. Without forge running, trigger events accumulate with no
 # downstream effect — see CLAUDE.md "factory event bus".
 # Skipped when the spine DB isn't configured (no events to consume).
+#
+# Issue #156: stiglab and forge share STIGLAB_INTERNAL_DISPATCH_TOKEN.
+# Stiglab requires this header on /api/shaping when the request sets
+# `created_by` (otherwise an attacker could exfiltrate any user's
+# credentials by guessing their user_id). Forge sends it. If unset,
+# auto-generate a per-boot token so the two co-located processes still
+# trust each other; an operator can pin a stable value via the env if
+# they want logs across restarts to authenticate to the same secret.
+if [ -z "$STIGLAB_INTERNAL_DISPATCH_TOKEN" ]; then
+    # 32 hex bytes = 128 bits of entropy, plenty for an in-container shared
+    # secret that's never written to disk and rotates on every redeploy.
+    STIGLAB_INTERNAL_DISPATCH_TOKEN="$(head -c 32 /dev/urandom | xxd -p -c 64)"
+    echo "Generated ephemeral STIGLAB_INTERNAL_DISPATCH_TOKEN for forge↔stiglab dispatch"
+fi
+export STIGLAB_INTERNAL_DISPATCH_TOKEN
+
 if [ -n "$ONSAGER_DATABASE_URL" ]; then
     # Default 3002 collides with portal — use 3003.
     FORGE_PORT="${FORGE_PORT:-3003}"
@@ -61,7 +77,7 @@ if [ -n "$ONSAGER_DATABASE_URL" ]; then
     FORGE_STIGLAB_URL="${STIGLAB_URL:-http://127.0.0.1:${PORT:-${STIGLAB_PORT:-3000}}}"
     FORGE_SYNODIC_URL="${SYNODIC_URL:-http://127.0.0.1:${SYNODIC_PORT}}"
     echo "Starting forge on :${FORGE_PORT}..."
-    gosu onsager sh -c "while true; do DATABASE_URL=\"$ONSAGER_DATABASE_URL\" FORGE_PORT=\"$FORGE_PORT\" STIGLAB_URL=\"$FORGE_STIGLAB_URL\" SYNODIC_URL=\"$FORGE_SYNODIC_URL\" /app/forge serve 2>&1; echo 'forge exited, restarting in 1s...'; sleep 1; done" &
+    gosu onsager sh -c "while true; do DATABASE_URL=\"$ONSAGER_DATABASE_URL\" FORGE_PORT=\"$FORGE_PORT\" STIGLAB_URL=\"$FORGE_STIGLAB_URL\" SYNODIC_URL=\"$FORGE_SYNODIC_URL\" STIGLAB_INTERNAL_DISPATCH_TOKEN=\"$STIGLAB_INTERNAL_DISPATCH_TOKEN\" /app/forge serve 2>&1; echo 'forge exited, restarting in 1s...'; sleep 1; done" &
 fi
 
 # Drop from root to unprivileged user and start stiglab.
