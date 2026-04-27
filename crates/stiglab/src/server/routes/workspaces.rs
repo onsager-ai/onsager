@@ -2,10 +2,11 @@
 //! routes (issue #59 — Phase 0; renamed from "tenant" → "workspace" in
 //! issue #163).
 //!
-//! All workspace-scoped endpoints go through [`require_workspace_member`]
-//! which returns **404 (not 403)** for non-members. Matching GitHub's
-//! private-resource behaviour means the workspace-enumeration surface
-//! stays private — no invite-acceptance UI needed for v1.
+//! All workspace-scoped endpoints go through
+//! [`super::require_workspace_access`] which returns **404 (not 403)** for
+//! non-members. Matching GitHub's private-resource behaviour means the
+//! workspace-enumeration surface stays private — no invite-acceptance UI
+//! needed for v1.
 //!
 //! Project deletion blocks with a clear error when live sessions reference
 //! the project; there is no cascade and no soft-delete in v1.
@@ -26,44 +27,12 @@ use crate::server::github_app;
 use crate::server::state::AppState;
 
 // ── Auth helper ──
+//
+// The shared workspace authorization gate lives at
+// `super::require_workspace_access` (see `routes/mod.rs`); every
+// workspace-scoped endpoint in this module funnels through it.
 
-/// Ensure the authenticated user is a member of the workspace. Returns
-/// **404** (not 403) for non-members — callers get the same response for
-/// "workspace doesn't exist" and "you're not a member", so workspace IDs
-/// can't be enumerated.
-///
-/// PAT principals carry an optional `workspace_id` scope (issue #143);
-/// when set, the request must target that exact workspace. A mismatch
-/// returns **403** (not 404) — the caller already proved membership at
-/// PAT-mint time, so hiding the workspace's existence is moot, and a
-/// distinct error makes the scope-violation observable in client tooling.
-#[allow(clippy::result_large_err)]
-async fn require_workspace_member(
-    pool: &AnyPool,
-    auth_user: &AuthUser,
-    workspace_id: &str,
-) -> Result<(), Response> {
-    if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
-        if pinned != workspace_id {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "error": "pat_workspace_scope_mismatch",
-                    "detail": "PAT is pinned to a different workspace",
-                })),
-            )
-                .into_response());
-        }
-    }
-    match db::is_workspace_member(pool, workspace_id, &auth_user.user_id).await {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(not_found("workspace not found")),
-        Err(e) => {
-            tracing::error!("failed to check workspace membership: {e}");
-            Err(StatusCode::INTERNAL_SERVER_ERROR.into_response())
-        }
-    }
-}
+use super::require_workspace_access;
 
 fn not_found(msg: &str) -> Response {
     (
@@ -187,7 +156,7 @@ pub async fn get_workspace(
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
         return r;
     }
     match db::get_workspace(&state.db, &workspace_id).await {
@@ -210,7 +179,7 @@ pub async fn list_members(
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
         return r;
     }
     match db::list_workspace_members_with_users(&state.db, &workspace_id).await {
@@ -252,7 +221,7 @@ pub async fn register_installation(
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
         return r;
     }
 
@@ -328,7 +297,7 @@ pub async fn list_installations(
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
         return r;
     }
     match db::list_github_app_installations_for_workspace(&state.db, &workspace_id).await {
@@ -356,7 +325,7 @@ pub async fn delete_installation(
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
         return r;
     }
 
@@ -421,7 +390,7 @@ pub async fn add_project(
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
         return r;
     }
 
@@ -516,7 +485,7 @@ pub async fn list_projects(
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
         return r;
     }
     match db::list_projects_for_workspace(&state.db, &workspace_id).await {
@@ -567,7 +536,7 @@ pub async fn get_project(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &project.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &project.workspace_id).await {
         return r;
     }
     Json(serde_json::json!({ "project": project })).into_response()
@@ -593,7 +562,7 @@ pub async fn delete_project(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &project.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &project.workspace_id).await {
         return r;
     }
 
@@ -633,7 +602,7 @@ pub async fn assert_workspace_member(
     auth_user: &AuthUser,
     workspace_id: &str,
 ) -> Result<(), Response> {
-    require_workspace_member(pool, auth_user, workspace_id).await
+    require_workspace_access(pool, auth_user, workspace_id).await
 }
 
 // ── Accessible-repos picker + GitHub App install flow ──
@@ -672,7 +641,7 @@ pub async fn list_accessible_repos(
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
         return r;
     }
     // Confirm the install row belongs to this workspace before burning a token.
@@ -727,7 +696,7 @@ pub async fn list_repo_labels(
         Ok(id) => id,
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
         return r;
     }
     match db::get_github_app_installation(&state.db, &install_id).await {
@@ -792,7 +761,7 @@ pub async fn github_app_install_start(
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &query.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &query.workspace_id).await {
         return r;
     }
 
@@ -871,7 +840,7 @@ pub async fn github_app_install_callback(
         Some((t, _)) if !t.is_empty() => t.to_string(),
         _ => return (StatusCode::BAD_REQUEST, "malformed state").into_response(),
     };
-    if let Err(r) = require_workspace_member(&state.db, &auth_user, &workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
         return r;
     }
 
