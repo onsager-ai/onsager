@@ -410,7 +410,7 @@ impl SynodicGate for HttpSynodicGate {
 
 /// Shared Forge state accessible from both the HTTP API and the tick loop.
 struct ForgeSharedState {
-    pipeline: ForgePipeline<HttpStiglabDispatcher, HttpSynodicGate>,
+    pipeline: ForgePipeline,
     kernel: BaselineKernel,
     spine: Option<EventStore>,
     /// Shared signal cache populated by the workflow signal listener and
@@ -509,20 +509,11 @@ pub fn run(database_url: &str, tick_ms: u64) {
             );
         }
 
-        let stiglab = HttpStiglabDispatcher {
-            client: client.clone(),
-            stiglab_url: stiglab_url.clone(),
-            internal_dispatch_token: internal_dispatch_token.clone(),
-        };
-        let synodic = HttpSynodicGate {
-            client: client.clone(),
-            synodic_url: synodic_url.clone(),
-            fail_policy,
-        };
-        // A second pair for the workflow gate evaluator (issue #80). It
-        // lives inside the spawned tick task and uses its own reqwest
-        // handles so the pipeline and the stage runner can dispatch in
-        // parallel without sharing mutable state.
+        // Phase 4 (Lever C): the main pipeline tick no longer dispatches
+        // synchronously to stiglab / synodic — it emits spine events and
+        // parks on the matching response. The HTTP types stay alive only
+        // for `LiveGateEvaluator` (the workflow-stage-runner gate path);
+        // phase 5 converts that path to events too and deletes them.
         let evaluator_stiglab = HttpStiglabDispatcher {
             client: client.clone(),
             stiglab_url: stiglab_url.clone(),
@@ -534,9 +525,15 @@ pub fn run(database_url: &str, tick_ms: u64) {
             fail_policy,
         };
 
+        // Phase-3 parking maps for the Lever C event-driven flow. The
+        // listeners spawned below populate these; the pipeline tick
+        // consumes them on its resume path.
+        let pending_verdicts = PendingVerdicts::new();
+        let pending_shapings = PendingShapings::new();
+
         let insight_cache = InsightCache::default();
-        let mut pipeline =
-            ForgePipeline::new(stiglab, synodic).with_insight_cache(insight_cache.clone());
+        let mut pipeline = ForgePipeline::new(pending_verdicts.clone(), pending_shapings.clone())
+            .with_insight_cache(insight_cache.clone());
         pipeline.store = artifact_store;
 
         // Workflows are read from the spine DB on demand — both at the top
@@ -547,12 +544,6 @@ pub fn run(database_url: &str, tick_ms: u64) {
         // picked up without a restart and without risking a stale-cache
         // branch that silently disagrees with the DB.
         let signals = SignalCache::new();
-
-        // Phase-3 parking maps for the Lever C event-driven flow. The
-        // listeners spawned below populate these; phase 4 wires the
-        // pipeline tick to consume them.
-        let pending_verdicts = PendingVerdicts::new();
-        let pending_shapings = PendingShapings::new();
 
         let shared = Arc::new(RwLock::new(ForgeSharedState {
             pipeline,
