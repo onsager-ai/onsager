@@ -169,9 +169,13 @@ pub async fn handle_agent_message(
             // forge's workflow signal listener can fail the agent-session
             // gate loudly (issue #156) — without it the artifact stalls
             // at stage 0 and forge re-dispatches every tick forever.
+            //
+            // Use the DB-only `artifact_id_for_session` lookup rather
+            // than `git_context_for_session` — the failure path doesn't
+            // need branch/project context, and `git_context_for_session`
+            // spawns a `git rev-parse` subprocess we'd be discarding.
             if let Some(spine) = spine {
-                let (_branch, _project_id, artifact_id) =
-                    git_context_for_session(pool, &session_id).await;
+                let artifact_id = artifact_id_for_session(pool, &session_id).await;
                 if let Err(e) = spine
                     .emit_session_failed(&session_id, "", &error, artifact_id.as_deref())
                     .await
@@ -184,6 +188,20 @@ pub async fn handle_agent_message(
             // Registration is handled separately (node creation + WS setup)
         }
     }
+}
+
+/// DB-only `artifact_id` lookup for a session — used by paths that need
+/// the artifact link but not the full git/project context (e.g. the
+/// session_failed spine emission, issue #156). Cheaper than
+/// `git_context_for_session` because it never spawns `git rev-parse`.
+async fn artifact_id_for_session(pool: &AnyPool, session_id: &str) -> Option<String> {
+    sqlx::query_scalar::<_, Option<String>>("SELECT artifact_id FROM sessions WHERE id = $1")
+        .bind(session_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten()
 }
 
 /// Best-effort branch + project + artifact lookup for a session at

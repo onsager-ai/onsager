@@ -1071,18 +1071,37 @@ pub async fn user_credential_exists(
     Ok(row.is_some())
 }
 
-/// True if the user has at least one credential row. Used by the
-/// workflow-activate gate (issue #156) to refuse activation when the
-/// owner has no credentials to dispatch with — without this check, the
-/// workflow would be active but every session would fail with "stdout
-/// closed without result event".
-pub async fn user_has_any_credential(pool: &AnyPool, user_id: &str) -> anyhow::Result<bool> {
-    let row = sqlx::query_scalar::<_, String>(
-        "SELECT name FROM user_credentials WHERE user_id = $1 LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await?;
+/// True if the user has at least one credential row matching one of
+/// `names`. Used by the workflow-activate gate (issue #156) to refuse
+/// activation when the owner has no Claude auth credential — without
+/// this check, the workflow would be active but every session would
+/// fail with "stdout closed without result event".
+///
+/// Checks by exact name match because the Claude CLI keys on specific
+/// env var names (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`).
+/// A user with only custom-named credentials would silently activate
+/// into a doomed workflow without the name filter.
+pub async fn user_has_credential_in(
+    pool: &AnyPool,
+    user_id: &str,
+    names: &[&str],
+) -> anyhow::Result<bool> {
+    if names.is_empty() {
+        return Ok(false);
+    }
+    // Build `name IN ($2, $3, ...)` with placeholders matched to the
+    // sqlx binding count — sqlx-AnyPool doesn't speak Postgres array
+    // params portably across SQLite.
+    let placeholders: Vec<String> = (2..=names.len() + 1).map(|i| format!("${i}")).collect();
+    let sql = format!(
+        "SELECT name FROM user_credentials WHERE user_id = $1 AND name IN ({}) LIMIT 1",
+        placeholders.join(", ")
+    );
+    let mut q = sqlx::query_scalar::<_, String>(&sql).bind(user_id);
+    for n in names {
+        q = q.bind(*n);
+    }
+    let row = q.fetch_optional(pool).await?;
     Ok(row.is_some())
 }
 

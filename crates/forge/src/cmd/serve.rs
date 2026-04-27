@@ -52,6 +52,13 @@ const STIGLAB_WAIT_WINDOW: Duration = Duration::from_secs(20);
 struct HttpStiglabDispatcher {
     client: reqwest::Client,
     stiglab_url: String,
+    /// Internal-dispatch token shared with stiglab (issue #156). When
+    /// set, sent as `X-Onsager-Internal-Dispatch` so stiglab honors
+    /// `ShapingRequest.created_by` and decrypts the matching user's
+    /// credentials. Without it, stiglab refuses any request that sets
+    /// `created_by` — which means workflow-dispatched sessions can't
+    /// authenticate. Sourced from `STIGLAB_INTERNAL_DISPATCH_TOKEN`.
+    internal_dispatch_token: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -66,13 +73,15 @@ impl HttpStiglabDispatcher {
         let create_url = format!("{}/api/shaping", self.stiglab_url);
         let body = serde_json::to_value(request)?;
 
-        let resp = self
+        let mut req_builder = self
             .client
             .post(&create_url)
             .header("Idempotency-Key", &request.request_id)
-            .json(&body)
-            .send()
-            .await?;
+            .json(&body);
+        if let Some(token) = self.internal_dispatch_token.as_deref() {
+            req_builder = req_builder.header("X-Onsager-Internal-Dispatch", token);
+        }
+        let resp = req_builder.send().await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -147,13 +156,15 @@ impl HttpStiglabDispatcher {
     async fn post_only(&self, request: &ShapingRequest) -> Result<String, anyhow::Error> {
         let create_url = format!("{}/api/shaping", self.stiglab_url);
         let body = serde_json::to_value(request)?;
-        let resp = self
+        let mut req_builder = self
             .client
             .post(&create_url)
             .header("Idempotency-Key", &request.request_id)
-            .json(&body)
-            .send()
-            .await?;
+            .json(&body);
+        if let Some(token) = self.internal_dispatch_token.as_deref() {
+            req_builder = req_builder.header("X-Onsager-Internal-Dispatch", token);
+        }
+        let resp = req_builder.send().await?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -470,9 +481,24 @@ pub fn run(database_url: &str, tick_ms: u64) {
         let fail_policy = SynodicFailPolicy::from_env();
         tracing::info!(?fail_policy, "forge: synodic gate fail-policy");
 
+        // Issue #156: shared secret stiglab requires before honoring
+        // `ShapingRequest.created_by`. Sourced via env so the entrypoint
+        // can pin the same value on both processes; absence is logged
+        // because workflow-dispatched sessions will fail closed.
+        let internal_dispatch_token = std::env::var("STIGLAB_INTERNAL_DISPATCH_TOKEN")
+            .ok()
+            .filter(|s| !s.is_empty());
+        if internal_dispatch_token.is_none() {
+            tracing::warn!(
+                "forge: STIGLAB_INTERNAL_DISPATCH_TOKEN unset — workflow shaping requests will \
+                 omit the auth header and stiglab will reject any request that sets created_by"
+            );
+        }
+
         let stiglab = HttpStiglabDispatcher {
             client: client.clone(),
             stiglab_url: stiglab_url.clone(),
+            internal_dispatch_token: internal_dispatch_token.clone(),
         };
         let synodic = HttpSynodicGate {
             client: client.clone(),
@@ -486,6 +512,7 @@ pub fn run(database_url: &str, tick_ms: u64) {
         let evaluator_stiglab = HttpStiglabDispatcher {
             client: client.clone(),
             stiglab_url: stiglab_url.clone(),
+            internal_dispatch_token: internal_dispatch_token.clone(),
         };
         let evaluator_synodic = HttpSynodicGate {
             client,
