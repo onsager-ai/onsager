@@ -102,6 +102,25 @@ pub async fn create_task(
         Some(auth_user.user_id.as_str())
     };
 
+    // Authenticated callers must scope the session to a workspace via
+    // `project_id` (issue #164).  A NULL-workspace session would be
+    // invisible to its own creator under the new workspace-filtered
+    // list/detail surface — better to reject up front than to mint
+    // unreachable rows.  The only path that may legitimately omit
+    // `project_id` is anonymous / `authEnabled=false` mode, which
+    // bypasses workspace filtering entirely (see
+    // `routes::require_workspace_access`).
+    if user_id.is_some() && request.project_id.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "project_id is required",
+                "detail": "authenticated sessions must be scoped to a project (and therefore a workspace) — pick one to dispatch into"
+            })),
+        )
+            .into_response();
+    }
+
     // Validate project membership if the caller scoped the session to a
     // workspace-owned project (issue #59). Non-members get 404 via
     // `assert_workspace_member` so project IDs can't be enumerated.

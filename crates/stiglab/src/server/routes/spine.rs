@@ -176,17 +176,23 @@ pub async fn list_events(
     // so we alias on the way out.
     //
     // Workspace filter (issue #164): `events_ext` rows do not carry an
-    // explicit `workspace_id` column.  Until they do, scope the result
-    // set by joining through the spine `artifacts` table on the
-    // namespace events that reference an artifact id (the bulk of
-    // factory traffic).  Cross-workspace event types (e.g. global
+    // explicit `workspace_id` column today.  Scope by joining through
+    // the spine `artifacts` table.  Forge-emitted events use a
+    // namespaced `stream_id` of the form `forge:{artifact_id}` (see
+    // `register_artifact` / `fetch_related_events` below), while
+    // spine-direct writes use the bare `{artifact_id}` — the JOIN's OR
+    // clause matches both.  Cross-workspace event types (e.g. global
     // `agent.*` heartbeats) are intentionally elided from per-workspace
-    // dashboards — they live on a separate ops surface.
+    // dashboards.
+    //
+    // The proper fix is to add `workspace_id` to `events_ext` directly;
+    // tracked as a follow-up so the join goes away.
     let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
         "SELECT e.id, e.stream_id, e.namespace AS stream_type, e.event_type, e.data, \
                 COALESCE(e.metadata->>'actor', '') AS actor, e.created_at \
          FROM events_ext e \
-         JOIN artifacts a ON a.artifact_id = e.stream_id \
+         JOIN artifacts a ON e.stream_id = a.artifact_id \
+                          OR e.stream_id LIKE '%:' || a.artifact_id \
          WHERE a.workspace_id = ",
     );
     qb.push_bind(workspace_id.clone());
