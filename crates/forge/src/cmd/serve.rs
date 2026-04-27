@@ -1,18 +1,12 @@
 //! `forge serve` — start the Forge scheduling loop with HTTP API.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::response::IntoResponse;
-use chrono::Utc;
 use tokio::sync::RwLock;
 
 use onsager_artifact::Kind;
-use onsager_spine::factory_event::ShapingOutcome;
-use onsager_spine::protocol::{
-    EscalationContext, GateRequest, GateVerdict, ShapingRequest, ShapingResult,
-};
 use onsager_spine::EventStore;
 
 use crate::core::artifact_store::ArtifactStore;
@@ -22,7 +16,7 @@ use crate::core::insight_listener;
 use crate::core::kernel::BaselineKernel;
 use crate::core::pending::{PendingShapings, PendingVerdicts};
 use crate::core::persistence;
-use crate::core::pipeline::{ForgePipeline, PipelineEvent, StiglabDispatcher, SynodicGate};
+use crate::core::pipeline::{ForgePipeline, PipelineEvent};
 use crate::core::session_listener::{self, SessionCompleted, SessionCompletedHandler};
 use crate::core::shaping_result_listener;
 use crate::core::signal_cache::SignalCache;
@@ -30,383 +24,9 @@ use crate::core::stage_runner::{self, StageEvent};
 use crate::core::trigger_subscriber::{
     self, register_artifact_from_trigger, trigger_external_ref, TriggerFired, TriggerHandler,
 };
-use crate::core::workflow_gates::LiveGateEvaluator;
+use crate::core::workflow_gates::{LiveGateEvaluator, SpineGateEmitter};
 use crate::core::workflow_persistence;
 use crate::core::workflow_signal_listener;
-
-/// Default Forge → upstream HTTP timeout. Bounds the worst case for both the
-/// Stiglab dispatcher and the Synodic gate so a single hung upstream cannot
-/// freeze the pipeline tick (and, transitively, every read on the shared
-/// pipeline state — see issue #28).
-const FORGE_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Per-request wait window applied to the Stiglab status long-poll. The full
-/// shaping deadline can still be longer; the dispatcher loops until then.
-const STIGLAB_WAIT_WINDOW: Duration = Duration::from_secs(20);
-
-/// HTTP Stiglab dispatcher — kicks off shaping via `POST /api/shaping`
-/// (which now returns 202 immediately — issue #31) and then polls
-/// `GET /api/shaping/{session_id}?wait=Ns` with a bounded window until the
-/// session reaches a terminal state or the per-request deadline elapses.
-///
-/// `request.request_id` is sent as the `Idempotency-Key` header so that a
-/// retry from a dropped connection collapses onto the original session
-/// instead of dispatching a second agent.
-struct HttpStiglabDispatcher {
-    client: reqwest::Client,
-    stiglab_url: String,
-    /// Internal-dispatch token shared with stiglab (issue #156). When
-    /// set, sent as `X-Onsager-Internal-Dispatch` so stiglab honors
-    /// `ShapingRequest.created_by` and decrypts the matching user's
-    /// credentials. Without it, stiglab refuses any request that sets
-    /// `created_by` — which means workflow-dispatched sessions can't
-    /// authenticate. Sourced from `STIGLAB_INTERNAL_DISPATCH_TOKEN`.
-    internal_dispatch_token: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct ShapingAccepted {
-    session_id: String,
-    #[allow(dead_code)]
-    request_id: Option<String>,
-}
-
-impl HttpStiglabDispatcher {
-    async fn run(&self, request: &ShapingRequest) -> Result<ShapingResult, anyhow::Error> {
-        let create_url = format!("{}/api/shaping", self.stiglab_url);
-        let body = serde_json::to_value(request)?;
-
-        let mut req_builder = self
-            .client
-            .post(&create_url)
-            .header("Idempotency-Key", &request.request_id)
-            .json(&body);
-        if let Some(token) = self.internal_dispatch_token.as_deref() {
-            req_builder = req_builder.header("X-Onsager-Internal-Dispatch", token);
-        }
-        let resp = req_builder.send().await?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "stiglab POST /api/shaping returned {status}: {text}"
-            ));
-        }
-
-        // Either 202 (new endpoint) or legacy 200 with a full ShapingResult.
-        let body_text = resp.text().await?;
-        if status == reqwest::StatusCode::OK {
-            // Legacy path — body already contains the terminal ShapingResult.
-            let result: ShapingResult = serde_json::from_str(&body_text)?;
-            return Ok(result);
-        }
-
-        let accepted: ShapingAccepted = serde_json::from_str(&body_text)?;
-
-        // Poll the status endpoint until the session is terminal or until the
-        // request's soft deadline expires. The wait window per request is
-        // capped so individual HTTP roundtrips stay HTTP-intermediary friendly.
-        let overall_deadline = request
-            .deadline
-            .and_then(|d| {
-                let remaining = d.signed_duration_since(Utc::now()).num_milliseconds();
-                if remaining <= 0 {
-                    None
-                } else {
-                    Some(tokio::time::Instant::now() + Duration::from_millis(remaining as u64))
-                }
-            })
-            .unwrap_or_else(|| tokio::time::Instant::now() + Duration::from_secs(300));
-
-        let status_url = format!("{}/api/shaping/{}", self.stiglab_url, accepted.session_id);
-
-        loop {
-            let now = tokio::time::Instant::now();
-            if now >= overall_deadline {
-                return Err(anyhow::anyhow!("stiglab shaping timed out"));
-            }
-            let remaining = overall_deadline.saturating_duration_since(now);
-            let wait = remaining.min(STIGLAB_WAIT_WINDOW);
-
-            let resp = self
-                .client
-                .get(&status_url)
-                .query(&[("wait", format!("{}s", wait.as_secs().max(1)))])
-                .send()
-                .await?;
-            let resp_status = resp.status();
-            if resp_status == reqwest::StatusCode::OK {
-                return Ok(resp.json::<ShapingResult>().await?);
-            }
-            if resp_status == reqwest::StatusCode::ACCEPTED {
-                // Still running — drain body and loop.
-                let _ = resp.text().await;
-                continue;
-            }
-            let text = resp.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "stiglab GET status returned {resp_status}: {text}"
-            ));
-        }
-    }
-}
-
-impl HttpStiglabDispatcher {
-    /// POST `/api/shaping` and return as soon as Stiglab accepts the
-    /// request. No status polling, no waiting for terminal state — used
-    /// by `dispatch_fire_and_forget` on the workflow gate path.
-    async fn post_only(&self, request: &ShapingRequest) -> Result<String, anyhow::Error> {
-        let create_url = format!("{}/api/shaping", self.stiglab_url);
-        let body = serde_json::to_value(request)?;
-        let mut req_builder = self
-            .client
-            .post(&create_url)
-            .header("Idempotency-Key", &request.request_id)
-            .json(&body);
-        if let Some(token) = self.internal_dispatch_token.as_deref() {
-            req_builder = req_builder.header("X-Onsager-Internal-Dispatch", token);
-        }
-        let resp = req_builder.send().await?;
-        let status = resp.status();
-        if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "stiglab POST /api/shaping returned {status}: {text}"
-            ));
-        }
-        let body_text = resp.text().await?;
-        // Stiglab can return either 202 with `{ session_id, ... }` or a
-        // legacy 200 with a full `ShapingResult`; both carry a session id
-        // we can surface.
-        if status == reqwest::StatusCode::OK {
-            let result: ShapingResult = serde_json::from_str(&body_text)?;
-            Ok(result.session_id)
-        } else {
-            let accepted: ShapingAccepted = serde_json::from_str(&body_text)?;
-            Ok(accepted.session_id)
-        }
-    }
-}
-
-impl StiglabDispatcher for HttpStiglabDispatcher {
-    fn dispatch(&self, request: &ShapingRequest) -> ShapingResult {
-        // The pipeline tick is synchronous, so block_in_place lets us await
-        // async HTTP calls without panicking inside the Tokio runtime.
-        let outcome = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.run(request))
-        });
-
-        match outcome {
-            Ok(result) => result,
-            Err(e) => {
-                tracing::error!("stiglab dispatch failed: {e}");
-                ShapingResult {
-                    request_id: request.request_id.clone(),
-                    outcome: ShapingOutcome::Failed,
-                    content_ref: None,
-                    change_summary: String::new(),
-                    quality_signals: vec![],
-                    session_id: String::new(),
-                    duration_ms: 0,
-                    error: Some(onsager_spine::protocol::ErrorDetail {
-                        code: "dispatch_error".into(),
-                        message: e.to_string(),
-                        retriable: Some(true),
-                    }),
-                }
-            }
-        }
-    }
-
-    fn dispatch_fire_and_forget(&self, request: &ShapingRequest) -> bool {
-        // Workflow gates only need Stiglab to accept the dispatch — the
-        // session_completed event listener resolves the signal cache for
-        // a later tick. Polling here would hold the Forge write lock for
-        // the full shaping deadline whenever no agent is connected to
-        // pick the session up.
-        let outcome = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.post_only(request))
-        });
-        match outcome {
-            Ok(session_id) => {
-                tracing::info!(
-                    request_id = %request.request_id,
-                    artifact_id = %request.artifact_id,
-                    session_id,
-                    "workflow agent-session dispatched"
-                );
-                true
-            }
-            Err(e) => {
-                tracing::error!(
-                    request_id = %request.request_id,
-                    artifact_id = %request.artifact_id,
-                    "workflow agent-session dispatch failed: {e}"
-                );
-                false
-            }
-        }
-    }
-}
-
-/// What to do when the Synodic gate is unreachable or unparsable
-/// (issue #29).
-///
-/// `Escalate` is the default because the pipeline already handles
-/// `GateVerdict::Escalate` non-blockingly (forge invariant #5): the artifact
-/// stays put while the escalation is parked, instead of either silently
-/// advancing (`Allow`) or hard-stopping (`Deny`) on every transient blip.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SynodicFailPolicy {
-    Allow,
-    Deny,
-    Escalate,
-}
-
-impl SynodicFailPolicy {
-    fn from_env() -> Self {
-        match std::env::var("SYNODIC_FAIL_POLICY")
-            .ok()
-            .as_deref()
-            .map(str::to_ascii_lowercase)
-            .as_deref()
-        {
-            Some("allow") => SynodicFailPolicy::Allow,
-            Some("deny") => SynodicFailPolicy::Deny,
-            Some("escalate") | None => SynodicFailPolicy::Escalate,
-            Some(other) => {
-                tracing::warn!("SYNODIC_FAIL_POLICY={other} is not recognized; using \"escalate\"");
-                SynodicFailPolicy::Escalate
-            }
-        }
-    }
-
-    fn verdict(self, reason: &str) -> GateVerdict {
-        match self {
-            SynodicFailPolicy::Allow => GateVerdict::Allow,
-            SynodicFailPolicy::Deny => GateVerdict::Deny {
-                reason: format!("synodic-fail-deny: {reason}"),
-            },
-            SynodicFailPolicy::Escalate => GateVerdict::Escalate {
-                context: EscalationContext {
-                    escalation_id: format!("synodic-fail-{}", ulid::Ulid::new()),
-                    reason: format!("synodic gate failure: {reason}"),
-                    // Issue #37: the default escalation target is the
-                    // supervisor agent, but operators can redirect to a
-                    // specific human (e.g. `"human:marvin"`) via env var
-                    // when the Stiglab supervisor profile isn't yet wired.
-                    target: escalation_default_target(),
-                    timeout_at: Utc::now() + chrono::Duration::minutes(15),
-                },
-            },
-        }
-    }
-}
-
-/// Who receives escalations when Synodic says so but no specific target is
-/// set on the verdict (issue #37). Reads `ESCALATION_DEFAULT_TARGET`;
-/// defaults to `"supervisor"` so the supervisor Stiglab agent is the
-/// natural first responder.
-fn escalation_default_target() -> String {
-    std::env::var("ESCALATION_DEFAULT_TARGET").unwrap_or_else(|_| "supervisor".to_string())
-}
-
-/// Distinguishes failure modes for the Synodic gate so that transient
-/// network problems escalate (recoverable) while protocol-level errors
-/// (4xx, parse failures) deny outright (loud failures, not silent ones).
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum SynodicGateFailure {
-    /// Network / timeout / connection error.
-    Transient(String),
-    /// 4xx response — request shape is wrong, fix the caller.
-    BadRequest(String),
-    /// 5xx response — synodic itself is sick.
-    ServerError(String),
-    /// 2xx response that didn't deserialize as `GateVerdict`.
-    Parse(String),
-}
-
-impl SynodicGateFailure {
-    fn into_verdict(self, policy: SynodicFailPolicy) -> GateVerdict {
-        match self {
-            SynodicGateFailure::Transient(reason) | SynodicGateFailure::ServerError(reason) => {
-                tracing::warn!(
-                    "synodic gate transient failure ({reason}); applying policy {policy:?}"
-                );
-                policy.verdict(&reason)
-            }
-            SynodicGateFailure::BadRequest(reason) => {
-                // Schema drift / bad caller — refuse to advance regardless of
-                // policy. Allowing this would let bugs ride through governance.
-                tracing::error!("synodic gate rejected request ({reason}); denying");
-                GateVerdict::Deny {
-                    reason: format!("synodic-bad-request: {reason}"),
-                }
-            }
-            SynodicGateFailure::Parse(reason) => {
-                tracing::error!("synodic gate response parse error ({reason}); denying");
-                GateVerdict::Deny {
-                    reason: format!("synodic-parse-error: {reason}"),
-                }
-            }
-        }
-    }
-}
-
-/// HTTP Synodic gate — calls Synodic's gate endpoint.
-struct HttpSynodicGate {
-    client: reqwest::Client,
-    synodic_url: String,
-    fail_policy: SynodicFailPolicy,
-}
-
-impl HttpSynodicGate {
-    async fn evaluate_async(
-        &self,
-        request: &GateRequest,
-    ) -> Result<GateVerdict, SynodicGateFailure> {
-        let url = format!("{}/api/gate", self.synodic_url);
-        let body = serde_json::to_value(request)
-            .map_err(|e| SynodicGateFailure::Parse(format!("request serialization: {e}")))?;
-
-        let resp = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| SynodicGateFailure::Transient(e.to_string()))?;
-
-        let status = resp.status();
-        if status.is_success() {
-            return resp
-                .json::<GateVerdict>()
-                .await
-                .map_err(|e| SynodicGateFailure::Parse(e.to_string()));
-        }
-        let text = resp.text().await.unwrap_or_default();
-        if status.is_client_error() {
-            Err(SynodicGateFailure::BadRequest(format!("{status}: {text}")))
-        } else {
-            Err(SynodicGateFailure::ServerError(format!("{status}: {text}")))
-        }
-    }
-}
-
-impl SynodicGate for HttpSynodicGate {
-    fn evaluate(&self, request: &GateRequest) -> GateVerdict {
-        let policy = self.fail_policy;
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                match self.evaluate_async(request).await {
-                    Ok(verdict) => verdict,
-                    Err(failure) => failure.into_verdict(policy),
-                }
-            })
-        })
-    }
-}
 
 /// Shared Forge state accessible from both the HTTP API and the tick loop.
 struct ForgeSharedState {
@@ -476,54 +96,14 @@ pub fn run(database_url: &str, tick_ms: u64) {
             None => ArtifactStore::new(),
         };
 
-        // seam-allow: legacy ADR 0001 sync RPC; replaced by spine events in Lever C (#148)
-        let stiglab_port = std::env::var("STIGLAB_PORT").unwrap_or_else(|_| "3000".to_string());
-        // seam-allow: legacy ADR 0001 sync RPC; replaced by spine events in Lever C (#148)
-        let stiglab_url = std::env::var("STIGLAB_URL")
-            .unwrap_or_else(|_| format!("http://localhost:{stiglab_port}"));
-        // seam-allow: legacy ADR 0001 sync RPC; replaced by spine events in Lever C (#148)
-        let synodic_port = std::env::var("SYNODIC_PORT").unwrap_or_else(|_| "3001".to_string());
-        // seam-allow: legacy ADR 0001 sync RPC; replaced by spine events in Lever C (#148)
-        let synodic_url = std::env::var("SYNODIC_URL")
-            .unwrap_or_else(|_| format!("http://localhost:{synodic_port}"));
-
-        let client = reqwest::Client::builder()
-            .timeout(FORGE_HTTP_TIMEOUT)
-            .build()
-            .expect("failed to build reqwest client");
-
-        let fail_policy = SynodicFailPolicy::from_env();
-        tracing::info!(?fail_policy, "forge: synodic gate fail-policy");
-
-        // Issue #156: shared secret stiglab requires before honoring
-        // `ShapingRequest.created_by`. Sourced via env so the entrypoint
-        // can pin the same value on both processes; absence is logged
-        // because workflow-dispatched sessions will fail closed.
-        let internal_dispatch_token = std::env::var("STIGLAB_INTERNAL_DISPATCH_TOKEN")
-            .ok()
-            .filter(|s| !s.is_empty());
-        if internal_dispatch_token.is_none() {
-            tracing::warn!(
-                "forge: STIGLAB_INTERNAL_DISPATCH_TOKEN unset — workflow shaping requests will \
-                 omit the auth header and stiglab will reject any request that sets created_by"
-            );
-        }
-
-        // Phase 4 (Lever C): the main pipeline tick no longer dispatches
-        // synchronously to stiglab / synodic — it emits spine events and
-        // parks on the matching response. The HTTP types stay alive only
-        // for `LiveGateEvaluator` (the workflow-stage-runner gate path);
-        // phase 5 converts that path to events too and deletes them.
-        let evaluator_stiglab = HttpStiglabDispatcher {
-            client: client.clone(),
-            stiglab_url: stiglab_url.clone(),
-            internal_dispatch_token: internal_dispatch_token.clone(),
-        };
-        let evaluator_synodic = HttpSynodicGate {
-            client,
-            synodic_url: synodic_url.clone(),
-            fail_policy,
-        };
+        // Phase 5 of Lever C (#148): the workflow stage runner's
+        // gate evaluator emits `forge.shaping_dispatched` and
+        // `forge.gate_requested` directly onto the spine. No more
+        // sibling-subsystem HTTP coordination — the seam between
+        // forge and stiglab/synodic is the spine exclusively.
+        // STIGLAB_URL / SYNODIC_URL / SYNODIC_FAIL_POLICY /
+        // STIGLAB_INTERNAL_DISPATCH_TOKEN env vars are no longer
+        // consumed by forge; see CLAUDE.md / .env.example.
 
         // Phase-3 parking maps for the Lever C event-driven flow. The
         // listeners spawned below populate these; the pipeline tick
@@ -566,10 +146,24 @@ pub fn run(database_url: &str, tick_ms: u64) {
             .expect("failed to bind forge port");
         tracing::info!("forge: HTTP API listening on :{forge_port}");
 
-        // Spawn the tick loop.
+        // Spawn the tick loop. The workflow stage runner's gate
+        // evaluator needs an emitter handle on the spine; if forge is
+        // running without a spine (legacy dev setup) the evaluator is
+        // skipped entirely — the workflow path requires the spine.
         let tick_shared = shared.clone();
-        let gate_evaluator =
-            LiveGateEvaluator::new(signals.clone(), evaluator_stiglab, evaluator_synodic);
+        let gate_evaluator = {
+            let spine_handle = {
+                let state = tick_shared.read().await;
+                state.spine.clone()
+            };
+            spine_handle.map(|store| {
+                LiveGateEvaluator::new(
+                    signals.clone(),
+                    SpineGateEmitter::new(store),
+                    pending_verdicts.clone(),
+                )
+            })
+        };
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_millis(tick_ms));
             loop {
@@ -609,13 +203,22 @@ pub fn run(database_url: &str, tick_ms: u64) {
                     // advancement decisions see a consistent artifact
                     // snapshot. Refill the per-tick dispatch budget
                     // before the pass so a burst of new artifacts can't
-                    // synchronously hammer Stiglab under the lock.
-                    gate_evaluator.reset_dispatch_budget();
-                    let stage_events = stage_runner::advance_workflow_artifacts(
-                        &workflows_snapshot,
-                        &mut state.pipeline.store,
-                        &gate_evaluator,
-                    );
+                    // synchronously hammer the spine under the lock.
+                    //
+                    // No spine connection means no event-driven gate
+                    // evaluator (legacy dev setup); the stage runner
+                    // is skipped for this tick.
+                    let stage_events = match gate_evaluator.as_ref() {
+                        Some(eval) => {
+                            eval.reset_dispatch_budget();
+                            stage_runner::advance_workflow_artifacts(
+                                &workflows_snapshot,
+                                &mut state.pipeline.store,
+                                eval,
+                            )
+                        }
+                        None => Vec::new(),
+                    };
                     let stage_touched_ids: std::collections::HashSet<String> = stage_events
                         .iter()
                         .map(|e| match e {
@@ -1483,104 +1086,4 @@ async fn emit_stage_event(spine: &EventStore, event: &StageEvent) {
     {
         tracing::warn!("failed to emit workflow stage event: {e}");
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fail_policy_default_is_escalate_when_unset() {
-        // Use a subprocess-isolated approach: clear the var locally for this thread.
-        // SAFETY: tests in this module are run sequentially via SYNODIC_FAIL_POLICY-
-        // sensitive guards; we serialize on the env var via the policy_env_lock below.
-        let _g = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("SYNODIC_FAIL_POLICY");
-        assert_eq!(SynodicFailPolicy::from_env(), SynodicFailPolicy::Escalate);
-    }
-
-    #[test]
-    fn fail_policy_parses_known_values() {
-        let _g = ENV_LOCK.lock().unwrap();
-        for (raw, expected) in [
-            ("allow", SynodicFailPolicy::Allow),
-            ("Allow", SynodicFailPolicy::Allow),
-            ("deny", SynodicFailPolicy::Deny),
-            ("escalate", SynodicFailPolicy::Escalate),
-        ] {
-            std::env::set_var("SYNODIC_FAIL_POLICY", raw);
-            assert_eq!(SynodicFailPolicy::from_env(), expected, "for {raw}");
-        }
-        std::env::remove_var("SYNODIC_FAIL_POLICY");
-    }
-
-    #[test]
-    fn fail_policy_unknown_value_falls_back_to_escalate() {
-        let _g = ENV_LOCK.lock().unwrap();
-        std::env::set_var("SYNODIC_FAIL_POLICY", "garbage");
-        assert_eq!(SynodicFailPolicy::from_env(), SynodicFailPolicy::Escalate);
-        std::env::remove_var("SYNODIC_FAIL_POLICY");
-    }
-
-    #[test]
-    fn transient_failure_escalates_under_default_policy() {
-        let v = SynodicGateFailure::Transient("connection refused".into())
-            .into_verdict(SynodicFailPolicy::Escalate);
-        assert!(matches!(v, GateVerdict::Escalate { .. }));
-    }
-
-    #[test]
-    fn transient_failure_denies_under_deny_policy() {
-        let v = SynodicGateFailure::Transient("connection refused".into())
-            .into_verdict(SynodicFailPolicy::Deny);
-        assert!(matches!(v, GateVerdict::Deny { .. }));
-    }
-
-    #[test]
-    fn server_error_treated_like_transient() {
-        let v = SynodicGateFailure::ServerError("503 down".into())
-            .into_verdict(SynodicFailPolicy::Escalate);
-        assert!(matches!(v, GateVerdict::Escalate { .. }));
-    }
-
-    #[test]
-    fn bad_request_always_denies_regardless_of_policy() {
-        for policy in [
-            SynodicFailPolicy::Allow,
-            SynodicFailPolicy::Deny,
-            SynodicFailPolicy::Escalate,
-        ] {
-            let v = SynodicGateFailure::BadRequest("400 bad shape".into()).into_verdict(policy);
-            assert!(
-                matches!(v, GateVerdict::Deny { .. }),
-                "policy={policy:?} should still deny"
-            );
-        }
-    }
-
-    #[test]
-    fn parse_error_always_denies_regardless_of_policy() {
-        for policy in [
-            SynodicFailPolicy::Allow,
-            SynodicFailPolicy::Deny,
-            SynodicFailPolicy::Escalate,
-        ] {
-            let v = SynodicGateFailure::Parse("missing field".into()).into_verdict(policy);
-            assert!(
-                matches!(v, GateVerdict::Deny { .. }),
-                "policy={policy:?} should still deny"
-            );
-        }
-    }
-
-    #[test]
-    fn allow_policy_returns_allow_for_transient() {
-        let v =
-            SynodicGateFailure::Transient("timeout".into()).into_verdict(SynodicFailPolicy::Allow);
-        assert!(matches!(v, GateVerdict::Allow));
-    }
-
-    // The from_env tests mutate the process-wide environment, which is shared
-    // across threads when cargo test runs them in parallel. Serialize them.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }

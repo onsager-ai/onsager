@@ -49,10 +49,15 @@ registry-backed event types → API/UI contract enforcement). Until the
 levers all land, the rule is review-time discipline; treat the drift
 patterns below as the working heuristics.
 
-Live violation (Lever C target): `crates/forge/src/cmd/serve.rs`
-still defines `HttpStiglabDispatcher` (≈52–304) and `HttpSynodicGate`
-(≈344–397), and instantiates them against sibling-subsystem ports in
-`run` (≈469–490). New code must not add to that pattern.
+Lever C status (#148): seam rule passing. The legacy
+`HttpStiglabDispatcher` / `HttpSynodicGate` HTTP RPCs in
+`crates/forge/src/cmd/serve.rs` are gone (phase 5), as are the
+`POST /api/shaping` and `POST /api/gate` endpoints they called.
+Forge ↔ stiglab/synodic coordination flows through the spine only —
+`forge.gate_requested` / `synodic.gate_verdict` and
+`forge.shaping_dispatched` / `stiglab.shaping_result_ready`. New code
+must not reintroduce sibling-subsystem HTTP calls; the seam-rule lint
+in `xtask` enforces this.
 
 ## Internal aesthetic
 

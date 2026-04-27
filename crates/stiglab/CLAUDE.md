@@ -23,16 +23,17 @@ What this means for stiglab specifically:
   webhook router at `src/server/webhook_router.rs`) called by external
   services. Both are "external boundary" by definition.
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `synodic`,
-  or `ising`. The legacy `HttpStiglabDispatcher` path
-  (`crates/forge/src/cmd/serve.rs` ≈52–304, instantiated in `run`
-  ≈469–490) is the one remaining violation, and Lever C of spec #131
-  deletes it. Do not add new internal routes to satisfy a sibling
-  subsystem — emit/consume an event instead.
+  or `ising`. **Lever C status (#148): no remaining violation** —
+  `HttpStiglabDispatcher` and the `POST /api/shaping` route it
+  called are gone as of phase 5. Do not add new internal routes to
+  satisfy a sibling subsystem — emit/consume an event instead.
 - **Coordinating with forge or synodic.** Listen on the spine for the
   event you care about, write your response as a new event. Concrete
-  pattern: forge will emit `forge.shaping_dispatched` once Lever C
-  lands; stiglab consumes it and emits `stiglab.session_completed` (or
-  the equivalent error event) when the session resolves.
+  pattern in production today: stiglab's `shaping_listener` consumes
+  `forge.shaping_dispatched`, spawns the agent session, and emits
+  `stiglab.session_completed` + `stiglab.shaping_result_ready` when
+  the session reaches a terminal state (or `stiglab.session_failed`
+  on the error path).
 - **Cargo deps.** `stiglab` may depend on `onsager-{artifact,
   registry, spine}` (the protocol DTOs now live in
   `onsager_spine::protocol` per #131 Lever C; the standalone

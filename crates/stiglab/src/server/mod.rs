@@ -63,7 +63,11 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route("/api/health", get(routes::health::health))
         .route("/api/nodes", get(routes::nodes::list_nodes))
         .route("/api/tasks", post(routes::tasks::create_task))
-        .route("/api/shaping", post(routes::shaping::create_shaping))
+        // POST /api/shaping was the legacy forge → stiglab dispatch
+        // entrypoint; deleted in Lever C phase 5 (#148). Forge now
+        // emits `forge.shaping_dispatched` directly onto the spine
+        // and `shaping_listener` consumes it. The GET status endpoint
+        // stays for the dashboard's session view.
         .route(
             "/api/shaping/{session_id}",
             get(routes::shaping::get_shaping_status),
