@@ -8,10 +8,10 @@
 //! separate from the emitter so the serve loop can build the event without
 //! also running the validation / dedup pipeline.
 
-use onsager_spine::protocol::Insight;
 use onsager_spine::factory_event::{
     EventRef, FactoryEventKind, InsightScope, RuleProposalAction, RuleProposalClass,
 };
+use onsager_spine::protocol::Insight;
 
 /// Confidence floor above which a `repeated_gate_override` insight becomes
 /// a rule-proposal candidate. Below this we stay in the observation-only
@@ -139,8 +139,8 @@ fn subject_ref_from_scope(scope: &InsightScope) -> String {
 mod tests {
     use super::*;
     use onsager_artifact::ArtifactId;
-    use onsager_spine::protocol::FactoryEventRef;
     use onsager_spine::factory_event::InsightKind;
+    use onsager_spine::protocol::FactoryEventRef;
 
     fn make_insight(scope: InsightScope) -> Insight {
         Insight {

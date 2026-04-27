@@ -100,7 +100,10 @@ pub fn task_to_session(task: &Task, node_id: &str) -> Session {
     }
 }
 
-fn find_constraint_str(constraints: &[onsager_spine::protocol::Constraint], name: &str) -> Option<String> {
+fn find_constraint_str(
+    constraints: &[onsager_spine::protocol::Constraint],
+    name: &str,
+) -> Option<String> {
     constraints
         .iter()
         .find(|c| c.constraint_type == name)
@@ -108,7 +111,10 @@ fn find_constraint_str(constraints: &[onsager_spine::protocol::Constraint], name
         .map(|s| s.to_string())
 }
 
-fn find_constraint_u32(constraints: &[onsager_spine::protocol::Constraint], name: &str) -> Option<u32> {
+fn find_constraint_u32(
+    constraints: &[onsager_spine::protocol::Constraint],
+    name: &str,
+) -> Option<u32> {
     constraints
         .iter()
         .find(|c| c.constraint_type == name)

@@ -67,8 +67,8 @@ impl AnalyzerRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use onsager_spine::protocol::FactoryEventRef;
     use onsager_spine::factory_event::{InsightKind, InsightScope};
+    use onsager_spine::protocol::FactoryEventRef;
 
     struct DummyAnalyzer;
     impl Analyzer for DummyAnalyzer {

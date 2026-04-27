@@ -9,10 +9,10 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 
 use onsager_artifact::Kind;
+use onsager_spine::factory_event::ShapingOutcome;
 use onsager_spine::protocol::{
     EscalationContext, GateRequest, GateVerdict, ShapingRequest, ShapingResult,
 };
-use onsager_spine::factory_event::ShapingOutcome;
 use onsager_spine::EventStore;
 
 use crate::core::artifact_store::ArtifactStore;
