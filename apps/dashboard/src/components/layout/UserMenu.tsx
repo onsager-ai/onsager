@@ -1,4 +1,4 @@
-import { ChevronsUpDown, LogOut, Monitor, Moon, Settings, Sun, User as UserIcon } from "lucide-react"
+import { ChevronsUpDown, LogOut, Monitor, Moon, Settings, Sun } from "lucide-react"
 import { Link } from "react-router-dom"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
@@ -22,21 +22,22 @@ export interface UserMenuProps {
 }
 
 export function UserMenu({ variant = "icon" }: UserMenuProps) {
-  const { user, authEnabled, logout } = useAuth()
+  const { user, logout } = useAuth()
   const { setTheme } = useTheme()
 
+  // Auth is always-on as of #193 — `user` is non-null here for any
+  // mounted UserMenu (it lives behind ProtectedRoute).
   const initial = user?.github_name?.[0] ?? user?.github_login?.[0] ?? "?"
   const label = user?.github_name ?? user?.github_login ?? "Account"
-  const sublabel = authEnabled && user?.github_login ? `@${user.github_login}` : undefined
+  const sublabel = user?.github_login ? `@${user.github_login}` : undefined
 
-  const avatar =
-    authEnabled && user?.github_avatar_url ? (
-      <img src={user.github_avatar_url} alt={label} className="h-7 w-7 shrink-0 rounded-full" />
-    ) : (
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium uppercase text-muted-foreground">
-        {authEnabled ? initial : <UserIcon className="h-4 w-4" />}
-      </div>
-    )
+  const avatar = user?.github_avatar_url ? (
+    <img src={user.github_avatar_url} alt={label} className="h-7 w-7 shrink-0 rounded-full" />
+  ) : (
+    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium uppercase text-muted-foreground">
+      {initial}
+    </div>
+  )
 
   const trigger =
     variant === "row" ? (
@@ -73,7 +74,7 @@ export function UserMenu({ variant = "icon" }: UserMenuProps) {
         side={variant === "row" ? "top" : "bottom"}
         className="w-56"
       >
-        {authEnabled && user ? (
+        {user && (
           <>
             <DropdownMenuLabel className="flex flex-col gap-0.5 px-2 py-1.5">
               <span className="truncate text-sm font-medium text-foreground">
@@ -87,7 +88,7 @@ export function UserMenu({ variant = "icon" }: UserMenuProps) {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
           </>
-        ) : null}
+        )}
         <DropdownMenuItem render={<Link to="/settings" />}>
           <Settings className="mr-2 h-4 w-4" />
           Settings
@@ -106,15 +107,11 @@ export function UserMenu({ variant = "icon" }: UserMenuProps) {
           <Monitor className="mr-2 h-4 w-4" />
           System
         </DropdownMenuItem>
-        {authEnabled && user && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onClick={logout}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Sign out
-            </DropdownMenuItem>
-          </>
-        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onClick={logout}>
+          <LogOut className="mr-2 h-4 w-4" />
+          Sign out
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

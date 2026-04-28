@@ -47,8 +47,8 @@ pub async fn github_login(
     let config = &state.config;
 
     match config.sso_mode() {
-        SsoMode::Disabled => (StatusCode::NOT_FOUND, "auth not configured").into_response(),
-        SsoMode::Relying => {
+        None => (StatusCode::NOT_FOUND, "auth not configured").into_response(),
+        Some(SsoMode::Relying) => {
             // Previews never talk to GitHub directly — bounce through prod.
             let auth_domain = config
                 .sso_auth_domain
@@ -75,7 +75,7 @@ pub async fn github_login(
             };
             Redirect::temporary(&target).into_response()
         }
-        SsoMode::Owner { delegate_enabled } => {
+        Some(SsoMode::Owner { delegate_enabled }) => {
             let Some(client_id) = config.github_client_id.as_deref() else {
                 return (StatusCode::NOT_FOUND, "auth not configured").into_response();
             };
@@ -148,7 +148,7 @@ pub async fn github_callback(
 ) -> impl IntoResponse {
     let config = &state.config;
 
-    let SsoMode::Owner { delegate_enabled } = config.sso_mode() else {
+    let Some(SsoMode::Owner { delegate_enabled }) = config.sso_mode() else {
         return (StatusCode::NOT_FOUND, "auth not configured").into_response();
     };
 
@@ -346,9 +346,9 @@ pub async fn sso_redeem(
 ) -> impl IntoResponse {
     let config = &state.config;
 
-    let SsoMode::Owner {
+    let Some(SsoMode::Owner {
         delegate_enabled: true,
-    } = config.sso_mode()
+    }) = config.sso_mode()
     else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     };
@@ -417,7 +417,7 @@ pub async fn sso_finish(
 ) -> impl IntoResponse {
     let config = &state.config;
 
-    if config.sso_mode() != SsoMode::Relying {
+    if config.sso_mode() != Some(SsoMode::Relying) {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     }
 
@@ -537,8 +537,13 @@ pub async fn sso_finish(
 
 // ── /api/auth/me + logout (unchanged behavior) ──
 
-/// GET /api/auth/me — Return current authenticated user
-pub async fn me(State(state): State<AppState>, auth_user: AuthUser) -> impl IntoResponse {
+/// GET /api/auth/me — Return current authenticated user.
+///
+/// `session_kind` ("github" | "dev") replaces the legacy `auth_enabled`
+/// flag (issue #193). Auth is always-on, so a successful response means
+/// the caller is authenticated; the field signals which path minted the
+/// session, which drives the dashboard's persistent dev-mode banner.
+pub async fn me(State(_state): State<AppState>, auth_user: AuthUser) -> impl IntoResponse {
     let via = match auth_user.principal {
         RequestPrincipal::Pat { .. } => "pat",
         RequestPrincipal::Session => "session",
@@ -550,7 +555,7 @@ pub async fn me(State(state): State<AppState>, auth_user: AuthUser) -> impl Into
             "github_name": auth_user.github_name,
             "github_avatar_url": auth_user.github_avatar_url,
         },
-        "auth_enabled": state.config.auth_enabled(),
+        "session_kind": auth_user.session_kind,
         "via": via,
     }))
 }

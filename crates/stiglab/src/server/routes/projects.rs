@@ -47,15 +47,9 @@ const DEFAULT_CAP: usize = 100;
 
 #[allow(clippy::result_large_err)]
 fn require_auth_user(auth_user: &AuthUser) -> Result<&str, Response> {
-    if auth_user.user_id == "anonymous" {
-        Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({ "error": "authentication required" })),
-        )
-            .into_response())
-    } else {
-        Ok(auth_user.user_id.as_str())
-    }
+    // Auth is always-on as of #193; the `AuthUser` extractor 401s
+    // unauthenticated requests before they reach this helper.
+    Ok(auth_user.user_id.as_str())
 }
 
 /// Look up the project + assert the user is a member of its workspace. 404s

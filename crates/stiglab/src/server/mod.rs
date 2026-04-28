@@ -1,6 +1,8 @@
 pub mod auth;
 pub mod config;
 pub mod db;
+#[cfg(debug_assertions)]
+pub mod dev_auth;
 pub mod github_app;
 pub mod handler;
 pub mod proxy_cache;
@@ -266,6 +268,16 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/spine/artifacts/{id}/override-gate",
             post(routes::spine::override_gate),
         );
+
+    // Dev-login (issue #193). The route is only registered in debug
+    // builds — `cargo build --release` strips the symbol, so a release
+    // deploy physically cannot serve `/api/auth/dev-login` regardless of
+    // env-var configuration.
+    #[cfg(debug_assertions)]
+    let api_routes = api_routes.route(
+        "/api/auth/dev-login",
+        post(crate::server::dev_auth::dev_login),
+    );
 
     // Configure CORS
     let cors = if let Some(ref origin) = config.cors_origin {

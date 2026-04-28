@@ -15,7 +15,6 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { useAuth } from "@/lib/auth"
 import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import { SetupChecklist } from "@/components/workspaces/SetupChecklist"
 import { useSetupProgress } from "@/hooks/useSetupProgress"
@@ -72,46 +71,43 @@ const SCOPED_SECTIONS: NavSection[] = [
 
 export function AppSidebar() {
   const location = useLocation()
-  const { user, authEnabled } = useAuth()
   const { isMobile, setOpenMobile } = useSidebar()
   // Call the progress hook once at the sidebar root and thread the result
   // down — avoids a second observer/render path when SetupChecklist mounts.
   const setupProgress = useSetupProgress()
   const { hasWorkspace, workspacesLoading } = setupProgress
   const activeWorkspace = useOptionalActiveWorkspace()
-  const authed = authEnabled && !!user
 
-  // Anonymous mode (auth disabled or signed out) has no workspace concept,
-  // so legacy paths render at the root and the resource nav points at
-  // them directly. The progressive nav from #72 also lands here for
-  // authed-but-zero-workspace users — they only see the workspace-picker
-  // entry until they create one.
+  // Auth is always-on as of #193. Pages outside a scoped route (the
+  // workspace picker, account settings) leave `activeWorkspace` null
+  // and route nav back to `/workspaces` so the user picks one.
   const linkBase = activeWorkspace
     ? `/workspaces/${activeWorkspace.slug}`
-    : ""
-  const overviewPath = linkBase || "/"
+    : null
+  const overviewPath = linkBase ?? "/workspaces"
 
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false)
   }
 
-  // Progressive disclosure: authenticated users with zero workspaces only
-  // see the System group + the switcher (which handles "create workspace").
+  // Progressive disclosure: users with zero workspaces only see the
+  // System group + the switcher (which handles "create workspace").
   // Once the first workspace lands the full nav unlocks. Gate on
   // workspacesLoading only (not the aggregate `loading`) so the nav
   // decision doesn't wait for the slower projects/installs queries.
-  const gateNav = authed && !workspacesLoading && !hasWorkspace
+  const gateNav = !workspacesLoading && !hasWorkspace
   const visibleSections = SCOPED_SECTIONS.filter((s) => {
     if (gateNav && s.label !== "System") return false
     return true
   })
 
-  // Prefix every nav item's path with the active workspace's root, or
-  // — in anonymous / no-workspace mode — render the legacy bare path so
-  // the link still resolves through the App.tsx legacy redirects.
+  // Prefix every nav item's path with the active workspace's root.
+  // Outside a scoped route (e.g. while the picker is mounted) we point
+  // the suffix-less Overview row at the picker so the user lands
+  // somewhere they can pick a workspace.
   const resolvePath = (suffix: string): string => {
     if (suffix === "") return overviewPath
-    return linkBase ? `${linkBase}/${suffix}` : `/${suffix}`
+    return linkBase ? `${linkBase}/${suffix}` : "/workspaces"
   }
 
   return (
@@ -123,7 +119,7 @@ export function AppSidebar() {
         </Link>
       </SidebarHeader>
       <SidebarContent>
-        {authed && <WorkspaceSwitcher />}
+        <WorkspaceSwitcher />
         {visibleSections.map((section) => (
           <SidebarGroup key={section.label}>
             <SidebarGroupLabel>{section.label}</SidebarGroupLabel>

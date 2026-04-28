@@ -9,7 +9,6 @@ import {
   type ProjectIssueRow,
   type SpineArtifact,
 } from "@/lib/api"
-import { useAuth } from "@/lib/auth"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -48,9 +47,7 @@ type StateFilter = "open" | "closed" | "all"
  * connect a project before there's anything to render.
  */
 export function IssuesPage() {
-  const { authEnabled, user } = useAuth()
   const workspace = useActiveWorkspace()
-  const authed = !authEnabled || !!user
 
   // `?project=<id>` selects the active project on first render. Subsequent
   // user picks via the dropdown override into local state, so deep-links
@@ -63,7 +60,6 @@ export function IssuesPage() {
   const projectsQuery = useQuery({
     queryKey: ["projects-for-user"],
     queryFn: api.listAllProjects,
-    enabled: authed,
   })
   const projects: Project[] = useMemo(() => {
     const all = projectsQuery.data?.projects ?? []
@@ -93,7 +89,7 @@ export function IssuesPage() {
         kind: "github_issue",
         project_id: selectedProjectId ?? undefined,
       }),
-    enabled: authed && !!selectedProjectId,
+    enabled: !!selectedProjectId,
     refetchInterval: 15_000,
   })
 
@@ -106,7 +102,7 @@ export function IssuesPage() {
   const liveQuery = useQuery({
     queryKey: ["project-issues", selectedProjectId, stateFilter],
     queryFn: () => api.listProjectIssues(selectedProjectId!, stateFilter),
-    enabled: authed && !!selectedProjectId,
+    enabled: !!selectedProjectId,
     refetchInterval: 60_000,
   })
 
@@ -191,16 +187,6 @@ export function IssuesPage() {
         />
       ) : null,
   })
-
-  if (!authed) {
-    return (
-      <div className="space-y-4">
-        <p className="text-muted-foreground">
-          Sign in to see your project's GitHub issues.
-        </p>
-      </div>
-    )
-  }
 
   if (projectsQuery.isLoading) {
     return <p className="py-8 text-center text-muted-foreground">Loading…</p>

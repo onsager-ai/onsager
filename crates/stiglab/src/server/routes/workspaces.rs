@@ -44,15 +44,13 @@ fn not_found(msg: &str) -> Response {
 
 #[allow(clippy::result_large_err)]
 fn require_auth_user(auth_user: &AuthUser) -> Result<&str, Response> {
-    if auth_user.user_id == "anonymous" {
-        Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({ "error": "authentication required" })),
-        )
-            .into_response())
-    } else {
-        Ok(auth_user.user_id.as_str())
-    }
+    // Auth is always-on as of #193; the `AuthUser` extractor 401s
+    // unauthenticated requests before they reach this helper. The
+    // wrapper stays as the canonical place to return the user-id —
+    // callers don't have to thread `auth_user.user_id.as_str()`
+    // by hand and the helper signature is stable for any future
+    // checks (suspension, etc.) that need to short-circuit here.
+    Ok(auth_user.user_id.as_str())
 }
 
 // ── Workspace CRUD ──

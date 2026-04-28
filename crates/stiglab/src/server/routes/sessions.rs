@@ -62,20 +62,13 @@ pub async fn list_sessions(
         Err(r) => return r,
     };
 
-    // The synthetic anonymous principal has no membership rows, so the
-    // membership-check helper would 404 every request in
-    // auth_enabled = false mode. Skip the check there but still scope
-    // the query to the requested workspace.
-    let result = if auth_user.user_id == "anonymous" {
-        db::list_sessions_in_workspace(&state.db, &workspace_id).await
-    } else {
-        if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
-            return r;
-        }
-        db::list_sessions_for_user_in_workspace(&state.db, &auth_user.user_id, &workspace_id).await
-    };
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+        return r;
+    }
 
-    match result {
+    match db::list_sessions_for_user_in_workspace(&state.db, &auth_user.user_id, &workspace_id)
+        .await
+    {
         Ok(sessions) => Json(serde_json::json!({ "sessions": sessions })).into_response(),
         Err(e) => {
             tracing::error!("failed to list sessions: {e}");
@@ -95,10 +88,6 @@ async fn authorize_session_read(
     auth_user: &AuthUser,
     session_id: &str,
 ) -> Result<Option<String>, Response> {
-    if auth_user.user_id == "anonymous" {
-        return Ok(None);
-    }
-
     let workspace_id = match db::get_session_workspace(&state.db, session_id).await {
         Ok(w) => w,
         Err(e) => {

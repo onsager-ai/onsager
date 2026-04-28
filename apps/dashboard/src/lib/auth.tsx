@@ -1,17 +1,22 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react"
-import { api, ApiError, type User } from "./api"
+import { api, type SessionKind, type User } from "./api"
 
 interface AuthContextValue {
   user: User | null
   loading: boolean
-  authEnabled: boolean
+  /**
+   * How the session was minted, surfaced by `/api/auth/me`. `"github"` for
+   * a real OAuth session, `"dev"` for a debug-build dev-login session.
+   * `null` while loading or when the user is signed out (issue #193).
+   */
+  sessionKind: SessionKind | null
   logout: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   loading: true,
-  authEnabled: false,
+  sessionKind: null,
   logout: async () => {},
 })
 
@@ -22,25 +27,19 @@ export function useAuth() {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [sessionKind, setSessionKind] = useState<SessionKind | null>(null)
   const [loading, setLoading] = useState(true)
-  const [authEnabled, setAuthEnabled] = useState(false)
 
   useEffect(() => {
     api
       .getMe()
       .then((data) => {
         setUser(data.user)
-        setAuthEnabled(data.auth_enabled)
+        setSessionKind(data.session_kind)
       })
-      .catch((err) => {
+      .catch(() => {
         setUser(null)
-        // Only treat as "auth enabled" if the backend explicitly returned 401.
-        // Network errors or 404s (e.g. no backend running) mean auth is not available.
-        if (err instanceof ApiError && err.status === 401) {
-          setAuthEnabled(true)
-        } else {
-          setAuthEnabled(false)
-        }
+        setSessionKind(null)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -50,12 +49,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await api.logout()
     } finally {
       setUser(null)
+      setSessionKind(null)
       window.location.href = "/login"
     }
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, loading, authEnabled, logout }}>
+    <AuthContext.Provider value={{ user, loading, sessionKind, logout }}>
       {children}
     </AuthContext.Provider>
   )

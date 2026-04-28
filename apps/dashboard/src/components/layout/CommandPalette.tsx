@@ -33,7 +33,6 @@ import {
 } from "@/components/ui/command"
 import { CreateSessionSheet } from "@/components/sessions/CreateSessionSheet"
 import { NewWorkspaceDialog } from "@/components/workspaces/NewWorkspaceDialog"
-import { useAuth } from "@/lib/auth"
 import { useOptionalActiveWorkspace } from "@/lib/workspace"
 
 // Single global "do something" surface — create a primitive or jump to
@@ -105,8 +104,6 @@ export function CommandPaletteTrigger() {
 function CommandPaletteDialog() {
   const { open, setOpen } = usePalette()
   const navigate = useNavigate()
-  const { user, authEnabled } = useAuth()
-  const canAuth = authEnabled && !!user
   const activeWorkspace = useOptionalActiveWorkspace()
 
   const [sessionOpen, setSessionOpen] = useState(false)
@@ -117,14 +114,17 @@ function CommandPaletteDialog() {
     action()
   }
   const go = (path: string) => run(() => navigate(path))
-  // Scope deep-links to the active workspace when there is one. Falls
-  // back to the legacy bare path for anonymous mode (the App.tsx route
-  // table redirects to the picker for authed users without a workspace).
+  // Scope deep-links to the active workspace when there is one;
+  // otherwise route to the workspace picker so the user lands on a
+  // surface that can resolve the missing context (auth is always-on
+  // post-#193, so the picker is always reachable).
   const scoped = (suffix: string) =>
-    activeWorkspace ? `/workspaces/${activeWorkspace.slug}/${suffix}` : `/${suffix}`
+    activeWorkspace
+      ? `/workspaces/${activeWorkspace.slug}/${suffix}`
+      : "/workspaces"
   const overview = activeWorkspace
     ? `/workspaces/${activeWorkspace.slug}`
-    : "/"
+    : "/workspaces"
 
   return (
     <>
@@ -146,24 +146,20 @@ function CommandPaletteDialog() {
                 <Zap className="mr-2 h-4 w-4" />
                 New workflow
               </CommandItem>
-              {canAuth && (
-                <CommandItem
-                  keywords={["new"]}
-                  onSelect={() => run(() => setSessionOpen(true))}
-                >
-                  <Terminal className="mr-2 h-4 w-4" />
-                  New session
-                </CommandItem>
-              )}
-              {canAuth && (
-                <CommandItem
-                  keywords={["new", "tenant"]}
-                  onSelect={() => run(() => setWorkspaceOpen(true))}
-                >
-                  <Building2 className="mr-2 h-4 w-4" />
-                  New workspace
-                </CommandItem>
-              )}
+              <CommandItem
+                keywords={["new"]}
+                onSelect={() => run(() => setSessionOpen(true))}
+              >
+                <Terminal className="mr-2 h-4 w-4" />
+                New session
+              </CommandItem>
+              <CommandItem
+                keywords={["new", "tenant"]}
+                onSelect={() => run(() => setWorkspaceOpen(true))}
+              >
+                <Building2 className="mr-2 h-4 w-4" />
+                New workspace
+              </CommandItem>
             </CommandGroup>
 
             <CommandSeparator />
@@ -173,12 +169,10 @@ function CommandPaletteDialog() {
                 <Factory className="mr-2 h-4 w-4" />
                 Factory overview
               </CommandItem>
-              {canAuth && (
-                <CommandItem onSelect={() => go("/workspaces")}>
-                  <Building2 className="mr-2 h-4 w-4" />
-                  Workspaces
-                </CommandItem>
-              )}
+              <CommandItem onSelect={() => go("/workspaces")}>
+                <Building2 className="mr-2 h-4 w-4" />
+                Workspaces
+              </CommandItem>
               <CommandItem onSelect={() => go(scoped("workflows"))}>
                 <GitBranch className="mr-2 h-4 w-4" />
                 Workflows
@@ -215,12 +209,10 @@ function CommandPaletteDialog() {
       {sessionOpen && (
         <CreateSessionSheet open={sessionOpen} onOpenChange={setSessionOpen} />
       )}
-      {canAuth && (
-        <NewWorkspaceDialog
-          open={workspaceOpen}
-          onOpenChange={setWorkspaceOpen}
-        />
-      )}
+      <NewWorkspaceDialog
+        open={workspaceOpen}
+        onOpenChange={setWorkspaceOpen}
+      />
     </>
   )
 }

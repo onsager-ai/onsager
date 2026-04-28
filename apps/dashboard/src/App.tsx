@@ -11,6 +11,7 @@ import { PageSkeleton } from "@/components/layout/PageSkeleton"
 import { LoginPage } from "@/pages/LoginPage"
 import { api } from "@/lib/api"
 import { readLastUsedWorkspace, WorkspaceScope } from "@/lib/workspace"
+import { DevModeBanner } from "@/components/layout/DevModeBanner"
 import type { ReactNode } from "react"
 
 const FactoryOverviewPage = lazy(() =>
@@ -76,18 +77,15 @@ const queryClient = new QueryClient({
 })
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { user, loading, authEnabled } = useAuth()
+  const { user, loading } = useAuth()
 
   if (loading) {
     return <AppShellSkeleton />
   }
 
-  // If auth is not enabled, allow access
-  if (!authEnabled) {
-    return <>{children}</>
-  }
-
-  // If auth is enabled but no user, redirect to login
+  // Auth is always-on as of #193 — anonymous mode is gone. Either the
+  // user has a real session (GitHub OAuth or dev-login in debug builds)
+  // or they bounce to /login.
   if (!user) {
     return <Navigate to="/login" replace />
   }
@@ -115,16 +113,13 @@ function LazyRoute({
 const ONBOARDING_SEEN_KEY = "onsager.onboarding_seen"
 
 function OnboardingGate({ children }: { children: ReactNode }) {
-  const { user, authEnabled } = useAuth()
   const location = useLocation()
-  // Only run the onboarding redirect for authenticated users — anonymous
-  // mode (auth disabled or no session) has no workspace concept to gate.
-  const gateEnabled = authEnabled && !!user
+  // ProtectedRoute already enforces an authenticated user, so the query
+  // can fire unconditionally — there's no anonymous branch to skip.
   const { data, isLoading } = useQuery({
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
     staleTime: 30_000,
-    enabled: gateEnabled,
   })
   const workspaces = data?.workspaces ?? []
   const seen =
@@ -141,13 +136,7 @@ function OnboardingGate({ children }: { children: ReactNode }) {
     }
   }, [onWorkspaces])
 
-  if (
-    gateEnabled &&
-    !isLoading &&
-    workspaces.length === 0 &&
-    !seen &&
-    !onWorkspaces
-  ) {
+  if (!isLoading && workspaces.length === 0 && !seen && !onWorkspaces) {
     return <Navigate to="/workspaces?welcome=1" replace />
   }
 
@@ -157,31 +146,17 @@ function OnboardingGate({ children }: { children: ReactNode }) {
 // Bare-path redirect: `/` → `/workspaces/<active>` if the user has a
 // workspace, otherwise let `OnboardingGate` send them to the picker.
 // "Active" is last-used (localStorage) when valid, else memberships[0].
-// Anonymous mode (auth disabled or no user) keeps the legacy bare path
-// rendering FactoryOverview directly so the existing demo flow still works.
 function BarePathRedirect() {
-  const { user, authEnabled, loading } = useAuth()
-  const gateEnabled = authEnabled && !!user
+  const { loading } = useAuth()
   const { data, isLoading } = useQuery({
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
     staleTime: 30_000,
-    enabled: gateEnabled,
   })
   const workspaces = data?.workspaces ?? []
 
-  if (loading || (gateEnabled && isLoading)) {
+  if (loading || isLoading) {
     return <AppShellSkeleton />
-  }
-
-  if (!gateEnabled) {
-    // Anonymous / auth-disabled: render the global Factory overview at
-    // `/`, same as before. There's no workspace to scope to.
-    return (
-      <LazyRoute>
-        <FactoryOverviewPage />
-      </LazyRoute>
-    )
   }
 
   if (workspaces.length === 0) {
@@ -195,60 +170,6 @@ function BarePathRedirect() {
   return <Navigate to={`/workspaces/${active.slug}`} replace />
 }
 
-// Per-resource legacy redirect: `/sessions` → `/workspaces/<active>/sessions`.
-// One release of compat per spec #166; tracked by bridge-debt follow-up issue
-// at land time.
-//
-// Anonymous mode (`authEnabled=false` or signed out) has no workspace concept;
-// the post-#166 list pages require WorkspaceContext (they call
-// `useActiveWorkspace()`), so anonymous-mode users can't render those pages
-// directly anymore. We bounce them to `/` (the FactoryOverview, which works
-// without a workspace) instead of pretending the legacy path renders. Once
-// #164 lands and `workspace_id` becomes mandatory at the API, this branch
-// goes away with the legacy redirect itself.
-function LegacyRedirect({ to }: { to: string }) {
-  const { user, authEnabled } = useAuth()
-  const gateEnabled = authEnabled && !!user
-  const { data, isLoading } = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: api.listWorkspaces,
-    staleTime: 30_000,
-    enabled: gateEnabled,
-  })
-  const workspaces = data?.workspaces ?? []
-  const location = useLocation()
-
-  if (gateEnabled && isLoading) return <AppShellSkeleton />
-
-  if (!gateEnabled) {
-    // Anonymous / auth-disabled: send to the overview at `/`. Pages here
-    // require WorkspaceContext, which doesn't exist without auth.
-    return <Navigate to="/" replace />
-  }
-
-  if (workspaces.length === 0) {
-    // Authed but zero memberships — OnboardingGate ultimately runs the
-    // welcome flow; bouncing to the picker keeps the screen non-empty
-    // until that fires.
-    return <Navigate to="/workspaces" replace />
-  }
-
-  const lastUsed = readLastUsedWorkspace()
-  const active = workspaces.find((w) => w.slug === lastUsed) ?? workspaces[0]
-  const search = location.search ?? ""
-  return (
-    <Navigate to={`/workspaces/${active.slug}/${to}${search}`} replace />
-  )
-}
-
-// Trailing-segment redirect for `/sessions/:id`, `/artifacts/:id`,
-// `/workflows/:id`. Reads the dynamic param and tacks it on.
-function LegacyDetailRedirect({ resource }: { resource: string }) {
-  const params = useParams()
-  const id = params.id ?? ""
-  return <LegacyRedirect to={`${resource}/${id}`} />
-}
-
 // Issue #82 first-run redirect: when an authed user with ≥1 workspace has
 // zero workflows and lands on a workspace overview, bounce them to that
 // workspace's workflows page once so the stepped hero can pitch the
@@ -257,10 +178,8 @@ function LegacyDetailRedirect({ resource }: { resource: string }) {
 const WORKFLOWS_ONBOARDING_SEEN_KEY = "onsager.workflows_onboarding_seen"
 
 function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
-  const { user, authEnabled } = useAuth()
   const location = useLocation()
   const params = useParams<{ workspace?: string }>()
-  const gateEnabled = authEnabled && !!user
   const slug = params.workspace ?? ""
 
   // Fire both queries in parallel — the old code chained `workflows` on
@@ -271,7 +190,6 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
     staleTime: 30_000,
-    enabled: gateEnabled,
   })
   const hasWorkspace = (workspacesData?.workspaces?.length ?? 0) > 0
 
@@ -279,7 +197,6 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
     queryKey: ["workflows", "user"],
     queryFn: () => api.listWorkflowsForUser(),
     staleTime: 30_000,
-    enabled: gateEnabled,
   })
   const workflowsCount = workflowsData?.workflows?.length ?? 0
 
@@ -298,7 +215,6 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
   }, [onWorkflows])
 
   if (
-    gateEnabled &&
     hasWorkspace &&
     !workflowsLoading &&
     workflowsCount === 0 &&
@@ -312,7 +228,7 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
 }
 
 function AppRoutes() {
-  const { user, loading, authEnabled } = useAuth()
+  const { user, loading } = useAuth()
 
   if (loading) {
     return <AppShellSkeleton />
@@ -322,20 +238,18 @@ function AppRoutes() {
     <Routes>
       <Route
         path="/login"
-        element={
-          // If already logged in or auth disabled, redirect to dashboard
-          !authEnabled || user ? <Navigate to="/" replace /> : <LoginPage />
-        }
+        element={user ? <Navigate to="/" replace /> : <LoginPage />}
       />
       <Route
         path="/*"
         element={
           <ProtectedRoute>
+            <DevModeBanner />
             <AppLayout>
               <OnboardingGate>
                 <Routes>
-                  {/* Bare path: redirect to last-used workspace (or render
-                      Factory overview in anonymous mode). */}
+                  {/* Bare path: redirect to last-used workspace. With auth
+                      always-on (#193), every user has a membership context. */}
                   <Route path="/" element={<BarePathRedirect />} />
 
                   {/* Workspace picker / list. Stays unscoped — the user
@@ -423,38 +337,6 @@ function AppRoutes() {
                         </WorkflowsFirstRunGate>
                       </WorkspaceScope>
                     }
-                  />
-
-                  {/* Legacy redirects: one release of compat per spec
-                      #166. Tracked by a bridge-debt follow-up issue. */}
-                  <Route path="/sessions" element={<LegacyRedirect to="sessions" />} />
-                  <Route
-                    path="/sessions/:id"
-                    element={<LegacyDetailRedirect resource="sessions" />}
-                  />
-                  <Route path="/nodes" element={<LegacyRedirect to="nodes" />} />
-                  <Route path="/artifacts" element={<LegacyRedirect to="artifacts" />} />
-                  <Route
-                    path="/artifacts/:id"
-                    element={<LegacyDetailRedirect resource="artifacts" />}
-                  />
-                  <Route path="/issues" element={<LegacyRedirect to="issues" />} />
-                  <Route path="/spine" element={<LegacyRedirect to="spine" />} />
-                  <Route
-                    path="/governance"
-                    element={<LegacyRedirect to="governance" />}
-                  />
-                  <Route
-                    path="/workflows"
-                    element={<LegacyRedirect to="workflows" />}
-                  />
-                  <Route
-                    path="/workflows/start"
-                    element={<LegacyRedirect to="workflows/start" />}
-                  />
-                  <Route
-                    path="/workflows/:id"
-                    element={<LegacyDetailRedirect resource="workflows" />}
                   />
                 </Routes>
               </OnboardingGate>

@@ -101,13 +101,10 @@ impl ServerConfig {
         config
     }
 
-    /// Returns true if GitHub OAuth is configured (both client ID and secret are set).
-    pub fn auth_enabled(&self) -> bool {
-        !matches!(self.sso_mode(), SsoMode::Disabled)
-    }
-
-    /// Classify the process's role in the SSO flow.
-    pub fn sso_mode(&self) -> SsoMode {
+    /// Classify the process's role in the SSO flow. `None` means no GitHub
+    /// OAuth is configured — the only path to authentication is dev-login
+    /// (debug builds only).
+    pub fn sso_mode(&self) -> Option<SsoMode> {
         let has_github = self.github_client_id.is_some() && self.github_client_secret.is_some();
         let has_owner_secrets =
             self.sso_state_secret.is_some() && self.sso_exchange_secret.is_some();
@@ -116,11 +113,11 @@ impl ServerConfig {
 
         if has_github {
             let delegate_enabled = has_owner_secrets && !self.sso_return_host_allowlist.is_empty();
-            SsoMode::Owner { delegate_enabled }
+            Some(SsoMode::Owner { delegate_enabled })
         } else if has_relying {
-            SsoMode::Relying
+            Some(SsoMode::Relying)
         } else {
-            SsoMode::Disabled
+            None
         }
     }
 
@@ -192,27 +189,15 @@ mod tests {
     }
 
     #[test]
-    fn auth_enabled_when_both_set() {
-        let config = make_config(Some("id"), Some("secret"));
-        assert!(config.auth_enabled());
-    }
-
-    #[test]
-    fn auth_disabled_when_id_missing() {
-        let config = make_config(None, Some("secret"));
-        assert!(!config.auth_enabled());
-    }
-
-    #[test]
-    fn auth_disabled_when_secret_missing() {
-        let config = make_config(Some("id"), None);
-        assert!(!config.auth_enabled());
-    }
-
-    #[test]
-    fn auth_disabled_when_both_missing() {
+    fn sso_mode_none_when_no_github_or_relying() {
+        // No OAuth env, no relying-side env — `sso_mode()` is `None` and
+        // dev-login is the only authentication path (debug builds only).
         let config = make_config(None, None);
-        assert!(!config.auth_enabled());
+        assert!(config.sso_mode().is_none());
+        let config = make_config(None, Some("secret"));
+        assert!(config.sso_mode().is_none());
+        let config = make_config(Some("id"), None);
+        assert!(config.sso_mode().is_none());
     }
 
     #[test]
@@ -220,9 +205,9 @@ mod tests {
         let c = make_config(Some("id"), Some("secret"));
         assert_eq!(
             c.sso_mode(),
-            SsoMode::Owner {
+            Some(SsoMode::Owner {
                 delegate_enabled: false
-            }
+            })
         );
     }
 
@@ -238,9 +223,9 @@ mod tests {
         };
         assert_eq!(
             c.sso_mode(),
-            SsoMode::Owner {
+            Some(SsoMode::Owner {
                 delegate_enabled: true
-            }
+            })
         );
     }
 
@@ -256,9 +241,9 @@ mod tests {
         };
         assert_eq!(
             c.sso_mode(),
-            SsoMode::Owner {
+            Some(SsoMode::Owner {
                 delegate_enabled: false
-            }
+            })
         );
     }
 
@@ -269,7 +254,7 @@ mod tests {
             sso_exchange_secret: Some("exchange-secret".into()),
             ..base_config()
         };
-        assert_eq!(c.sso_mode(), SsoMode::Relying);
+        assert_eq!(c.sso_mode(), Some(SsoMode::Relying));
     }
 
     #[test]

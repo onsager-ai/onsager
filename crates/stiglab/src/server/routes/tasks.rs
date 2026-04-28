@@ -96,11 +96,8 @@ pub async fn create_task(
         updated_at: Utc::now(),
     };
 
-    let user_id = if auth_user.user_id == "anonymous" {
-        None
-    } else {
-        Some(auth_user.user_id.as_str())
-    };
+    // Auth is always-on as of #193 — every request carries a real user.
+    let user_id: &str = auth_user.user_id.as_str();
 
     // Validate project membership if the caller scoped the session to a
     // workspace-owned project (issue #59). Non-members get 404 via
@@ -118,15 +115,6 @@ pub async fn create_task(
     // pick one rather than the server silently preferring one over the
     // other.
     let workspace_id: Option<String> = if let Some(ref project_id) = request.project_id {
-        if user_id.is_none() {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({
-                    "error": "authentication required to scope a session to a project"
-                })),
-            )
-                .into_response();
-        };
         let project = match db::get_project(&state.db, project_id).await {
             Ok(Some(p)) => p,
             Ok(None) => {
@@ -163,15 +151,6 @@ pub async fn create_task(
         }
         Some(project.workspace_id)
     } else if let Some(ref explicit) = request.workspace_id {
-        if user_id.is_none() {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({
-                    "error": "authentication required to scope a session to a workspace"
-                })),
-            )
-                .into_response();
-        }
         // 404 (not 403) on non-membership via the shared helper —
         // matches every other workspace-scoped surface so a caller
         // can't enumerate workspaces by probing this endpoint.
@@ -188,7 +167,7 @@ pub async fn create_task(
     if let Err(e) = db::insert_session_with_user_project_workspace(
         &state.db,
         &session,
-        user_id,
+        Some(user_id),
         request.project_id.as_deref(),
         workspace_id.as_deref(),
     )
@@ -202,9 +181,9 @@ pub async fn create_task(
     // sessions (no project, no workspace) get no credentials — the resulting
     // session_failed event surfaces the broken state via forge's listener
     // rather than silently launching an unauthenticated agent.
-    let credentials = match (user_id, workspace_id.as_deref()) {
-        (Some(uid), Some(ws)) => fetch_workspace_credentials(&state, ws, uid).await,
-        _ => None,
+    let credentials = match workspace_id.as_deref() {
+        Some(ws) => fetch_workspace_credentials(&state, ws, user_id).await,
+        None => None,
     };
 
     // Dispatch to agent via WebSocket

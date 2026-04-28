@@ -282,8 +282,7 @@ pub async fn verify_pat(
 /// gate behavior on the principal kind.
 #[derive(Debug, Clone)]
 pub enum RequestPrincipal {
-    /// Cookie-based session (the existing `stiglab_session` flow), or the
-    /// synthetic anonymous principal when auth is disabled.
+    /// Cookie-based session (the `stiglab_session` flow).
     Session,
     /// PAT-authenticated request.  `pat_id` identifies the issuing token row;
     /// `workspace_id` pins the request to that workspace — every PAT is
@@ -309,8 +308,32 @@ impl RequestPrincipal {
     }
 }
 
+/// How the user behind a request was minted. The dashboard renders a
+/// persistent dev-mode banner when this is `Dev` (issue #193).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionKind {
+    /// Real GitHub OAuth user.
+    Github,
+    /// Local-only dev user seeded by `seed_dev_user_and_workspace` and
+    /// minted via `/api/auth/dev-login`. Only reachable in debug builds.
+    Dev,
+}
+
+/// Negative `github_id` is the type-level signal for a dev-seeded user
+/// (real GitHub user IDs are always positive). Centralized here so the
+/// seeder, the auth extractor, and `/api/auth/me` agree on the rule.
+pub fn session_kind_for_github_id(github_id: i64) -> SessionKind {
+    if github_id < 0 {
+        SessionKind::Dev
+    } else {
+        SessionKind::Github
+    }
+}
+
 /// Authenticated user extracted from request cookies or a PAT Bearer token.
-/// When auth is disabled (no GitHub config), returns a synthetic anonymous user.
+/// Auth is always-on as of issue #193 — every request must resolve to a
+/// real `users` row. There is no synthetic principal.
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     pub user_id: String,
@@ -318,18 +341,7 @@ pub struct AuthUser {
     pub github_name: Option<String>,
     pub github_avatar_url: Option<String>,
     pub principal: RequestPrincipal,
-}
-
-impl AuthUser {
-    fn anonymous() -> Self {
-        AuthUser {
-            user_id: "anonymous".to_string(),
-            github_login: "anonymous".to_string(),
-            github_name: None,
-            github_avatar_url: None,
-            principal: RequestPrincipal::Session,
-        }
-    }
+    pub session_kind: SessionKind,
 }
 
 /// Pull the bearer token (if any) out of the `Authorization` header.
@@ -365,11 +377,6 @@ impl FromRequestParts<AppState> for AuthUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        // If auth is not enabled, return anonymous user
-        if !state.config.auth_enabled() {
-            return Ok(AuthUser::anonymous());
-        }
-
         // 1) Try PAT Bearer token first. A valid PAT wins over any cookie
         //    on the same request — cookie + Bearer normally doesn't happen
         //    in practice, but a CLI smoke test of the dashboard shouldn't
@@ -417,6 +424,7 @@ impl FromRequestParts<AppState> for AuthUser {
                             }
                         });
 
+                        let session_kind = session_kind_for_github_id(user.github_id);
                         return Ok(AuthUser {
                             user_id: user.id,
                             github_login: user.github_login,
@@ -426,6 +434,7 @@ impl FromRequestParts<AppState> for AuthUser {
                                 pat_id: pat.id,
                                 workspace_id: pat.workspace_id,
                             },
+                            session_kind,
                         });
                     }
                     Ok(PatVerifyOutcome::Unknown)
@@ -458,13 +467,17 @@ impl FromRequestParts<AppState> for AuthUser {
 
         // Look up session in DB
         match db::get_auth_session(&state.db, &session_id).await {
-            Ok(Some(auth_session)) => Ok(AuthUser {
-                user_id: auth_session.user_id,
-                github_login: auth_session.user.github_login,
-                github_name: auth_session.user.github_name,
-                github_avatar_url: auth_session.user.github_avatar_url,
-                principal: RequestPrincipal::Session,
-            }),
+            Ok(Some(auth_session)) => {
+                let session_kind = session_kind_for_github_id(auth_session.user.github_id);
+                Ok(AuthUser {
+                    user_id: auth_session.user_id,
+                    github_login: auth_session.user.github_login,
+                    github_name: auth_session.user.github_name,
+                    github_avatar_url: auth_session.user.github_avatar_url,
+                    principal: RequestPrincipal::Session,
+                    session_kind,
+                })
+            }
             Ok(None) => Err((StatusCode::UNAUTHORIZED, "session expired").into_response()),
             Err(e) => {
                 tracing::error!("failed to look up auth session: {e}");
@@ -596,12 +609,25 @@ mod tests {
     }
 
     #[test]
-    fn test_auth_user_anonymous() {
-        let user = AuthUser::anonymous();
-        assert_eq!(user.user_id, "anonymous");
-        assert_eq!(user.github_login, "anonymous");
-        assert!(user.github_name.is_none());
-        assert!(matches!(user.principal, RequestPrincipal::Session));
+    fn session_kind_negative_github_id_is_dev() {
+        // Real GitHub IDs are always positive; the seeder uses negative IDs
+        // for dev-only users so the type is recoverable from the user row
+        // alone (no extra column on `auth_sessions`).
+        assert_eq!(session_kind_for_github_id(-1), SessionKind::Dev);
+        assert_eq!(session_kind_for_github_id(-9999), SessionKind::Dev);
+        assert_eq!(session_kind_for_github_id(0), SessionKind::Github);
+        assert_eq!(session_kind_for_github_id(123_456), SessionKind::Github);
+    }
+
+    #[test]
+    fn session_kind_serializes_lowercase() {
+        // The dashboard reads `session_kind: "github" | "dev"` from
+        // `/api/auth/me`; lock the wire shape down here.
+        assert_eq!(
+            serde_json::to_string(&SessionKind::Github).unwrap(),
+            "\"github\""
+        );
+        assert_eq!(serde_json::to_string(&SessionKind::Dev).unwrap(), "\"dev\"");
     }
 
     #[test]

@@ -100,6 +100,16 @@ async fn run_server(
     let pool = db::init_pool(&config.database_url).await?;
     tracing::info!("database connected");
 
+    // Dev-login seeding (issue #193). Debug builds always materialize a
+    // `${USER}@local` user + `dev` workspace + membership, idempotently,
+    // so the LoginPage's "Dev Login" button always has a real user to
+    // mint a session for. Release builds skip this entirely — the
+    // symbol is `cfg(debug_assertions)`-gated, not just no-op'd.
+    #[cfg(debug_assertions)]
+    if let Err(e) = stiglab::server::dev_auth::seed_dev_user_and_workspace(&pool).await {
+        tracing::warn!("dev-login: seeder failed (non-fatal): {e}");
+    }
+
     // Connect to Onsager event spine if configured
     let spine = if let Ok(url) = std::env::var("ONSAGER_DATABASE_URL") {
         tracing::info!("connecting to onsager event spine...");

@@ -7,11 +7,9 @@ import {
   Copy,
   KeyRound,
   Plus,
-  ShieldAlert,
   Trash2,
 } from "lucide-react"
 
-import { useAuth } from "@/lib/auth"
 import { api, type Pat } from "@/lib/api"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { Button } from "@/components/ui/button"
@@ -386,22 +384,16 @@ function PatRow({ pat, workspaceName, onRevoke, isRevoking }: PatRowProps) {
 
 export function PersonalAccessTokensPage() {
   usePageHeader({ title: "Tokens", backTo: "/settings" })
-  const { user, authEnabled } = useAuth()
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
 
   const patsQuery = useQuery({
     queryKey: ["pats"],
     queryFn: api.listPats,
-    // PATs only make sense for an authenticated user — anonymous mode
-    // renders the "unavailable" stub below, so don't fire a doomed
-    // request that would just 401 and clutter logs.
-    enabled: authEnabled && !!user,
   })
   const workspacesQuery = useQuery({
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
-    enabled: authEnabled && !!user,
   })
 
   const revoke = useMutation({
@@ -417,30 +409,6 @@ export function PersonalAccessTokensPage() {
     const byId = new Map(workspaces.map((w) => [w.id, w.name]))
     return (id: string) => byId.get(id) ?? id
   }, [workspaces])
-
-  // Anonymous mode (auth disabled or no session) has no concept of a user
-  // to mint a PAT against — render a stub instead of a 401.
-  if (authEnabled && !user) {
-    return null
-  }
-  if (!authEnabled) {
-    return (
-      <div className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4" />
-              Tokens unavailable
-            </CardTitle>
-            <CardDescription>
-              Personal access tokens require authentication. Configure GitHub
-              OAuth on this server to enable them.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    )
-  }
 
   const pats = patsQuery.data?.pats ?? []
 

@@ -28,8 +28,11 @@ export interface SetupProgress {
  * and avoids double-fetching across callers.
  */
 export function useSetupProgress(): SetupProgress {
-  const { user, authEnabled } = useAuth()
-  const authed = Boolean(authEnabled && user)
+  const { user } = useAuth()
+  // Auth is always-on as of #193; `user` is non-null behind ProtectedRoute.
+  // The flag stays for any consumer that wants to know whether `/me`
+  // resolved (vs. still loading) before reacting to query results.
+  const authed = Boolean(user)
 
   const { data: wsData, isLoading: wsLoading } = useQuery({
     queryKey: ["workspaces"],

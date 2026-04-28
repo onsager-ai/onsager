@@ -1589,24 +1589,6 @@ pub async fn list_sessions_for_user_in_workspace(
     rows.into_iter().map(|r| r.try_into()).collect()
 }
 
-/// List every session in `workspace_id` regardless of owner. Used in the
-/// `auth_enabled = false` branch where the synthetic anonymous user has
-/// no membership rows to filter against.
-pub async fn list_sessions_in_workspace(
-    pool: &AnyPool,
-    workspace_id: &str,
-) -> anyhow::Result<Vec<Session>> {
-    let rows = sqlx::query_as::<_, SessionRow>(
-        "SELECT id, task_id, node_id, state, prompt, output, working_dir, \
-                artifact_id, artifact_version, created_at, updated_at \
-         FROM sessions WHERE workspace_id = $1 ORDER BY created_at DESC",
-    )
-    .bind(workspace_id)
-    .fetch_all(pool)
-    .await?;
-    rows.into_iter().map(|r| r.try_into()).collect()
-}
-
 pub async fn get_session_owner(pool: &AnyPool, session_id: &str) -> anyhow::Result<Option<String>> {
     let row = sqlx::query_scalar::<_, String>(
         "SELECT user_id FROM sessions WHERE id = $1 AND user_id IS NOT NULL",
@@ -1820,6 +1802,19 @@ pub async fn get_workspace(
         "SELECT id, slug, name, created_by, created_at FROM workspaces WHERE id = $1",
     )
     .bind(workspace_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(|r| r.try_into()).transpose()
+}
+
+pub async fn get_workspace_by_slug(
+    pool: &AnyPool,
+    slug: &str,
+) -> anyhow::Result<Option<Workspace>> {
+    let row = sqlx::query_as::<_, WorkspaceRow>(
+        "SELECT id, slug, name, created_by, created_at FROM workspaces WHERE slug = $1",
+    )
+    .bind(slug)
     .fetch_optional(pool)
     .await?;
     row.map(|r| r.try_into()).transpose()

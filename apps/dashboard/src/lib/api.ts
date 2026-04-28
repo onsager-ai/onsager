@@ -64,6 +64,13 @@ export interface User {
   github_avatar_url: string | null;
 }
 
+/**
+ * How the active session was minted (issue #193). `"github"` for a real
+ * OAuth session; `"dev"` for a `${USER}@local` session minted by the
+ * `/api/auth/dev-login` flow available only in debug builds.
+ */
+export type SessionKind = 'github' | 'dev';
+
 export interface Credential {
   name: string;
   created_at: string;
@@ -629,11 +636,22 @@ export const api = {
   getHealth: () => request<{ status: string; version: string }>('/health'),
   // Auth
   getMe: () =>
-    request<{ user: User; auth_enabled: boolean; via?: 'session' | 'pat' }>(
+    request<{ user: User; session_kind: SessionKind; via?: 'session' | 'pat' }>(
       '/auth/me',
     ),
   logout: () =>
     request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+  /**
+   * Mint a session for the seeded `${USER}@local` dev user (issue #193).
+   * 404s in release builds — the route is `cfg(debug_assertions)`-gated
+   * server-side. The LoginPage probes for that 404 to decide whether to
+   * render the "Dev Login" button.
+   */
+  devLogin: () =>
+    request<{ ok: boolean; session_kind: SessionKind; user: User }>(
+      '/auth/dev-login',
+      { method: 'POST' },
+    ),
   // Personal Access Tokens (issue #143)
   listPats: () => request<{ pats: Pat[] }>('/pats'),
   createPat: (body: {

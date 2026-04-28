@@ -1,8 +1,61 @@
+import { useEffect, useState } from "react"
+import { TerminalSquare } from "lucide-react"
 import { OnsagerLogo } from "@/components/layout/OnsagerLogo"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { buttonVariants } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { api, ApiError } from "@/lib/api"
 
+/**
+ * Login screen.
+ *
+ * Renders the GitHub OAuth entry-point unconditionally. The "Dev Login"
+ * button is conditional: we probe `/api/auth/dev-login` with a HEAD-style
+ * request and only render the button when the route exists, which is the
+ * case in `cargo build` (debug) but not `cargo build --release`. Issue
+ * #193 — anonymous mode was deleted; dev-login replaces it as the
+ * SSO-free path for local development.
+ */
 export function LoginPage() {
+  const [devAvailable, setDevAvailable] = useState(false)
+  const [devLoggingIn, setDevLoggingIn] = useState(false)
+  const [devError, setDevError] = useState<string | null>(null)
+
+  // Detect whether the server has the dev-login route. A bare GET is
+  // enough — debug builds reply 405 (route registered, wrong method);
+  // release builds reply 404 (route absent). Any non-404 means present.
+  useEffect(() => {
+    let cancelled = false
+    fetch("/api/auth/dev-login", { method: "GET" })
+      .then((r) => {
+        if (!cancelled) setDevAvailable(r.status !== 404)
+      })
+      .catch(() => {
+        // Network failure — leave the button hidden rather than
+        // letting a backend outage suggest dev-login is available.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function handleDevLogin() {
+    setDevLoggingIn(true)
+    setDevError(null)
+    try {
+      await api.devLogin()
+      // Cookie is now set; reload so AuthProvider re-fetches /me and the
+      // app shell renders behind the new session.
+      window.location.href = "/"
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? `dev-login failed (${err.status})`
+          : "dev-login failed"
+      setDevError(msg)
+      setDevLoggingIn(false)
+    }
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
@@ -15,7 +68,7 @@ export function LoginPage() {
             Sign in to manage your distributed agent sessions.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           <a
             href="/api/auth/github"
             className={buttonVariants({ size: "lg", className: "w-full" })}
@@ -25,6 +78,37 @@ export function LoginPage() {
             </svg>
             Sign in with GitHub
           </a>
+          {devAvailable && (
+            <>
+              <div className="relative my-1 flex items-center">
+                <div className="flex-1 border-t border-border" />
+                <span className="px-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Local dev only
+                </span>
+                <div className="flex-1 border-t border-border" />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="w-full"
+                disabled={devLoggingIn}
+                onClick={handleDevLogin}
+              >
+                <TerminalSquare className="mr-2 h-5 w-5" />
+                {devLoggingIn ? "Signing in…" : "Dev Login"}
+              </Button>
+              {devError && (
+                <p className="text-center text-xs text-destructive">
+                  {devError}
+                </p>
+              )}
+              <p className="text-center text-[11px] text-muted-foreground">
+                Available in debug builds only. Build with{" "}
+                <span className="font-mono">--release</span> to disable.
+              </p>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>
