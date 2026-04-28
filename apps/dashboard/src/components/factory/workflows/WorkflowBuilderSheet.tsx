@@ -2,6 +2,7 @@ import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import {
   Sheet,
   SheetContent,
@@ -22,20 +23,24 @@ export interface WorkflowBuilderSheetProps {
  */
 export function WorkflowBuilderSheet({ open, onOpenChange }: WorkflowBuilderSheetProps) {
   const isMobile = useIsMobile()
+  const activeWorkspace = useOptionalActiveWorkspace()
 
+  // Prefer the URL-scoped workspace (#166); fall back to the user's first
+  // membership for routes mounted outside `/workspaces/:workspace/*` (e.g.
+  // legacy bare paths still alive during the redirect window).
   const { data: workspacesData } = useQuery({
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
-    enabled: open,
+    enabled: open && !activeWorkspace,
     staleTime: 30_000,
   })
-  const workspaces = workspacesData?.tenants ?? []
-  const tenantId = workspaces[0]?.id ?? ""
+  const workspaces = workspacesData?.workspaces ?? []
+  const workspaceId = activeWorkspace?.id ?? workspaces[0]?.id ?? ""
 
   const { data: installsData } = useQuery({
-    queryKey: ["workspace-installations", tenantId],
-    queryFn: () => api.listWorkspaceInstallations(tenantId),
-    enabled: open && !!tenantId,
+    queryKey: ["workspace-installations", workspaceId],
+    queryFn: () => api.listWorkspaceInstallations(workspaceId),
+    enabled: open && !!workspaceId,
     staleTime: 30_000,
   })
   const installations = useMemo(() => installsData?.installations ?? [], [installsData])
@@ -57,9 +62,9 @@ export function WorkflowBuilderSheet({ open, onOpenChange }: WorkflowBuilderShee
           </SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
-          {tenantId ? (
+          {workspaceId ? (
             <WorkflowBuilder
-              tenantId={tenantId}
+              workspaceId={workspaceId}
               installations={installations}
               onCreated={() => onOpenChange(false)}
             />

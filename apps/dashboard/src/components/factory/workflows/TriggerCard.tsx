@@ -17,14 +17,14 @@ import { RepoCombobox } from "./RepoCombobox"
 import type { WorkflowTriggerDraft } from "./workflow-draft"
 
 export interface TriggerCardProps {
-  tenantId: string
+  workspaceId: string
   installations: GitHubAppInstallation[]
   value: WorkflowTriggerDraft
   onChange: (next: WorkflowTriggerDraft) => void
 }
 
 export function TriggerCard({
-  tenantId,
+  workspaceId,
   installations,
   value,
   onChange,
@@ -80,7 +80,7 @@ export function TriggerCard({
           </SheetHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4">
             <TriggerForm
-              tenantId={tenantId}
+              workspaceId={workspaceId}
               installations={installations}
               value={value}
               onChange={onChange}
@@ -98,12 +98,12 @@ export function TriggerCard({
 }
 
 function TriggerForm({
-  tenantId,
+  workspaceId,
   installations,
   value,
   onChange,
 }: {
-  tenantId: string
+  workspaceId: string
   installations: GitHubAppInstallation[]
   value: WorkflowTriggerDraft
   onChange: (next: WorkflowTriggerDraft) => void
@@ -113,7 +113,7 @@ function TriggerForm({
       <div className="space-y-1.5">
         <span className="text-sm font-medium">Repository</span>
         <RepoCombobox
-          tenantId={tenantId}
+          workspaceId={workspaceId}
           installations={installations}
           installId={value.install_id}
           repoOwner={value.repo_owner}
@@ -139,7 +139,7 @@ function TriggerForm({
         <span className="text-sm font-medium">Trigger label</span>
         {value.install_id && value.repo_owner && value.repo_name ? (
           <LabelCombobox
-            tenantId={tenantId}
+            workspaceId={workspaceId}
             installId={value.install_id}
             repoOwner={value.repo_owner}
             repoName={value.repo_name}

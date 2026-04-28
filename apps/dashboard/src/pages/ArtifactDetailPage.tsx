@@ -22,6 +22,7 @@ import {
 import { ArrowLeft, Ban, MoreHorizontal, RefreshCw, ShieldCheck } from "lucide-react"
 import { LineageDAG } from "@/components/factory/LineageDAG"
 import { usePageHeader } from "@/components/layout/PageHeader"
+import { useActiveWorkspace } from "@/lib/workspace"
 
 const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -38,6 +39,7 @@ type ActionBanner =
 
 export function ArtifactDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const workspace = useActiveWorkspace()
   const queryClient = useQueryClient()
   const [banner, setBanner] = useState<ActionBanner>(null)
 
@@ -181,7 +183,7 @@ export function ArtifactDetailPage() {
   )
   usePageHeader({
     title: artifact?.name ?? "Artifact",
-    backTo: "/artifacts",
+    backTo: `/workspaces/${workspace.slug}/artifacts`,
     actions: headerActions,
   })
 
@@ -206,7 +208,7 @@ export function ArtifactDetailPage() {
       {/* Desktop header — back link + title + state badge. Mobile uses
           the global top bar (back arrow + title + overflow menu). */}
       <Link
-        to="/artifacts"
+        to={`/workspaces/${workspace.slug}/artifacts`}
         className="hidden items-center gap-1 text-sm text-muted-foreground hover:text-foreground md:inline-flex"
       >
         <ArrowLeft className="h-4 w-4" /> Back to Artifacts
@@ -362,7 +364,7 @@ export function ArtifactDetailPage() {
                       </TableCell>
                       <TableCell>
                         <Link
-                          to={`/sessions/${v.created_by_session}`}
+                          to={`/workspaces/${workspace.slug}/sessions/${v.created_by_session}`}
                           className="font-mono text-xs hover:underline"
                         >
                           {v.created_by_session.slice(0, 8)}
@@ -400,7 +402,7 @@ export function ArtifactDetailPage() {
                     <TableCell className="font-mono">v{entry.version}</TableCell>
                     <TableCell>
                       <Link
-                        to={`/sessions/${entry.session_id}`}
+                        to={`/workspaces/${workspace.slug}/sessions/${entry.session_id}`}
                         className="font-mono text-xs hover:underline"
                       >
                         {entry.session_id.slice(0, 8)}
@@ -440,7 +442,7 @@ export function ArtifactDetailPage() {
                     <TableCell className="text-xs">{entry.role}</TableCell>
                     <TableCell>
                       <Link
-                        to={`/artifacts/${entry.source_artifact_id}`}
+                        to={`/workspaces/${workspace.slug}/artifacts/${entry.source_artifact_id}`}
                         className="font-mono text-xs hover:underline"
                       >
                         {entry.source_artifact_id}

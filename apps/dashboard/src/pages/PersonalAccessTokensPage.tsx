@@ -94,7 +94,13 @@ interface CreatePatDialogProps {
 function CreatePatDialog({ open, onOpenChange, workspaces }: CreatePatDialogProps) {
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
-  const [tenantId, setTenantId] = useState<string>("__all__")
+  // PATs are pinned to a specific workspace (#143/#163: `workspace_id`
+  // is `NOT NULL` on the wire). Default to the first membership so the
+  // common case is one click; multi-workspace users can switch in the
+  // dropdown.
+  const [workspaceId, setWorkspaceId] = useState<string>(
+    () => workspaces[0]?.id ?? "",
+  )
   const [expiryChoice, setExpiryChoice] = useState<ExpiryChoiceId>("30")
   const [customDate, setCustomDate] = useState("")
   const [revealedToken, setRevealedToken] = useState<string | null>(null)
@@ -104,12 +110,12 @@ function CreatePatDialog({ open, onOpenChange, workspaces }: CreatePatDialogProp
   const create = useMutation({
     mutationFn: (body: {
       name: string
-      tenant_id: string | null
+      workspace_id: string
       expires_at: string
     }) =>
       api.createPat({
         name: body.name,
-        tenant_id: body.tenant_id,
+        workspace_id: body.workspace_id,
         expires_at: body.expires_at,
       }),
     onSuccess: (data) => {
@@ -123,7 +129,7 @@ function CreatePatDialog({ open, onOpenChange, workspaces }: CreatePatDialogProp
 
   function reset() {
     setName("")
-    setTenantId("__all__")
+    setWorkspaceId(workspaces[0]?.id ?? "")
     setExpiryChoice("30")
     setCustomDate("")
     setRevealedToken(null)
@@ -145,6 +151,10 @@ function CreatePatDialog({ open, onOpenChange, workspaces }: CreatePatDialogProp
       setError("Name is required")
       return
     }
+    if (!workspaceId) {
+      setError("Pick a workspace to pin this token to")
+      return
+    }
     const exp = expiryFromChoice(expiryChoice, customDate)
     if (exp.error) {
       setError(exp.error)
@@ -152,7 +162,7 @@ function CreatePatDialog({ open, onOpenChange, workspaces }: CreatePatDialogProp
     }
     create.mutate({
       name: trimmed,
-      tenant_id: tenantId === "__all__" ? null : tenantId,
+      workspace_id: workspaceId,
       expires_at: exp.iso,
     })
   }
@@ -201,14 +211,13 @@ function CreatePatDialog({ open, onOpenChange, workspaces }: CreatePatDialogProp
                   Workspace
                 </label>
                 <Select
-                  value={tenantId}
-                  onValueChange={(v) => setTenantId(v ?? "__all__")}
+                  value={workspaceId}
+                  onValueChange={(v) => setWorkspaceId(v ?? "")}
                 >
                   <SelectTrigger id="pat-workspace">
-                    <SelectValue />
+                    <SelectValue placeholder="Pick a workspace" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__all__">All workspaces</SelectItem>
                     {workspaces.map((w) => (
                       <SelectItem key={w.id} value={w.id}>
                         {w.name}
@@ -217,8 +226,8 @@ function CreatePatDialog({ open, onOpenChange, workspaces }: CreatePatDialogProp
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Restricting to a workspace blocks the token from touching
-                  other workspaces.
+                  Tokens are pinned to one workspace. Mint another token if
+                  you need to call a different workspace's API.
                 </p>
               </div>
 
@@ -315,7 +324,7 @@ function CreatePatDialog({ open, onOpenChange, workspaces }: CreatePatDialogProp
 
 interface PatRowProps {
   pat: Pat
-  workspaceName: (id: string | null) => string
+  workspaceName: (id: string) => string
   onRevoke: (id: string) => void
   isRevoking: boolean
 }
@@ -344,7 +353,7 @@ function PatRow({ pat, workspaceName, onRevoke, isRevoking }: PatRowProps) {
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Workspace: {workspaceName(pat.tenant_id)} · Expires{" "}
+            Workspace: {workspaceName(pat.workspace_id)} · Expires{" "}
             {formatTimestamp(pat.expires_at)}
           </p>
           <p
@@ -401,13 +410,12 @@ export function PersonalAccessTokensPage() {
   })
 
   const workspaces = useMemo(
-    () => workspacesQuery.data?.tenants ?? [],
+    () => workspacesQuery.data?.workspaces ?? [],
     [workspacesQuery.data],
   )
   const workspaceName = useMemo(() => {
     const byId = new Map(workspaces.map((w) => [w.id, w.name]))
-    return (id: string | null) =>
-      id == null ? "All workspaces" : byId.get(id) ?? id
+    return (id: string) => byId.get(id) ?? id
   }, [workspaces])
 
   // Anonymous mode (auth disabled or no session) has no concept of a user

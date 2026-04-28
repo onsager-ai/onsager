@@ -11,7 +11,7 @@ import type {
 const installations: GitHubAppInstallation[] = [
   {
     id: "inst_one",
-    tenant_id: "t1",
+    workspace_id: "t1",
     install_id: 1001,
     account_login: "onsager-ai",
     account_type: "organization",
@@ -19,7 +19,7 @@ const installations: GitHubAppInstallation[] = [
   },
   {
     id: "inst_two",
-    tenant_id: "t1",
+    workspace_id: "t1",
     install_id: 1002,
     account_login: "tikazyq",
     account_type: "user",
@@ -69,7 +69,7 @@ describe("RepoCombobox", () => {
   it("groups repos under each install's account login", async () => {
     mount(
       <RepoCombobox
-        tenantId="t1"
+        workspaceId="t1"
         installations={installations}
         installId=""
         repoOwner=""
@@ -93,7 +93,7 @@ describe("RepoCombobox", () => {
     const onChange = vi.fn()
     mount(
       <RepoCombobox
-        tenantId="t1"
+        workspaceId="t1"
         installations={installations}
         installId=""
         repoOwner=""
@@ -114,7 +114,7 @@ describe("RepoCombobox", () => {
   it("offers a deep-link to configure repository access on GitHub", async () => {
     mount(
       <RepoCombobox
-        tenantId="t1"
+        workspaceId="t1"
         installations={installations}
         installId="inst_one"
         repoOwner=""

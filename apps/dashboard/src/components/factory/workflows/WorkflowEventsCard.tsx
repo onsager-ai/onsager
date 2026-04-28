@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { api, type SpineEvent, type WorkflowRun } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useActiveWorkspace } from "@/lib/workspace"
 
 // Events scoped to a single workflow: one `trigger.fired` stream keyed by
 // workflow_id plus a per-artifact stream (`workflow:{artifact_id}`) for
@@ -30,10 +31,12 @@ export function WorkflowEventsCard({
     [workflowId, artifactIds],
   )
 
+  const workspace = useActiveWorkspace()
   const queries = useQueries({
     queries: streamIds.map((sid) => ({
-      queryKey: ["workflow-events", sid],
-      queryFn: () => api.getSpineEvents({ stream_id: sid, limit: 50 }),
+      queryKey: ["workflow-events", workspace.id, sid],
+      queryFn: () =>
+        api.getSpineEvents(workspace.id, { stream_id: sid, limit: 50 }),
       refetchInterval: 5000,
     })),
   })

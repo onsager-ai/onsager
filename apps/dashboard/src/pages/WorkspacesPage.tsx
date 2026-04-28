@@ -25,7 +25,7 @@ export function WorkspacesPage() {
     queryFn: api.listWorkspaces,
     enabled: canLoadWorkspaces,
   })
-  const workspaces = useMemo(() => data?.tenants ?? [], [data])
+  const workspaces = useMemo(() => data?.workspaces ?? [], [data])
   const [createOpen, setCreateOpen] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const welcome = searchParams.get("welcome") === "1"

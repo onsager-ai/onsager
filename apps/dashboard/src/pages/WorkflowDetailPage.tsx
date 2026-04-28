@@ -20,6 +20,7 @@ import { WorkflowEventsCard } from "@/components/factory/workflows/WorkflowEvent
 import { WorkflowSessionsCard } from "@/components/factory/workflows/WorkflowSessionsCard"
 import { outputArtifactKind } from "@/components/factory/workflows/workflow-meta"
 import { usePageHeader } from "@/components/layout/PageHeader"
+import { useActiveWorkspace } from "@/lib/workspace"
 
 const STATUS_VARIANT: Record<StageRunStatus, "default" | "secondary" | "destructive" | "outline"> = {
   pending: "outline",
@@ -37,6 +38,7 @@ const STATUS_ICON: Record<StageRunStatus, typeof Circle> = {
 
 export function WorkflowDetailPage() {
   const { id = "" } = useParams<{ id: string }>()
+  const workspace = useActiveWorkspace()
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["workflow", id],
@@ -69,7 +71,7 @@ export function WorkflowDetailPage() {
   )
   usePageHeader({
     title: workflow?.name ?? "Workflow",
-    backTo: "/workflows",
+    backTo: `/workspaces/${workspace.slug}/workflows`,
     actions: headerActions,
   })
 
@@ -86,7 +88,7 @@ export function WorkflowDetailPage() {
     <div className="space-y-4 md:space-y-6">
       {/* Desktop-only page header. Mobile uses the global top bar. */}
       <div className="hidden space-y-2 md:block">
-        <BackLink />
+        <BackLink workspaceSlug={workspace.slug} />
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <h1 className="truncate text-2xl font-bold tracking-tight">
@@ -229,9 +231,13 @@ function iconClass(status: StageRunStatus): string {
   }
 }
 
-function BackLink() {
+function BackLink({ workspaceSlug }: { workspaceSlug: string }) {
   return (
-    <Button variant="ghost" size="sm" render={<Link to="/workflows" />}>
+    <Button
+      variant="ghost"
+      size="sm"
+      render={<Link to={`/workspaces/${workspaceSlug}/workflows`} />}
+    >
       <ArrowLeft className="h-4 w-4" />
       Workflows
     </Button>

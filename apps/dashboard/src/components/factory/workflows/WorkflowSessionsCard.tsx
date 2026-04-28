@@ -4,6 +4,7 @@ import { useQueries } from "@tanstack/react-query"
 import { api, type WorkflowRun } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useActiveWorkspace } from "@/lib/workspace"
 
 // Sessions that shaped this workflow's artifacts. The durable edge lives
 // in the `vertical_lineage` table (artifact_id, version, session_id),
@@ -12,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 // its current emission path, so we read lineage directly via the
 // artifact-detail endpoint rather than filtering events client-side.
 export function WorkflowSessionsCard({ runs }: { runs: WorkflowRun[] }) {
+  const workspace = useActiveWorkspace()
   const artifactIds = useMemo(
     () =>
       Array.from(
@@ -75,7 +77,7 @@ export function WorkflowSessionsCard({ runs }: { runs: WorkflowRun[] }) {
           rows.map((r) => (
             <Link
               key={`${r.artifact_id}:${r.session_id}:${r.version}`}
-              to={`/sessions/${r.session_id}`}
+              to={`/workspaces/${workspace.slug}/sessions/${r.session_id}`}
               className="flex items-center gap-2 rounded-md border px-3 py-2 hover:bg-muted/50"
             >
               <Badge variant="outline" className="shrink-0 font-mono text-[10px]">

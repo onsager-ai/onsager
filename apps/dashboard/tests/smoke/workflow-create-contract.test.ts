@@ -14,7 +14,7 @@ import {
 describe("draftToCreateRequest", () => {
   const installation: GitHubAppInstallation = {
     id: "inst_abc",
-    tenant_id: "t_1",
+    workspace_id: "t_1",
     install_id: 12345,
     account_login: "onsager-ai",
     account_type: "organization",
@@ -49,7 +49,7 @@ describe("draftToCreateRequest", () => {
   it("flattens the trigger into the backend's snake_case keys", () => {
     const out = draftToCreateRequest(draft(), [installation], "t_1", true)
     expect(out).toMatchObject({
-      tenant_id: "t_1",
+      workspace_id: "t_1",
       name: "Issue → PR",
       trigger_kind: "github-issue-webhook",
       repo_owner: "onsager-ai",
@@ -81,9 +81,9 @@ describe("draftToCreateRequest", () => {
     expect(out.active).toBe(false)
   })
 
-  it("throws when tenant_id is blank", () => {
+  it("throws when workspace_id is blank", () => {
     expect(() => draftToCreateRequest(draft(), [installation], "  ", true)).toThrow(
-      /tenant_id/,
+      /workspace_id/,
     )
   })
 

@@ -190,11 +190,11 @@ export function draftToRequestTrigger(t: WorkflowTriggerDraft): WorkflowTrigger 
 export function draftToCreateRequest(
   draft: WorkflowDraft,
   installations: GitHubAppInstallation[],
-  tenantId: string,
+  workspaceId: string,
   activate: boolean,
 ): CreateWorkflowRequest {
-  if (!tenantId.trim()) {
-    throw new ApiError("tenant_id is required", 400)
+  if (!workspaceId.trim()) {
+    throw new ApiError("workspace_id is required", 400)
   }
   if (!isTriggerReady(draft.trigger)) {
     throw new ApiError(
@@ -210,7 +210,7 @@ export function draftToCreateRequest(
     )
   }
   return {
-    tenant_id: tenantId,
+    workspace_id: workspaceId,
     name: draft.name.trim(),
     trigger_kind: "github-issue-webhook",
     install_id: install.install_id,

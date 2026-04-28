@@ -37,11 +37,11 @@ export function useSetupProgress(): SetupProgress {
     enabled: authed,
     staleTime: 30_000,
   })
-  const workspaces = wsData?.tenants ?? []
+  const workspaces = wsData?.workspaces ?? []
   const firstWs = workspaces[0]
 
-  // Installations live per-tenant; a user may install the App in any of
-  // their workspaces. Fan out one query per workspace so the checklist
+  // Installations live per-workspace; a user may install the App in any
+  // of their workspaces. Fan out one query per workspace so the checklist
   // reflects the truth regardless of which workspace got the install.
   // React Query shares the cache with `WorkspaceCard`'s per-id queries.
   const installQueries = useQueries({

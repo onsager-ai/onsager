@@ -14,7 +14,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 export interface LabelComboboxProps {
-  tenantId: string
+  workspaceId: string
   installId: string
   repoOwner: string
   repoName: string
@@ -29,7 +29,7 @@ export interface LabelComboboxProps {
  * the value committed is always a discrete label string.
  */
 export function LabelCombobox({
-  tenantId,
+  workspaceId,
   installId,
   repoOwner,
   repoName,
@@ -41,10 +41,10 @@ export function LabelCombobox({
   const [query, setQuery] = useState("")
 
   const fetchEnabled =
-    !!tenantId && !!installId && !!repoOwner && !!repoName
+    !!workspaceId && !!installId && !!repoOwner && !!repoName
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["repo-labels", tenantId, installId, repoOwner, repoName],
-    queryFn: () => api.listRepoLabels(tenantId, installId, repoOwner, repoName),
+    queryKey: ["repo-labels", workspaceId, installId, repoOwner, repoName],
+    queryFn: () => api.listRepoLabels(workspaceId, installId, repoOwner, repoName),
     enabled: fetchEnabled,
     staleTime: 30_000,
     retry: false,

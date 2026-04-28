@@ -2,6 +2,7 @@ import { Fragment, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { api, type SpineEvent } from "@/lib/api"
+import { useActiveWorkspace } from "@/lib/workspace"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,12 +27,13 @@ const STREAM_TYPES = ["", "stiglab", "synodic", "forge", "ising"]
 
 export function SpinePage() {
   usePageHeader({ title: "Event Spine" })
+  const workspace = useActiveWorkspace()
   const [streamType, setStreamType] = useState("")
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
   const { data, isLoading } = useQuery({
-    queryKey: ["spine-events", streamType],
-    queryFn: () => api.getSpineEvents({
+    queryKey: ["spine-events", workspace.id, streamType],
+    queryFn: () => api.getSpineEvents(workspace.id, {
       stream_type: streamType || undefined,
       limit: 100,
     }),

@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { api, type CreateWorkflowRequest, type GitHubAppInstallation } from "@/lib/api"
+import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CardStackEditor } from "./CardStackEditor"
@@ -14,14 +15,14 @@ import {
 } from "./workflow-draft"
 
 export interface WorkflowBuilderProps {
-  tenantId: string
+  workspaceId: string
   installations: GitHubAppInstallation[]
   initialDraft?: WorkflowDraft
   onCreated?: (id: string) => void
 }
 
 export function WorkflowBuilder({
-  tenantId,
+  workspaceId,
   installations,
   initialDraft,
   onCreated,
@@ -29,6 +30,7 @@ export function WorkflowBuilder({
   const [draft, setDraft] = useState<WorkflowDraft>(initialDraft ?? emptyDraft())
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const activeWorkspace = useOptionalActiveWorkspace()
 
   const canSave =
     draft.name.trim() !== "" &&
@@ -40,13 +42,17 @@ export function WorkflowBuilder({
     onSuccess: ({ workflow }) => {
       queryClient.invalidateQueries({ queryKey: ["workflows"] })
       if (onCreated) onCreated(workflow.id)
-      else navigate(`/workflows/${workflow.id}`)
+      else if (activeWorkspace) {
+        navigate(`/workspaces/${activeWorkspace.slug}/workflows/${workflow.id}`)
+      } else {
+        navigate(`/workflows/${workflow.id}`)
+      }
     },
   })
 
   const save = (active: boolean) => {
     if (!canSave) return
-    create.mutate(draftToCreateRequest(draft, installations, tenantId, active))
+    create.mutate(draftToCreateRequest(draft, installations, workspaceId, active))
   }
 
   return (
@@ -66,7 +72,7 @@ export function WorkflowBuilder({
       <PresetPicker draft={draft} onApply={setDraft} />
 
       <CardStackEditor
-        tenantId={tenantId}
+        workspaceId={workspaceId}
         installations={installations}
         draft={draft}
         onChange={setDraft}
