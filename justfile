@@ -115,10 +115,12 @@ dev-synodic port="3001":
 
 # ── DB ───────────────────────────────────────────────────────────────
 db-migrate:
-    psql "$DATABASE_URL" -f crates/onsager-spine/migrations/001_initial.sql
-    psql "$DATABASE_URL" -f crates/onsager-spine/migrations/002_artifacts.sql
-    psql "$DATABASE_URL" -f crates/onsager-spine/migrations/003_artifacts_git_context.sql
-    psql "$DATABASE_URL" -f crates/onsager-spine/migrations/004_artifact_pipeline.sql
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for f in crates/onsager-spine/migrations/*.sql; do
+        echo "==> applying $f"
+        psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$f"
+    done
 
 # ── Test (with spine integration) ────────────────────────────────────
 
