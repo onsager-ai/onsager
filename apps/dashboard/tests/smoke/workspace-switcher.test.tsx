@@ -98,4 +98,35 @@ describe("WorkspaceSwitcher", () => {
       )
     },
   )
+
+  // Regression: the AppSidebar (and the switcher inside it) lives in
+  // AppLayout, which mounts above the `/workspaces/:workspace/*` route —
+  // so WorkspaceContext is not available. Without a URL fallback in
+  // useOptionalActiveWorkspace, the switcher shows "Select workspace"
+  // and every sidebar nav link resolves to `/workspaces` regardless of
+  // the active workspace.
+  it("renders the active workspace when mounted outside WorkspaceScope", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/workspaces/acme/sessions"]}>
+          <Routes>
+            <Route
+              path="/workspaces/:workspace/*"
+              element={
+                <SidebarProvider>
+                  <WorkspaceSwitcher />
+                  <LocationProbe />
+                </SidebarProvider>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText("Acme")).toBeInTheDocument()
+    expect(screen.getByText("acme")).toBeInTheDocument()
+  })
 })
