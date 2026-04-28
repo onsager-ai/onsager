@@ -126,11 +126,23 @@ export function useActiveWorkspace(): Workspace {
   return ctx.workspace
 }
 
-/** Optional: callers outside scoped routes (sidebar switcher) read this. */
+/** Optional: callers outside scoped routes (sidebar switcher, AppSidebar
+ * nav links) read this. The sidebar lives in `AppLayout`, which mounts
+ * above the `/workspaces/:workspace/*` route, so `WorkspaceContext` is
+ * not in scope there. Fall back to the URL pathname + memberships query
+ * so the sidebar can resolve `/workspaces/<active>/...` links and the
+ * switcher's trigger button shows the active workspace's name.
+ */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useOptionalActiveWorkspace(): Workspace | null {
   const ctx = useContext(WorkspaceContext)
-  return ctx?.workspace ?? null
+  const location = useLocation()
+  const { data } = useWorkspacesQuery()
+  if (ctx) return ctx.workspace
+  const match = location.pathname.match(/^\/workspaces\/([^/]+)/)
+  const slug = match?.[1]
+  if (!slug) return null
+  return data?.workspaces?.find((w) => w.slug === slug) ?? null
 }
 
 /** All workspaces the caller is a member of (memoized list from cache). */
