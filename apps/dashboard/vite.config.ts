@@ -3,6 +3,14 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+// VITE_HMR_CLIENT_PORT lets the per-slot dev stack (#194) aim the
+// browser-side HMR WebSocket at the slot's edge port (e.g. 9010) when
+// Vite is reached through Caddy. Falls back to the default Vite behavior
+// for the legacy slot-0 / `just dev` flow.
+const hmrClientPort = process.env.VITE_HMR_CLIENT_PORT
+  ? Number(process.env.VITE_HMR_CLIENT_PORT)
+  : undefined
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -11,6 +19,10 @@ export default defineConfig({
     },
   },
   server: {
+    host: process.env.VITE_HOST ?? 'localhost',
+    hmr: hmrClientPort
+      ? { clientPort: hmrClientPort }
+      : undefined,
     proxy: {
       '/api': 'http://localhost:3000',
       '/agent': {

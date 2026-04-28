@@ -174,6 +174,32 @@ Services:
 
 To stop: `Ctrl+C` for services, `just dev-down` for Postgres.
 
+### Parallel dev environments (per-worktree slots)
+
+When two agents (or a human + an agent) need to run the stack on the
+same VM at the same time, the **slot system** (#194) gives each
+worktree a private, fully-containerized copy of the stack on a
+disjoint port block. Slot 0 is the main checkout and uses today's
+port layout via `just dev`; slots 1..=99 use a 10-port stride
+starting at 9000.
+
+```bash
+just worktree-new feat-a              # branch + slot + compose project, all up
+just worktree-list                    # see slots, ports, container status
+just slot-exec  feat-a cargo test -p stiglab    # one-off command in the slot
+just worktree-tunnel feat-a           # SSH `-L` flags for laptop access
+just worktree-up    feat-a            # bring an existing slot back after reboot
+just worktree-rm    feat-a            # tear down + remove worktree (keeps branch)
+just worktree-rm    feat-a --with-branch  # also delete the branch
+```
+
+The slot's edge port serves the dashboard and reverse-proxies the
+backend APIs same-origin (`/api/synodic/...`, `/api/forge/...`,
+`/api/...` → stiglab), so the dashboard makes relative-path fetches
+with no per-environment URL config and no CORS surface. SSH-forward
+`localhost:9010` (slot 1's edge), open `http://localhost:9010/`,
+done. See [spec #194](https://github.com/onsager-ai/onsager/issues/194).
+
 ## Build & Test
 
 ```bash

@@ -1,0 +1,37 @@
+// devcontainer template for per-slot dev environments (#194).
+//
+// Copy this into <worktree>/.devcontainer/devcontainer.json (the
+// `just worktree-new` recipe does this automatically) so VS Code /
+// Cursor Remote-Containers can attach into the slot's stiglab container.
+// rust-analyzer then runs against the slot's exact toolchain + the
+// per-slot incremental cargo cache, so type resolution and hover info
+// match the running build.
+//
+// One devcontainer per worktree, each pinned to its own compose project
+// — opening two worktrees in two editor windows attaches into two
+// different slot stacks without crosstalk.
+{
+  "name": "onsager-slot",
+  "dockerComposeFile": [
+    "../deploy/dev/docker-compose.slot.yml"
+  ],
+  "service": "stiglab",
+  "workspaceFolder": "/work",
+  "shutdownAction": "none",
+  "remoteEnv": {
+    "RUST_BACKTRACE": "1"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb"
+      ],
+      "settings": {
+        "rust-analyzer.cargo.targetDir": true,
+        "rust-analyzer.check.command": "clippy"
+      }
+    }
+  }
+}

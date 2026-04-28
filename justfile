@@ -187,3 +187,120 @@ install:
     cargo install --path crates/ising
     cargo install --path crates/stiglab
     cargo install --path crates/synodic
+
+# ── Per-worktree dev slots (spec #194) ───────────────────────────────
+#
+# Each worktree maps to a numbered slot. A slot owns a docker-compose
+# project (`onsager-slot{N}`), a private postgres + spine, and a
+# 10-port block on the VM (edge `9000+10*N`, postgres `9000+10*N+1`).
+# Slot 0 is the main checkout and uses the legacy port layout via
+# `just dev` — these recipes only touch slots 1..=99.
+#
+# Typical flow on the VM:
+#   just worktree-new feat-a            # branch from main, allocate slot, bring up
+#   just worktree-list                  # see slots, ports, project names
+#   just slot-exec feat-a cargo test -p stiglab
+#   just worktree-tunnel feat-a         # print SSH `-L` flags for the laptop
+#   just worktree-rm feat-a             # tear down slot + volumes + worktree dir
+#   just worktree-rm feat-a --with-branch  # also delete the branch
+#
+# All of these resolve the slot from `.dev-slots.json` via xtask, so
+# the human never types port numbers.
+
+# Allocate a fresh slot, create a worktree off main, bring the slot's
+# compose stack up. The `<base>` arg defaults to `main`; pass another
+# base branch to fork from a different point.
+worktree-new name base="main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="{{name}}"; base="{{base}}"
+    if [ -e "worktrees/$name" ]; then
+      echo "worktrees/$name already exists" >&2; exit 1
+    fi
+    slot=$(cargo run -p xtask --quiet -- slot alloc "$name" --branch "$name")
+    mkdir -p worktrees
+    git worktree add -b "$name" "worktrees/$name" "$base"
+    cargo run -p xtask --quiet -- slot env "$name" > "worktrees/$name/.env.slot"
+    mkdir -p "worktrees/$name/.devcontainer"
+    cp deploy/dev/devcontainer.json "worktrees/$name/.devcontainer/devcontainer.json"
+    project="onsager-slot${slot}"
+    docker compose --env-file "worktrees/$name/.env.slot" \
+        -f deploy/dev/docker-compose.slot.yml \
+        -p "$project" up -d --wait
+    echo ""
+    echo "=== slot $slot ($name) up ==="
+    cargo run -p xtask --quiet -- slot tunnel "$name"
+
+# Bring an existing slot's compose project back up after a VM reboot
+# or manual stop. Does NOT re-allocate a slot; the worktree dir and
+# branch must already exist.
+worktree-up name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="{{name}}"
+    project=$(cargo run -p xtask --quiet -- slot project "$name")
+    docker compose --env-file "worktrees/$name/.env.slot" \
+        -f deploy/dev/docker-compose.slot.yml \
+        -p "$project" up -d --wait
+    cargo run -p xtask --quiet -- slot tunnel "$name"
+
+# Show every slot — name, slot number, ports, project, worktree path.
+# Includes container status (best-effort `docker compose ps`).
+worktree-list:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo run -p xtask --quiet -- slot list
+    echo ""
+    echo "=== container status ==="
+    cargo run -p xtask --quiet -- slot list --json \
+      | (command -v jq >/dev/null && jq -r '.slots[] | select(.slot != 0) | .name' || \
+         python3 -c 'import json,sys;[print(s["name"]) for s in json.load(sys.stdin)["slots"] if s["slot"]!=0]') \
+      | while read -r name; do
+          [ -z "$name" ] && continue
+          project=$(cargo run -p xtask --quiet -- slot project "$name" 2>/dev/null || true)
+          [ -z "$project" ] && continue
+          echo "--- $name ($project) ---"
+          docker compose -p "$project" ps 2>/dev/null || echo "(not running)"
+        done
+
+# Tear down a slot's compose project + per-slot volumes, remove the
+# worktree dir, free the slot. Pass --with-branch to also delete the
+# git branch (default: keep — branches are cheap, accidental deletion
+# is annoying).
+worktree-rm name *flags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="{{name}}"; flags="{{flags}}"
+    with_branch=0
+    for f in $flags; do [ "$f" = "--with-branch" ] && with_branch=1; done
+    project=$(cargo run -p xtask --quiet -- slot project "$name")
+    docker compose --env-file "worktrees/$name/.env.slot" \
+        -f deploy/dev/docker-compose.slot.yml \
+        -p "$project" down -v --remove-orphans || true
+    git worktree remove --force "worktrees/$name" 2>/dev/null || rm -rf "worktrees/$name"
+    if [ "$with_branch" = "1" ]; then
+      git branch -D "$name" 2>/dev/null || true
+      echo "deleted branch $name"
+    fi
+    cargo run -p xtask --quiet -- slot free "$name"
+    echo "freed slot for $name"
+
+# Print the SSH `-L` flags needed to reach a slot from a laptop.
+# Pass the second arg to override the SSH host (defaults to "vm").
+worktree-tunnel name host="vm":
+    cargo run -p xtask --quiet -- slot tunnel "{{name}}" --host="{{host}}"
+
+# Run a one-off command inside a slot's stiglab container — same shell,
+# same target dir, same toolchain as the live cargo-watch loop.
+#   just slot-exec feat-a cargo test -p stiglab
+#   just slot-exec feat-a bash
+slot-exec name *cmd:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="{{name}}"
+    project=$(cargo run -p xtask --quiet -- slot project "$name")
+    if [ -z "{{cmd}}" ]; then
+      docker compose -p "$project" exec stiglab bash
+    else
+      docker compose -p "$project" exec stiglab {{cmd}}
+    fi

@@ -1,0 +1,59 @@
+# Per-slot edge proxy.
+#
+# Variables come from the slot's .env.slot (sourced by docker-compose):
+#   SLOT_EDGE_PORT     — port Caddy listens on (also the SSH-forward target)
+#
+# Routing model — same-origin for everything the browser hits:
+#   /api/synodic/*  → synodic:3001  (strip prefix)
+#   /api/forge/*    → forge:3003    (strip prefix)
+#   /api/*          → stiglab:3000  (catch-all; matches today's vite proxy)
+#   /agent          → stiglab:3000  (WebSocket upgrade)
+#   /*              → dashboard:5173 (Vite dev server, with HMR upgrade)
+#
+# Caddy upgrades any WebSocket request transparently — no per-route
+# `@websocket matcher` block is needed for the dashboard's HMR or the
+# agent socket. The order of `handle` blocks is significant: more
+# specific paths come first.
+
+{
+    # Run as a single, ephemeral container — disable the admin endpoint so
+    # the slot doesn't open another port we'd have to track.
+    admin off
+    # Don't try to provision certs; we serve plain HTTP behind SSH-forward.
+    auto_https off
+    persist_config off
+}
+
+:{$SLOT_EDGE_PORT} {
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+
+    # Synodic is on /api/synodic/<route>; strip the prefix so its routes
+    # mounted under /api/<route> see the path they expect.
+    handle_path /api/synodic/* {
+        reverse_proxy synodic:3001
+    }
+
+    handle_path /api/forge/* {
+        reverse_proxy forge:3003
+    }
+
+    # Stiglab catch-all under /api/* and the agent WS. This matches the
+    # dev-time behavior of vite.config.ts so the dashboard needs no
+    # per-environment URL changes.
+    handle /api/* {
+        reverse_proxy stiglab:3000
+    }
+    handle /agent* {
+        reverse_proxy stiglab:3000
+    }
+
+    # Everything else → the Vite dev server. Vite handles its own HMR
+    # WebSocket on the same port; Caddy upgrades transparently.
+    handle {
+        reverse_proxy dashboard:5173
+    }
+}

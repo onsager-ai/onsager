@@ -11,3 +11,10 @@
 **/dist
 **/.turbo
 **/.next
+# Per-worktree dev slots (#194). The manifest is host-local — slot
+# numbers describe a single VM's port layout and shouldn't propagate
+# across machines. The worktrees/ directory holds linked git worktrees
+# created by `just worktree-new` and is similarly local.
+/.dev-slots.json
+/worktrees/
+**/.env.slot
