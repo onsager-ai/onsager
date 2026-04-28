@@ -32,10 +32,11 @@ services:
       PGPASSWORD: onsager
     entrypoint: >
       sh -c "
-        psql -X -v ON_ERROR_STOP=1 -h db -U onsager -d onsager -f /migrations/001_initial.sql &&
-        psql -X -v ON_ERROR_STOP=1 -h db -U onsager -d onsager -f /migrations/002_artifacts.sql &&
-        psql -X -v ON_ERROR_STOP=1 -h db -U onsager -d onsager -f /migrations/003_artifacts_git_context.sql &&
-        psql -X -v ON_ERROR_STOP=1 -h db -U onsager -d onsager -f /migrations/004_artifact_pipeline.sql
+        set -e;
+        for f in /migrations/*.sql; do
+          echo \"==> applying $$f\";
+          psql -X -v ON_ERROR_STOP=1 -h db -U onsager -d onsager -f \"$$f\";
+        done
       "
 
 volumes:
