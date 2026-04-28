@@ -92,18 +92,28 @@ fn require_auth_user(auth_user: &AuthUser) -> Result<&str, Response> {
     }
 }
 
-/// Issue #156: ensure the workflow's owner has at least one Claude
-/// auth credential before activating. Returns a 4xx response when
-/// missing so the dashboard can surface a "connect Claude credentials"
-/// CTA.
+/// Issue #156 (workspace-scoped post-#164): ensure the workflow's owner
+/// has at least one Claude auth credential **in the workflow's
+/// workspace** before activating. Returns a 4xx response when missing so
+/// the dashboard can surface a "connect Claude credentials" CTA.
 ///
 /// Checks by exact credential name (not "any credential row") because
 /// the Claude CLI only honors specific env vars; a user with only
 /// custom-named secrets would silently activate into a workflow whose
 /// every session fails with "stdout closed without result event".
 #[allow(clippy::result_large_err)]
-async fn require_owner_credentials(state: &AppState, owner_user_id: &str) -> Result<(), Response> {
-    match db::user_has_credential_in(&state.db, owner_user_id, CLAUDE_AUTH_CREDENTIAL_NAMES).await
+async fn require_owner_credentials(
+    state: &AppState,
+    workspace_id: &str,
+    owner_user_id: &str,
+) -> Result<(), Response> {
+    match db::user_has_credential_in(
+        &state.db,
+        workspace_id,
+        owner_user_id,
+        CLAUDE_AUTH_CREDENTIAL_NAMES,
+    )
+    .await
     {
         Ok(true) => Ok(()),
         Ok(false) => Err((
@@ -111,11 +121,12 @@ async fn require_owner_credentials(state: &AppState, owner_user_id: &str) -> Res
             Json(serde_json::json!({
                 "error": "no_credentials_for_workflow",
                 "message": format!(
-                    "Workflow owner has no Claude credentials. Connect one of {:?} in Settings before activating.",
+                    "Workflow owner has no Claude credentials in this workspace. Connect one of {:?} in Settings before activating.",
                     CLAUDE_AUTH_CREDENTIAL_NAMES
                 ),
                 "required_one_of": CLAUDE_AUTH_CREDENTIAL_NAMES,
                 "owner_user_id": owner_user_id,
+                "workspace_id": workspace_id,
             })),
         )
             .into_response()),
@@ -299,11 +310,14 @@ pub async fn create_workflow(
     // stays `active=false` and the caller sees the activation error.
     if body.active {
         // Issue #156: same activation gate as patch_workflow — refuse to
-        // activate if the owner has no credentials. Here `created_by` is
-        // the caller themselves (just set above), so this in practice
-        // surfaces the case where a user creates+activates without ever
-        // having connected Claude credentials.
-        if let Err(r) = require_owner_credentials(&state, &workflow.created_by).await {
+        // activate if the owner has no credentials in the workflow's
+        // workspace (post-#164). Here `created_by` is the caller themselves
+        // (just set above), so this in practice surfaces the case where a
+        // user creates+activates without ever having connected Claude
+        // credentials in this workspace.
+        if let Err(r) =
+            require_owner_credentials(&state, &workflow.workspace_id, &workflow.created_by).await
+        {
             return r;
         }
         if let Err(r) = activate_workflow(&state, &workflow.id, &headers).await {
@@ -579,15 +593,18 @@ pub async fn patch_workflow(
     }
 
     if desired_active {
-        // Issue #156: refuse activation when the workflow's owner has no
-        // credentials. Without this guard the workflow would be active
+        // Issue #156 (workspace-scoped post-#164): refuse activation when
+        // the workflow's owner has no credentials in the workflow's
+        // workspace. Without this guard the workflow would be active
         // but every shaping dispatch would spawn an agent without
         // CLAUDE_CODE_OAUTH_TOKEN and immediately fail with "stdout
         // closed without result event". Failing fast at activation
         // surfaces the broken state in the UX layer (a 4xx the dashboard
         // can render as "connect Claude credentials") instead of in the
         // spine event stream where users won't see it.
-        if let Err(r) = require_owner_credentials(&state, &workflow.created_by).await {
+        if let Err(r) =
+            require_owner_credentials(&state, &workflow.workspace_id, &workflow.created_by).await
+        {
             return r;
         }
         if let Err(r) = activate_workflow(&state, &workflow_id, &headers).await {

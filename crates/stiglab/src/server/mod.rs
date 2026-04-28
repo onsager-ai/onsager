@@ -99,13 +99,15 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         //   OAuth app directly.
         .route("/api/auth/sso/redeem", post(routes::auth::sso_redeem))
         .route("/api/auth/sso/finish", get(routes::auth::sso_finish))
-        // Credential routes
+        // Credential routes — per-workspace post-#164.  Each workspace
+        // carries its own secret store; sessions launched in W1 will
+        // never reach for a token registered in W2.
         .route(
-            "/api/credentials",
+            "/api/workspaces/{workspace_id}/credentials",
             get(routes::credentials::list_credentials),
         )
         .route(
-            "/api/credentials/{name}",
+            "/api/workspaces/{workspace_id}/credentials/{name}",
             put(routes::credentials::set_credential).delete(routes::credentials::delete_credential),
         )
         // Personal Access Tokens (issue #143)

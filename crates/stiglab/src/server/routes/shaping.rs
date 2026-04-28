@@ -104,6 +104,14 @@ pub async fn dispatch_shaping_inner(
         None => return Ok(DispatchOutcome::NoAvailableNode),
     };
 
+    // Resolve the workspace this dispatch targets from the spine
+    // artifact row (#164).  The session's workspace pins which
+    // credential set the agent runner reaches for and which `?workspace=`
+    // listing surfaces it. Falls back to None when the spine isn't wired
+    // (dev / tests without spine), in which case credentials are skipped
+    // — same loud-fail behaviour as the no-`created_by` path.
+    let workspace_id = resolve_workspace_for_artifact(state, req.artifact_id.as_str()).await;
+
     let mut session = Session {
         id: Uuid::new_v4().to_string(),
         task_id: task.id.clone(),
@@ -119,9 +127,24 @@ pub async fn dispatch_shaping_inner(
     };
 
     if idempotency_key.is_empty() {
-        db::insert_session(&state.db, &session).await?;
+        db::insert_session_with_user_project_workspace(
+            &state.db,
+            &session,
+            req.created_by.as_deref(),
+            None,
+            workspace_id.as_deref(),
+        )
+        .await?;
     } else {
-        match db::insert_session_with_idempotency_key(&state.db, &session, idempotency_key).await? {
+        match insert_session_with_idempotency_and_workspace(
+            &state.db,
+            &session,
+            req.created_by.as_deref(),
+            workspace_id.as_deref(),
+            idempotency_key,
+        )
+        .await?
+        {
             true => { /* new session inserted */ }
             false => {
                 // Concurrent insert with the same key won the race; load
@@ -138,13 +161,14 @@ pub async fn dispatch_shaping_inner(
         }
     }
 
-    // Fetch user credentials when the request carries `created_by`. Direct
-    // callers that don't set it keep the legacy `None` behavior — the
-    // resulting session_failed event surfaces the broken state via
-    // forge's signal listener.
-    let credentials = match req.created_by.as_deref() {
-        Some(uid) => super::tasks::fetch_user_credentials(state, uid).await,
-        None => None,
+    // Fetch credentials scoped to the session's workspace (#164). A
+    // request without both `created_by` and a resolvable workspace gets
+    // `None` — the resulting session_failed event surfaces the broken
+    // state via forge's signal listener rather than dispatching with the
+    // wrong workspace's secrets.
+    let credentials = match (req.created_by.as_deref(), workspace_id.as_deref()) {
+        (Some(uid), Some(ws)) => super::tasks::fetch_workspace_credentials(state, ws, uid).await,
+        _ => None,
     };
 
     // Dispatch to the agent over WebSocket.
@@ -339,6 +363,60 @@ async fn terminal_response(session: &Session) -> axum::response::Response {
 
 fn is_terminal(state: SessionState) -> bool {
     matches!(state, SessionState::Done | SessionState::Failed)
+}
+
+/// Resolve the workspace an artifact belongs to by querying the spine
+/// `artifacts.workspace_id` column added in #162. Returns `None` when
+/// the spine isn't connected, the artifact row is missing, or the
+/// query fails — every failure mode degrades gracefully and the
+/// caller treats a missing workspace as "no credentials, dispatch and
+/// fail loudly".
+async fn resolve_workspace_for_artifact(state: &AppState, artifact_id: &str) -> Option<String> {
+    let spine = state.spine.as_ref()?;
+    sqlx::query_scalar::<_, String>("SELECT workspace_id FROM artifacts WHERE artifact_id = $1")
+        .bind(artifact_id)
+        .fetch_optional(spine.pool())
+        .await
+        .ok()
+        .flatten()
+}
+
+/// Insert a session bound to an idempotency key with full workspace +
+/// user context. Mirrors `db::insert_session_with_idempotency_key` but
+/// also writes `user_id` and `workspace_id` so the session row has the
+/// full provenance the new list/credential paths need (#164).
+async fn insert_session_with_idempotency_and_workspace(
+    pool: &sqlx::AnyPool,
+    session: &Session,
+    user_id: Option<&str>,
+    workspace_id: Option<&str>,
+    idempotency_key: &str,
+) -> anyhow::Result<bool> {
+    let affected = sqlx::query(
+        "INSERT INTO sessions (id, task_id, node_id, state, prompt, output, working_dir, \
+                               user_id, workspace_id, artifact_id, artifact_version, \
+                               idempotency_key, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) \
+         ON CONFLICT (idempotency_key) DO NOTHING",
+    )
+    .bind(&session.id)
+    .bind(&session.task_id)
+    .bind(&session.node_id)
+    .bind(session.state.to_string())
+    .bind(&session.prompt)
+    .bind(&session.output)
+    .bind(&session.working_dir)
+    .bind(user_id)
+    .bind(workspace_id)
+    .bind(&session.artifact_id)
+    .bind(session.artifact_version)
+    .bind(idempotency_key)
+    .bind(session.created_at.to_rfc3339())
+    .bind(session.updated_at.to_rfc3339())
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(affected > 0)
 }
 
 /// Parse `"30s"`, `"1500ms"`, or a bare seconds integer like `"15"`. Returns

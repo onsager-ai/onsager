@@ -162,7 +162,35 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
     }
 
     let events = route_event(&state, &event, &parsed).await;
-    emit_events(&state, events).await;
+    // Resolve the install → workspace mapping once. The mapping is 1:1
+    // by the migration's UNIQUE(install_id) (#164); we look it up here
+    // so every emitted event carries `workspace_id` regardless of which
+    // typed FactoryEventKind variant it lives in.
+    //
+    // Fail closed: the secret-cipher lookup above already proved the
+    // install exists, so a missing workspace mapping or a query error
+    // here would be a real schema/database problem — not something we
+    // want to paper over by emitting unscoped events that vanish from
+    // workspace-filtered listings.
+    let workspace_id = match crate::server::db::get_github_app_installation_by_install_id(
+        &state.db, install_id,
+    )
+    .await
+    {
+        Ok(Some(installation)) => installation.workspace_id,
+        Ok(None) => {
+            tracing::error!(
+                install_id,
+                "installation passed secret lookup but workspace mapping is missing"
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        Err(e) => {
+            tracing::error!(install_id, error = %e, "failed to resolve workspace_id for installation");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    emit_events(&state, events, &workspace_id).await;
 
     (
         StatusCode::ACCEPTED,
@@ -223,7 +251,7 @@ async fn route_event(state: &AppState, event: &str, payload: &Value) -> Vec<Rout
     }
 }
 
-async fn emit_events(state: &AppState, events: Vec<RoutedEvent>) {
+async fn emit_events(state: &AppState, events: Vec<RoutedEvent>, workspace_id: &str) {
     let Some(spine) = state.spine.as_ref() else {
         if !events.is_empty() {
             tracing::warn!("spine not configured; dropping {} events", events.len());
@@ -231,13 +259,23 @@ async fn emit_events(state: &AppState, events: Vec<RoutedEvent>) {
         return;
     };
     for ev in events {
-        let data = match serde_json::to_value(&ev.kind) {
+        let mut data = match serde_json::to_value(&ev.kind) {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!("failed to serialize spine event: {e}");
                 continue;
             }
         };
+        // Stamp workspace_id (#164) so downstream consumers — including
+        // the workspace-scoped `/api/spine/events` listing — can filter
+        // by workspace without re-resolving the install. The
+        // `TriggerFired` payload already includes its workflow's
+        // workspace; we don't overwrite it (a missing entry is the
+        // common case for `gate.*` events from check / PR webhooks).
+        if let Some(obj) = data.as_object_mut() {
+            obj.entry("workspace_id".to_string())
+                .or_insert(serde_json::Value::String(workspace_id.to_string()));
+        }
         let namespace = spine_namespace(&ev.kind);
         if let Err(e) = spine
             .emit_raw(

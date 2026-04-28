@@ -1,6 +1,14 @@
+//! Per-workspace credential CRUD (issue #164, child C of #161).
+//!
+//! Credentials live under `/api/workspaces/:workspace/credentials` so a
+//! user holding two workspaces gets two independent secret stores —
+//! launching a session in W1 will never reach for a token registered in
+//! W2. Every route funnels through `require_workspace_access` for the
+//! 404-not-403 membership check + PAT scope guardrail.
+
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 
@@ -8,12 +16,12 @@ use crate::server::auth::{encrypt_credential, AuthUser, RequestPrincipal};
 use crate::server::db;
 use crate::server::state::AppState;
 
+use super::require_workspace_access;
+
 /// Standard 403 body for the PAT destructive-credential guardrail (issue
 /// #143). PATs may read and create credentials, but deleting an existing
-/// credential or overwriting one requires a real browser session — those
-/// actions take a refresh of the secret out of the user's hands and into
-/// any system that holds the token, which is the explicit non-goal here.
-fn pat_destructive_blocked() -> axum::response::Response {
+/// credential or overwriting one requires a real browser session.
+fn pat_destructive_blocked() -> Response {
     (
         StatusCode::FORBIDDEN,
         Json(serde_json::json!({
@@ -29,12 +37,17 @@ pub struct SetCredentialBody {
     pub value: String,
 }
 
-/// GET /api/credentials — List credential names for the current user (no values).
+/// GET /api/workspaces/:workspace/credentials — list credential names for
+/// the current user in this workspace (no values).
 pub async fn list_credentials(
     State(state): State<AppState>,
     auth_user: AuthUser,
-) -> impl IntoResponse {
-    match db::get_user_credentials(&state.db, &auth_user.user_id).await {
+    Path(workspace_id): Path<String>,
+) -> Response {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+        return r;
+    }
+    match db::get_user_credentials(&state.db, &workspace_id, &auth_user.user_id).await {
         Ok(creds) => {
             let items: Vec<_> = creds
                 .into_iter()
@@ -55,18 +68,23 @@ pub async fn list_credentials(
     }
 }
 
-/// PUT /api/credentials/{name} — Set or update a credential.
+/// PUT /api/workspaces/:workspace/credentials/{name} — set or update a credential.
 pub async fn set_credential(
     State(state): State<AppState>,
     auth_user: AuthUser,
-    Path(name): Path<String>,
+    Path((workspace_id, name)): Path<(String, String)>,
     Json(body): Json<SetCredentialBody>,
-) -> impl IntoResponse {
+) -> Response {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+        return r;
+    }
+
     // PAT principals can create new credentials but not overwrite existing
     // ones — silently rotating a secret over the API while the dashboard
     // still shows the old one would be confusing and a footgun.
     if matches!(auth_user.principal, RequestPrincipal::Pat { .. }) {
-        match db::user_credential_exists(&state.db, &auth_user.user_id, &name).await {
+        match db::user_credential_exists(&state.db, &workspace_id, &auth_user.user_id, &name).await
+        {
             Ok(true) => return pat_destructive_blocked(),
             Ok(false) => {}
             Err(e) => {
@@ -92,7 +110,15 @@ pub async fn set_credential(
         }
     };
 
-    match db::set_user_credential(&state.db, &auth_user.user_id, &name, &encrypted).await {
+    match db::set_user_credential(
+        &state.db,
+        &workspace_id,
+        &auth_user.user_id,
+        &name,
+        &encrypted,
+    )
+    .await
+    {
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => {
             tracing::error!("failed to set credential: {e}");
@@ -101,18 +127,21 @@ pub async fn set_credential(
     }
 }
 
-/// DELETE /api/credentials/{name} — Delete a credential.
+/// DELETE /api/workspaces/:workspace/credentials/{name} — delete a credential.
 pub async fn delete_credential(
     State(state): State<AppState>,
     auth_user: AuthUser,
-    Path(name): Path<String>,
-) -> impl IntoResponse {
+    Path((workspace_id, name)): Path<(String, String)>,
+) -> Response {
+    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+        return r;
+    }
     // The destructive guard is unconditional for PATs — deletion is always
     // a session-only operation regardless of whether the credential exists.
     if matches!(auth_user.principal, RequestPrincipal::Pat { .. }) {
         return pat_destructive_blocked();
     }
-    match db::delete_user_credential(&state.db, &auth_user.user_id, &name).await {
+    match db::delete_user_credential(&state.db, &workspace_id, &auth_user.user_id, &name).await {
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => {
             tracing::error!("failed to delete credential: {e}");

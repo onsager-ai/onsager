@@ -30,4 +30,14 @@ pub struct TaskRequest {
     /// omitted for personal sessions.
     #[serde(default)]
     pub project_id: Option<String>,
+    /// Optional explicit workspace scope (#164). When set without
+    /// `project_id`, the session is filed under this workspace and
+    /// shows up in `/api/sessions?workspace=` listings + receives the
+    /// workspace's credential bundle at dispatch. When `project_id`
+    /// is set, that wins (the project owns its workspace context); a
+    /// disagreement between the two surfaces as a 400. Omitting both
+    /// preserves the legacy "personal session" path that doesn't
+    /// surface in any workspace listing.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
 }

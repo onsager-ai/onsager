@@ -6,15 +6,20 @@
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+use crate::server::auth::AuthUser;
 use crate::server::state::AppState;
+
+use super::require_workspace_access;
 
 #[derive(Debug, Deserialize)]
 pub struct EventsQuery {
+    /// Required workspace scope (#164). Missing → 400.
+    pub workspace: String,
     pub stream_type: Option<String>,
     pub event_type: Option<String>,
     /// Exact-match filter on `stream_id`. Used by per-artifact and
@@ -86,6 +91,10 @@ pub struct HorizontalLineageRow {
 
 #[derive(Debug, Deserialize)]
 pub struct RegisterArtifactRequest {
+    /// Workspace the new artifact belongs to (#164). Caller must be a
+    /// member; the value is written into `artifacts.workspace_id` so
+    /// later list/detail queries scope it correctly.
+    pub workspace_id: String,
     pub kind: String,
     pub name: String,
     pub owner: String,
@@ -134,11 +143,31 @@ pub struct OverrideGateRequest {
     pub actor: Option<String>,
 }
 
-/// GET /api/spine/events — query the events_ext table.
+/// GET /api/spine/events?workspace=W — query the events_ext table.
+///
+/// Filters event rows whose payload references the requested workspace
+/// (matched on `data->>'workspace_id'`). The `?workspace=` query param
+/// is required (#164) — a missing value returns 400 so a caller can't
+/// silently scan every workspace's stream.
 pub async fn list_events(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     Query(params): Query<EventsQuery>,
-) -> impl IntoResponse {
+) -> Response {
+    let workspace_id = params.workspace.trim();
+    if workspace_id.is_empty() {
+        return missing_workspace();
+    }
+    // Skip the membership check for the synthetic anonymous principal
+    // so auth-disabled dev mode keeps these endpoints usable. The
+    // `?workspace=` requirement still applies and the SQL still filters
+    // by it — anonymous just means no per-user gate.
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
+            return r;
+        }
+    }
+
     let spine = match &state.spine {
         Some(s) => s,
         None => {
@@ -156,22 +185,24 @@ pub async fn list_events(
     // `events_ext` stores the partition key in `namespace` and the actor inside
     // `metadata`. The API surfaces them as `stream_type` / `actor` for clients,
     // so we alias on the way out.
+    //
+    // Workspace scope is matched on `data->>'workspace_id'`; events that
+    // don't carry the field (legacy, infrastructure-level) are excluded
+    // so a workspace listing never includes another workspace's rows.
     let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
         "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
                 COALESCE(metadata->>'actor', '') AS actor, created_at \
-         FROM events_ext",
+         FROM events_ext WHERE data->>'workspace_id' = ",
     );
-    let mut sep = " WHERE ";
+    qb.push_bind(workspace_id.to_string());
     if let Some(st) = params.stream_type.as_deref() {
-        qb.push(sep).push("namespace = ").push_bind(st.to_string());
-        sep = " AND ";
+        qb.push(" AND namespace = ").push_bind(st.to_string());
     }
     if let Some(et) = params.event_type.as_deref() {
-        qb.push(sep).push("event_type = ").push_bind(et.to_string());
-        sep = " AND ";
+        qb.push(" AND event_type = ").push_bind(et.to_string());
     }
     if let Some(sid) = params.stream_id.as_deref() {
-        qb.push(sep).push("stream_id = ").push_bind(sid.to_string());
+        qb.push(" AND stream_id = ").push_bind(sid.to_string());
     }
     qb.push(" ORDER BY id DESC LIMIT ").push_bind(limit);
     let result = qb.build_query_as::<SpineEvent>().fetch_all(pool).await;
@@ -189,9 +220,26 @@ pub async fn list_events(
     }
 }
 
-/// Filters for `GET /api/spine/artifacts`. All optional.
+/// Standard 400 body for the `?workspace=` requirement on every
+/// workspace-scoped list endpoint (#164). Mirrors the helper in
+/// `routes/sessions.rs` — kept duplicated to avoid a fragile module
+/// dependency.
+fn missing_workspace() -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({
+            "error": "workspace query parameter is required",
+            "detail": "every workspace-scoped list endpoint requires ?workspace=<id>",
+        })),
+    )
+        .into_response()
+}
+
+/// Filters for `GET /api/spine/artifacts`.
 #[derive(Debug, Deserialize)]
 pub struct ListArtifactsQuery {
+    /// Required workspace scope (#164). Missing → 400.
+    pub workspace: String,
     /// Filter by `kind` discriminator (e.g. `pull_request`, `github_issue`).
     pub kind: Option<String>,
     /// Filter by `metadata->>'project_id'`. Used by the dashboard `/issues`
@@ -199,15 +247,29 @@ pub struct ListArtifactsQuery {
     pub project_id: Option<String>,
 }
 
-/// GET /api/spine/artifacts — list artifacts from the spine.
+/// GET /api/spine/artifacts?workspace=W — list artifacts from the spine.
 ///
-/// Supports `?kind=` and `?project_id=` filters so the dashboard's per-page
-/// queries (Factory PRs, Issues inbox) can target a single discriminated
-/// slice without scanning the whole table client-side.
+/// Filters by `workspace_id` (required). Optional `?kind=` and
+/// `?project_id=` further narrow the listing.
 pub async fn list_artifacts(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     Query(filters): Query<ListArtifactsQuery>,
-) -> impl IntoResponse {
+) -> Response {
+    let workspace_id = filters.workspace.trim();
+    if workspace_id.is_empty() {
+        return missing_workspace();
+    }
+    // Skip the membership check for the synthetic anonymous principal
+    // so auth-disabled dev mode keeps these endpoints usable. The
+    // `?workspace=` requirement still applies and the SQL still filters
+    // by it — anonymous just means no per-user gate.
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
+            return r;
+        }
+    }
+
     let spine = match &state.spine {
         Some(s) => s,
         None => {
@@ -221,47 +283,25 @@ pub async fn list_artifacts(
 
     let pool = spine.pool();
 
-    // Build the query with optional WHERE clauses. sqlx::Postgres binds use
-    // `$N` positional placeholders; we keep this simple by branching on the
-    // (kind, project_id) combinations rather than building a string.
-    let base = "SELECT artifact_id AS id, kind, name, state, owner, current_version, \
+    // The base query always filters by workspace_id (#162 added the
+    // column on the spine `artifacts` table).  Optional kind/project
+    // filters tack onto the same WHERE clause via QueryBuilder so a
+    // mis-set bind index can't shift between branches.
+    let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+        "SELECT artifact_id AS id, kind, name, state, owner, current_version, \
                 consumers, external_ref, created_at, updated_at, last_observed_at \
-                FROM artifacts";
-    let result = match (filters.kind.as_deref(), filters.project_id.as_deref()) {
-        (Some(kind), Some(project_id)) => {
-            sqlx::query_as::<_, SpineArtifact>(&format!(
-                "{base} WHERE kind = $1 AND metadata->>'project_id' = $2 \
-                 ORDER BY updated_at DESC LIMIT 100"
-            ))
-            .bind(kind)
-            .bind(project_id)
-            .fetch_all(pool)
-            .await
-        }
-        (Some(kind), None) => {
-            sqlx::query_as::<_, SpineArtifact>(&format!(
-                "{base} WHERE kind = $1 ORDER BY updated_at DESC LIMIT 100"
-            ))
-            .bind(kind)
-            .fetch_all(pool)
-            .await
-        }
-        (None, Some(project_id)) => {
-            sqlx::query_as::<_, SpineArtifact>(&format!(
-                "{base} WHERE metadata->>'project_id' = $1 ORDER BY updated_at DESC LIMIT 100"
-            ))
-            .bind(project_id)
-            .fetch_all(pool)
-            .await
-        }
-        (None, None) => {
-            sqlx::query_as::<_, SpineArtifact>(&format!(
-                "{base} ORDER BY updated_at DESC LIMIT 100"
-            ))
-            .fetch_all(pool)
-            .await
-        }
-    };
+         FROM artifacts WHERE workspace_id = ",
+    );
+    qb.push_bind(workspace_id.to_string());
+    if let Some(kind) = filters.kind.as_deref() {
+        qb.push(" AND kind = ").push_bind(kind.to_string());
+    }
+    if let Some(project_id) = filters.project_id.as_deref() {
+        qb.push(" AND metadata->>'project_id' = ")
+            .push_bind(project_id.to_string());
+    }
+    qb.push(" ORDER BY updated_at DESC LIMIT 100");
+    let result = qb.build_query_as::<SpineArtifact>().fetch_all(pool).await;
 
     match result {
         Ok(artifacts) => Json(serde_json::json!({ "artifacts": artifacts })).into_response(),
@@ -279,8 +319,27 @@ pub async fn list_artifacts(
 /// POST /api/spine/artifacts — register a new artifact in Draft state.
 pub async fn register_artifact(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     Json(req): Json<RegisterArtifactRequest>,
-) -> impl IntoResponse {
+) -> Response {
+    let workspace_id = req.workspace_id.trim();
+    if workspace_id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "workspace_id is required" })),
+        )
+            .into_response();
+    }
+    // Skip the membership check for the synthetic anonymous principal
+    // so auth-disabled dev mode keeps these endpoints usable. The
+    // `?workspace=` requirement still applies and the SQL still filters
+    // by it — anonymous just means no per-user gate.
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
+            return r;
+        }
+    }
+
     let spine = match &state.spine {
         Some(s) => s,
         None => {
@@ -296,14 +355,15 @@ pub async fn register_artifact(
     let artifact_id = format!("art_{}", ulid::Ulid::new());
 
     let result = sqlx::query(
-        "INSERT INTO artifacts (artifact_id, kind, name, owner, created_by, state, current_version) \
-         VALUES ($1, $2, $3, $4, $5, 'draft', 0)",
+        "INSERT INTO artifacts (artifact_id, kind, name, owner, created_by, state, current_version, workspace_id) \
+         VALUES ($1, $2, $3, $4, $5, 'draft', 0, $6)",
     )
     .bind(&artifact_id)
     .bind(&req.kind)
     .bind(&req.name)
     .bind(&req.owner)
     .bind("dashboard") // created_by
+    .bind(workspace_id)
     .execute(pool)
     .await;
 
@@ -370,11 +430,14 @@ pub async fn register_artifact(
     }
 }
 
-/// GET /api/spine/artifacts/:id — single artifact detail with versions and lineage.
+/// GET /api/spine/artifacts/:id — single artifact detail with versions
+/// and lineage. 404s callers who aren't members of the artifact's
+/// workspace (#164) so artifact IDs can't be enumerated cross-workspace.
 pub async fn get_artifact(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     Path(id): Path<String>,
-) -> impl IntoResponse {
+) -> Response {
     let spine = match &state.spine {
         Some(s) => s,
         None => {
@@ -387,6 +450,50 @@ pub async fn get_artifact(
     };
 
     let pool = spine.pool();
+
+    // Resolve the artifact's workspace first so the membership check
+    // 404s before any further data is read; the artifact body itself
+    // is fetched separately to keep the row type a clean SpineArtifact.
+    let workspace_id: String = match sqlx::query_scalar::<_, String>(
+        "SELECT workspace_id FROM artifacts WHERE artifact_id = $1",
+    )
+    .bind(&id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(Some(w)) => w,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "artifact not found" })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("spine artifact workspace lookup failed: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "failed to query artifact" })),
+            )
+                .into_response();
+        }
+    };
+
+    // 404 (not 403) on workspace mismatch via the shared helper —
+    // rewrite the body to "artifact not found" so artifact IDs don't
+    // leak via the workspace-not-found body.
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            if r.status() == StatusCode::NOT_FOUND {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "artifact not found" })),
+                )
+                    .into_response();
+            }
+            return r;
+        }
+    }
 
     let artifact = sqlx::query_as::<_, SpineArtifact>(
         "SELECT artifact_id AS id, kind, name, state, owner, current_version, consumers, \
@@ -546,9 +653,10 @@ async fn fetch_related_events(
 /// POST /api/spine/artifacts/:id/retry
 pub async fn retry_artifact(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     Path(id): Path<String>,
     Json(req): Json<RetryRequest>,
-) -> impl IntoResponse {
+) -> Response {
     let spine = match &state.spine {
         Some(s) => s,
         None => {
@@ -562,21 +670,46 @@ pub async fn retry_artifact(
 
     let pool = spine.pool();
 
-    // Confirm the artifact exists and is not archived.
-    let current_state: Option<String> =
-        sqlx::query_scalar("SELECT state FROM artifacts WHERE artifact_id = $1")
-            .bind(&id)
-            .fetch_optional(pool)
-            .await
-            .unwrap_or(None);
-
-    let Some(state_str) = current_state else {
+    // Resolve workspace + state in one round-trip; the membership check
+    // comes before any mutation so a non-member can't probe artifact
+    // state via the side-effect.
+    let row: Option<(String, String)> = match sqlx::query_as::<_, (String, String)>(
+        "SELECT workspace_id, state FROM artifacts WHERE artifact_id = $1",
+    )
+    .bind(&id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(opt) => opt,
+        Err(e) => {
+            tracing::error!("artifact lookup failed: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "failed to load artifact" })),
+            )
+                .into_response();
+        }
+    };
+    let Some((workspace_id, state_str)) = row else {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "artifact not found" })),
         )
             .into_response();
     };
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            if r.status() == StatusCode::NOT_FOUND {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "artifact not found" })),
+                )
+                    .into_response();
+            }
+            return r;
+        }
+    }
+    let _ = workspace_id;
 
     if state_str == "archived" || state_str == "released" {
         return (
@@ -620,9 +753,10 @@ pub async fn retry_artifact(
 /// POST /api/spine/artifacts/:id/abort
 pub async fn abort_artifact(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     Path(id): Path<String>,
     Json(req): Json<AbortRequest>,
-) -> impl IntoResponse {
+) -> Response {
     let spine = match &state.spine {
         Some(s) => s,
         None => {
@@ -636,20 +770,42 @@ pub async fn abort_artifact(
 
     let pool = spine.pool();
 
-    let previous_state: Option<String> =
-        sqlx::query_scalar("SELECT state FROM artifacts WHERE artifact_id = $1")
-            .bind(&id)
-            .fetch_optional(pool)
-            .await
-            .unwrap_or(None);
-
-    let Some(previous_state) = previous_state else {
+    let row: Option<(String, String)> = match sqlx::query_as::<_, (String, String)>(
+        "SELECT workspace_id, state FROM artifacts WHERE artifact_id = $1",
+    )
+    .bind(&id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(opt) => opt,
+        Err(e) => {
+            tracing::error!("artifact lookup failed: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "failed to load artifact" })),
+            )
+                .into_response();
+        }
+    };
+    let Some((workspace_id, previous_state)) = row else {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "artifact not found" })),
         )
             .into_response();
     };
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            if r.status() == StatusCode::NOT_FOUND {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "artifact not found" })),
+                )
+                    .into_response();
+            }
+            return r;
+        }
+    }
 
     if previous_state == "archived" {
         return (
@@ -713,9 +869,10 @@ pub async fn abort_artifact(
 /// POST /api/spine/artifacts/:id/override-gate
 pub async fn override_gate(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     Path(id): Path<String>,
     Json(req): Json<OverrideGateRequest>,
-) -> impl IntoResponse {
+) -> Response {
     let spine = match &state.spine {
         Some(s) => s,
         None => {
@@ -729,19 +886,41 @@ pub async fn override_gate(
 
     let pool = spine.pool();
 
-    let exists: Option<String> =
-        sqlx::query_scalar("SELECT artifact_id FROM artifacts WHERE artifact_id = $1")
-            .bind(&id)
-            .fetch_optional(pool)
-            .await
-            .unwrap_or(None);
-
-    if exists.is_none() {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "artifact not found" })),
-        )
-            .into_response();
+    let workspace_id: String = match sqlx::query_scalar::<_, String>(
+        "SELECT workspace_id FROM artifacts WHERE artifact_id = $1",
+    )
+    .bind(&id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(Some(w)) => w,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "artifact not found" })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("artifact lookup failed: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "failed to load artifact" })),
+            )
+                .into_response();
+        }
+    };
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            if r.status() == StatusCode::NOT_FOUND {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "artifact not found" })),
+                )
+                    .into_response();
+            }
+            return r;
+        }
     }
 
     let verdict = req.verdict.as_deref().unwrap_or("allow").to_lowercase();
