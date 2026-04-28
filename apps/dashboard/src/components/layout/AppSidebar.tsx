@@ -127,15 +127,20 @@ export function AppSidebar() {
               <SidebarMenu>
                 {section.items.map((item) => {
                   const path = resolvePath(item.path)
+                  // Outside a scoped route every non-Overview item shares
+                  // the `/workspaces` picker fallback — none of them is
+                  // really "this page", so don't highlight any.
+                  const isActive =
+                    item.path === ""
+                      ? location.pathname === path
+                      : linkBase != null &&
+                        (location.pathname === path ||
+                          location.pathname.startsWith(`${path}/`))
                   return (
                     <SidebarMenuItem key={item.title}>
                       <SidebarMenuButton
                         render={<Link to={path} onClick={closeMobile} />}
-                        isActive={
-                          item.path === ""
-                            ? location.pathname === path
-                            : location.pathname.startsWith(path)
-                        }
+                        isActive={isActive}
                       >
                         <item.icon className="h-4 w-4" />
                         <span>{item.title}</span>
