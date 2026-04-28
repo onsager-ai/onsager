@@ -105,7 +105,10 @@ pub async fn create_task(
     // Validate project membership if the caller scoped the session to a
     // workspace-owned project (issue #59). Non-members get 404 via
     // `assert_workspace_member` so project IDs can't be enumerated.
-    if let Some(ref project_id) = request.project_id {
+    // The project also resolves the workspace the session is launched
+    // into — credentials, listing, and detail-access checks all key on
+    // that workspace_id (issue #164).
+    let workspace_id: Option<String> = if let Some(ref project_id) = request.project_id {
         if user_id.is_none() {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -138,13 +141,17 @@ pub async fn create_task(
         {
             return r;
         }
-    }
+        Some(project.workspace_id)
+    } else {
+        None
+    };
 
-    if let Err(e) = db::insert_session_with_user_and_project(
+    if let Err(e) = db::insert_session_with_user_project_workspace(
         &state.db,
         &session,
         user_id,
         request.project_id.as_deref(),
+        workspace_id.as_deref(),
     )
     .await
     {
@@ -152,11 +159,13 @@ pub async fn create_task(
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
 
-    // Fetch user credentials to pass to the agent
-    let credentials = if let Some(uid) = user_id {
-        fetch_user_credentials(&state, uid).await
-    } else {
-        None
+    // Fetch user credentials scoped to the session's workspace. Personal
+    // sessions (no project, no workspace) get no credentials — the resulting
+    // session_failed event surfaces the broken state via forge's listener
+    // rather than silently launching an unauthenticated agent.
+    let credentials = match (user_id, workspace_id.as_deref()) {
+        (Some(uid), Some(ws)) => fetch_workspace_credentials(&state, ws, uid).await,
+        _ => None,
     };
 
     // Dispatch to agent via WebSocket
@@ -193,18 +202,22 @@ pub async fn create_task(
         .into_response()
 }
 
-/// Fetch all user credentials, decrypt them, and return as a HashMap.
+/// Fetch the credentials a user holds in a specific workspace, decrypt
+/// them, and return as a HashMap of env-var name → plaintext value.
 ///
-/// Used by both `POST /api/tasks` (direct user-triggered sessions) and
-/// `POST /api/shaping` (forge-dispatched workflow sessions, see issue
-/// #156). Visible to sibling route modules; not part of the public API.
-pub(super) async fn fetch_user_credentials(
+/// Used by both `POST /api/tasks` and the spine-dispatched
+/// `forge.shaping_dispatched` listener (`crate::server::shaping_listener`).
+/// The workspace argument is mandatory post-#164 — credentials are
+/// per-workspace and a session in W1 must never be launched with a
+/// W2 token.
+pub(super) async fn fetch_workspace_credentials(
     state: &AppState,
+    workspace_id: &str,
     user_id: &str,
 ) -> Option<HashMap<String, String>> {
     let key = state.config.credential_key.as_deref()?;
 
-    let encrypted_creds = db::get_all_user_credential_values(&state.db, user_id)
+    let encrypted_creds = db::get_all_user_credential_values(&state.db, workspace_id, user_id)
         .await
         .ok()?;
 

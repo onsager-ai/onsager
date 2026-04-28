@@ -162,7 +162,21 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
     }
 
     let events = route_event(&state, &event, &parsed).await;
-    emit_events(&state, events).await;
+    // Resolve the install → workspace mapping once. The mapping is 1:1
+    // by the migration's UNIQUE(install_id) (#164); we look it up here
+    // so every emitted event carries `workspace_id` regardless of which
+    // typed FactoryEventKind variant it lives in.
+    let workspace_id = match state.db.acquire().await {
+        Ok(_) => {
+            crate::server::db::get_github_app_installation_by_install_id(&state.db, install_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|i| i.workspace_id)
+        }
+        Err(_) => None,
+    };
+    emit_events(&state, events, workspace_id.as_deref()).await;
 
     (
         StatusCode::ACCEPTED,
@@ -223,7 +237,7 @@ async fn route_event(state: &AppState, event: &str, payload: &Value) -> Vec<Rout
     }
 }
 
-async fn emit_events(state: &AppState, events: Vec<RoutedEvent>) {
+async fn emit_events(state: &AppState, events: Vec<RoutedEvent>, workspace_id: Option<&str>) {
     let Some(spine) = state.spine.as_ref() else {
         if !events.is_empty() {
             tracing::warn!("spine not configured; dropping {} events", events.len());
@@ -231,13 +245,23 @@ async fn emit_events(state: &AppState, events: Vec<RoutedEvent>) {
         return;
     };
     for ev in events {
-        let data = match serde_json::to_value(&ev.kind) {
+        let mut data = match serde_json::to_value(&ev.kind) {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!("failed to serialize spine event: {e}");
                 continue;
             }
         };
+        // Stamp workspace_id (#164) so downstream consumers — including
+        // the workspace-scoped `/api/spine/events` listing — can filter
+        // by workspace without re-resolving the install. The
+        // `TriggerFired` payload already includes its workflow's
+        // workspace; we don't overwrite it (a missing entry is the
+        // common case for `gate.*` events from check / PR webhooks).
+        if let (Some(ws), Some(obj)) = (workspace_id, data.as_object_mut()) {
+            obj.entry("workspace_id".to_string())
+                .or_insert(serde_json::Value::String(ws.to_string()));
+        }
         let namespace = spine_namespace(&ev.kind);
         if let Err(e) = spine
             .emit_raw(
