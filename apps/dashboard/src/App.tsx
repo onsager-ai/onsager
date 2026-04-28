@@ -198,6 +198,14 @@ function BarePathRedirect() {
 // Per-resource legacy redirect: `/sessions` → `/workspaces/<active>/sessions`.
 // One release of compat per spec #166; tracked by bridge-debt follow-up issue
 // at land time.
+//
+// Anonymous mode (`authEnabled=false` or signed out) has no workspace concept;
+// the post-#166 list pages require WorkspaceContext (they call
+// `useActiveWorkspace()`), so anonymous-mode users can't render those pages
+// directly anymore. We bounce them to `/` (the FactoryOverview, which works
+// without a workspace) instead of pretending the legacy path renders. Once
+// #164 lands and `workspace_id` becomes mandatory at the API, this branch
+// goes away with the legacy redirect itself.
 function LegacyRedirect({ to }: { to: string }) {
   const { user, authEnabled } = useAuth()
   const gateEnabled = authEnabled && !!user
@@ -212,9 +220,16 @@ function LegacyRedirect({ to }: { to: string }) {
 
   if (gateEnabled && isLoading) return <AppShellSkeleton />
 
-  if (!gateEnabled || workspaces.length === 0) {
-    // Anonymous / zero-workspace users can't be redirected into a scoped
-    // path — fall through to the picker; OnboardingGate handles welcome.
+  if (!gateEnabled) {
+    // Anonymous / auth-disabled: send to the overview at `/`. Pages here
+    // require WorkspaceContext, which doesn't exist without auth.
+    return <Navigate to="/" replace />
+  }
+
+  if (workspaces.length === 0) {
+    // Authed but zero memberships — OnboardingGate ultimately runs the
+    // welcome flow; bouncing to the picker keeps the screen non-empty
+    // until that fires.
     return <Navigate to="/workspaces" replace />
   }
 
@@ -349,8 +364,11 @@ function AppRoutes() {
                       <WorkspaceScope>
                         <WorkflowsFirstRunGate>
                           <Routes>
+                            {/* `index` matches the parent's exact path.
+                                A nested `path="/"` is absolute and would
+                                never match `/workspaces/:workspace`. */}
                             <Route
-                              path="/"
+                              index
                               element={<LazyRoute><FactoryOverviewPage /></LazyRoute>}
                             />
                             <Route
