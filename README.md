@@ -44,6 +44,18 @@ just dev                   # Postgres, migrations, and all services
 just smoke-test            # verify everything works (in another terminal)
 ```
 
+Open the dashboard at http://localhost:5173 and click **Dev Login** —
+debug builds (the default `cargo build` / `just dev` profile) seed a
+`${USER}@local` user plus a default workspace and expose a one-click
+login button on the LoginPage. A persistent banner reminds you you're
+in dev mode. Release builds (`cargo build --release`) strip the
+seeder + the `/api/auth/dev-login` route entirely; production deploys
+must use real GitHub OAuth.
+
+To use your real GitHub identity locally instead, set
+`GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `.env` and click
+**Sign in with GitHub** on the LoginPage.
+
 To run agent sessions, add your `CLAUDE_CODE_OAUTH_TOKEN` via
 **Dashboard → Settings → Credentials** (encrypted at rest, passed to agents
 as env vars).

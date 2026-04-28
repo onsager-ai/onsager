@@ -19,10 +19,13 @@ use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
 /// How this process relates to the GitHub OAuth app.
+///
+/// `Owner` and `Relying` are the two GitHub-OAuth shapes; the absence of
+/// either is represented as `None` from `ServerConfig::sso_mode()` (never
+/// a separate variant), since a process with no GitHub OAuth configured
+/// has no SSO state to classify.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SsoMode {
-    /// No auth configured — anonymous user.
-    Disabled,
     /// Owns the GitHub OAuth app; handles callbacks directly.
     /// `delegate_enabled` is true when the owner-side secrets for serving
     /// preview environments are also set.

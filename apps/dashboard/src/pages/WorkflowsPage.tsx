@@ -3,7 +3,6 @@ import { Link } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { GitBranch, Plus } from "lucide-react"
 import { api } from "@/lib/api"
-import { useAuth } from "@/lib/auth"
 import { useActiveWorkspace } from "@/lib/workspace"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,15 +12,12 @@ import { usePageHeader } from "@/components/layout/PageHeader"
 
 export function WorkflowsPage() {
   usePageHeader({ title: "Workflows" })
-  const { user, authEnabled } = useAuth()
   const workspace = useActiveWorkspace()
-  const authed = authEnabled ? !!user : true
   const [creating, setCreating] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ["workflows", workspace.id],
     queryFn: () => api.listWorkflows(workspace.id),
-    enabled: authed,
   })
   const workflows = data?.workflows ?? []
 

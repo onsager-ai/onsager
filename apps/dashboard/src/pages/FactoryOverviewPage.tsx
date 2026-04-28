@@ -99,14 +99,13 @@ export function FactoryOverviewPage() {
   // stats, spine events, nodes, session spend, user workflows). The
   // dedicated `useNodes()` hook applies this gate too — see its
   // comment for the original motivation.
-  const { user, loading: authLoading, authEnabled } = useAuth()
+  const { loading: authLoading } = useAuth()
   const workspace = useOptionalActiveWorkspace()
-  const enabled = !authLoading && (!authEnabled || !!user)
-  // The page renders both scoped (`/workspaces/:slug`) and bare-path
-  // (anonymous mode at `/`) — outside a scoped route, the workspace id
-  // is empty and the backend treats the call as global. Once #164 lands
-  // and `workspace_id` becomes mandatory, the bare-path render will
-  // migrate to a no-workspace empty state instead.
+  const enabled = !authLoading
+  // The page renders inside a scoped (`/workspaces/:slug/*`) route, but
+  // it can also mount briefly on the bare-path redirect render before
+  // the navigate fires. `workspace?.id ?? ""` keeps the queries safe
+  // either way; the empty workspace id is filtered out by the API.
   const wsId = workspace?.id ?? ""
 
   const { data: artifactsData } = useQuery({

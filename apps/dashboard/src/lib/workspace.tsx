@@ -8,7 +8,6 @@ import {
 import { Navigate, useLocation, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { api, type Workspace } from "@/lib/api"
-import { useAuth } from "@/lib/auth"
 
 // Per spec #166: the active workspace is whatever lives at `:workspace`
 // in the URL. This provider validates the slug against the user's
@@ -46,16 +45,15 @@ export function readLastUsedWorkspace(): string | null {
   }
 }
 
-/** Fetch the user's workspaces. Disabled when auth is off + no user. */
+/** Fetch the user's workspaces. Auth is always-on as of #193 — the
+ * caller is behind ProtectedRoute so the query can fire unconditionally.
+ */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useWorkspacesQuery() {
-  const { user, authEnabled } = useAuth()
-  const enabled = !authEnabled || !!user
   return useQuery({
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
     staleTime: 30_000,
-    enabled,
   })
 }
 
