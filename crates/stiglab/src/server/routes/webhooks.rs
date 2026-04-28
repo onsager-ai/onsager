@@ -166,17 +166,31 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
     // by the migration's UNIQUE(install_id) (#164); we look it up here
     // so every emitted event carries `workspace_id` regardless of which
     // typed FactoryEventKind variant it lives in.
-    let workspace_id = match state.db.acquire().await {
-        Ok(_) => {
-            crate::server::db::get_github_app_installation_by_install_id(&state.db, install_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|i| i.workspace_id)
+    //
+    // Fail closed: the secret-cipher lookup above already proved the
+    // install exists, so a missing workspace mapping or a query error
+    // here would be a real schema/database problem — not something we
+    // want to paper over by emitting unscoped events that vanish from
+    // workspace-filtered listings.
+    let workspace_id = match crate::server::db::get_github_app_installation_by_install_id(
+        &state.db, install_id,
+    )
+    .await
+    {
+        Ok(Some(installation)) => installation.workspace_id,
+        Ok(None) => {
+            tracing::error!(
+                install_id,
+                "installation passed secret lookup but workspace mapping is missing"
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
-        Err(_) => None,
+        Err(e) => {
+            tracing::error!(install_id, error = %e, "failed to resolve workspace_id for installation");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
-    emit_events(&state, events, workspace_id.as_deref()).await;
+    emit_events(&state, events, &workspace_id).await;
 
     (
         StatusCode::ACCEPTED,
@@ -237,7 +251,7 @@ async fn route_event(state: &AppState, event: &str, payload: &Value) -> Vec<Rout
     }
 }
 
-async fn emit_events(state: &AppState, events: Vec<RoutedEvent>, workspace_id: Option<&str>) {
+async fn emit_events(state: &AppState, events: Vec<RoutedEvent>, workspace_id: &str) {
     let Some(spine) = state.spine.as_ref() else {
         if !events.is_empty() {
             tracing::warn!("spine not configured; dropping {} events", events.len());
@@ -258,9 +272,9 @@ async fn emit_events(state: &AppState, events: Vec<RoutedEvent>, workspace_id: O
         // `TriggerFired` payload already includes its workflow's
         // workspace; we don't overwrite it (a missing entry is the
         // common case for `gate.*` events from check / PR webhooks).
-        if let (Some(ws), Some(obj)) = (workspace_id, data.as_object_mut()) {
+        if let Some(obj) = data.as_object_mut() {
             obj.entry("workspace_id".to_string())
-                .or_insert(serde_json::Value::String(ws.to_string()));
+                .or_insert(serde_json::Value::String(workspace_id.to_string()));
         }
         let namespace = spine_namespace(&ev.kind);
         if let Err(e) = spine

@@ -188,24 +188,26 @@ pub async fn session_logs(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Path(session_id): Path<String>,
-) -> impl IntoResponse {
+) -> Response {
     if let Err(r) = authorize_session_read(&state, &auth_user, &session_id).await {
-        return Err((r.status(), Json(serde_json::json!({ "error": "see body" }))));
+        // Forward the helper's response verbatim — it already carries the
+        // 404-rewrite for workspace mismatch and the 403 PAT-scope body
+        // (`pat_workspace_scope_mismatch`); replacing it with a generic
+        // shape would hide both.
+        return r;
     }
 
     // Verify session exists
     match db::get_session(&state.db, &session_id).await {
         Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "session not found" })),
-            ));
+            return not_found();
         }
         Err(e) => {
-            return Err((
+            return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": e.to_string() })),
-            ));
+            )
+                .into_response();
         }
         Ok(Some(_)) => {}
     }
@@ -256,5 +258,7 @@ pub async fn session_logs(
         ))
     });
 
-    Ok(Sse::new(sse_stream).keep_alive(KeepAlive::default()))
+    Sse::new(sse_stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }

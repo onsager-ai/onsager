@@ -460,3 +460,166 @@ async fn github_app_install_id_is_unique() {
         "duplicate install_id must violate the UNIQUE index"
     );
 }
+
+// ── session_logs forwards the auth helper's response verbatim ──
+
+#[tokio::test]
+async fn session_logs_for_other_workspace_returns_404_not_generic_body() {
+    // Regression for the Copilot review on PR #189: the previous
+    // implementation replaced the auth helper's response with a
+    // generic `{ "error": "see body" }` body, hiding both the
+    // `pat_workspace_scope_mismatch` 403 and the rewritten "session
+    // not found" 404. The forwarded response should pass through.
+    let pool = test_pool().await;
+    let owner_w1 = seed_user(&pool, "wonly1", 1).await;
+    let owner_w2 = seed_user(&pool, "wonly2", 2).await;
+    let _w1 = seed_workspace(&pool, &owner_w1.id, "w1").await;
+    let w2 = seed_workspace(&pool, &owner_w2.id, "w2").await;
+    let s_w2 = seed_session_in_workspace(&pool, &owner_w2.id, &w2.id).await;
+
+    let session_token = seed_session_cookie(&pool, &owner_w1.id).await;
+    let state = AppState::new(pool, auth_enabled_config(), None);
+
+    let resp = app(state)
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/sessions/{}/logs", s_w2.id))
+                .header(header::COOKIE, cookie(&session_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body = read_json(resp).await;
+    assert_eq!(body["error"], "session not found");
+}
+
+// ── POST /api/tasks honours an explicit workspace_id ──
+
+#[tokio::test]
+async fn create_task_with_explicit_workspace_id_files_under_that_workspace() {
+    // Regression for the Copilot review on PR #189: post-#164 a session
+    // created with no project_id used to land with `workspace_id =
+    // NULL`, making it invisible to every `?workspace=` listing. The
+    // new path lets callers pass `workspace_id` directly so the
+    // session is discoverable + correctly credentialed.
+    let pool = test_pool().await;
+    let user = seed_user(&pool, "u", 1).await;
+    let w = seed_workspace(&pool, &user.id, "w-tasks").await;
+
+    // Seed a node so the task dispatch can pick a target.
+    sqlx::query(
+        "INSERT INTO nodes (id, name, hostname, status, max_sessions, \
+                            active_sessions, last_heartbeat, registered_at) \
+         VALUES ($1, $2, $3, 'online', 4, 0, $4, $4)",
+    )
+    .bind("n1")
+    .bind("n1")
+    .bind("local")
+    .bind(Utc::now().to_rfc3339())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let session_token = seed_session_cookie(&pool, &user.id).await;
+    let state = AppState::new(pool.clone(), auth_enabled_config(), None);
+
+    let body = serde_json::json!({
+        "prompt": "hi",
+        "workspace_id": w.id,
+    });
+    let resp = app(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/tasks")
+                .header(header::COOKIE, cookie(&session_token))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    // The session row carries the workspace, so it shows up under
+    // the W-scoped listing.
+    let listed = db::list_sessions_for_user_in_workspace(&pool, &user.id, &w.id)
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 1, "session should appear under W's listing");
+}
+
+#[tokio::test]
+async fn create_task_rejects_conflicting_project_and_workspace_ids() {
+    // When both project_id and workspace_id are set and disagree, the
+    // server 400s rather than silently preferring one — the dashboard
+    // should pick which scope is authoritative.
+    let pool = test_pool().await;
+    let user = seed_user(&pool, "u", 1).await;
+    let w_a = seed_workspace(&pool, &user.id, "w-a").await;
+    let w_b = seed_workspace(&pool, &user.id, "w-b").await;
+
+    // The node lookup runs before the workspace validation in
+    // `create_task`; without a node it 503s and we never reach the
+    // conflict check.
+    sqlx::query(
+        "INSERT INTO nodes (id, name, hostname, status, max_sessions, \
+                            active_sessions, last_heartbeat, registered_at) \
+         VALUES ($1, $2, $3, 'online', 4, 0, $4, $4)",
+    )
+    .bind("n1")
+    .bind("n1")
+    .bind("local")
+    .bind(Utc::now().to_rfc3339())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Seed an installation + project owned by w_a.
+    let install = stiglab::core::GitHubAppInstallation {
+        id: Uuid::new_v4().to_string(),
+        workspace_id: w_a.id.clone(),
+        install_id: 1234,
+        account_login: "acme".into(),
+        account_type: stiglab::core::GitHubAccountType::Organization,
+        created_at: Utc::now(),
+    };
+    db::insert_github_app_installation(&pool, &install, None)
+        .await
+        .unwrap();
+    let project = stiglab::core::Project {
+        id: Uuid::new_v4().to_string(),
+        workspace_id: w_a.id.clone(),
+        github_app_installation_id: install.id.clone(),
+        repo_owner: "acme".into(),
+        repo_name: "widgets".into(),
+        default_branch: "main".into(),
+        created_at: Utc::now(),
+    };
+    db::insert_project(&pool, &project).await.unwrap();
+
+    let session_token = seed_session_cookie(&pool, &user.id).await;
+    let state = AppState::new(pool, auth_enabled_config(), None);
+
+    let body = serde_json::json!({
+        "prompt": "hi",
+        "project_id": project.id,
+        // Disagrees with project.workspace_id (= w_a.id).
+        "workspace_id": w_b.id,
+    });
+    let resp = app(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/tasks")
+                .header(header::COOKIE, cookie(&session_token))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}

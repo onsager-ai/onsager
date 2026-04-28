@@ -108,6 +108,15 @@ pub async fn create_task(
     // The project also resolves the workspace the session is launched
     // into — credentials, listing, and detail-access checks all key on
     // that workspace_id (issue #164).
+    //
+    // Resolution order for the session's workspace:
+    //   1. project_id  → use that project's workspace (project owns scope)
+    //   2. workspace_id explicit → use it after a membership check
+    //   3. neither     → personal session, NULL workspace_id (legacy path)
+    //
+    // When both are supplied and disagree, 400 — the dashboard should
+    // pick one rather than the server silently preferring one over the
+    // other.
     let workspace_id: Option<String> = if let Some(ref project_id) = request.project_id {
         if user_id.is_none() {
             return (
@@ -132,6 +141,17 @@ pub async fn create_task(
                 return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
             }
         };
+        if let Some(ref explicit) = request.workspace_id {
+            if explicit != &project.workspace_id {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "workspace_id does not match the project's workspace",
+                    })),
+                )
+                    .into_response();
+            }
+        }
         if let Err(r) = crate::server::routes::workspaces::assert_workspace_member(
             &state.db,
             &auth_user,
@@ -142,6 +162,25 @@ pub async fn create_task(
             return r;
         }
         Some(project.workspace_id)
+    } else if let Some(ref explicit) = request.workspace_id {
+        if user_id.is_none() {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "authentication required to scope a session to a workspace"
+                })),
+            )
+                .into_response();
+        }
+        // 404 (not 403) on non-membership via the shared helper —
+        // matches every other workspace-scoped surface so a caller
+        // can't enumerate workspaces by probing this endpoint.
+        if let Err(r) =
+            crate::server::routes::require_workspace_access(&state.db, &auth_user, explicit).await
+        {
+            return r;
+        }
+        Some(explicit.clone())
     } else {
         None
     };

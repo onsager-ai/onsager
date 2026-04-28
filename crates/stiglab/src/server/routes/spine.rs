@@ -158,8 +158,14 @@ pub async fn list_events(
     if workspace_id.is_empty() {
         return missing_workspace();
     }
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
-        return r;
+    // Skip the membership check for the synthetic anonymous principal
+    // so auth-disabled dev mode keeps these endpoints usable. The
+    // `?workspace=` requirement still applies and the SQL still filters
+    // by it — anonymous just means no per-user gate.
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
+            return r;
+        }
     }
 
     let spine = match &state.spine {
@@ -254,8 +260,14 @@ pub async fn list_artifacts(
     if workspace_id.is_empty() {
         return missing_workspace();
     }
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
-        return r;
+    // Skip the membership check for the synthetic anonymous principal
+    // so auth-disabled dev mode keeps these endpoints usable. The
+    // `?workspace=` requirement still applies and the SQL still filters
+    // by it — anonymous just means no per-user gate.
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
+            return r;
+        }
     }
 
     let spine = match &state.spine {
@@ -318,8 +330,14 @@ pub async fn register_artifact(
         )
             .into_response();
     }
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
-        return r;
+    // Skip the membership check for the synthetic anonymous principal
+    // so auth-disabled dev mode keeps these endpoints usable. The
+    // `?workspace=` requirement still applies and the SQL still filters
+    // by it — anonymous just means no per-user gate.
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, workspace_id).await {
+            return r;
+        }
     }
 
     let spine = match &state.spine {
@@ -464,15 +482,17 @@ pub async fn get_artifact(
     // 404 (not 403) on workspace mismatch via the shared helper —
     // rewrite the body to "artifact not found" so artifact IDs don't
     // leak via the workspace-not-found body.
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
-        if r.status() == StatusCode::NOT_FOUND {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "artifact not found" })),
-            )
-                .into_response();
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            if r.status() == StatusCode::NOT_FOUND {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "artifact not found" })),
+                )
+                    .into_response();
+            }
+            return r;
         }
-        return r;
     }
 
     let artifact = sqlx::query_as::<_, SpineArtifact>(
@@ -677,15 +697,17 @@ pub async fn retry_artifact(
         )
             .into_response();
     };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
-        if r.status() == StatusCode::NOT_FOUND {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "artifact not found" })),
-            )
-                .into_response();
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            if r.status() == StatusCode::NOT_FOUND {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "artifact not found" })),
+                )
+                    .into_response();
+            }
+            return r;
         }
-        return r;
     }
     let _ = workspace_id;
 
@@ -772,15 +794,17 @@ pub async fn abort_artifact(
         )
             .into_response();
     };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
-        if r.status() == StatusCode::NOT_FOUND {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "artifact not found" })),
-            )
-                .into_response();
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            if r.status() == StatusCode::NOT_FOUND {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "artifact not found" })),
+                )
+                    .into_response();
+            }
+            return r;
         }
-        return r;
     }
 
     if previous_state == "archived" {
@@ -886,15 +910,17 @@ pub async fn override_gate(
                 .into_response();
         }
     };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
-        if r.status() == StatusCode::NOT_FOUND {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "artifact not found" })),
-            )
-                .into_response();
+    if auth_user.user_id != "anonymous" {
+        if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
+            if r.status() == StatusCode::NOT_FOUND {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "artifact not found" })),
+                )
+                    .into_response();
+            }
+            return r;
         }
-        return r;
     }
 
     let verdict = req.verdict.as_deref().unwrap_or("allow").to_lowercase();

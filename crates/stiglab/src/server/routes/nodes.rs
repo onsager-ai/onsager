@@ -14,10 +14,11 @@ use super::require_workspace_access;
 ///
 /// Nodes are global infrastructure (one set of physical agents serves
 /// every workspace), but the list endpoint still requires `?workspace=`
-/// so the API surface follows one filter pattern (#164). The
-/// membership check 404s callers that aren't members of the requested
-/// workspace, so node IDs don't leak across workspaces even though the
-/// underlying registry is shared.
+/// so the API surface follows one filter pattern (#164). The membership
+/// check 404s non-members of the requested workspace, preventing them
+/// from accessing the nodes listing even though the underlying registry
+/// is shared. Members of any one workspace can still see every node;
+/// per-workspace node scoping is a separate concern (no spec yet).
 pub async fn list_nodes(
     State(state): State<AppState>,
     auth_user: AuthUser,
