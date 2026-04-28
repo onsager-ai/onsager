@@ -72,10 +72,14 @@ services:
       - ../../crates/onsager-spine/migrations:/migrations:ro
     environment:
       PGPASSWORD: onsager
+    # `sort -V` orders 001 < 002 < ... < 010 (the same scheme
+    # crates/stiglab/deploy/entrypoint.sh uses); a bare glob's order
+    # isn't guaranteed and would silently misorder migrations as the
+    # set crosses 010+.
     entrypoint: >
       sh -c "
         set -e;
-        for f in /migrations/*.sql; do
+        for f in $$(ls /migrations/*.sql | sort -V); do
           echo \"==> applying $$f\";
           psql -X -v ON_ERROR_STOP=1 -h db -U onsager -d onsager -f \"$$f\";
         done

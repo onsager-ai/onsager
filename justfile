@@ -210,6 +210,10 @@ install:
 # Allocate a fresh slot, create a worktree off main, bring the slot's
 # compose stack up. The `<base>` arg defaults to `main`; pass another
 # base branch to fork from a different point.
+#
+# All compose invocations run from inside the worktree dir so the
+# `../..:/work` bind mount in docker-compose.slot.yml resolves to the
+# worktree's source tree, not the main checkout's.
 worktree-new name base="main":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -218,15 +222,20 @@ worktree-new name base="main":
       echo "worktrees/$name already exists" >&2; exit 1
     fi
     slot=$(cargo run -p xtask --quiet -- slot alloc "$name" --branch "$name")
+    # If anything below this fails, hand the slot back so the manifest
+    # doesn't accumulate orphan entries.
+    trap 'rc=$?; if [ "$rc" != 0 ]; then cargo run -p xtask --quiet -- slot free "'"$name"'" >/dev/null 2>&1 || true; rm -rf "worktrees/'"$name"'" 2>/dev/null || true; fi' EXIT
     mkdir -p worktrees
     git worktree add -b "$name" "worktrees/$name" "$base"
     cargo run -p xtask --quiet -- slot env "$name" > "worktrees/$name/.env.slot"
     mkdir -p "worktrees/$name/.devcontainer"
     cp deploy/dev/devcontainer.json "worktrees/$name/.devcontainer/devcontainer.json"
     project="onsager-slot${slot}"
-    docker compose --env-file "worktrees/$name/.env.slot" \
-        -f deploy/dev/docker-compose.slot.yml \
-        -p "$project" up -d --wait
+    (cd "worktrees/$name" && \
+     docker compose --env-file .env.slot \
+         -f deploy/dev/docker-compose.slot.yml \
+         -p "$project" up -d --wait)
+    trap - EXIT
     echo ""
     echo "=== slot $slot ($name) up ==="
     cargo run -p xtask --quiet -- slot tunnel "$name"
@@ -239,9 +248,10 @@ worktree-up name:
     set -euo pipefail
     name="{{name}}"
     project=$(cargo run -p xtask --quiet -- slot project "$name")
-    docker compose --env-file "worktrees/$name/.env.slot" \
-        -f deploy/dev/docker-compose.slot.yml \
-        -p "$project" up -d --wait
+    (cd "worktrees/$name" && \
+     docker compose --env-file .env.slot \
+         -f deploy/dev/docker-compose.slot.yml \
+         -p "$project" up -d --wait)
     cargo run -p xtask --quiet -- slot tunnel "$name"
 
 # Show every slot — name, slot number, ports, project, worktree path.
@@ -260,7 +270,13 @@ worktree-list:
           project=$(cargo run -p xtask --quiet -- slot project "$name" 2>/dev/null || true)
           [ -z "$project" ] && continue
           echo "--- $name ($project) ---"
-          docker compose -p "$project" ps 2>/dev/null || echo "(not running)"
+          if [ -d "worktrees/$name" ]; then
+            (cd "worktrees/$name" && \
+             docker compose -f deploy/dev/docker-compose.slot.yml -p "$project" ps 2>/dev/null) \
+              || echo "(not running)"
+          else
+            echo "(worktree dir missing)"
+          fi
         done
 
 # Tear down a slot's compose project + per-slot volumes, remove the
@@ -274,9 +290,15 @@ worktree-rm name *flags:
     with_branch=0
     for f in $flags; do [ "$f" = "--with-branch" ] && with_branch=1; done
     project=$(cargo run -p xtask --quiet -- slot project "$name")
-    docker compose --env-file "worktrees/$name/.env.slot" \
-        -f deploy/dev/docker-compose.slot.yml \
-        -p "$project" down -v --remove-orphans || true
+    if [ -d "worktrees/$name" ]; then
+      (cd "worktrees/$name" && \
+       docker compose --env-file .env.slot \
+           -f deploy/dev/docker-compose.slot.yml \
+           -p "$project" down -v --remove-orphans) || true
+    else
+      # Worktree dir already gone — fall back to no-bind compose teardown.
+      docker compose -p "$project" down -v --remove-orphans 2>/dev/null || true
+    fi
     git worktree remove --force "worktrees/$name" 2>/dev/null || rm -rf "worktrees/$name"
     if [ "$with_branch" = "1" ]; then
       git branch -D "$name" 2>/dev/null || true
@@ -288,7 +310,7 @@ worktree-rm name *flags:
 # Print the SSH `-L` flags needed to reach a slot from a laptop.
 # Pass the second arg to override the SSH host (defaults to "vm").
 worktree-tunnel name host="vm":
-    cargo run -p xtask --quiet -- slot tunnel "{{name}}" --host="{{host}}"
+    cargo run -p xtask --quiet -- slot tunnel "{{name}}" --host "{{host}}"
 
 # Run a one-off command inside a slot's stiglab container — same shell,
 # same target dir, same toolchain as the live cargo-watch loop.
@@ -299,8 +321,9 @@ slot-exec name *cmd:
     set -euo pipefail
     name="{{name}}"
     project=$(cargo run -p xtask --quiet -- slot project "$name")
+    cd "worktrees/$name"
     if [ -z "{{cmd}}" ]; then
-      docker compose -p "$project" exec stiglab bash
+      docker compose -f deploy/dev/docker-compose.slot.yml -p "$project" exec stiglab bash
     else
-      docker compose -p "$project" exec stiglab {{cmd}}
+      docker compose -f deploy/dev/docker-compose.slot.yml -p "$project" exec stiglab {{cmd}}
     fi

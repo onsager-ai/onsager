@@ -13,12 +13,16 @@
 //! Subcommands:
 //!
 //!     cargo run -p xtask -- slot alloc <name> [--worktree <path>] [--branch <branch>]
-//!     cargo run -p xtask -- slot free  <name> [--keep-branch]
+//!     cargo run -p xtask -- slot free  <name>
 //!     cargo run -p xtask -- slot list  [--json]
 //!     cargo run -p xtask -- slot env   <name>
-//!     cargo run -p xtask -- slot tunnel <name> [--exec]
+//!     cargo run -p xtask -- slot tunnel <name> [--host <host>]
 //!     cargo run -p xtask -- slot get   <name>
 //!     cargo run -p xtask -- slot project <name>     # docker-compose project name
+//!
+//! Slot 0 / "main" is reserved for the main checkout — `alloc` rejects
+//! the names "main" and "0", and `env`/`get`/`project`/`tunnel` accept
+//! either spelling as a shortcut for the main checkout.
 
 use std::path::{Path, PathBuf};
 
@@ -31,24 +35,20 @@ pub const DEFAULT_MAX_SLOTS: u8 = 100;
 pub const SLOT_PORT_BASE: u16 = 9000;
 pub const SLOT_PORT_STRIDE: u16 = 10;
 
-/// The set of port offsets within a slot's 10-port block. Names match the
-/// env vars exported into the slot's compose project (see `slot_env`).
-const PORT_OFFSETS: &[(&str, u16)] = &[
-    ("EDGE_PORT", 0),
-    ("POSTGRES_PORT", 1),
-    // Offsets 2..=9 are reserved for debugger/profiler ports. We don't
-    // bind them by default — they're available for `docker compose run -p`
-    // overrides at debug time.
-];
+/// Names that can never be allocated. "main" and "0" address slot 0
+/// (the main checkout), so handing them out would create entries that
+/// `entry_or_main()` shadows — visible in `slot list` but invisible to
+/// `slot env`/`get`/`project`/`tunnel`.
+const RESERVED_NAMES: &[&str] = &["main", "0"];
 
 /// Legacy port layout for slot 0 (the main checkout). Keeping this
 /// special-cased preserves zero behavioral change for single-checkout
-/// developers who never create a worktree.
+/// developers who never create a worktree. The legacy stiglab / synodic /
+/// forge ports (3000 / 3001 / 3003) are owned by `just dev` directly,
+/// not by the slot allocator — they aren't part of `SlotPorts` because
+/// no slot 1..=99 publishes a parallel set on the host.
 const SLOT0_EDGE_PORT: u16 = 5173;
 const SLOT0_POSTGRES_PORT: u16 = 5432;
-const SLOT0_STIGLAB_PORT: u16 = 3000;
-const SLOT0_SYNODIC_PORT: u16 = 3001;
-const SLOT0_FORGE_PORT: u16 = 3003;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Manifest {
@@ -88,18 +88,16 @@ pub struct SlotEntry {
 }
 
 /// Resolved port assignments for a slot — pure derivation from `slot`.
+///
+/// Only `edge` and `postgres` are published on the VM host by
+/// `docker-compose.slot.yml`; everything else stays on the compose
+/// network. The dashboard reaches stiglab/synodic/forge via Caddy's
+/// same-origin reverse proxy at `edge`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotPorts {
     pub slot: u8,
     pub edge: u16,
     pub postgres: u16,
-    /// Per-service ports the dashboard/Caddy doesn't need but that we
-    /// expose for direct curl/sql access against a slot. For slot 0 these
-    /// match the legacy layout; for slots 1..=99 they're slot-derived
-    /// debug ports inside the 10-port block.
-    pub stiglab: u16,
-    pub synodic: u16,
-    pub forge: u16,
 }
 
 impl Manifest {
@@ -127,6 +125,9 @@ impl Manifest {
     pub fn allocate(&self, name: &str) -> Result<u8> {
         if name.trim().is_empty() {
             bail!("slot name must not be empty");
+        }
+        if RESERVED_NAMES.contains(&name) {
+            bail!("slot name {name:?} is reserved for the main checkout (slot 0)");
         }
         if self.slots.iter().any(|s| s.name == name) {
             bail!("a slot named {name:?} already exists");
@@ -187,9 +188,6 @@ pub fn slot_ports(slot: u8) -> SlotPorts {
             slot,
             edge: SLOT0_EDGE_PORT,
             postgres: SLOT0_POSTGRES_PORT,
-            stiglab: SLOT0_STIGLAB_PORT,
-            synodic: SLOT0_SYNODIC_PORT,
-            forge: SLOT0_FORGE_PORT,
         };
     }
     let base = SLOT_PORT_BASE + SLOT_PORT_STRIDE * slot as u16;
@@ -197,13 +195,10 @@ pub fn slot_ports(slot: u8) -> SlotPorts {
         slot,
         edge: base,
         postgres: base + 1,
-        // Per-service ports inside the slot's reserved 10-port block.
-        // These let `psql -p 90X1` and `curl localhost:90X3` work without
-        // tunneling through Caddy. Caddy is the only path the dashboard
-        // uses, so these are debug-only conveniences.
-        stiglab: base + 3,
-        synodic: base + 4,
-        forge: base + 5,
+        // Offsets 2..=9 are reserved within the slot's 10-port block for
+        // ad-hoc debugger / profiler / direct-service ports a developer
+        // can bind via `docker compose run --service-ports` at debug
+        // time. They are intentionally not pre-published.
     }
 }
 
@@ -234,17 +229,7 @@ pub fn slot_env(entry: &SlotEntry) -> Vec<(String, String)> {
         ("ONSAGER_TARGET_VOLUME".into(), target_volume(entry.slot)),
         ("SLOT_EDGE_PORT".into(), p.edge.to_string()),
         ("SLOT_POSTGRES_PORT".into(), p.postgres.to_string()),
-        ("SLOT_STIGLAB_PORT".into(), p.stiglab.to_string()),
-        ("SLOT_SYNODIC_PORT".into(), p.synodic.to_string()),
-        ("SLOT_FORGE_PORT".into(), p.forge.to_string()),
     ];
-    // Echo the canonical PORT_OFFSETS as well so callers that just want
-    // "the edge port" don't have to know slot 0's special-case.
-    for (suffix, _) in PORT_OFFSETS {
-        // Already covered by the explicit names above; loop kept so future
-        // offsets land here automatically.
-        let _ = suffix;
-    }
     out.sort();
     out
 }
@@ -422,8 +407,10 @@ fn cmd_project(args: Vec<String>) -> Result<()> {
 fn cmd_tunnel(args: Vec<String>) -> Result<()> {
     let mut name: Option<String> = None;
     let mut host: Option<String> = None;
-    for a in args {
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
         match a.as_str() {
+            "--host" => host = Some(it.next().ok_or_else(|| anyhow!("--host needs a value"))?),
             other if other.starts_with("--host=") => host = Some(other[7..].to_string()),
             other if other.starts_with("--") => bail!("unknown flag {other:?}"),
             other => {
@@ -557,9 +544,6 @@ mod tests {
         let p = slot_ports(0);
         assert_eq!(p.edge, 5173);
         assert_eq!(p.postgres, 5432);
-        assert_eq!(p.stiglab, 3000);
-        assert_eq!(p.synodic, 3001);
-        assert_eq!(p.forge, 3003);
     }
 
     #[test]
@@ -580,7 +564,7 @@ mod tests {
         let mut all: Vec<u16> = Vec::new();
         for n in 1..=99u8 {
             let p = slot_ports(n);
-            all.extend([p.edge, p.postgres, p.stiglab, p.synodic, p.forge]);
+            all.extend([p.edge, p.postgres]);
         }
         let mut sorted = all.clone();
         sorted.sort();
@@ -590,6 +574,15 @@ mod tests {
             all.len(),
             "port collision detected across slots 1..=99"
         );
+    }
+
+    #[test]
+    fn allocate_rejects_reserved_names() {
+        let m = Manifest::default();
+        for n in ["main", "0"] {
+            let err = m.allocate(n).unwrap_err().to_string();
+            assert!(err.contains("reserved"), "name {n:?} got: {err}");
+        }
     }
 
     #[test]
