@@ -34,6 +34,7 @@ import {
 import { CreateSessionSheet } from "@/components/sessions/CreateSessionSheet"
 import { NewWorkspaceDialog } from "@/components/workspaces/NewWorkspaceDialog"
 import { useAuth } from "@/lib/auth"
+import { useOptionalActiveWorkspace } from "@/lib/workspace"
 
 // Single global "do something" surface — create a primitive or jump to
 // a section. Replaces the old chrome `+` dropdown: that pattern doesn't
@@ -106,6 +107,7 @@ function CommandPaletteDialog() {
   const navigate = useNavigate()
   const { user, authEnabled } = useAuth()
   const canAuth = authEnabled && !!user
+  const activeWorkspace = useOptionalActiveWorkspace()
 
   const [sessionOpen, setSessionOpen] = useState(false)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
@@ -115,6 +117,14 @@ function CommandPaletteDialog() {
     action()
   }
   const go = (path: string) => run(() => navigate(path))
+  // Scope deep-links to the active workspace when there is one. Falls
+  // back to the legacy bare path for anonymous mode (the App.tsx route
+  // table redirects to the picker for authed users without a workspace).
+  const scoped = (suffix: string) =>
+    activeWorkspace ? `/workspaces/${activeWorkspace.slug}/${suffix}` : `/${suffix}`
+  const overview = activeWorkspace
+    ? `/workspaces/${activeWorkspace.slug}`
+    : "/"
 
   return (
     <>
@@ -131,7 +141,7 @@ function CommandPaletteDialog() {
             <CommandGroup heading="Create">
               <CommandItem
                 keywords={["new", "factory", "github"]}
-                onSelect={() => go("/workflows/start")}
+                onSelect={() => go(scoped("workflows/start"))}
               >
                 <Zap className="mr-2 h-4 w-4" />
                 New workflow
@@ -159,7 +169,7 @@ function CommandPaletteDialog() {
             <CommandSeparator />
 
             <CommandGroup heading="Go to">
-              <CommandItem keywords={["overview"]} onSelect={() => go("/")}>
+              <CommandItem keywords={["overview"]} onSelect={() => go(overview)}>
                 <Factory className="mr-2 h-4 w-4" />
                 Factory overview
               </CommandItem>
@@ -169,27 +179,27 @@ function CommandPaletteDialog() {
                   Workspaces
                 </CommandItem>
               )}
-              <CommandItem onSelect={() => go("/workflows")}>
+              <CommandItem onSelect={() => go(scoped("workflows"))}>
                 <GitBranch className="mr-2 h-4 w-4" />
                 Workflows
               </CommandItem>
-              <CommandItem onSelect={() => go("/artifacts")}>
+              <CommandItem onSelect={() => go(scoped("artifacts"))}>
                 <Package className="mr-2 h-4 w-4" />
                 Artifacts
               </CommandItem>
-              <CommandItem onSelect={() => go("/spine")}>
+              <CommandItem onSelect={() => go(scoped("spine"))}>
                 <Activity className="mr-2 h-4 w-4" />
                 Event spine
               </CommandItem>
-              <CommandItem onSelect={() => go("/governance")}>
+              <CommandItem onSelect={() => go(scoped("governance"))}>
                 <Shield className="mr-2 h-4 w-4" />
                 Governance
               </CommandItem>
-              <CommandItem onSelect={() => go("/sessions")}>
+              <CommandItem onSelect={() => go(scoped("sessions"))}>
                 <Terminal className="mr-2 h-4 w-4" />
                 Sessions
               </CommandItem>
-              <CommandItem onSelect={() => go("/nodes")}>
+              <CommandItem onSelect={() => go(scoped("nodes"))}>
                 <Server className="mr-2 h-4 w-4" />
                 Nodes
               </CommandItem>

@@ -29,7 +29,7 @@ const ws = {
 }
 const orgInstall = {
   id: "inst1",
-  tenant_id: "ws1",
+  workspace_id: "ws1",
   install_id: 42,
   account_login: "onsager-ai",
   account_type: "organization" as const,
@@ -44,7 +44,7 @@ async function primeMocks(opts: {
   members?: unknown[]
 }) {
   const { api } = await import("@/lib/api")
-  vi.mocked(api.listWorkspaces).mockResolvedValue({ tenants: [ws] })
+  vi.mocked(api.listWorkspaces).mockResolvedValue({ workspaces: [ws] })
   vi.mocked(api.listWorkspaceMembers).mockResolvedValue({
     members: (opts.members ?? []) as never,
   })
@@ -166,7 +166,7 @@ describe("WorkspaceCard — step-by-step NextStepCallout", () => {
     renderCard()
     const link = await screen.findByRole("link", { name: /install github app/i })
     expect(link.getAttribute("href")).toBe(
-      "/api/github-app/install-start?tenant_id=ws1",
+      "/api/github-app/install-start?workspace_id=ws1",
     )
     expect(screen.getByText(/step 2 of 3/i)).toBeInTheDocument()
     // Empty-state CTA must be unambiguous — the InstallationsSection
@@ -230,7 +230,7 @@ describe("WorkspaceCard — step-by-step NextStepCallout", () => {
       projects: [
         {
           id: "p1",
-          tenant_id: "ws1",
+          workspace_id: "ws1",
           github_app_installation_id: "inst1",
           repo_owner: "onsager-ai",
           repo_name: "onsager",
@@ -241,7 +241,7 @@ describe("WorkspaceCard — step-by-step NextStepCallout", () => {
     })
     renderCard()
     const link = await screen.findByRole("link", { name: /start a session/i })
-    expect(link.getAttribute("href")).toBe("/sessions")
+    expect(link.getAttribute("href")).toBe("/workspaces/acme/sessions")
     expect(screen.getByText(/you're set up/i)).toBeInTheDocument()
     // "Add another project" appears now that there's an existing project.
     expect(
@@ -258,7 +258,7 @@ describe("WorkspaceCard — human-readable member + installation labels", () => 
       repos: [],
       members: [
         {
-          tenant_id: "ws1",
+          workspace_id: "ws1",
           user_id: "133d228a-be10-492b-8035-bdb984d20721",
           joined_at: "2026-01-01",
           github_login: "octocat",
@@ -281,7 +281,7 @@ describe("WorkspaceCard — human-readable member + installation labels", () => 
       repos: [],
       members: [
         {
-          tenant_id: "ws1",
+          workspace_id: "ws1",
           user_id: "orphaned-user-id",
           joined_at: "2026-01-01",
           github_login: null,

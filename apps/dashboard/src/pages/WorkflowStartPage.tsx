@@ -23,7 +23,7 @@ export function WorkflowStartPage() {
   usePageHeader({ title: "Start the factory", backTo: "/workspaces" })
   const [params] = useSearchParams()
   const installId = params.get("install") ?? ""
-  const tenantIdParam = params.get("tenant_id") ?? ""
+  const workspaceIdParam = params.get("workspace_id") ?? ""
 
   const { data: workspacesData } = useQuery({
     queryKey: ["workspaces"],
@@ -31,19 +31,19 @@ export function WorkflowStartPage() {
     staleTime: 30_000,
   })
   const workspaces = useMemo(
-    () => workspacesData?.tenants ?? [],
+    () => workspacesData?.workspaces ?? [],
     [workspacesData],
   )
 
-  // If the callback URL doesn't carry an explicit tenant_id, fall back to
-  // the workspace that owns this install — one query hop, no user typing.
-  const { data: tenantInstallsData } = useQuery({
+  // If the callback URL doesn't carry an explicit workspace_id, fall back
+  // to the workspace that owns this install — one query hop, no typing.
+  const { data: workspaceInstallsData } = useQuery({
     queryKey: ["workflow-start-installations", workspaces.map((w) => w.id).join(",")],
     queryFn: async () => {
       const entries = await Promise.all(
         workspaces.map(async (w) => {
           const r = await api.listWorkspaceInstallations(w.id)
-          return { tenantId: w.id, installations: r.installations }
+          return { workspaceId: w.id, installations: r.installations }
         }),
       )
       return entries
@@ -52,38 +52,38 @@ export function WorkflowStartPage() {
     staleTime: 30_000,
   })
 
-  // Resolve the tenant that owns the given install id. If we can't match,
-  // return "" and let the UI render an error — guessing a tenant would
-  // run later mutations against the wrong workspace.
-  const resolvedTenantId = useMemo(() => {
-    if (tenantIdParam) return tenantIdParam
-    if (!tenantInstallsData) return ""
-    const hit = tenantInstallsData.find((e) =>
+  // Resolve the workspace that owns the given install id. If we can't
+  // match, return "" and let the UI render an error — guessing would run
+  // later mutations against the wrong workspace.
+  const resolvedWorkspaceId = useMemo(() => {
+    if (workspaceIdParam) return workspaceIdParam
+    if (!workspaceInstallsData) return ""
+    const hit = workspaceInstallsData.find((e) =>
       e.installations.some((i) => i.id === installId),
     )
-    return hit?.tenantId ?? ""
-  }, [tenantIdParam, tenantInstallsData, installId])
+    return hit?.workspaceId ?? ""
+  }, [workspaceIdParam, workspaceInstallsData, installId])
 
   // The backend's workflow create API wants the numeric GitHub install id,
   // not the dashboard's installation record id. Look it up from the same
-  // list we used to resolve the tenant.
+  // list we used to resolve the workspace.
   const githubInstallId = useMemo(() => {
-    if (!tenantInstallsData) return 0
-    for (const e of tenantInstallsData) {
+    if (!workspaceInstallsData) return 0
+    for (const e of workspaceInstallsData) {
       const hit = e.installations.find((i) => i.id === installId)
       if (hit) return hit.install_id
     }
     return 0
-  }, [tenantInstallsData, installId])
+  }, [workspaceInstallsData, installId])
 
-  const installLookupDone = !!tenantIdParam || !!tenantInstallsData
+  const installLookupDone = !!workspaceIdParam || !!workspaceInstallsData
   const installUnresolved =
-    !!installId && installLookupDone && !resolvedTenantId
+    !!installId && installLookupDone && !resolvedWorkspaceId
 
   const { data: reposData, isLoading: reposLoading } = useQuery({
-    queryKey: ["installation-repos", resolvedTenantId, installId],
-    queryFn: () => api.listInstallationRepos(resolvedTenantId, installId),
-    enabled: !!resolvedTenantId && !!installId,
+    queryKey: ["installation-repos", resolvedWorkspaceId, installId],
+    queryFn: () => api.listInstallationRepos(resolvedWorkspaceId, installId),
+    enabled: !!resolvedWorkspaceId && !!installId,
     retry: false,
   })
   const repos = reposData?.repos ?? []
@@ -131,7 +131,7 @@ export function WorkflowStartPage() {
                 <RepoRow
                   key={`${r.owner}/${r.name}`}
                   repo={r}
-                  tenantId={resolvedTenantId}
+                  workspaceId={resolvedWorkspaceId}
                   installId={installId}
                   githubInstallId={githubInstallId}
                 />
@@ -143,6 +143,9 @@ export function WorkflowStartPage() {
 
       <p className="text-center text-xs text-muted-foreground">
         Want something custom?{" "}
+        {/* The legacy bare `/workflows` path falls through the App.tsx
+            legacy redirect to the active workspace; safer than computing
+            a slug here, which we'd have to look up by workspace id. */}
         <Link to="/workflows" className="underline">
           Build a workflow from scratch
         </Link>
@@ -168,12 +171,12 @@ function EmptyInstall() {
 
 function RepoRow({
   repo,
-  tenantId,
+  workspaceId,
   installId,
   githubInstallId,
 }: {
   repo: AccessibleRepo
-  tenantId: string
+  workspaceId: string
   installId: string
   githubInstallId: number
 }) {
@@ -189,7 +192,7 @@ function RepoRow({
     },
   })
 
-  const ready = !!label && !!tenantId && githubInstallId > 0
+  const ready = !!label && !!workspaceId && githubInstallId > 0
   const run = () => {
     if (!ready || !label) return
     // Preset path: stiglab expands the stage chain server-side, so we
@@ -203,7 +206,7 @@ function RepoRow({
       label,
     })
     create.mutate({
-      tenant_id: tenantId,
+      workspace_id: workspaceId,
       name: draft.name,
       trigger_kind: "github-issue-webhook",
       install_id: githubInstallId,
@@ -232,7 +235,7 @@ function RepoRow({
       </div>
       <div className="space-y-2">
         <LabelCombobox
-          tenantId={tenantId}
+          workspaceId={workspaceId}
           installId={installId}
           repoOwner={repo.owner}
           repoName={repo.name}

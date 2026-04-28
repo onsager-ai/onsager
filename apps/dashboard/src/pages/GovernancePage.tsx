@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
+import { useActiveWorkspace } from "@/lib/workspace"
 import type {
   GovernanceEvent,
   IsingInsightEmittedEvent,
@@ -37,18 +38,20 @@ const EVENT_TYPES = ["", "tool_call_error", "hallucination", "compliance_violati
 
 export function GovernancePage() {
   usePageHeader({ title: "Governance" })
+  const workspace = useActiveWorkspace()
   const [filter, setFilter] = useState("")
   const queryClient = useQueryClient()
 
   const { data: events, isLoading } = useQuery({
-    queryKey: ["governance-events", filter],
-    queryFn: () => api.getGovernanceEvents(filter || undefined),
+    queryKey: ["governance-events", workspace.id, filter],
+    queryFn: () =>
+      api.getGovernanceEvents(workspace.id, filter || undefined),
     refetchInterval: 5000,
   })
 
   const { data: stats } = useQuery({
-    queryKey: ["governance-stats"],
-    queryFn: api.getGovernanceStats,
+    queryKey: ["governance-stats", workspace.id],
+    queryFn: () => api.getGovernanceStats(workspace.id),
     refetchInterval: 5000,
   })
 
@@ -56,16 +59,16 @@ export function GovernancePage() {
   // less aggressively than governance events since analyzers tick on a 7d
   // window, so per-second polling would burn backend cycles for no signal.
   const { data: insights } = useQuery({
-    queryKey: ["ising-insights"],
-    queryFn: () => api.getIsingInsights(20),
+    queryKey: ["ising-insights", workspace.id],
+    queryFn: () => api.getIsingInsights(workspace.id, 20),
     refetchInterval: 15000,
   })
 
   // Issue #36 Step 2 — pending rule proposals. Same slow-refresh cadence as
   // insights; proposals churn at most once per ising tick.
   const { data: pendingProposals } = useQuery({
-    queryKey: ["rule-proposals-pending"],
-    queryFn: () => api.getRuleProposals("pending"),
+    queryKey: ["rule-proposals-pending", workspace.id],
+    queryFn: () => api.getRuleProposals(workspace.id, "pending"),
     refetchInterval: 15000,
   })
 

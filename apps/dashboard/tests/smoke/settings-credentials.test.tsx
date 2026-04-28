@@ -1,80 +1,114 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { MemoryRouter } from "react-router-dom"
-import { SettingsPage } from "@/pages/SettingsPage"
+import { MemoryRouter, Routes, Route } from "react-router-dom"
+import { WorkspaceSettingsPage } from "@/pages/WorkspaceSettingsPage"
 
-// Minimal mocks so SettingsPage renders without network
+// Per spec #166, credentials moved from the account-wide /settings page
+// to /workspaces/:workspace/settings. The dialog wires through the active
+// workspace via WorkspaceContext, so the smoke tests render under the
+// scoped layout.
+
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ user: null, authEnabled: false }),
 }))
 
 vi.mock("@/lib/api", () => ({
   api: {
+    listWorkspaces: vi
+      .fn()
+      .mockResolvedValue({
+        workspaces: [
+          {
+            id: "ws1",
+            slug: "acme",
+            name: "Acme",
+            created_by: "u1",
+            created_at: "2026-01-01",
+          },
+        ],
+      }),
     getCredentials: vi.fn().mockResolvedValue({ credentials: [] }),
     setCredential: vi.fn(),
     deleteCredential: vi.fn(),
   },
 }))
 
+import { WorkspaceScope } from "@/lib/workspace"
+
 function renderSettings() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
-        <SettingsPage />
+      <MemoryRouter initialEntries={["/workspaces/acme/settings"]}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspace/*"
+            element={
+              <WorkspaceScope>
+                <Routes>
+                  <Route path="settings" element={<WorkspaceSettingsPage />} />
+                </Routes>
+              </WorkspaceScope>
+            }
+          />
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   )
 }
 
-describe("SettingsPage credentials layout", () => {
+describe("WorkspaceSettingsPage credentials layout", () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it("renders both known credential entries", () => {
+  it("renders both known credential entries", async () => {
     renderSettings()
-    expect(screen.getByText("CLAUDE_CODE_OAUTH_TOKEN")).toBeInTheDocument()
+    expect(
+      await screen.findByText("CLAUDE_CODE_OAUTH_TOKEN"),
+    ).toBeInTheDocument()
     expect(screen.getByText("ANTHROPIC_API_KEY")).toBeInTheDocument()
   })
 
-  it("shows Add button inline with each known credential (not in a separate row)", () => {
+  it("shows Add button inline with each known credential (not in a separate row)", async () => {
     renderSettings()
+    await screen.findByText("CLAUDE_CODE_OAUTH_TOKEN")
     const addButtons = screen.getAllByRole("button", { name: /add/i })
     // At least 2 Add buttons (one per known credential) + 1 for custom credential
     expect(addButtons.length).toBeGreaterThanOrEqual(2)
   })
 
-  it("known credential name has truncate class to prevent mobile overflow", () => {
+  it("known credential name has truncate class to prevent mobile overflow", async () => {
     renderSettings()
-    const token = screen.getByText("CLAUDE_CODE_OAUTH_TOKEN")
+    const token = await screen.findByText("CLAUDE_CODE_OAUTH_TOKEN")
     expect(token.className).toMatch(/truncate/)
   })
 
-  it("reveals inline input form when Add is clicked on a known credential", () => {
+  it("reveals inline input form when Add is clicked on a known credential", async () => {
     renderSettings()
+    await screen.findByText("CLAUDE_CODE_OAUTH_TOKEN")
     const [firstAdd] = screen.getAllByRole("button", { name: /add/i })
     fireEvent.click(firstAdd)
-    // Two "Value" inputs exist: the inline edit form + the custom credential form
     expect(screen.getAllByPlaceholderText("Value").length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument()
   })
 
-  it("hides Add button while inline edit form is open", () => {
+  it("hides Add button while inline edit form is open", async () => {
     renderSettings()
+    await screen.findByText("CLAUDE_CODE_OAUTH_TOKEN")
     const addButtons = screen.getAllByRole("button", { name: /add/i })
     const initialCount = addButtons.length
     fireEvent.click(addButtons[0])
-    // One Add button should disappear (replaced by Save/Cancel)
     expect(screen.getAllByRole("button", { name: /add/i }).length).toBe(
       initialCount - 1,
     )
   })
 
-  it("renders custom credential form with ENV_VAR_NAME and Value inputs", () => {
+  it("renders custom credential form with ENV_VAR_NAME and Value inputs", async () => {
     renderSettings()
-    expect(screen.getByPlaceholderText("ENV_VAR_NAME")).toBeInTheDocument()
-    // Password input for the custom credential value
+    expect(
+      await screen.findByPlaceholderText("ENV_VAR_NAME"),
+    ).toBeInTheDocument()
     const valueInputs = screen.getAllByPlaceholderText("Value")
     expect(valueInputs.length).toBeGreaterThanOrEqual(1)
   })
@@ -82,15 +116,16 @@ describe("SettingsPage credentials layout", () => {
   it("delete button has aria-label naming the credential", async () => {
     const { api: mockApi } = await import("@/lib/api")
     vi.mocked(mockApi.getCredentials).mockResolvedValueOnce({
-      credentials: [{ name: "MY_SECRET", updated_at: new Date().toISOString() }],
+      credentials: [{ name: "MY_SECRET", created_at: "x", updated_at: new Date().toISOString() }],
     })
     const { findByRole } = renderSettings()
     const deleteBtn = await findByRole("button", { name: "Delete MY_SECRET" })
     expect(deleteBtn).toBeInTheDocument()
   })
 
-  it("inline edit form wraps inputs in a <form> element", () => {
+  it("inline edit form wraps inputs in a <form> element", async () => {
     renderSettings()
+    await screen.findByText("CLAUDE_CODE_OAUTH_TOKEN")
     const [firstAdd] = screen.getAllByRole("button", { name: /add/i })
     fireEvent.click(firstAdd)
     const saveBtn = screen.getByRole("button", { name: /save/i })
@@ -101,6 +136,7 @@ describe("SettingsPage credentials layout", () => {
     const { api: mockApi } = await import("@/lib/api")
     vi.mocked(mockApi.setCredential).mockResolvedValue({ ok: true })
     renderSettings()
+    await screen.findByText("CLAUDE_CODE_OAUTH_TOKEN")
     const [firstAdd] = screen.getAllByRole("button", { name: /add/i })
     fireEvent.click(firstAdd)
     const input = screen.getAllByPlaceholderText(/value/i)[0]
@@ -108,6 +144,7 @@ describe("SettingsPage credentials layout", () => {
     fireEvent.submit(input.closest("form")!)
     await waitFor(() =>
       expect(mockApi.setCredential).toHaveBeenCalledWith(
+        "ws1",
         "CLAUDE_CODE_OAUTH_TOKEN",
         "secret123",
       ),
@@ -120,6 +157,7 @@ describe("SettingsPage credentials layout", () => {
       new Error("Unauthorized"),
     )
     renderSettings()
+    await screen.findByText("CLAUDE_CODE_OAUTH_TOKEN")
     const [firstAdd] = screen.getAllByRole("button", { name: /add/i })
     fireEvent.click(firstAdd)
     const input = screen.getAllByPlaceholderText(/value/i)[0]
@@ -136,6 +174,7 @@ describe("SettingsPage credentials layout", () => {
       new Error("Unauthorized"),
     )
     renderSettings()
+    await screen.findByText("CLAUDE_CODE_OAUTH_TOKEN")
     const [firstAdd] = screen.getAllByRole("button", { name: /add/i })
     fireEvent.click(firstAdd)
     const input = screen.getAllByPlaceholderText(/value/i)[0]
@@ -144,7 +183,6 @@ describe("SettingsPage credentials layout", () => {
     await waitFor(() =>
       expect(screen.getByText("Unauthorized")).toBeInTheDocument(),
     )
-    // Re-open the form and cancel — error should be gone
     const [nextAdd] = screen.getAllByRole("button", { name: /add/i })
     fireEvent.click(nextAdd)
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }))

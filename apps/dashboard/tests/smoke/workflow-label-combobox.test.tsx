@@ -25,7 +25,7 @@ describe("LabelCombobox", () => {
   it("lists existing labels", async () => {
     mount(
       <LabelCombobox
-        tenantId="t1"
+        workspaceId="t1"
         installId="i1"
         repoOwner="onsager-ai"
         repoName="onsager"
@@ -42,7 +42,7 @@ describe("LabelCombobox", () => {
   it("surfaces an inline-create affordance when the query has no exact match", async () => {
     mount(
       <LabelCombobox
-        tenantId="t1"
+        workspaceId="t1"
         installId="i1"
         repoOwner="onsager-ai"
         repoName="onsager"
@@ -62,7 +62,7 @@ describe("LabelCombobox", () => {
     const onChange = vi.fn()
     mount(
       <LabelCombobox
-        tenantId="t1"
+        workspaceId="t1"
         installId="i1"
         repoOwner="onsager-ai"
         repoName="onsager"

@@ -16,12 +16,13 @@ import { Button } from "@/components/ui/button"
 
 interface SessionTableProps {
   sessions: Session[]
+  workspaceSlug: string
 }
 
-function SessionCard({ session }: { session: Session }) {
+function SessionCard({ session, workspaceSlug }: { session: Session; workspaceSlug: string }) {
   return (
     <Link
-      to={`/sessions/${session.id}`}
+      to={`/workspaces/${workspaceSlug}/sessions/${session.id}`}
       className="flex items-center gap-3 rounded-lg border p-3 transition-colors active:bg-accent"
     >
       <div className="min-w-0 flex-1 space-y-1">
@@ -43,7 +44,7 @@ function SessionCard({ session }: { session: Session }) {
   )
 }
 
-export function SessionTable({ sessions }: SessionTableProps) {
+export function SessionTable({ sessions, workspaceSlug }: SessionTableProps) {
   if (sessions.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-8">
@@ -63,7 +64,11 @@ export function SessionTable({ sessions }: SessionTableProps) {
       {/* Mobile: card list */}
       <div className="flex flex-col gap-2 md:hidden">
         {sessions.map((session) => (
-          <SessionCard key={session.id} session={session} />
+          <SessionCard
+            key={session.id}
+            session={session}
+            workspaceSlug={workspaceSlug}
+          />
         ))}
       </div>
 
@@ -84,7 +89,7 @@ export function SessionTable({ sessions }: SessionTableProps) {
               <TableRow key={session.id}>
                 <TableCell>
                   <Link
-                    to={`/sessions/${session.id}`}
+                    to={`/workspaces/${workspaceSlug}/sessions/${session.id}`}
                     className="font-mono text-sm text-blue-500 hover:underline"
                   >
                     {session.id.slice(0, 8)}

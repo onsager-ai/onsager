@@ -15,7 +15,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 export interface RepoComboboxProps {
-  tenantId: string
+  workspaceId: string
   installations: GitHubAppInstallation[]
   installId: string
   repoOwner: string
@@ -35,7 +35,7 @@ export interface RepoComboboxProps {
  * select. Linkable fields stay un-typed, per the dashboard-ui rules.
  */
 export function RepoCombobox({
-  tenantId,
+  workspaceId,
   installations,
   installId,
   repoOwner,
@@ -50,9 +50,9 @@ export function RepoCombobox({
   // staleTime keeps subsequent opens snappy via the React Query cache.
   const queries = useQueries({
     queries: installations.map((inst) => ({
-      queryKey: ["installation-repos", tenantId, inst.id],
-      queryFn: () => api.listInstallationRepos(tenantId, inst.id),
-      enabled: !!tenantId && open,
+      queryKey: ["installation-repos", workspaceId, inst.id],
+      queryFn: () => api.listInstallationRepos(workspaceId, inst.id),
+      enabled: !!workspaceId && open,
       staleTime: 30_000,
       retry: false,
     })),

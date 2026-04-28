@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
+import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -99,29 +100,36 @@ export function FactoryOverviewPage() {
   // dedicated `useNodes()` hook applies this gate too — see its
   // comment for the original motivation.
   const { user, loading: authLoading, authEnabled } = useAuth()
+  const workspace = useOptionalActiveWorkspace()
   const enabled = !authLoading && (!authEnabled || !!user)
+  // The page renders both scoped (`/workspaces/:slug`) and bare-path
+  // (anonymous mode at `/`) — outside a scoped route, the workspace id
+  // is empty and the backend treats the call as global. Once #164 lands
+  // and `workspace_id` becomes mandatory, the bare-path render will
+  // migrate to a no-workspace empty state instead.
+  const wsId = workspace?.id ?? ""
 
   const { data: artifactsData } = useQuery({
-    queryKey: ["artifacts"],
-    queryFn: () => api.getArtifacts(),
+    queryKey: ["artifacts", wsId],
+    queryFn: () => api.getArtifacts(wsId),
     refetchInterval: 5000,
     enabled,
   })
   const { data: govStats } = useQuery({
-    queryKey: ["governance-stats"],
-    queryFn: api.getGovernanceStats,
+    queryKey: ["governance-stats", wsId],
+    queryFn: () => api.getGovernanceStats(wsId),
     refetchInterval: 10000,
     enabled,
   })
   const { data: spineData } = useQuery({
-    queryKey: ["spine-events-overview"],
-    queryFn: () => api.getSpineEvents({ limit: 20 }),
+    queryKey: ["spine-events-overview", wsId],
+    queryFn: () => api.getSpineEvents(wsId, { limit: 20 }),
     refetchInterval: 5000,
     enabled,
   })
   const { data: nodesData } = useQuery({
-    queryKey: ["nodes"],
-    queryFn: api.getNodes,
+    queryKey: ["nodes", wsId],
+    queryFn: () => api.getNodes(wsId),
     refetchInterval: 10000,
     enabled,
   })
@@ -129,8 +137,8 @@ export function FactoryOverviewPage() {
   // session_completed events so the spend card can render without a
   // dedicated accounting endpoint.
   const { data: spendData } = useQuery({
-    queryKey: ["session-spend"],
-    queryFn: () => api.getSessionSpend(100),
+    queryKey: ["session-spend", wsId],
+    queryFn: () => api.getSessionSpend(wsId, 100),
     refetchInterval: 30000,
     enabled,
   })
@@ -203,7 +211,7 @@ export function FactoryOverviewPage() {
               </div>
             </div>
             <Link
-              to="/workflows"
+              to={workspace ? `/workspaces/${workspace.slug}/workflows` : "/workflows"}
               className="shrink-0 text-sm font-medium text-primary hover:underline"
             >
               Get started →
@@ -242,7 +250,10 @@ export function FactoryOverviewPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between px-4 md:px-6">
             <CardTitle className="text-base md:text-lg">Active Artifacts</CardTitle>
-            <Link to="/artifacts" className="text-sm text-muted-foreground hover:text-foreground">
+            <Link
+              to={workspace ? `/workspaces/${workspace.slug}/artifacts` : "/artifacts"}
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
               View all
             </Link>
           </CardHeader>
@@ -267,7 +278,12 @@ export function FactoryOverviewPage() {
                     .map((a) => (
                       <TableRow key={a.id}>
                         <TableCell>
-                          <Link to={`/artifacts/${a.id}`} className="font-medium hover:underline">
+                          <Link
+                            to={workspace
+                              ? `/workspaces/${workspace.slug}/artifacts/${a.id}`
+                              : `/artifacts/${a.id}`}
+                            className="font-medium hover:underline"
+                          >
                             {a.name ?? a.id}
                           </Link>
                           <div className="text-xs text-muted-foreground">{a.kind}</div>
@@ -290,7 +306,10 @@ export function FactoryOverviewPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between px-4 md:px-6">
             <CardTitle className="text-base md:text-lg">Recent Events</CardTitle>
-            <Link to="/spine" className="text-sm text-muted-foreground hover:text-foreground">
+            <Link
+              to={workspace ? `/workspaces/${workspace.slug}/spine` : "/spine"}
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
               View all
             </Link>
           </CardHeader>

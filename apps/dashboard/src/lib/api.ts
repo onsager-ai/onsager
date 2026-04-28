@@ -72,12 +72,11 @@ export interface Credential {
 
 // Personal Access Tokens (issue #143). The full token value is only ever
 // returned by `createPat`; subsequent `listPats` calls expose prefix +
-// metadata only. `tenant_id` pins the PAT to a workspace; `null` means
-// "all workspaces the user belongs to".
+// metadata only. `workspace_id` pins the PAT to a workspace.
 export interface Pat {
   id: string;
   name: string;
-  tenant_id: string | null;
+  workspace_id: string;
   token_prefix: string;
   expires_at: string | null;
   last_used_at: string | null;
@@ -94,8 +93,8 @@ export interface CreatePatResponse {
   token: string;
 }
 
-// Workspace (tenant) / membership / GitHub App installation / project
-// types, issue #59 (Phase 0).
+// Workspace / membership / GitHub App installation / project types,
+// issue #59 (Phase 0); renamed from `tenant` per #163.
 export interface Workspace {
   id: string;
   slug: string;
@@ -105,7 +104,7 @@ export interface Workspace {
 }
 
 export interface WorkspaceMember {
-  tenant_id: string;
+  workspace_id: string;
   user_id: string;
   joined_at: string;
   github_login: string | null;
@@ -117,7 +116,7 @@ export type GitHubAccountType = 'user' | 'organization';
 
 export interface GitHubAppInstallation {
   id: string;
-  tenant_id: string;
+  workspace_id: string;
   install_id: number;
   account_login: string;
   account_type: GitHubAccountType;
@@ -126,7 +125,7 @@ export interface GitHubAppInstallation {
 
 export interface Project {
   id: string;
-  tenant_id: string;
+  workspace_id: string;
   github_app_installation_id: string;
   repo_owner: string;
   repo_name: string;
@@ -404,7 +403,7 @@ export type WorkflowStatus = 'draft' | 'active' | 'paused' | 'archived';
 
 export interface Workflow {
   id: string;
-  tenant_id: string;
+  workspace_id: string;
   name: string;
   preset?: string | null;
   status: WorkflowStatus;
@@ -420,7 +419,7 @@ export interface Workflow {
 // from the UI draft + installations list so the numeric id is resolved
 // from the workspace installation record id the draft carries.
 export interface CreateWorkflowRequest {
-  tenant_id: string;
+  workspace_id: string;
   name: string;
   trigger_kind: 'github-issue-webhook';
   repo_owner: string;
@@ -443,7 +442,7 @@ export interface CreateWorkflowStage {
 // so the rest of the app doesn't have to know the wire format.
 interface BackendWorkflow {
   id: string;
-  tenant_id: string;
+  workspace_id: string;
   name: string;
   trigger_kind: 'github-issue-webhook';
   repo_owner: string;
@@ -519,7 +518,7 @@ function workflowFromBackend(
 ): Workflow {
   return {
     id: w.id,
-    tenant_id: w.tenant_id,
+    workspace_id: w.workspace_id,
     name: w.name,
     preset: w.preset_id,
     status: w.active ? 'active' : 'draft',
@@ -598,9 +597,29 @@ export interface ArtifactActionResponse {
   escalation_id?: string;
 }
 
+// Build a `?workspace_id=...&k=v` query string. Workspace scope is the
+// universal first-class filter for scoped lists (#166); the backend
+// adds enforcement once #164 lands. Today, endpoints that don't yet
+// filter on `workspace_id` simply ignore the param — passing it now
+// keeps the wire format ready and the React Query keys honest.
+function scoped(
+  workspaceId: string,
+  extra?: Record<string, string | number | undefined | null>,
+): string {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      if (v != null && v !== '') params.set(k, String(v));
+    }
+  }
+  return `?${params.toString()}`;
+}
+
 export const api = {
-  getNodes: () => request<{ nodes: Node[] }>('/nodes'),
-  getSessions: () => request<{ sessions: Session[] }>('/sessions'),
+  getNodes: (workspaceId: string) =>
+    request<{ nodes: Node[] }>(`/nodes${scoped(workspaceId)}`),
+  getSessions: (workspaceId: string) =>
+    request<{ sessions: Session[] }>(`/sessions${scoped(workspaceId)}`),
   getSession: (id: string) => request<{ session: Session }>(`/sessions/${id}`),
   createTask: (task: TaskRequest) =>
     request<{ task: unknown; session: Session }>('/tasks', {
@@ -619,7 +638,7 @@ export const api = {
   listPats: () => request<{ pats: Pat[] }>('/pats'),
   createPat: (body: {
     name: string;
-    tenant_id?: string | null;
+    workspace_id: string;
     // v1: an explicit ISO-8601 future timestamp is required. The "never
     // expires" affordance is intentionally not exposed in this release.
     expires_at: string;
@@ -632,34 +651,45 @@ export const api = {
     request<{ ok: boolean }>(`/pats/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
-  // Credentials
-  getCredentials: () =>
-    request<{ credentials: Credential[] }>('/credentials'),
-  setCredential: (name: string, value: string) =>
-    request<{ ok: boolean }>(`/credentials/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ value }),
-    }),
-  deleteCredential: (name: string) =>
-    request<{ ok: boolean }>(`/credentials/${encodeURIComponent(name)}`, {
-      method: 'DELETE',
-    }),
-  // Workspaces / tenants (issue #59)
-  listWorkspaces: () => request<{ tenants: Workspace[] }>('/tenants'),
+  // Credentials. Today the wire format is global (`/api/credentials`);
+  // #164 makes them per-workspace at `/api/workspaces/:id/credentials`.
+  // The dashboard already speaks workspace scope (#166) so the helpers
+  // accept `workspaceId` and append `?workspace_id=` — the server
+  // ignores it until #164 lands and starts honouring it.
+  getCredentials: (workspaceId: string) =>
+    request<{ credentials: Credential[] }>(`/credentials${scoped(workspaceId)}`),
+  setCredential: (workspaceId: string, name: string, value: string) =>
+    request<{ ok: boolean }>(
+      `/credentials/${encodeURIComponent(name)}${scoped(workspaceId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ value }),
+      },
+    ),
+  deleteCredential: (workspaceId: string, name: string) =>
+    request<{ ok: boolean }>(
+      `/credentials/${encodeURIComponent(name)}${scoped(workspaceId)}`,
+      { method: 'DELETE' },
+    ),
+  // Workspaces (issue #59; renamed from `/tenants` per #163). The backend
+  // emits 308 redirects from `/api/tenants/*` for one release; dashboard
+  // hits the new path directly. Wire envelope is `workspaces`/`workspace`
+  // post-rename.
+  listWorkspaces: () => request<{ workspaces: Workspace[] }>('/workspaces'),
   createWorkspace: (body: { slug: string; name: string }) =>
-    request<{ tenant: Workspace }>('/tenants', {
+    request<{ workspace: Workspace }>('/workspaces', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
   getWorkspace: (id: string) =>
-    request<{ tenant: Workspace }>(`/tenants/${encodeURIComponent(id)}`),
+    request<{ workspace: Workspace }>(`/workspaces/${encodeURIComponent(id)}`),
   listWorkspaceMembers: (id: string) =>
     request<{ members: WorkspaceMember[] }>(
-      `/tenants/${encodeURIComponent(id)}/members`,
+      `/workspaces/${encodeURIComponent(id)}/members`,
     ),
   listWorkspaceInstallations: (id: string) =>
     request<{ installations: GitHubAppInstallation[] }>(
-      `/tenants/${encodeURIComponent(id)}/github-installations`,
+      `/workspaces/${encodeURIComponent(id)}/github-installations`,
     ),
   registerWorkspaceInstallation: (
     id: string,
@@ -671,17 +701,17 @@ export const api = {
     },
   ) =>
     request<{ installation: GitHubAppInstallation }>(
-      `/tenants/${encodeURIComponent(id)}/github-installations`,
+      `/workspaces/${encodeURIComponent(id)}/github-installations`,
       { method: 'POST', body: JSON.stringify(body) },
     ),
-  deleteWorkspaceInstallation: (tenantId: string, installId: string) =>
+  deleteWorkspaceInstallation: (workspaceId: string, installId: string) =>
     request<{ ok: boolean }>(
-      `/tenants/${encodeURIComponent(tenantId)}/github-installations/${encodeURIComponent(installId)}`,
+      `/workspaces/${encodeURIComponent(workspaceId)}/github-installations/${encodeURIComponent(installId)}`,
       { method: 'DELETE' },
     ),
   listWorkspaceProjects: (id: string) =>
     request<{ projects: Project[] }>(
-      `/tenants/${encodeURIComponent(id)}/projects`,
+      `/workspaces/${encodeURIComponent(id)}/projects`,
     ),
   addWorkspaceProject: (
     id: string,
@@ -693,7 +723,7 @@ export const api = {
     },
   ) =>
     request<{ project: Project }>(
-      `/tenants/${encodeURIComponent(id)}/projects`,
+      `/workspaces/${encodeURIComponent(id)}/projects`,
       { method: 'POST', body: JSON.stringify(body) },
     ),
   listAllProjects: () => request<{ projects: Project[] }>('/projects'),
@@ -705,21 +735,29 @@ export const api = {
   // Phase 0 items from #59: OAuth callback and the repo dropdown).
   getGitHubAppConfig: () =>
     request<{ enabled: boolean; slug?: string | null }>('/github-app/config'),
-  listInstallationRepos: (tenantId: string, installId: string) =>
+  listInstallationRepos: (workspaceId: string, installId: string) =>
     request<{ repos: AccessibleRepo[] }>(
-      `/tenants/${encodeURIComponent(tenantId)}/github-installations/${encodeURIComponent(installId)}/accessible-repos`,
+      `/workspaces/${encodeURIComponent(workspaceId)}/github-installations/${encodeURIComponent(installId)}/accessible-repos`,
     ),
-  // Governance (proxied to synodic)
-  getGovernanceEvents: (type?: string) =>
-    request<GovernanceEvent[]>(`/governance/events${type ? `?type=${type}` : ''}`),
-  getGovernanceStats: () => request<GovernanceStats>('/governance/stats'),
-  getGovernanceRules: () => request<GovernanceRule[]>('/governance/rules'),
+  // Governance (proxied to synodic). Workspace-scoped per #166; #164
+  // tightens the backend to filter, today it's a forward-compat param.
+  getGovernanceEvents: (workspaceId: string, type?: string) =>
+    request<GovernanceEvent[]>(
+      `/governance/events${scoped(workspaceId, { type })}`,
+    ),
+  getGovernanceStats: (workspaceId: string) =>
+    request<GovernanceStats>(`/governance/stats${scoped(workspaceId)}`),
+  getGovernanceRules: (workspaceId: string) =>
+    request<GovernanceRule[]>(`/governance/rules${scoped(workspaceId)}`),
   // Ising insights — backed by the spine events endpoint (issue #36).
   // Returns a typed view of the `ising.insight_emitted` events so the
   // governance UI doesn't have to reach into each event's `data` blob.
-  getIsingInsights: async (limit = 20): Promise<IsingInsightEmittedEvent[]> => {
+  getIsingInsights: async (
+    workspaceId: string,
+    limit = 20,
+  ): Promise<IsingInsightEmittedEvent[]> => {
     const res = await request<{ events: SpineEvent[] }>(
-      `/spine/events?event_type=ising.insight_emitted&limit=${limit}`,
+      `/spine/events${scoped(workspaceId, { event_type: 'ising.insight_emitted', limit })}`,
     );
     return res.events.map((e) => {
       const d = e.data as {
@@ -745,9 +783,9 @@ export const api = {
     }),
   // Ising rule proposals (issue #36 Step 2). Served by Synodic and
   // proxied through stiglab's /api/governance/rule-proposals.
-  getRuleProposals: (status?: RuleProposal['status']) =>
+  getRuleProposals: (workspaceId: string, status?: RuleProposal['status']) =>
     request<RuleProposal[]>(
-      `/governance/rule-proposals${status ? `?status=${status}` : ''}`,
+      `/governance/rule-proposals${scoped(workspaceId, { status })}`,
     ),
   resolveRuleProposal: (id: string, status: 'approved' | 'rejected', notes?: string) =>
     request<void>(`/governance/rule-proposals/${id}/resolve`, {
@@ -758,9 +796,12 @@ export const api = {
   // events and unpacks the typed `token_usage` payload client-side so we
   // don't have to spin up a dedicated pricing/accounting endpoint just to
   // render the dashboard card.
-  getSessionSpend: async (limit = 50): Promise<SessionSpend[]> => {
+  getSessionSpend: async (
+    workspaceId: string,
+    limit = 50,
+  ): Promise<SessionSpend[]> => {
     const res = await request<{ events: SpineEvent[] }>(
-      `/spine/events?event_type=stiglab.session_completed&limit=${limit}`,
+      `/spine/events${scoped(workspaceId, { event_type: 'stiglab.session_completed', limit })}`,
     );
     return res.events.map((e) => {
       const d = e.data as {
@@ -780,28 +821,25 @@ export const api = {
     });
   },
   // Spine
-  getSpineEvents: (params?: {
-    stream_type?: string;
-    event_type?: string;
-    stream_id?: string;
-    limit?: number;
-  }) => {
-    const qs = params ? '?' + new URLSearchParams(
-      Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])
-    ).toString() : '';
-    return request<{ events: SpineEvent[] }>(`/spine/events${qs}`);
-  },
-  getArtifacts: (filters?: { kind?: string; project_id?: string }) => {
-    const qs = filters
-      ? '?' +
-        new URLSearchParams(
-          Object.entries(filters)
-            .filter(([, v]) => v != null && v !== '')
-            .map(([k, v]) => [k, String(v)]),
-        ).toString()
-      : '';
-    return request<{ artifacts: SpineArtifact[] }>(`/spine/artifacts${qs}`);
-  },
+  getSpineEvents: (
+    workspaceId: string,
+    params?: {
+      stream_type?: string;
+      event_type?: string;
+      stream_id?: string;
+      limit?: number;
+    },
+  ) =>
+    request<{ events: SpineEvent[] }>(
+      `/spine/events${scoped(workspaceId, params)}`,
+    ),
+  getArtifacts: (
+    workspaceId: string,
+    filters?: { kind?: string; project_id?: string },
+  ) =>
+    request<{ artifacts: SpineArtifact[] }>(
+      `/spine/artifacts${scoped(workspaceId, filters)}`,
+    ),
   getArtifact: (id: string) => request<{ artifact: ArtifactDetail }>(`/spine/artifacts/${id}`),
   registerArtifact: (req: RegisterArtifactRequest) =>
     request<{ artifact: SpineArtifact }>('/spine/artifacts', {
@@ -827,25 +865,27 @@ export const api = {
   // stiglab sibling sub-issue; the dashboard is the only client today.
   // The backend persists workflows with flat trigger fields and stage `params`;
   // these wrappers translate backend → UI shape.
-  listWorkflows: async (tenantId: string): Promise<{ workflows: Workflow[] }> => {
-    if (!tenantId) throw new ApiError('tenantId is required', 400);
+  listWorkflows: async (workspaceId: string): Promise<{ workflows: Workflow[] }> => {
+    if (!workspaceId) throw new ApiError('workspaceId is required', 400);
     const raw = await request<{ workflows: BackendWorkflow[] }>(
-      `/workflows?tenant_id=${encodeURIComponent(tenantId)}`,
+      `/workflows?workspace_id=${encodeURIComponent(workspaceId)}`,
     );
     return { workflows: raw.workflows.map((w) => workflowFromBackend(w)) };
   },
   // Fan-out across every workspace the user belongs to. Stiglab's list
-  // endpoint is tenant-scoped; cross-tenant "do I have any workflows yet?"
-  // queries (empty-state gates, first-run redirect) need this shape. We
-  // hit `/tenants` once and one `/workflows?tenant_id=…` per workspace;
-  // fine for the workspace counts we target (typically 1–3).
+  // endpoint is workspace-scoped; cross-workspace "do I have any workflows
+  // yet?" queries (empty-state gates, first-run redirect) need this shape.
+  // We hit `/workspaces` once and one `/workflows?workspace_id=…` per
+  // workspace; fine for the workspace counts we target (typically 1–3).
   listWorkflowsForUser: async (): Promise<{ workflows: Workflow[] }> => {
-    const { tenants } = await request<{ tenants: { id: string }[] }>('/tenants');
+    const { workspaces } = await request<{ workspaces: { id: string }[] }>(
+      '/workspaces',
+    );
     const lists = await Promise.all(
-      tenants.map((t) =>
+      workspaces.map((w) =>
         request<{ workflows: BackendWorkflow[] }>(
-          `/workflows?tenant_id=${encodeURIComponent(t.id)}`,
-        ).then((r) => r.workflows.map((w) => workflowFromBackend(w))),
+          `/workflows?workspace_id=${encodeURIComponent(w.id)}`,
+        ).then((r) => r.workflows.map((wf) => workflowFromBackend(wf))),
       ),
     );
     return { workflows: lists.flat() };
@@ -887,9 +927,9 @@ export const api = {
   // GitHub labels for a workspace install + repo. Used by the trigger card
   // combobox so the user selects from existing labels (with an inline
   // create-new affordance) instead of free-texting.
-  listRepoLabels: (tenantId: string, installId: string, owner: string, repo: string) =>
+  listRepoLabels: (workspaceId: string, installId: string, owner: string, repo: string) =>
     request<{ labels: GitHubLabel[] }>(
-      `/tenants/${encodeURIComponent(tenantId)}/github-installations/${encodeURIComponent(installId)}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/labels`,
+      `/workspaces/${encodeURIComponent(workspaceId)}/github-installations/${encodeURIComponent(installId)}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/labels`,
     ),
   // Live-hydration proxy endpoints (specs #167, #170, #171). Dashboard
   // joins skeleton rows from `getArtifacts({kind: ...})` with the rows

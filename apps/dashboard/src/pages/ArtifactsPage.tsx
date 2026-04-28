@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { api, type SpineArtifact } from "@/lib/api"
+import { useActiveWorkspace } from "@/lib/workspace"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,9 +27,10 @@ const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "o
 
 export function ArtifactsPage() {
   usePageHeader({ title: "Artifacts" })
+  const workspace = useActiveWorkspace()
   const { data, isLoading } = useQuery({
-    queryKey: ["artifacts"],
-    queryFn: () => api.getArtifacts(),
+    queryKey: ["artifacts", workspace.id],
+    queryFn: () => api.getArtifacts(workspace.id),
     refetchInterval: 5000,
   })
 
@@ -78,7 +80,7 @@ export function ArtifactsPage() {
               {/* Mobile: card list */}
               <div className="flex flex-col gap-2 md:hidden">
                 {artifacts.map((a) => (
-                  <ArtifactCard key={a.id} artifact={a} />
+                  <ArtifactCard key={a.id} artifact={a} workspaceSlug={workspace.slug} />
                 ))}
               </div>
 
@@ -99,7 +101,7 @@ export function ArtifactsPage() {
                     {artifacts.map((a) => (
                       <TableRow key={a.id}>
                         <TableCell>
-                          <Link to={`/artifacts/${a.id}`} className="font-medium hover:underline">
+                          <Link to={`/workspaces/${workspace.slug}/artifacts/${a.id}`} className="font-medium hover:underline">
                             {a.name ?? a.id}
                           </Link>
                         </TableCell>
@@ -131,10 +133,10 @@ export function ArtifactsPage() {
   )
 }
 
-function ArtifactCard({ artifact }: { artifact: SpineArtifact }) {
+function ArtifactCard({ artifact, workspaceSlug }: { artifact: SpineArtifact; workspaceSlug: string }) {
   return (
     <Link
-      to={`/artifacts/${artifact.id}`}
+      to={`/workspaces/${workspaceSlug}/artifacts/${artifact.id}`}
       className="flex items-center gap-3 rounded-lg border p-3 transition-colors active:bg-accent"
     >
       <div className="min-w-0 flex-1 space-y-1.5">

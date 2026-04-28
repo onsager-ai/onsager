@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from "react"
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom"
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
 import { ThemeProvider } from "@/components/providers/ThemeProvider"
 import { AuthProvider, useAuth } from "@/lib/auth"
@@ -10,6 +10,7 @@ import { PageSkeleton } from "@/components/layout/PageSkeleton"
 // pay for an extra chunk fetch. Every other page is lazy.
 import { LoginPage } from "@/pages/LoginPage"
 import { api } from "@/lib/api"
+import { readLastUsedWorkspace, WorkspaceScope } from "@/lib/workspace"
 import type { ReactNode } from "react"
 
 const FactoryOverviewPage = lazy(() =>
@@ -53,6 +54,11 @@ const WorkflowDetailPage = lazy(() =>
 )
 const SettingsPage = lazy(() =>
   import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+)
+const WorkspaceSettingsPage = lazy(() =>
+  import("@/pages/WorkspaceSettingsPage").then((m) => ({
+    default: m.WorkspaceSettingsPage,
+  })),
 )
 const PersonalAccessTokensPage = lazy(() =>
   import("@/pages/PersonalAccessTokensPage").then((m) => ({
@@ -120,7 +126,7 @@ function OnboardingGate({ children }: { children: ReactNode }) {
     staleTime: 30_000,
     enabled: gateEnabled,
   })
-  const workspaces = data?.tenants ?? []
+  const workspaces = data?.workspaces ?? []
   const seen =
     typeof window !== "undefined" &&
     window.sessionStorage.getItem(ONBOARDING_SEEN_KEY) === "1"
@@ -148,16 +154,99 @@ function OnboardingGate({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+// Bare-path redirect: `/` → `/workspaces/<active>` if the user has a
+// workspace, otherwise let `OnboardingGate` send them to the picker.
+// "Active" is last-used (localStorage) when valid, else memberships[0].
+// Anonymous mode (auth disabled or no user) keeps the legacy bare path
+// rendering FactoryOverview directly so the existing demo flow still works.
+function BarePathRedirect() {
+  const { user, authEnabled, loading } = useAuth()
+  const gateEnabled = authEnabled && !!user
+  const { data, isLoading } = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: api.listWorkspaces,
+    staleTime: 30_000,
+    enabled: gateEnabled,
+  })
+  const workspaces = data?.workspaces ?? []
+
+  if (loading || (gateEnabled && isLoading)) {
+    return <AppShellSkeleton />
+  }
+
+  if (!gateEnabled) {
+    // Anonymous / auth-disabled: render the global Factory overview at
+    // `/`, same as before. There's no workspace to scope to.
+    return (
+      <LazyRoute>
+        <FactoryOverviewPage />
+      </LazyRoute>
+    )
+  }
+
+  if (workspaces.length === 0) {
+    // OnboardingGate will catch this on the next render; keep the user
+    // visible while it does so the screen isn't blank.
+    return <Navigate to="/workspaces?welcome=1" replace />
+  }
+
+  const lastUsed = readLastUsedWorkspace()
+  const active = workspaces.find((w) => w.slug === lastUsed) ?? workspaces[0]
+  return <Navigate to={`/workspaces/${active.slug}`} replace />
+}
+
+// Per-resource legacy redirect: `/sessions` → `/workspaces/<active>/sessions`.
+// One release of compat per spec #166; tracked by bridge-debt follow-up issue
+// at land time.
+function LegacyRedirect({ to }: { to: string }) {
+  const { user, authEnabled } = useAuth()
+  const gateEnabled = authEnabled && !!user
+  const { data, isLoading } = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: api.listWorkspaces,
+    staleTime: 30_000,
+    enabled: gateEnabled,
+  })
+  const workspaces = data?.workspaces ?? []
+  const location = useLocation()
+
+  if (gateEnabled && isLoading) return <AppShellSkeleton />
+
+  if (!gateEnabled || workspaces.length === 0) {
+    // Anonymous / zero-workspace users can't be redirected into a scoped
+    // path — fall through to the picker; OnboardingGate handles welcome.
+    return <Navigate to="/workspaces" replace />
+  }
+
+  const lastUsed = readLastUsedWorkspace()
+  const active = workspaces.find((w) => w.slug === lastUsed) ?? workspaces[0]
+  const search = location.search ?? ""
+  return (
+    <Navigate to={`/workspaces/${active.slug}/${to}${search}`} replace />
+  )
+}
+
+// Trailing-segment redirect for `/sessions/:id`, `/artifacts/:id`,
+// `/workflows/:id`. Reads the dynamic param and tacks it on.
+function LegacyDetailRedirect({ resource }: { resource: string }) {
+  const params = useParams()
+  const id = params.id ?? ""
+  return <LegacyRedirect to={`${resource}/${id}`} />
+}
+
 // Issue #82 first-run redirect: when an authed user with ≥1 workspace has
-// zero workflows and lands on /, bounce them to /workflows once so the
-// stepped hero can pitch the factory. Dismissed for the rest of the session
-// via sessionStorage so they can navigate freely afterwards.
+// zero workflows and lands on a workspace overview, bounce them to that
+// workspace's workflows page once so the stepped hero can pitch the
+// factory. Dismissed for the rest of the session via sessionStorage so
+// they can navigate freely afterwards.
 const WORKFLOWS_ONBOARDING_SEEN_KEY = "onsager.workflows_onboarding_seen"
 
 function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
   const { user, authEnabled } = useAuth()
   const location = useLocation()
+  const params = useParams<{ workspace?: string }>()
   const gateEnabled = authEnabled && !!user
+  const slug = params.workspace ?? ""
 
   // Fire both queries in parallel — the old code chained `workflows` on
   // `hasWorkspace`, which serialized two RTTs. The workflows endpoint is
@@ -169,7 +258,7 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
     staleTime: 30_000,
     enabled: gateEnabled,
   })
-  const hasWorkspace = (workspacesData?.tenants?.length ?? 0) > 0
+  const hasWorkspace = (workspacesData?.workspaces?.length ?? 0) > 0
 
   const { data: workflowsData, isLoading: workflowsLoading } = useQuery({
     queryKey: ["workflows", "user"],
@@ -183,9 +272,9 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
     typeof window !== "undefined" &&
     window.sessionStorage.getItem(WORKFLOWS_ONBOARDING_SEEN_KEY) === "1"
 
-  const onWorkflows =
-    location.pathname === "/workflows" ||
-    location.pathname.startsWith("/workflows/")
+  const onWorkflows = location.pathname.includes("/workflows")
+  const onWorkspaceOverview =
+    !!slug && location.pathname === `/workspaces/${slug}`
 
   useEffect(() => {
     if (onWorkflows && typeof window !== "undefined") {
@@ -199,9 +288,9 @@ function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
     !workflowsLoading &&
     workflowsCount === 0 &&
     !seen &&
-    location.pathname === "/"
+    onWorkspaceOverview
   ) {
-    return <Navigate to="/workflows" replace />
+    return <Navigate to={`/workspaces/${slug}/workflows`} replace />
   }
 
   return <>{children}</>
@@ -229,70 +318,127 @@ function AppRoutes() {
           <ProtectedRoute>
             <AppLayout>
               <OnboardingGate>
-                <WorkflowsFirstRunGate>
-                  <Routes>
-                    <Route
-                      path="/"
-                      element={<LazyRoute><FactoryOverviewPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/artifacts"
-                      element={<LazyRoute variant="list"><ArtifactsPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/artifacts/:id"
-                      element={<LazyRoute variant="detail"><ArtifactDetailPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/issues"
-                      element={<LazyRoute variant="list"><IssuesPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/spine"
-                      element={<LazyRoute variant="list"><SpinePage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/governance"
-                      element={<LazyRoute><GovernancePage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/sessions"
-                      element={<LazyRoute variant="list"><SessionsPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/sessions/:id"
-                      element={<LazyRoute variant="detail"><SessionDetailPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/nodes"
-                      element={<LazyRoute variant="list"><NodesPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/workspaces"
-                      element={<LazyRoute variant="list"><WorkspacesPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/workflows"
-                      element={<LazyRoute variant="list"><WorkflowsPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/workflows/start"
-                      element={<LazyRoute><WorkflowStartPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/workflows/:id"
-                      element={<LazyRoute variant="detail"><WorkflowDetailPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/settings"
-                      element={<LazyRoute><SettingsPage /></LazyRoute>}
-                    />
-                    <Route
-                      path="/settings/tokens"
-                      element={<LazyRoute><PersonalAccessTokensPage /></LazyRoute>}
-                    />
-                  </Routes>
-                </WorkflowsFirstRunGate>
+                <Routes>
+                  {/* Bare path: redirect to last-used workspace (or render
+                      Factory overview in anonymous mode). */}
+                  <Route path="/" element={<BarePathRedirect />} />
+
+                  {/* Workspace picker / list. Stays unscoped — the user
+                      lands here when they have zero workspaces or want to
+                      switch. */}
+                  <Route
+                    path="/workspaces"
+                    element={<LazyRoute variant="list"><WorkspacesPage /></LazyRoute>}
+                  />
+
+                  {/* Account-wide settings (profile, PAT list). */}
+                  <Route
+                    path="/settings"
+                    element={<LazyRoute><SettingsPage /></LazyRoute>}
+                  />
+                  <Route
+                    path="/settings/tokens"
+                    element={<LazyRoute><PersonalAccessTokensPage /></LazyRoute>}
+                  />
+
+                  {/* Workspace-scoped routes. WorkspaceScope validates the
+                      slug and supplies WorkspaceContext. */}
+                  <Route
+                    path="/workspaces/:workspace/*"
+                    element={
+                      <WorkspaceScope>
+                        <WorkflowsFirstRunGate>
+                          <Routes>
+                            <Route
+                              path="/"
+                              element={<LazyRoute><FactoryOverviewPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="artifacts"
+                              element={<LazyRoute variant="list"><ArtifactsPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="artifacts/:id"
+                              element={<LazyRoute variant="detail"><ArtifactDetailPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="issues"
+                              element={<LazyRoute variant="list"><IssuesPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="spine"
+                              element={<LazyRoute variant="list"><SpinePage /></LazyRoute>}
+                            />
+                            <Route
+                              path="governance"
+                              element={<LazyRoute><GovernancePage /></LazyRoute>}
+                            />
+                            <Route
+                              path="sessions"
+                              element={<LazyRoute variant="list"><SessionsPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="sessions/:id"
+                              element={<LazyRoute variant="detail"><SessionDetailPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="nodes"
+                              element={<LazyRoute variant="list"><NodesPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="workflows"
+                              element={<LazyRoute variant="list"><WorkflowsPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="workflows/start"
+                              element={<LazyRoute><WorkflowStartPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="workflows/:id"
+                              element={<LazyRoute variant="detail"><WorkflowDetailPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="settings"
+                              element={<LazyRoute><WorkspaceSettingsPage /></LazyRoute>}
+                            />
+                          </Routes>
+                        </WorkflowsFirstRunGate>
+                      </WorkspaceScope>
+                    }
+                  />
+
+                  {/* Legacy redirects: one release of compat per spec
+                      #166. Tracked by a bridge-debt follow-up issue. */}
+                  <Route path="/sessions" element={<LegacyRedirect to="sessions" />} />
+                  <Route
+                    path="/sessions/:id"
+                    element={<LegacyDetailRedirect resource="sessions" />}
+                  />
+                  <Route path="/nodes" element={<LegacyRedirect to="nodes" />} />
+                  <Route path="/artifacts" element={<LegacyRedirect to="artifacts" />} />
+                  <Route
+                    path="/artifacts/:id"
+                    element={<LegacyDetailRedirect resource="artifacts" />}
+                  />
+                  <Route path="/issues" element={<LegacyRedirect to="issues" />} />
+                  <Route path="/spine" element={<LegacyRedirect to="spine" />} />
+                  <Route
+                    path="/governance"
+                    element={<LegacyRedirect to="governance" />}
+                  />
+                  <Route
+                    path="/workflows"
+                    element={<LegacyRedirect to="workflows" />}
+                  />
+                  <Route
+                    path="/workflows/start"
+                    element={<LegacyRedirect to="workflows/start" />}
+                  />
+                  <Route
+                    path="/workflows/:id"
+                    element={<LegacyDetailRedirect resource="workflows" />}
+                  />
+                </Routes>
               </OnboardingGate>
             </AppLayout>
           </ProtectedRoute>

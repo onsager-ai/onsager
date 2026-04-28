@@ -47,7 +47,7 @@ export function CreateSessionSheet({ children, open: openProp, onOpenChange }: C
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
   })
-  const workspaces = wsData?.tenants ?? []
+  const workspaces = wsData?.workspaces ?? []
 
   const { data: projectsData } = useQuery({
     queryKey: ["all-projects"],
@@ -56,7 +56,7 @@ export function CreateSessionSheet({ children, open: openProp, onOpenChange }: C
 
   const visibleProjects = useMemo(() => {
     const all = projectsData?.projects ?? []
-    return workspaceId ? all.filter((p) => p.tenant_id === workspaceId) : []
+    return workspaceId ? all.filter((p) => p.workspace_id === workspaceId) : []
   }, [projectsData, workspaceId])
 
   const mutation = useMutation({

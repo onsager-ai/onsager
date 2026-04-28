@@ -11,7 +11,7 @@ import { TriggerCard } from "./TriggerCard"
 import { makeStage, type WorkflowDraft } from "./workflow-draft"
 
 export interface CardStackEditorProps {
-  tenantId: string
+  workspaceId: string
   installations: GitHubAppInstallation[]
   draft: WorkflowDraft
   onChange: (next: WorkflowDraft) => void
@@ -22,7 +22,7 @@ export interface CardStackEditorProps {
 }
 
 export function CardStackEditor({
-  tenantId,
+  workspaceId,
   installations,
   draft,
   onChange,
@@ -69,7 +69,7 @@ export function CardStackEditor({
         </div>
       )}
       <TriggerCard
-        tenantId={tenantId}
+        workspaceId={workspaceId}
         installations={installations}
         value={draft.trigger}
         onChange={(trigger) => onChange({ ...draft, trigger })}

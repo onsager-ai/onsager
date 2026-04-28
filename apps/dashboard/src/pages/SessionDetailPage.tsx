@@ -6,9 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { formatDistanceToNow } from "@/lib/utils"
 import { usePageHeader } from "@/components/layout/PageHeader"
+import { useActiveWorkspace } from "@/lib/workspace"
 
 export function SessionDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const workspace = useActiveWorkspace()
   const { data, isLoading } = useSession(id!)
   const session = data?.session
 
@@ -18,7 +20,7 @@ export function SessionDetailPage() {
     ) : (
       "Session"
     ),
-    backTo: "/sessions",
+    backTo: `/workspaces/${workspace.slug}/sessions`,
   })
 
   if (isLoading) {

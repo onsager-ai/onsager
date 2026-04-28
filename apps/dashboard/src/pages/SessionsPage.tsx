@@ -5,9 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import { usePageHeader } from "@/components/layout/PageHeader"
+import { useActiveWorkspace } from "@/lib/workspace"
 
 export function SessionsPage() {
   usePageHeader({ title: "Sessions" })
+  const workspace = useActiveWorkspace()
   const { data, isLoading } = useSessions()
   const sessions = data?.sessions ?? []
 
@@ -37,7 +39,7 @@ export function SessionsPage() {
           {isLoading ? (
             <p className="py-8 text-center text-muted-foreground">Loading...</p>
           ) : (
-            <SessionTable sessions={sessions} />
+            <SessionTable sessions={sessions} workspaceSlug={workspace.slug} />
           )}
         </CardContent>
       </Card>

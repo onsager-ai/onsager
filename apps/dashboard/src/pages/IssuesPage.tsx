@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/table"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { BackfillDialog } from "@/components/BackfillDialog"
+import { useActiveWorkspace } from "@/lib/workspace"
 
 type StateFilter = "open" | "closed" | "all"
 
@@ -48,6 +49,7 @@ type StateFilter = "open" | "closed" | "all"
  */
 export function IssuesPage() {
   const { authEnabled, user } = useAuth()
+  const workspace = useActiveWorkspace()
   const authed = !authEnabled || !!user
 
   // `?project=<id>` selects the active project on first render. Subsequent
@@ -63,10 +65,10 @@ export function IssuesPage() {
     queryFn: api.listAllProjects,
     enabled: authed,
   })
-  const projects: Project[] = useMemo(
-    () => projectsQuery.data?.projects ?? [],
-    [projectsQuery.data],
-  )
+  const projects: Project[] = useMemo(() => {
+    const all = projectsQuery.data?.projects ?? []
+    return all.filter((p) => p.workspace_id === workspace.id)
+  }, [projectsQuery.data, workspace.id])
   const selectedProjectId =
     projectIdOverride ?? urlProjectId ?? projects[0]?.id ?? null
   const selectedProject = useMemo(
@@ -85,9 +87,9 @@ export function IssuesPage() {
   // Skeleton rows from the spine (kind=github_issue, scoped to project).
   // The hydrated fields come from the proxy below; we join on external_ref.
   const skeletonsQuery = useQuery({
-    queryKey: ["artifacts", "github_issue", selectedProjectId],
+    queryKey: ["artifacts", workspace.id, "github_issue", selectedProjectId],
     queryFn: () =>
-      api.getArtifacts({
+      api.getArtifacts(workspace.id, {
         kind: "github_issue",
         project_id: selectedProjectId ?? undefined,
       }),

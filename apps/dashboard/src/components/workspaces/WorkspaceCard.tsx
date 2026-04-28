@@ -130,6 +130,7 @@ export function WorkspaceCard({ workspace }: { workspace: Workspace }) {
 
         <NextStepCallout
           workspaceId={workspace.id}
+          workspaceSlug={workspace.slug}
           hasInstalls={hasInstalls}
           hasProjects={hasProjects}
           onAddProject={handleAddProject}
@@ -164,11 +165,13 @@ export function WorkspaceCard({ workspace }: { workspace: Workspace }) {
  */
 function NextStepCallout({
   workspaceId,
+  workspaceSlug,
   hasInstalls,
   hasProjects,
   onAddProject,
 }: {
   workspaceId: string
+  workspaceSlug: string
   hasInstalls: boolean
   hasProjects: boolean
   onAddProject: () => void
@@ -208,7 +211,7 @@ function NextStepCallout({
         description="Install the Onsager GitHub App on a user or org you own so this workspace can read its repositories."
         action={
           <a
-            href={`/api/github-app/install-start?tenant_id=${encodeURIComponent(workspaceId)}`}
+            href={`/api/github-app/install-start?workspace_id=${encodeURIComponent(workspaceId)}`}
             className={buttonVariants({ size: "sm" })}
           >
             <GitBranch className="mr-1 h-3 w-3" />
@@ -242,7 +245,10 @@ function NextStepCallout({
       label="You're set up"
       description="Start your first agent session against a project in this workspace."
       action={
-        <Link to="/sessions" className={buttonVariants({ size: "sm" })}>
+        <Link
+          to={`/workspaces/${workspaceSlug}/sessions`}
+          className={buttonVariants({ size: "sm" })}
+        >
           <Sparkles className="mr-1 h-3 w-3" />
           Start a session
           <ArrowRight className="ml-1 h-3 w-3" />
@@ -411,18 +417,18 @@ function InstallationsSection({
     staleTime: 5 * 60_000,
   })
 
-  // GitHub redirects back with ?github_app_linked=N&tenant_id=... after a
-  // successful install. Refresh this workspace's installations and strip
+  // GitHub redirects back with ?github_app_linked=N&workspace_id=... after
+  // a successful install. Refresh this workspace's installations and strip
   // the query so a page reload doesn't loop.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const linkedTenant = params.get("tenant_id")
-    if (params.has("github_app_linked") && linkedTenant === workspaceId) {
+    const linkedWorkspace = params.get("workspace_id")
+    if (params.has("github_app_linked") && linkedWorkspace === workspaceId) {
       queryClient.invalidateQueries({
         queryKey: ["workspace-installations", workspaceId],
       })
       params.delete("github_app_linked")
-      params.delete("tenant_id")
+      params.delete("workspace_id")
       const q = params.toString()
       window.history.replaceState(
         {},
@@ -458,7 +464,7 @@ function InstallationsSection({
             size="sm"
             variant="outline"
             onClick={() => {
-              window.location.href = `/api/github-app/install-start?tenant_id=${encodeURIComponent(workspaceId)}`
+              window.location.href = `/api/github-app/install-start?workspace_id=${encodeURIComponent(workspaceId)}`
             }}
           >
             <Plus className="mr-1 h-3 w-3" />

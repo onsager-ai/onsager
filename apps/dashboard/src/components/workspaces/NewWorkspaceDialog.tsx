@@ -59,7 +59,7 @@ export function NewWorkspaceDialog({
       queryClient.invalidateQueries({ queryKey: ["workspaces"] })
       reset()
       onOpenChange(false)
-      onCreated?.(res.tenant.id)
+      onCreated?.(res.workspace.id)
     },
     onError: (err) =>
       setError(err instanceof Error ? err.message : "Failed to create workspace"),
