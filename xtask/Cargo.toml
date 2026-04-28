@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 syn = { version = "2", features = ["full", "extra-traits"] }
 quote = "1"
 toml = "0.8"

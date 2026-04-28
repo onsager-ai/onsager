@@ -3,6 +3,7 @@
 //!     cargo run -p xtask -- gen-event-docs           # write docs/events.md
 //!     cargo run -p xtask -- gen-event-docs --check   # verify in sync
 //!     cargo run -p xtask -- lint-seams               # check the seam rule
+//!     cargo run -p xtask -- slot <subcommand>        # per-worktree dev slot allocator (#194)
 //!
 //! The event catalog is derived from `crates/onsager-spine/src/factory_event.rs`
 //! by parsing the `FactoryEventKind` enum and the `event_type()` /
@@ -12,8 +13,12 @@
 //!
 //! `lint-seams` enforces the canonical seam rule from ADR 0004 / spec #131
 //! Lever B — see [`lint_seams`] for the full check list.
+//!
+//! `slot` allocates and manages per-worktree dev slots backed by docker-compose
+//! projects on disjoint ports. See [`slot`] for the full surface.
 
 mod lint_seams;
+mod slot;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -38,9 +43,10 @@ fn main() -> ExitCode {
                 lint_seams::run()
             }
         }
+        Some("slot") => slot::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams"
+            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
         )),
     };
 
