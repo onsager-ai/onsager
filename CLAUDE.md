@@ -226,6 +226,18 @@ cargo fmt --all -- --check
 - Unit tests co-located in `#[cfg(test)]` modules
 - All internal deps use `path = "../..."` -- no git deps, no crates.io
 
+## Merge policy
+
+- **PR → main: squash only.** Merge commits and rebase-merges are
+  disabled at the repo level; the GitHub merge button only offers
+  squash. One PR = one commit on `main`.
+- **main → PR: rebase, not merge.** When updating a PR branch with
+  `main` (locally or via the "Update branch" button), use rebase.
+  This keeps PR history linear and avoids merge commits inside
+  feature branches that would then be squashed away anyway.
+- Local equivalent: `git pull --rebase origin main` (or set
+  `git config --global pull.rebase true` once).
+
 ## Environment variables
 
 Subsystem-specific env vars worth calling out:
