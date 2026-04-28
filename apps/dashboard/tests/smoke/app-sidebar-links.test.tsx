@@ -37,7 +37,9 @@ vi.mock("@/lib/api", () => ({
       ],
     }),
     listAllProjects: vi.fn().mockResolvedValue({ projects: [] }),
-    listInstallations: vi.fn().mockResolvedValue({ installations: [] }),
+    listWorkspaceInstallations: vi
+      .fn()
+      .mockResolvedValue({ installations: [] }),
   },
 }))
 
