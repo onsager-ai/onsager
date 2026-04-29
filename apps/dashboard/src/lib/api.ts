@@ -669,16 +669,14 @@ export const api = {
     request<{ ok: boolean }>(`/pats/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
-  // Credentials. Today the wire format is global (`/api/credentials`);
-  // #164 makes them per-workspace at `/api/workspaces/:id/credentials`.
-  // The dashboard already speaks workspace scope (#166) so the helpers
-  // accept `workspaceId` and append `?workspace_id=` — the server
-  // ignores it until #164 lands and starts honouring it.
+  // Credentials live under /api/workspaces/:workspace/credentials (#189).
   getCredentials: (workspaceId: string) =>
-    request<{ credentials: Credential[] }>(`/credentials${scoped(workspaceId)}`),
+    request<{ credentials: Credential[] }>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/credentials`,
+    ),
   setCredential: (workspaceId: string, name: string, value: string) =>
     request<{ ok: boolean }>(
-      `/credentials/${encodeURIComponent(name)}${scoped(workspaceId)}`,
+      `/workspaces/${encodeURIComponent(workspaceId)}/credentials/${encodeURIComponent(name)}`,
       {
         method: 'PUT',
         body: JSON.stringify({ value }),
@@ -686,7 +684,7 @@ export const api = {
     ),
   deleteCredential: (workspaceId: string, name: string) =>
     request<{ ok: boolean }>(
-      `/credentials/${encodeURIComponent(name)}${scoped(workspaceId)}`,
+      `/workspaces/${encodeURIComponent(workspaceId)}/credentials/${encodeURIComponent(name)}`,
       { method: 'DELETE' },
     ),
   // Workspaces (issue #59; renamed from `/tenants` per #163). The backend

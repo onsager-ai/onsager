@@ -22,7 +22,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use syn::visit::Visit;
 use syn::{Expr, ExprLit, Lit};
 
@@ -318,10 +318,7 @@ pub fn normalize_dashboard(path: &str) -> String {
                 }
                 j += 1;
             }
-            let inside = path
-                .get(i + 2..j.saturating_sub(1))
-                .unwrap_or("")
-                .trim();
+            let inside = path.get(i + 2..j.saturating_sub(1)).unwrap_or("").trim();
             if inside.starts_with("scoped(") || inside == "qs" {
                 s.push('?');
             } else {
@@ -333,8 +330,12 @@ pub fn normalize_dashboard(path: &str) -> String {
             i += 1;
         }
     }
-    let s = s.split('?').next().unwrap_or("").trim_start_matches('/').to_string();
-    s
+    let s = s.split('?').next().unwrap_or("").to_string();
+    let s = s.trim_start_matches('/').to_string();
+    // sse.ts and a few `<a href>` sites write the full `/api/...` path;
+    // api.ts uses bare `/...` because `request` prepends `API_BASE`. Normalize
+    // both flavours into the same `/api`-less namespace.
+    s.strip_prefix("api/").map(str::to_string).unwrap_or(s)
 }
 
 /// Rewrite axum path params: `{name}` → `{x}`, `{*name}` → `{*x}`.
@@ -446,12 +447,202 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "/health",
         "synodic internal health endpoint — ops-only, not a dashboard surface",
     ),
+    // Pre-existing half-wires found by Lever F at land time. These are real
+    // "no caller" debt; allowlisting documents them so the lint stays green
+    // while the dashboard wiring is filed and shipped separately.
+    (
+        "/api/shaping/{session_id}",
+        "kept for the dashboard session view (per #148 phase 5 comment); caller \
+         not yet wired — half-wire tracked in the Lever F follow-up",
+    ),
+    (
+        "/events/{id}",
+        "synodic governance event detail — caller not yet wired in dashboard; \
+         half-wire tracked in the Lever F follow-up",
+    ),
+    (
+        "/escalations/{id}/propose-resolution",
+        "synodic escalation resolution proposal — caller not yet wired in \
+         dashboard; half-wire tracked in the Lever F follow-up",
+    ),
 ];
 
+// ---------------------------------------------------------------------------
+// Comparison
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViolationKind {
+    /// Backend registered a route that no dashboard `request<T>` /
+    /// `EventSource` site reaches, and the path isn't on
+    /// [`EXTERNAL_ONLY_ROUTES`].
+    BackendRouteWithoutCaller,
+    /// Dashboard calls a path that no backend route matches.
+    DashboardCallWithoutRoute,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Violation {
+    pub kind: ViolationKind,
+    /// The raw path as written at the offending site, before
+    /// normalization — picked so a reviewer can grep for it directly.
+    pub raw_path: String,
+    /// Subsystem for backend violations (`stiglab`/`synodic`).
+    pub subsystem: Option<&'static str>,
+    /// Source file for dashboard violations.
+    pub file: Option<PathBuf>,
+    /// 1-based line for dashboard violations.
+    pub line: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnalysisReport {
+    pub violations: Vec<Violation>,
+    /// Backend routes that matched the [`EXTERNAL_ONLY_ROUTES`] allowlist
+    /// — included so CI prints them on every run.
+    pub allowed: Vec<(BackendRoute, &'static str)>,
+}
+
+/// Run the bidirectional comparison given pre-parsed inputs. Pure, so
+/// tests can exercise it with synthetic data without filesystem state.
+pub fn analyse(backend: &[BackendRoute], dashboard: &[DashboardCall]) -> AnalysisReport {
+    let backend_norm: Vec<(String, &BackendRoute)> = backend
+        .iter()
+        .map(|r| (normalize_backend(&r.path, r.subsystem), r))
+        .collect();
+    let dashboard_norm: Vec<(String, &DashboardCall)> = dashboard
+        .iter()
+        .map(|c| (normalize_dashboard(&c.path), c))
+        .collect();
+
+    let mut violations = Vec::new();
+    let mut allowed = Vec::new();
+
+    for (n, r) in &backend_norm {
+        if dashboard_norm.iter().any(|(d, _)| matches_route(d, n)) {
+            continue;
+        }
+        if let Some(reason) = EXTERNAL_ONLY_ROUTES
+            .iter()
+            .find(|(p, _)| *p == r.path)
+            .map(|(_, why)| *why)
+        {
+            allowed.push(((**r).clone(), reason));
+            continue;
+        }
+        violations.push(Violation {
+            kind: ViolationKind::BackendRouteWithoutCaller,
+            raw_path: r.path.clone(),
+            subsystem: Some(r.subsystem),
+            file: None,
+            line: None,
+        });
+    }
+
+    for (n, c) in &dashboard_norm {
+        if backend_norm.iter().any(|(b, _)| matches_route(n, b)) {
+            continue;
+        }
+        violations.push(Violation {
+            kind: ViolationKind::DashboardCallWithoutRoute,
+            raw_path: c.path.clone(),
+            subsystem: None,
+            file: Some(c.file.clone()),
+            line: Some(c.line),
+        });
+    }
+
+    AnalysisReport {
+        violations,
+        allowed,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// run()
+// ---------------------------------------------------------------------------
+
+const STIGLAB_SRC: &str = "crates/stiglab/src/server/mod.rs";
+const SYNODIC_SRC: &str = "crates/synodic/src/cmd/serve.rs";
+const DASHBOARD_API_SRC: &str = "apps/dashboard/src/lib/api.ts";
+const DASHBOARD_SSE_SRC: &str = "apps/dashboard/src/lib/sse.ts";
+
 pub fn run() -> Result<()> {
-    // Implementation lands in chunk 5: bidirectional comparison.
-    println!("api-contract lint: skeleton (no checks wired yet — spec #151)");
+    let root = workspace_root()?;
+
+    let mut backend = Vec::new();
+    backend.extend(parse_rust_routes(&root.join(STIGLAB_SRC), "stiglab")?);
+    backend.extend(parse_rust_routes(&root.join(SYNODIC_SRC), "synodic")?);
+
+    let mut dashboard = Vec::new();
+    dashboard.extend(parse_ts_calls(&root.join(DASHBOARD_API_SRC))?);
+    dashboard.extend(parse_ts_calls(&root.join(DASHBOARD_SSE_SRC))?);
+
+    let report = analyse(&backend, &dashboard);
+
+    if !report.allowed.is_empty() {
+        eprintln!("api-contract: external-only allowances:");
+        for (r, reason) in &report.allowed {
+            eprintln!("  {} ({}) — {}", r.path, r.subsystem, reason);
+        }
+        eprintln!();
+    }
+
+    if !report.violations.is_empty() {
+        eprintln!("api-contract: violations:");
+        for v in &report.violations {
+            match v.kind {
+                ViolationKind::BackendRouteWithoutCaller => {
+                    let subsys = v.subsystem.unwrap_or("?");
+                    eprintln!(
+                        "  [route-without-caller] {subsys} registered `{}` but no \
+                         dashboard `request<T>` / `EventSource` reaches it",
+                        v.raw_path
+                    );
+                }
+                ViolationKind::DashboardCallWithoutRoute => {
+                    let loc = match (&v.file, v.line) {
+                        (Some(f), Some(l)) => format!("{}:{l}", f.display()),
+                        (Some(f), None) => f.display().to_string(),
+                        _ => "<unknown>".to_string(),
+                    };
+                    eprintln!(
+                        "  [call-without-route] {loc}: dashboard calls `{}` but no \
+                         backend route matches",
+                        v.raw_path
+                    );
+                }
+            }
+        }
+        eprintln!();
+        eprintln!(
+            "Add a route+caller pair atomically. To exempt an external-only route \
+             (webhook, OAuth callback, agent WS), add it to EXTERNAL_ONLY_ROUTES \
+             in xtask/src/lint_api_contract.rs with a reason."
+        );
+        bail!(
+            "api-contract: {} violation(s) (excluding {} allowed)",
+            report.violations.len(),
+            report.allowed.len()
+        );
+    }
+
+    println!(
+        "api-contract: clean ({} backend routes, {} dashboard calls, {} allowed exemption(s))",
+        backend.len(),
+        dashboard.len(),
+        report.allowed.len()
+    );
     Ok(())
+}
+
+fn workspace_root() -> Result<PathBuf> {
+    let manifest = std::env::var("CARGO_MANIFEST_DIR")
+        .context("CARGO_MANIFEST_DIR not set; run via `cargo run -p xtask`")?;
+    Ok(Path::new(&manifest)
+        .parent()
+        .ok_or_else(|| anyhow!("xtask manifest has no parent"))?
+        .to_path_buf())
 }
 
 #[cfg(test)]
@@ -620,13 +811,18 @@ mod tests {
         let root = workspace_root();
         let calls = parse_ts_calls(&root.join("apps/dashboard/src/lib/sse.ts")).unwrap();
         let paths: Vec<_> = calls.iter().map(|c| c.path.as_str()).collect();
-        assert!(paths.iter().any(|p| p.contains("/sessions/") && p.ends_with("/logs")));
+        assert!(paths
+            .iter()
+            .any(|p| p.contains("/sessions/") && p.ends_with("/logs")));
     }
 
     #[test]
     fn normalize_backend_strips_api_prefix_and_rewrites_params() {
         assert_eq!(normalize_backend("/api/health", "stiglab"), "health");
-        assert_eq!(normalize_backend("/api/workspaces", "stiglab"), "workspaces");
+        assert_eq!(
+            normalize_backend("/api/workspaces", "stiglab"),
+            "workspaces"
+        );
         assert_eq!(
             normalize_backend("/api/workspaces/{id}/members", "stiglab"),
             "workspaces/{x}/members"
@@ -660,6 +856,15 @@ mod tests {
             normalize_dashboard("/workspaces/${encodeURIComponent(id)}/members"),
             "workspaces/{x}/members"
         );
+    }
+
+    #[test]
+    fn normalize_dashboard_strips_api_prefix() {
+        assert_eq!(
+            normalize_dashboard("/api/sessions/${id}/logs"),
+            "sessions/{x}/logs"
+        );
+        assert_eq!(normalize_dashboard("/api/health"), "health");
     }
 
     #[test]
@@ -701,5 +906,110 @@ mod tests {
             assert!(seen.insert(*path), "duplicate allowlist entry: {path}");
             assert!(!reason.trim().is_empty(), "missing reason for {path}");
         }
+    }
+
+    fn route(path: &str, subsystem: &'static str) -> BackendRoute {
+        BackendRoute {
+            path: path.to_string(),
+            subsystem,
+        }
+    }
+
+    fn call(path: &str) -> DashboardCall {
+        DashboardCall {
+            path: path.to_string(),
+            file: PathBuf::from("api.ts"),
+            line: 1,
+        }
+    }
+
+    #[test]
+    fn analyse_passes_when_every_route_has_a_caller() {
+        let backend = vec![
+            route("/api/health", "stiglab"),
+            route("/api/workspaces/{id}", "stiglab"),
+            route("/events", "synodic"),
+        ];
+        let dashboard = vec![
+            call("/health"),
+            call("/workspaces/${id}"),
+            call("/governance/events${scoped(workspaceId)}"),
+        ];
+        let r = analyse(&backend, &dashboard);
+        assert!(r.violations.is_empty(), "{:?}", r.violations);
+    }
+
+    #[test]
+    fn analyse_flags_backend_route_without_caller() {
+        let backend = vec![route("/api/orphan", "stiglab")];
+        let dashboard: Vec<DashboardCall> = vec![];
+        let r = analyse(&backend, &dashboard);
+        assert_eq!(r.violations.len(), 1);
+        assert_eq!(
+            r.violations[0].kind,
+            ViolationKind::BackendRouteWithoutCaller
+        );
+        assert_eq!(r.violations[0].raw_path, "/api/orphan");
+        assert_eq!(r.violations[0].subsystem, Some("stiglab"));
+    }
+
+    #[test]
+    fn analyse_flags_dashboard_call_without_route() {
+        let backend = vec![route("/api/health", "stiglab")];
+        // First call satisfies the backend route; the second has no
+        // matching backend and should be the only flagged item.
+        let dashboard = vec![call("/health"), call("/missing-on-backend")];
+        let r = analyse(&backend, &dashboard);
+        assert_eq!(r.violations.len(), 1, "{:?}", r.violations);
+        assert_eq!(
+            r.violations[0].kind,
+            ViolationKind::DashboardCallWithoutRoute
+        );
+        assert_eq!(r.violations[0].raw_path, "/missing-on-backend");
+    }
+
+    #[test]
+    fn analyse_exempts_allowlisted_routes() {
+        let backend = vec![
+            route("/api/auth/github", "stiglab"),
+            route("/webhooks/github", "stiglab"),
+            route("/api/governance/{*path}", "stiglab"),
+        ];
+        let dashboard: Vec<DashboardCall> = vec![];
+        let r = analyse(&backend, &dashboard);
+        assert!(r.violations.is_empty(), "{:?}", r.violations);
+        assert_eq!(r.allowed.len(), 3);
+        assert!(r.allowed.iter().all(|(_, why)| !why.is_empty()));
+    }
+
+    #[test]
+    fn analyse_real_codebase_is_clean() {
+        // The lint must be all-green on `main` the moment it lands —
+        // otherwise CI flips red on the same PR that ships the check.
+        // This test is the canary: if this fails, either the lint has
+        // regressed or somebody added a half-wired surface.
+        let root = workspace_root();
+        let mut backend = Vec::new();
+        backend.extend(
+            parse_rust_routes(&root.join("crates/stiglab/src/server/mod.rs"), "stiglab").unwrap(),
+        );
+        backend.extend(
+            parse_rust_routes(&root.join("crates/synodic/src/cmd/serve.rs"), "synodic").unwrap(),
+        );
+        let mut dashboard = Vec::new();
+        dashboard.extend(parse_ts_calls(&root.join("apps/dashboard/src/lib/api.ts")).unwrap());
+        dashboard.extend(parse_ts_calls(&root.join("apps/dashboard/src/lib/sse.ts")).unwrap());
+
+        let report = analyse(&backend, &dashboard);
+        if !report.violations.is_empty() {
+            for v in &report.violations {
+                eprintln!(" violation: {:?} {}", v.kind, v.raw_path);
+            }
+        }
+        assert!(
+            report.violations.is_empty(),
+            "{} violation(s)",
+            report.violations.len()
+        );
     }
 }
