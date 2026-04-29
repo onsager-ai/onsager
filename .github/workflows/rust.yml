@@ -50,6 +50,11 @@ jobs:
             xtask:
               - 'xtask/**'
               - 'docs/events.md'
+              # Lever F (#151) — the api-contract lint reads these plus
+              # stiglab/synodic mod.rs, so changes on either side must
+              # re-trigger the xtask job.
+              - 'apps/dashboard/src/lib/api.ts'
+              - 'apps/dashboard/src/lib/sse.ts'
 
   check:
     needs: changes
@@ -86,6 +91,8 @@ jobs:
         run: cargo run -p xtask --quiet -- gen-event-docs --check
       - name: Seam-rule lint (ADR 0004 / spec #131 Lever B)
         run: cargo run -p xtask --quiet -- lint-seams
+      - name: API/UI contract lint (spec #131 Lever F / #151)
+        run: cargo run -p xtask --quiet -- check-api-contract
       - name: Apply database migrations
         run: |
           psql "$DATABASE_URL" -f crates/onsager-spine/migrations/001_initial.sql
