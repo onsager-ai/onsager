@@ -38,7 +38,12 @@ use sqlx::{AnyPool, PgPool};
 use crate::server::auth::AuthUser;
 use crate::server::db;
 use crate::server::github_app;
+use crate::server::routes::webhooks::spine_namespace;
 use crate::server::state::AppState;
+use crate::server::webhook_router::{
+    build_trigger_fired_events, trigger_source, IssueTriggerContext, RoutedEvent,
+};
+use crate::server::workflow_db;
 
 const HARD_CAP: usize = 200;
 const DEFAULT_CAP: usize = 100;
@@ -853,4 +858,275 @@ async fn upsert_pr_skeleton(
     .await?;
     tx.commit().await?;
     Ok(true)
+}
+
+// ── POST /api/projects/:id/issues/:number/replay-trigger ─────────────────
+//
+// Active-mode debug counterpart to the passive `issues.labeled` webhook
+// path. Reads the issue's *current* labels live from GitHub, finds active
+// workflows in the project's workspace whose `(repo, label)` matches, and
+// either previews (`dry_run=true`, default) or emits one
+// `workflow.trigger_fired` per match identical to the webhook path —
+// distinguishable only by `payload.source = "manual_replay"` plus
+// `payload.replayed_by = <user_id>`.
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ReplayTriggerBody {
+    /// `true` (default) returns the matched-workflow list without
+    /// emitting; `false` emits one `workflow.trigger_fired` per match.
+    #[serde(default)]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReplayMatch {
+    workflow_id: String,
+    workflow_name: String,
+    label: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ReplayResponse {
+    project_id: String,
+    issue_number: u64,
+    dry_run: bool,
+    matches: Vec<ReplayMatch>,
+    /// Spine event IDs for the emitted `workflow.trigger_fired` events.
+    /// Empty in dry-run mode and when there were zero matches.
+    event_ids: Vec<i64>,
+}
+
+pub async fn replay_issue_trigger(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path((project_id, issue_number)): Path<(String, u64)>,
+    Json(body): Json<ReplayTriggerBody>,
+) -> Response {
+    let project = match require_project_for_user(&state.db, &auth_user, &project_id).await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let dry_run = body.dry_run.unwrap_or(true);
+
+    let token = match mint_token(&state.db, &project.github_app_installation_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "GitHub App not configured" })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!("mint_token failed: {e}");
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": "GitHub auth failed" })),
+            )
+                .into_response();
+        }
+    };
+
+    let issue = match fetch_single_issue(
+        &token.token,
+        &project.repo_owner,
+        &project.repo_name,
+        issue_number,
+    )
+    .await
+    {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
+
+    // One DB round-trip for every `(repo, label)` an issue carries gets
+    // expensive when an issue has many labels. Pull every active
+    // workflow on `(workspace, repo)` once and partition by label
+    // in-memory.
+    let candidates = match workflow_db::find_active_github_workflows_for_workspace_repo(
+        &state.db,
+        &project.workspace_id,
+        &project.repo_owner,
+        &project.repo_name,
+    )
+    .await
+    {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::error!(
+                workspace_id = %project.workspace_id,
+                error = %e,
+                "failed to look up active workflows for replay-trigger"
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "workflow lookup failed" })),
+            )
+                .into_response();
+        }
+    };
+    let label_set: std::collections::HashSet<&str> =
+        issue.labels.iter().map(|l| l.name.as_str()).collect();
+    let mut matches: Vec<(crate::core::workflow::Workflow, String)> = Vec::new();
+    for wf in candidates {
+        if label_set.contains(wf.trigger_label.as_str()) {
+            let label = wf.trigger_label.clone();
+            matches.push((wf, label));
+        }
+    }
+
+    let preview: Vec<ReplayMatch> = matches
+        .iter()
+        .map(|(w, label)| ReplayMatch {
+            workflow_id: w.id.clone(),
+            workflow_name: w.name.clone(),
+            label: label.clone(),
+        })
+        .collect();
+
+    if dry_run || matches.is_empty() {
+        return Json(serde_json::json!(ReplayResponse {
+            project_id: project.id,
+            issue_number,
+            // Echo the requested mode rather than coercing to dry-run on
+            // an empty match set — the client distinguishes "I asked to
+            // fire but nothing matched" (`dry_run=false, event_ids=[]`)
+            // from "I asked to preview" (`dry_run=true`).
+            dry_run,
+            matches: preview,
+            event_ids: Vec::new(),
+        }))
+        .into_response();
+    }
+
+    let Some(spine) = state.spine.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "spine not connected" })),
+        )
+            .into_response();
+    };
+
+    // Group matches by label so each `build_trigger_fired_events` call
+    // produces one event per workflow for that label — matching the
+    // webhook path which fires once per `(label, workflow)` pair.
+    let mut event_ids = Vec::new();
+    let mut by_label: std::collections::BTreeMap<String, Vec<crate::core::workflow::Workflow>> =
+        std::collections::BTreeMap::new();
+    for (wf, label) in matches {
+        by_label.entry(label).or_default().push(wf);
+    }
+    for (label, wfs) in by_label {
+        let events: Vec<RoutedEvent> = build_trigger_fired_events(
+            &IssueTriggerContext {
+                repo_owner: &project.repo_owner,
+                repo_name: &project.repo_name,
+                issue_number,
+                title: &issue.title,
+                label: &label,
+                source: trigger_source::MANUAL_REPLAY,
+                replayed_by: Some(&auth_user.user_id),
+            },
+            &wfs,
+        );
+        for ev in events {
+            let mut data = match serde_json::to_value(&ev.kind) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!("failed to serialize replay-trigger event: {e}");
+                    continue;
+                }
+            };
+            // Match the webhook path's workspace_id stamping. `TriggerFired`
+            // carries the workflow's workspace inside `payload`, so the
+            // top-level field is informational redundancy for the
+            // workspace-scoped event listings.
+            if let Some(obj) = data.as_object_mut() {
+                obj.entry("workspace_id".to_string())
+                    .or_insert(serde_json::Value::String(project.workspace_id.clone()));
+            }
+            match spine
+                .emit_raw(
+                    &ev.kind.stream_id(),
+                    spine_namespace(&ev.kind),
+                    "stiglab",
+                    ev.kind.event_type(),
+                    &data,
+                )
+                .await
+            {
+                Ok(id) => event_ids.push(id),
+                Err(e) => {
+                    tracing::error!("failed to emit replay-trigger event: {e}");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": "failed to emit event" })),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
+
+    Json(serde_json::json!(ReplayResponse {
+        project_id: project.id,
+        issue_number,
+        dry_run: false,
+        matches: preview,
+        event_ids,
+    }))
+    .into_response()
+}
+
+#[allow(clippy::result_large_err)]
+async fn fetch_single_issue(
+    token: &str,
+    repo_owner: &str,
+    repo_name: &str,
+    issue_number: u64,
+) -> Result<LiveIssue, Response> {
+    let url =
+        format!("https://api.github.com/repos/{repo_owner}/{repo_name}/issues/{issue_number}");
+    let resp = match gh_client()
+        .get(&url)
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("github single-issue fetch failed: {e}");
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": "github fetch failed" })),
+            )
+                .into_response());
+        }
+    };
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(not_found("issue not found"));
+    }
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let snippet = resp.text().await.unwrap_or_default();
+        tracing::warn!(%status, "github single-issue fetch non-2xx: {snippet}");
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "error": "github API error" })),
+        )
+            .into_response());
+    }
+    let parsed: LiveIssue = match resp.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("github single-issue parse failed: {e}");
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": "github response parse failed" })),
+            )
+                .into_response());
+        }
+    };
+    Ok(parsed)
 }

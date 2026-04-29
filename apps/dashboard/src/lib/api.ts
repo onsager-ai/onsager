@@ -302,6 +302,32 @@ export interface BackfillRequestBody {
   state?: 'open' | 'closed' | 'all';
 }
 
+/// Manual replay of a `workflow.trigger_fired` event for one issue
+/// (spec #203). Active counterpart to the passive
+/// `issues.labeled` webhook path — used for debugging when no e2e
+/// workflow run has fired yet.
+export interface ReplayIssueTriggerRequest {
+  /// `true` (default on the server) returns the matched workflow list
+  /// without emitting; `false` emits one event per match.
+  dry_run?: boolean;
+}
+
+export interface ReplayMatch {
+  workflow_id: string;
+  workflow_name: string;
+  label: string;
+}
+
+export interface ReplayIssueTriggerResponse {
+  project_id: string;
+  issue_number: number;
+  dry_run: boolean;
+  matches: ReplayMatch[];
+  /// Spine event IDs for the emitted events. Empty in dry-run mode and
+  /// when there were zero matches.
+  event_ids: number[];
+}
+
 export interface BackfillReport {
   project_id: string;
   repo: string;
@@ -969,4 +995,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  replayIssueTrigger: (
+    projectId: string,
+    issueNumber: number,
+    body: ReplayIssueTriggerRequest = {},
+  ) =>
+    request<ReplayIssueTriggerResponse>(
+      `/projects/${encodeURIComponent(projectId)}/issues/${issueNumber}/replay-trigger`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    ),
 };

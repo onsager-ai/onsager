@@ -188,6 +188,14 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/projects/{id}/backfill",
             post(routes::projects::backfill_project),
         )
+        // Manual replay of `workflow.trigger_fired` for a single issue —
+        // active counterpart to the passive `issues.labeled` webhook
+        // path (#203). Useful when debugging an end-to-end workflow run
+        // that didn't fire.
+        .route(
+            "/api/projects/{id}/issues/{number}/replay-trigger",
+            post(routes::projects::replay_issue_trigger),
+        )
         // Legacy `/api/tenants/*` paths — return 308 Permanent Redirect to
         // the new `/api/workspaces/*` surface so existing clients (CLI,
         // PATs, dashboards on older deploys) keep working for one release.
