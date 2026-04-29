@@ -38,12 +38,12 @@ use sqlx::{AnyPool, PgPool};
 use crate::server::auth::AuthUser;
 use crate::server::db;
 use crate::server::github_app;
+use crate::server::routes::webhooks::spine_namespace;
 use crate::server::state::AppState;
 use crate::server::webhook_router::{
     build_trigger_fired_events, trigger_source, IssueTriggerContext, RoutedEvent,
 };
 use crate::server::workflow_db;
-use onsager_spine::factory_event::FactoryEventKind;
 
 const HARD_CAP: usize = 200;
 const DEFAULT_CAP: usize = 100;
@@ -939,34 +939,39 @@ pub async fn replay_issue_trigger(
         Err(r) => return r,
     };
 
+    // One DB round-trip for every `(repo, label)` an issue carries gets
+    // expensive when an issue has many labels. Pull every active
+    // workflow on `(workspace, repo)` once and partition by label
+    // in-memory.
+    let candidates = match workflow_db::find_active_github_workflows_for_workspace_repo(
+        &state.db,
+        &project.workspace_id,
+        &project.repo_owner,
+        &project.repo_name,
+    )
+    .await
+    {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::error!(
+                workspace_id = %project.workspace_id,
+                error = %e,
+                "failed to look up active workflows for replay-trigger"
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "workflow lookup failed" })),
+            )
+                .into_response();
+        }
+    };
+    let label_set: std::collections::HashSet<&str> =
+        issue.labels.iter().map(|l| l.name.as_str()).collect();
     let mut matches: Vec<(crate::core::workflow::Workflow, String)> = Vec::new();
-    for label in &issue.labels {
-        let hits = match workflow_db::find_active_github_workflows_for_label_in_workspace(
-            &state.db,
-            &project.workspace_id,
-            &project.repo_owner,
-            &project.repo_name,
-            &label.name,
-        )
-        .await
-        {
-            Ok(h) => h,
-            Err(e) => {
-                tracing::error!(
-                    workspace_id = %project.workspace_id,
-                    label = %label.name,
-                    error = %e,
-                    "failed to look up active workflows for replay-trigger"
-                );
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": "workflow lookup failed" })),
-                )
-                    .into_response();
-            }
-        };
-        for wf in hits {
-            matches.push((wf, label.name.clone()));
+    for wf in candidates {
+        if label_set.contains(wf.trigger_label.as_str()) {
+            let label = wf.trigger_label.clone();
+            matches.push((wf, label));
         }
     }
 
@@ -983,7 +988,11 @@ pub async fn replay_issue_trigger(
         return Json(serde_json::json!(ReplayResponse {
             project_id: project.id,
             issue_number,
-            dry_run: true,
+            // Echo the requested mode rather than coercing to dry-run on
+            // an empty match set — the client distinguishes "I asked to
+            // fire but nothing matched" (`dry_run=false, event_ids=[]`)
+            // from "I asked to preview" (`dry_run=true`).
+            dry_run,
             matches: preview,
             event_ids: Vec::new(),
         }))
@@ -1039,7 +1048,7 @@ pub async fn replay_issue_trigger(
             match spine
                 .emit_raw(
                     &ev.kind.stream_id(),
-                    spine_namespace_for(&ev.kind),
+                    spine_namespace(&ev.kind),
                     "stiglab",
                     ev.kind.event_type(),
                     &data,
@@ -1067,16 +1076,6 @@ pub async fn replay_issue_trigger(
         event_ids,
     }))
     .into_response()
-}
-
-fn spine_namespace_for(kind: &FactoryEventKind) -> &'static str {
-    // Keep aligned with `webhooks::spine_namespace` — replays must land
-    // in the same partition as live webhook events so listeners see one
-    // unified stream.
-    match kind {
-        FactoryEventKind::TriggerFired { .. } => "workflow",
-        _ => "stiglab",
-    }
 }
 
 #[allow(clippy::result_large_err)]

@@ -446,8 +446,10 @@ function IssueCard({
   listQueryKey: readonly unknown[]
 }) {
   const display = describeRow(row)
-  const cardClass =
-    "flex flex-col gap-1.5 rounded-lg border p-3 transition-colors active:bg-accent"
+  // No interactive cursor / press state on the card itself — the row
+  // is no longer a single clickable surface; per-row navigation lives
+  // in the kebab menu's "Open in GitHub" item.
+  const cardClass = "flex flex-col gap-1.5 rounded-lg border p-3"
   return (
     <div className={cardClass}>
       <div className="flex items-start justify-between gap-2">

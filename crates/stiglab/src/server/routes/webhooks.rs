@@ -292,7 +292,11 @@ async fn emit_events(state: &AppState, events: Vec<RoutedEvent>, workspace_id: &
     }
 }
 
-fn spine_namespace(kind: &FactoryEventKind) -> &'static str {
+/// Namespace partition for webhook-sourced spine events. Public so the
+/// manual-replay route in `routes::projects` can route replayed events
+/// into the same partition as live ones — keeping consumer streams
+/// unified.
+pub fn spine_namespace(kind: &FactoryEventKind) -> &'static str {
     match kind {
         FactoryEventKind::TriggerFired { .. } => "workflow",
         FactoryEventKind::GateCheckUpdated { .. }

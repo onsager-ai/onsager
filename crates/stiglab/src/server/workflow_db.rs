@@ -269,6 +269,32 @@ pub async fn find_active_github_workflows_for_label_in_workspace(
     rows.into_iter().map(|r| r.try_into()).collect()
 }
 
+/// All active `github-issue-webhook` workflows for `(workspace, repo)` —
+/// returned without label filtering so callers iterating over many
+/// candidate labels can do one round-trip and partition in-memory.
+pub async fn find_active_github_workflows_for_workspace_repo(
+    pool: &AnyPool,
+    workspace_id: &str,
+    repo_owner: &str,
+    repo_name: &str,
+) -> anyhow::Result<Vec<Workflow>> {
+    let trigger_kind = TriggerKind::GithubIssueWebhook.to_string();
+    let rows = sqlx::query_as::<_, WorkflowRow>(
+        "SELECT id, workspace_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
+                install_id, preset_id, active, created_by, created_at, updated_at \
+         FROM workspace_workflows \
+         WHERE active = 1 AND workspace_id = $1 AND trigger_kind = $2 \
+           AND repo_owner = $3 AND repo_name = $4",
+    )
+    .bind(workspace_id)
+    .bind(&trigger_kind)
+    .bind(repo_owner)
+    .bind(repo_name)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
+}
+
 /// Whether any other active workflow on `(repo_owner, repo_name)` still
 /// needs webhook delivery. Used by the deactivation hook to decide if it
 /// can deregister the repo-level webhook.

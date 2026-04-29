@@ -37,8 +37,11 @@ import {
 //   one `workflow.trigger_fired` per match with `source=manual_replay`.
 // - Open in GitHub: external link, kept here so the row stays clean.
 //
-// Skeleton-only rows (no live data) hide the menu — replay needs the
-// issue's current labels.
+// Skeleton-only rows (no live data) keep the kebab so Refresh stays
+// reachable — Refresh re-runs the list query, which is exactly what's
+// needed when a row is missing live data. Replay is disabled instead
+// of hidden because it needs the issue's current labels, and the
+// "Open in GitHub" entry only renders when an `htmlUrl` is known.
 export interface IssueActionsMenuProps {
   projectId: string | null
   issueNumber: number | null
@@ -110,7 +113,11 @@ export function IssueActionsMenu({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 render={
-                  <a href={htmlUrl} target="_blank" rel="noreferrer" />
+                  <a
+                    href={htmlUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  />
                 }
               >
                 <ExternalLink className="mr-2 h-4 w-4" />
