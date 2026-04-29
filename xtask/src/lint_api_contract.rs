@@ -449,21 +449,21 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
     ),
     // Pre-existing half-wires found by Lever F at land time. These are real
     // "no caller" debt; allowlisting documents them so the lint stays green
-    // while the dashboard wiring is filed and shipped separately.
+    // while each is wired (or deleted) on its own follow-up issue.
     (
         "/api/shaping/{session_id}",
-        "kept for the dashboard session view (per #148 phase 5 comment); caller \
-         not yet wired — half-wire tracked in the Lever F follow-up",
+        "kept for the dashboard session view (per #148 phase 5 comment); \
+         caller not yet wired — tracked in #209",
     ),
     (
         "/events/{id}",
         "synodic governance event detail — caller not yet wired in dashboard; \
-         half-wire tracked in the Lever F follow-up",
+         tracked in #210",
     ),
     (
         "/escalations/{id}/propose-resolution",
-        "synodic escalation resolution proposal — caller not yet wired in \
-         dashboard; half-wire tracked in the Lever F follow-up",
+        "synodic escalation resolution proposal (per #37) — caller not yet \
+         wired in dashboard; tracked in #211",
     ),
 ];
 
