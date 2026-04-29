@@ -105,6 +105,18 @@ struct LiveIssue {
     pull_request: Option<serde_json::Value>,
     comments: u32,
     updated_at: String,
+    // Detail-only fields. The list endpoint ignores them; the
+    // single-issue handler surfaces them in `LiveIssueDetailRow`.
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    assignees: Vec<LiveUser>,
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default)]
+    closed_at: Option<String>,
+    #[serde(default)]
+    milestone: Option<LiveMilestone>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,6 +127,12 @@ struct LiveUser {
 #[derive(Debug, Deserialize)]
 struct LiveLabel {
     name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LiveMilestone {
+    title: String,
+    state: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -227,6 +245,34 @@ struct LiveIssueRow {
     labels: Vec<String>,
     comments: u32,
     updated_at: String,
+}
+
+/// Single-issue detail payload (#205). Superset of `LiveIssueRow` with
+/// the fields the list endpoint omits — body, assignees, milestone,
+/// created/closed timestamps. Cached the same way as the list response
+/// (per-process LRU+TTL); keyed independently so a `/issues/:n` fetch
+/// doesn't evict a `/issues` page and vice versa.
+#[derive(Debug, Serialize)]
+struct LiveIssueDetailRow {
+    number: u64,
+    title: String,
+    state: String,
+    html_url: String,
+    author: Option<String>,
+    labels: Vec<String>,
+    assignees: Vec<String>,
+    comments: u32,
+    body: Option<String>,
+    milestone: Option<LiveMilestoneRow>,
+    created_at: Option<String>,
+    updated_at: String,
+    closed_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct LiveMilestoneRow {
+    title: String,
+    state: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -360,6 +406,138 @@ pub async fn list_project_issues(
         .collect();
 
     let body = serde_json::json!({ "issues": rows });
+    state.proxy_cache.put(cache_key, body.clone());
+    Json(body).into_response()
+}
+
+// ── GET /api/projects/:id/issues/:number ─────────────────────────────────
+
+/// GET `/api/projects/:project_id/issues/:number` — single hydrated
+/// issue used by the dashboard's issue detail page (#205). Same
+/// proxy-cache + fail-open shape as `list_project_issues`: a
+/// rate-limited or unreachable upstream returns
+/// `{ "issue": null, "error": "rate_limited" | "github_unreachable" }`
+/// so the dashboard can render the skeleton-only fallback rather than
+/// crash. 404 propagates as 404 (the issue genuinely doesn't exist).
+pub async fn get_project_issue(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path((project_id, number)): Path<(String, u64)>,
+) -> Response {
+    let project = match require_project_for_user(&state.db, &auth_user, &project_id).await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+
+    let cache_key = format!("issue:{project_id}:{number}");
+    if let Some(cached) = state.proxy_cache.get(&cache_key) {
+        return Json(cached).into_response();
+    }
+
+    let token = match mint_token(&state.db, &project.github_app_installation_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "GitHub App not configured" })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!("mint_token failed: {e}");
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": "GitHub auth failed" })),
+            )
+                .into_response();
+        }
+    };
+
+    let url = format!(
+        "https://api.github.com/repos/{owner}/{repo}/issues/{number}",
+        owner = project.repo_owner,
+        repo = project.repo_name,
+    );
+    let resp = match gh_client()
+        .get(&url)
+        .bearer_auth(&token.token)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("github single-issue fetch failed: {e}");
+            return Json(serde_json::json!({
+                "issue": serde_json::Value::Null,
+                "error": "github_unreachable",
+            }))
+            .into_response();
+        }
+    };
+
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return not_found("issue not found");
+    }
+    if resp.status() == reqwest::StatusCode::FORBIDDEN
+        || resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+    {
+        return Json(serde_json::json!({
+            "issue": serde_json::Value::Null,
+            "error": "rate_limited",
+        }))
+        .into_response();
+    }
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let snippet = resp.text().await.unwrap_or_default();
+        tracing::warn!(%status, "github single-issue fetch non-2xx: {snippet}");
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "error": "github API error" })),
+        )
+            .into_response();
+    }
+
+    let parsed: LiveIssue = match resp.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("github single-issue parse failed: {e}");
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": "github response parse failed" })),
+            )
+                .into_response();
+        }
+    };
+
+    // GitHub's issues endpoint will happily return a PR if asked by
+    // number — guard against it so the issue page doesn't render PR
+    // metadata as if it were an issue.
+    if parsed.pull_request.is_some() {
+        return not_found("issue not found");
+    }
+
+    let row = LiveIssueDetailRow {
+        number: parsed.number,
+        title: parsed.title,
+        state: parsed.state,
+        html_url: parsed.html_url,
+        author: parsed.user.map(|u| u.login),
+        labels: parsed.labels.into_iter().map(|l| l.name).collect(),
+        assignees: parsed.assignees.into_iter().map(|u| u.login).collect(),
+        comments: parsed.comments,
+        body: parsed.body,
+        milestone: parsed.milestone.map(|m| LiveMilestoneRow {
+            title: m.title,
+            state: m.state,
+        }),
+        created_at: parsed.created_at,
+        updated_at: parsed.updated_at,
+        closed_at: parsed.closed_at,
+    };
+
+    let body = serde_json::json!({ "issue": row });
     state.proxy_cache.put(cache_key, body.clone());
     Json(body).into_response()
 }

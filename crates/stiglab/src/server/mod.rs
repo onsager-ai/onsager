@@ -181,6 +181,10 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             get(routes::projects::list_project_issues),
         )
         .route(
+            "/api/projects/{id}/issues/{number}",
+            get(routes::projects::get_project_issue),
+        )
+        .route(
             "/api/projects/{id}/pulls",
             get(routes::projects::list_project_pulls),
         )
