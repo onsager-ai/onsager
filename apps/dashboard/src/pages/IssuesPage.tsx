@@ -416,14 +416,15 @@ function rowKey(row: HydratedIssueRow): string {
 
 /// Extract the issue number for the detail-page link. Prefers the live
 /// row's number; falls back to parsing the skeleton's `external_ref`
-/// tail (`...:issue:42`) so skeleton-only rows can still navigate. Returns
-/// null if neither side has a usable number.
+/// tail (`...:issue:42`) so skeleton-only rows can still navigate.
+/// Requires the tail to be all digits — `parseInt` on a partial string
+/// like `"42abc"` would otherwise silently link to the wrong issue.
+/// Returns null if neither side has a usable number.
 function detailIssueNumber(row: HydratedIssueRow): number | null {
   if (row.issue) return row.issue.number
   const tail = row.skeleton?.external_ref?.split(":issue:").pop()
-  if (!tail) return null
-  const parsed = Number.parseInt(tail, 10)
-  return Number.isFinite(parsed) ? parsed : null
+  if (!tail || !/^\d+$/.test(tail)) return null
+  return Number.parseInt(tail, 10)
 }
 
 /// Project hydrated + skeleton rows down to the values the table/card

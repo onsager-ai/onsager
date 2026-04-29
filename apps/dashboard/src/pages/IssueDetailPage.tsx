@@ -5,6 +5,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react"
 
 import {
   api,
+  ApiError,
   type ProjectIssueDetail,
   type SpineArtifact,
 } from "@/lib/api"
@@ -31,11 +32,15 @@ export function IssueDetailPage() {
     projectId: string
     number: string
   }>()
-  const issueNumber = Number.parseInt(numberParam, 10)
-  const numberValid = Number.isFinite(issueNumber) && issueNumber > 0
+  // Strict digit-only check before parseInt — a malformed segment like
+  // "42abc" would otherwise parse to 42 and silently link to the wrong
+  // issue. queryKey uses the raw string so an invalid input never
+  // serializes NaN into the cache key.
+  const numberValid = /^\d+$/.test(numberParam)
+  const issueNumber = numberValid ? Number.parseInt(numberParam, 10) : 0
 
   const liveQuery = useQuery({
-    queryKey: ["project-issue", projectId, issueNumber],
+    queryKey: ["project-issue", projectId, numberParam],
     queryFn: () => api.getProjectIssue(projectId, issueNumber),
     enabled: !!projectId && numberValid,
     refetchInterval: 60_000,
@@ -51,7 +56,7 @@ export function IssueDetailPage() {
         kind: "github_issue",
         project_id: projectId,
       }),
-    enabled: !!projectId,
+    enabled: !!projectId && numberValid,
     refetchInterval: 30_000,
   })
 
@@ -66,7 +71,13 @@ export function IssueDetailPage() {
   }, [skeletonsQuery.data, projectId, issueNumber, numberValid])
 
   const issue: ProjectIssueDetail | null = liveQuery.data?.issue ?? null
+  // The proxy fail-open envelope (`{ issue: null, error: ... }`) carries
+  // `rate_limited` / `github_unreachable`. A network/HTTP error throws
+  // an `ApiError`; we render those as a not-found / error state below
+  // rather than degraded mode.
   const proxyError = liveQuery.data?.error ?? null
+  const liveErrored = liveQuery.error instanceof ApiError ? liveQuery.error : null
+  const liveNotFound = liveErrored?.status === 404
 
   const inboxBackTo = `/workspaces/${workspace.slug}/issues${
     projectId ? `?project=${encodeURIComponent(projectId)}` : ""
@@ -74,17 +85,21 @@ export function IssueDetailPage() {
 
   // Mobile chrome — title is `#N` so it stays short; the full issue
   // title renders below in the page body. The kebab reuses the same
-  // replay/external-link actions as the inbox row.
+  // replay/external-link actions as the inbox row. `Replay trigger`
+  // needs the issue's *current* labels, so we only enable it (by
+  // passing the number) when live data is present — degraded modes
+  // (proxy fail-open or live HTTP error) get the disabled state.
+  const replayIssueNumber = issue && numberValid ? issueNumber : null
   const headerActions = useMemo(
     () => (
       <IssueActionsMenu
         projectId={projectId || null}
-        issueNumber={numberValid ? issueNumber : null}
+        issueNumber={replayIssueNumber}
         htmlUrl={issue?.html_url ?? null}
-        listQueryKey={["project-issue", projectId, issueNumber]}
+        listQueryKey={["project-issue", projectId, numberParam]}
       />
     ),
-    [projectId, issueNumber, numberValid, issue?.html_url],
+    [projectId, replayIssueNumber, numberParam, issue?.html_url],
   )
   usePageHeader({
     title: numberValid ? `#${issueNumber}` : "Issue",
@@ -104,6 +119,18 @@ export function IssueDetailPage() {
     return (
       <div className="flex min-h-[200px] items-center justify-center">
         <p className="text-muted-foreground">Loading…</p>
+      </div>
+    )
+  }
+
+  // 404 from the backend means the issue genuinely doesn't exist —
+  // surface that explicitly even if a stale skeleton happens to match.
+  // Other live errors fall through to the error banner below; the
+  // skeleton (if present) still anchors the page.
+  if (liveNotFound) {
+    return (
+      <div className="space-y-4">
+        <p className="text-destructive">Issue not found.</p>
       </div>
     )
   }
@@ -155,6 +182,14 @@ export function IssueDetailPage() {
         </Card>
       ) : null}
 
+      {liveErrored && !liveNotFound ? (
+        <Card>
+          <CardContent className="py-3 text-sm text-destructive">
+            Couldn&apos;t load this issue: {liveErrored.message}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {/* Desktop: external link as inline button. Mobile uses the
           overflow menu in the global top bar. */}
       {issue?.html_url ? (
@@ -182,7 +217,7 @@ export function IssueDetailPage() {
         <MetaCard label="Updated" value={display.updatedLabel} />
         <MetaCard
           label="Lifecycle"
-          value={skeleton ? skeleton.state.replace("_", " ") : "—"}
+          value={skeleton ? skeleton.state.replaceAll("_", " ") : "—"}
         />
       </div>
 
@@ -321,10 +356,13 @@ function describe(
     }
   }
   // Skeleton-only fallback — same shape the inbox uses on a degraded
-  // proxy. Lifecycle `draft` ↔ open, `archived` ↔ closed.
+  // proxy. Lifecycle `draft` ↔ open, `archived` ↔ closed. The title
+  // falls back to `Issue #N` rather than the artifact id (which is an
+  // internal identifier already shown under "Onsager metadata" and is
+  // not user-meaningful).
   const open = skeleton?.state === "draft"
   return {
-    title: skeleton?.id ?? `Issue #${number}`,
+    title: `Issue #${number}`,
     openState: open,
     stateLabel: open ? "open" : "closed",
     author: "—",
