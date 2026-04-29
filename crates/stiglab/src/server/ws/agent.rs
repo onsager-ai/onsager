@@ -106,14 +106,8 @@ async fn handle_agent_connection(socket: WebSocket, state: AppState) {
 
             other => {
                 if let Some(ref nid) = node_id {
-                    handler::handle_agent_message(
-                        &state.db,
-                        nid,
-                        other,
-                        state.spine.as_ref(),
-                        Some(&state.session_completion_tx),
-                    )
-                    .await;
+                    handler::handle_agent_message(&state.db, nid, other, state.spine.as_ref())
+                        .await;
                 }
             }
         }

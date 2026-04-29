@@ -11,7 +11,7 @@ use anyhow::Result;
 use axum::extract::{FromRef, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, patch, post};
+use axum::routing::{get, patch};
 use axum::{Json, Router};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -129,7 +129,6 @@ impl ServeCmd {
         let api = Router::new()
             .route("/health", get(health))
             .route("/events", get(list_events).post(create_event))
-            .route("/events/{id}", get(get_event))
             .route("/events/{id}/resolve", patch(resolve_event))
             .route("/stats", get(get_stats))
             .route("/rules", get(list_rules))
@@ -138,12 +137,7 @@ impl ServeCmd {
             // `synodic.gate_verdict`) instead of HTTP.
             // Rule proposal queue (issue #36 Step 2)
             .route("/rule-proposals", get(list_rule_proposals))
-            .route("/rule-proposals/{id}/resolve", patch(resolve_rule_proposal))
-            // Escalation resolution proposals (issue #37)
-            .route(
-                "/escalations/{id}/propose-resolution",
-                post(propose_escalation_resolution),
-            );
+            .route("/rule-proposals/{id}/resolve", patch(resolve_rule_proposal));
 
         // Spawn the ising.rule_proposed listener on the shared spine
         // handle (issue #36 Step 2). A missing spine handle is non-fatal —
@@ -250,17 +244,6 @@ async fn list_events(
     };
     let events = store.get_governance_events(filters).await?;
     Ok(Json(events))
-}
-
-async fn get_event(
-    State(store): State<Arc<dyn Storage>>,
-    Path(id): Path<String>,
-) -> Result<Json<GovernanceEvent>, AppError> {
-    let event = store
-        .get_governance_event(&id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("event not found".into()))?;
-    Ok(Json(event))
 }
 
 async fn create_event(
@@ -426,79 +409,12 @@ fn classify_resolve_error(err: anyhow::Error) -> AppError {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Escalation resolution proposals (issue #37)
-// ---------------------------------------------------------------------------
-
-#[derive(Deserialize)]
-struct ProposeResolutionBody {
-    artifact_id: String,
-    /// Identity of the proposer: `"supervisor"`, `"human:<id>"`, or any
-    /// free-form string representing the delegate.
-    proposer: String,
-    /// One of `"allow" | "deny" | "modify" | "escalate"`.
-    proposed_verdict: String,
-    rationale: String,
-}
-
-/// POST `/api/escalations/{id}/propose-resolution` — record a delegate's
-/// proposed resolution on the spine as `synodic.gate_resolution_proposed`.
-/// The proposal is not applied; Forge/Synodic wiring converts accepted
-/// proposals into a final verdict on a separate path.
-///
-/// The spine handle is pulled from `AppState` so we reuse one `PgPool`
-/// across all requests instead of building a fresh pool per call.
-async fn propose_escalation_resolution(
-    State(spine): State<Option<Arc<onsager_spine::EventStore>>>,
-    Path(escalation_id): Path<String>,
-    Json(body): Json<ProposeResolutionBody>,
-) -> Result<StatusCode, AppError> {
-    let verdict = match body.proposed_verdict.to_ascii_lowercase().as_str() {
-        "allow" => onsager_spine::factory_event::VerdictSummary::Allow,
-        "deny" => onsager_spine::factory_event::VerdictSummary::Deny,
-        "modify" => onsager_spine::factory_event::VerdictSummary::Modify,
-        "escalate" => onsager_spine::factory_event::VerdictSummary::Escalate,
-        other => {
-            return Err(AppError::BadRequest(format!(
-                "proposed_verdict must be allow|deny|modify|escalate, got {other}"
-            )));
-        }
-    };
-
-    let Some(spine) = spine else {
-        return Err(AppError::ServiceUnavailable(
-            "spine not attached; Synodic must be run with a postgres DATABASE_URL \
-             to emit gate_resolution_proposed events"
-                .into(),
-        ));
-    };
-
-    let event = onsager_spine::factory_event::FactoryEventKind::SynodicGateResolutionProposed {
-        escalation_id: escalation_id.clone(),
-        artifact_id: onsager_artifact::ArtifactId::new(&body.artifact_id),
-        proposer: body.proposer,
-        proposed_verdict: verdict,
-        rationale: body.rationale,
-    };
-    let data = serde_json::to_value(&event).expect("FactoryEventKind must serialize");
-    let metadata = onsager_spine::EventMetadata {
-        actor: "synodic".into(),
-        ..Default::default()
-    };
-    spine
-        .append_ext(
-            &escalation_id,
-            "synodic",
-            event.event_type(),
-            data,
-            &metadata,
-            None,
-        )
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("append_ext: {e}")))?;
-
-    Ok(StatusCode::ACCEPTED)
-}
+// `POST /api/escalations/{id}/propose-resolution` was the HTTP entry
+// point for issue #37's escalation-resolution-proposals flow; deleted
+// in #211 (no caller in-tree, and the
+// `synodic.gate_resolution_proposed` event it emitted has no consumer).
+// The spine event type itself is left in place pending a separate
+// decision.
 
 // `POST /api/gate` was the legacy forge → synodic gate evaluation
 // entrypoint; deleted in Lever C phase 5 (#148). Forge now emits
@@ -516,7 +432,6 @@ enum AppError {
     NotFound(String),
     BadRequest(String),
     Conflict(String),
-    ServiceUnavailable(String),
 }
 
 impl From<anyhow::Error> for AppError {
@@ -548,11 +463,6 @@ impl IntoResponse for AppError {
                 .into_response(),
             Self::Conflict(msg) => (
                 StatusCode::CONFLICT,
-                Json(serde_json::json!({ "error": msg })),
-            )
-                .into_response(),
-            Self::ServiceUnavailable(msg) => (
-                StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({ "error": msg })),
             )
                 .into_response(),
