@@ -20,7 +20,7 @@
 //! E #150). Together they cover the three #131 contract surfaces:
 //! subsystem-to-subsystem (B), event types (E), API/UI (F).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use syn::visit::Visit;
@@ -33,6 +33,18 @@ pub struct BackendRoute {
     pub path: String,
     /// `"stiglab"` or `"synodic"`.
     pub subsystem: &'static str,
+}
+
+/// One dashboard call site — the path argument extracted from a
+/// `request<T>(...)` or `EventSource(...)` invocation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DashboardCall {
+    /// Path as written in TS, e.g. `/workspaces/${encodeURIComponent(id)}`.
+    pub path: String,
+    /// Source file (workspace-relative).
+    pub file: PathBuf,
+    /// 1-based line number where the string literal opens.
+    pub line: usize,
 }
 
 /// Walk `expr.route("...", ...)` method chains and collect the literal
@@ -78,9 +90,187 @@ pub fn parse_rust_routes(file: &Path, subsystem: &'static str) -> Result<Vec<Bac
     Ok(visitor.out)
 }
 
+/// Scan a TypeScript source file and pull out the path argument from
+/// every `request<T>(...)` and `EventSource(...)` call. Conservative —
+/// only literal string forms are recognised; computed paths fall through
+/// silently because they would defeat any matching anyway.
+///
+/// Backtick interpolations (`${...}`) are preserved verbatim — the
+/// normaliser collapses them into `{x}` later so that
+/// `/workspaces/${id}` and `/workspaces/{id}` (axum) compare equal.
+pub fn parse_ts_calls(file: &Path) -> Result<Vec<DashboardCall>> {
+    let source =
+        std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
+    Ok(scan_ts_calls(&source, file))
+}
+
+fn scan_ts_calls(source: &str, file: &Path) -> Vec<DashboardCall> {
+    let bytes = source.as_bytes();
+    let n = bytes.len();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < n {
+        // Comments and string literals never contain a call marker we
+        // care about, so step over them wholesale rather than letting
+        // the marker scan match commented-out or string-embedded code.
+        if let Some(after) = skip_trivia_or_string(source, i) {
+            i = after;
+            continue;
+        }
+        if let Some(after_marker) = match_call_marker(bytes, i) {
+            i = after_marker;
+            if let Some((path, after_str, line)) = read_next_string(source, i) {
+                out.push(DashboardCall {
+                    path,
+                    file: file.to_path_buf(),
+                    line,
+                });
+                i = after_str;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Step past one comment or string literal starting at `i`. `None` if
+/// the byte at `i` doesn't open one.
+fn skip_trivia_or_string(source: &str, i: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let n = bytes.len();
+    if i >= n {
+        return None;
+    }
+    match bytes[i] {
+        b'/' if i + 1 < n && bytes[i + 1] == b'/' => {
+            let mut j = i + 2;
+            while j < n && bytes[j] != b'\n' {
+                j += 1;
+            }
+            Some(j)
+        }
+        b'/' if i + 1 < n && bytes[i + 1] == b'*' => {
+            let mut j = i + 2;
+            while j + 1 < n && !(bytes[j] == b'*' && bytes[j + 1] == b'/') {
+                j += 1;
+            }
+            Some((j + 2).min(n))
+        }
+        b'\'' | b'"' | b'`' => read_next_string(source, i).map(|(_, end, _)| end),
+        _ => None,
+    }
+}
+
+/// Recognise the call-site markers we care about. Returns the byte
+/// offset just past the opening `(` of the call's argument list, or
+/// `None` if `i` doesn't start a marker.
+fn match_call_marker(bytes: &[u8], i: usize) -> Option<usize> {
+    // request<...>( — generic args may nest, so we count `<` vs `>`.
+    if bytes[i..].starts_with(b"request<") {
+        let mut j = i + b"request<".len();
+        let mut depth: i32 = 1;
+        while j < bytes.len() && depth > 0 {
+            match bytes[j] {
+                b'<' => depth += 1,
+                b'>' => depth -= 1,
+                _ => {}
+            }
+            j += 1;
+        }
+        // Skip any whitespace, then expect `(`.
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j < bytes.len() && bytes[j] == b'(' {
+            return Some(j + 1);
+        }
+        return None;
+    }
+    if bytes[i..].starts_with(b"EventSource(") {
+        return Some(i + b"EventSource(".len());
+    }
+    None
+}
+
+/// Skip whitespace and `//` / `/* */` comments, then read one TS string
+/// literal starting at the resulting position. Returns `(content,
+/// next_offset, line_number)`. `None` if the next non-trivia byte isn't
+/// a quote.
+fn read_next_string(source: &str, mut i: usize) -> Option<(String, usize, usize)> {
+    let bytes = source.as_bytes();
+    let n = bytes.len();
+    while i < n {
+        match bytes[i] {
+            b' ' | b'\t' | b'\n' | b'\r' => i += 1,
+            b'/' if i + 1 < n && bytes[i + 1] == b'/' => {
+                while i < n && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < n && bytes[i + 1] == b'*' => {
+                i += 2;
+                while i + 1 < n && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                i = (i + 2).min(n);
+            }
+            _ => break,
+        }
+    }
+    if i >= n {
+        return None;
+    }
+    let quote = bytes[i];
+    if quote != b'\'' && quote != b'"' && quote != b'`' {
+        return None;
+    }
+    let line = source[..i].bytes().filter(|&b| b == b'\n').count() + 1;
+    i += 1;
+    let mut content = String::new();
+    // Backtick template literals can embed `${...}` interpolations whose
+    // bodies may contain matching `{}`, balanced strings, etc. We
+    // don't evaluate them; we just preserve the raw `${...}` block so
+    // the normaliser can map it to `{x}`.
+    let mut tpl_depth: u32 = 0;
+    while i < n {
+        let c = bytes[i];
+        if tpl_depth > 0 {
+            content.push(c as char);
+            if c == b'{' {
+                tpl_depth += 1;
+            } else if c == b'}' {
+                tpl_depth -= 1;
+            }
+            i += 1;
+            continue;
+        }
+        if c == b'\\' && i + 1 < n {
+            content.push(c as char);
+            content.push(bytes[i + 1] as char);
+            i += 2;
+            continue;
+        }
+        if c == quote {
+            return Some((content, i + 1, line));
+        }
+        if quote == b'`' && c == b'$' && i + 1 < n && bytes[i + 1] == b'{' {
+            content.push('$');
+            content.push('{');
+            tpl_depth = 1;
+            i += 2;
+            continue;
+        }
+        content.push(c as char);
+        i += 1;
+    }
+    // Unterminated literal — bail out.
+    None
+}
+
 pub fn run() -> Result<()> {
-    // Implementation lands in subsequent chunks: TS scanner, normalization
-    // + allowlist, bidirectional comparison.
+    // Implementation lands in subsequent chunks: normalization +
+    // allowlist, bidirectional comparison.
     println!("api-contract lint: skeleton (no checks wired yet — spec #151)");
     Ok(())
 }
@@ -170,5 +360,87 @@ mod tests {
         let routes = parse_rust_routes(f.path(), "stiglab").unwrap();
         let paths: Vec<_> = routes.iter().map(|r| r.path.as_str()).collect();
         assert_eq!(paths, vec!["/api/static"]);
+    }
+
+    fn scan(src: &str) -> Vec<String> {
+        scan_ts_calls(src, Path::new("api.ts"))
+            .into_iter()
+            .map(|c| c.path)
+            .collect()
+    }
+
+    #[test]
+    fn extracts_path_from_request_call_with_generics() {
+        let src = "
+            const a = request<{ workspaces: Workspace[] }>('/workspaces');
+            const b = request<{ session: Session }>(`/sessions/${id}`);
+        ";
+        assert_eq!(scan(src), vec!["/workspaces", "/sessions/${id}"]);
+    }
+
+    #[test]
+    fn extracts_path_from_event_source_call() {
+        let src = "const es = new EventSource(`/api/sessions/${sid}/logs`);";
+        assert_eq!(scan(src), vec!["/api/sessions/${sid}/logs"]);
+    }
+
+    #[test]
+    fn handles_multi_line_request_with_options() {
+        let src = "
+            request<{ ok: boolean }>(
+              `/credentials/${name}`,
+              { method: 'DELETE' },
+            );
+        ";
+        assert_eq!(scan(src), vec!["/credentials/${name}"]);
+    }
+
+    #[test]
+    fn preserves_template_interpolations_with_nested_calls() {
+        let src = "
+            request<X>(`/projects/${encodeURIComponent(id)}/issues${qs}`)
+        ";
+        assert_eq!(
+            scan(src),
+            vec!["/projects/${encodeURIComponent(id)}/issues${qs}"]
+        );
+    }
+
+    #[test]
+    fn ignores_non_call_string_literals() {
+        let src = "
+            const ONBOARDING = 'onsager.onboarding_seen';
+            const url = `https://example.com/path`;
+            // request<X>('not-a-call'); -- in a comment, scanner still
+            // matches because it's not full TS, but a real api.ts has
+            // none of these patterns. Exercised separately below.
+        ";
+        assert_eq!(scan(src), Vec::<String>::new());
+    }
+
+    #[test]
+    fn parses_real_dashboard_api_ts() {
+        let root = workspace_root();
+        let calls = parse_ts_calls(&root.join("apps/dashboard/src/lib/api.ts")).unwrap();
+        assert!(calls.len() > 30, "api.ts calls: {}", calls.len());
+        let paths: Vec<_> = calls.iter().map(|c| c.path.as_str()).collect();
+        assert!(paths.contains(&"/health"));
+        assert!(paths.contains(&"/workspaces"));
+        // sanity: every captured path starts with a slash
+        for c in &calls {
+            assert!(
+                c.path.starts_with('/'),
+                "non-path string captured: {:?}",
+                c.path
+            );
+        }
+    }
+
+    #[test]
+    fn parses_real_dashboard_sse_ts() {
+        let root = workspace_root();
+        let calls = parse_ts_calls(&root.join("apps/dashboard/src/lib/sse.ts")).unwrap();
+        let paths: Vec<_> = calls.iter().map(|c| c.path.as_str()).collect();
+        assert!(paths.iter().any(|p| p.contains("/sessions/") && p.ends_with("/logs")));
     }
 }
