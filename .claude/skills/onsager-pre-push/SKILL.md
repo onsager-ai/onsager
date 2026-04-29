@@ -233,11 +233,13 @@ is explicitly trivial). This is the local counterpart to the
    step 6.5 still runs — it's a no-op for genuinely doc-only diffs and
    takes seconds otherwise. Use the trivial label sparingly.
 
-### 6.5. Seam-rule self-check
+### 6.5. Seam-rule + API/UI contract self-check
 
-`just lint-rust` runs `cargo run -p xtask --quiet -- lint-seams` as part
-of step 4. That's the canonical check; CI runs the same. The lint
-enforces the rule from ADR 0004 / spec #131 Lever B:
+`just lint-rust` runs `cargo run -p xtask --quiet -- lint-seams` and
+`cargo run -p xtask --quiet -- check-api-contract` as part of step 4.
+Those are the canonical checks; CI runs the same. They enforce the
+rule from ADR 0004 / spec #131 Lever B (subsystem seams) and Lever F
+/ #151 (API/UI contract — no half-wired endpoints):
 
 > HTTP APIs exist only at external boundaries:
 > - **User-facing endpoints** called by the dashboard.
@@ -271,10 +273,21 @@ hint — see `xtask/src/lint_seams.rs` for the full set):
 (`producer-without-consumer` is gated on Lever E #150 and currently
 warn-only.)
 
-To run the lint by hand without the rest of `lint-rust`:
+What `check-api-contract` catches (Lever F / #151 — see
+`xtask/src/lint_api_contract.rs`):
+
+- **`route-without-caller`** — a `.route("/api/...", ...)` registration
+  in stiglab/synodic with no matching `request<T>(...)` /
+  `EventSource(...)` site in `apps/dashboard/src/lib/api.ts` or
+  `sse.ts`.
+- **`call-without-route`** — a dashboard `request<T>` /
+  `EventSource` site whose path matches no backend route.
+
+To run the lints by hand without the rest of `lint-rust`:
 
 ```bash
 cargo run -p xtask --quiet -- lint-seams
+cargo run -p xtask --quiet -- check-api-contract
 ```
 
 **Escape hatch (use sparingly).** For a single-line non-Cargo.toml

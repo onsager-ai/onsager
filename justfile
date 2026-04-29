@@ -38,6 +38,7 @@ lint-rust:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo run -p xtask --quiet -- gen-event-docs --check
     cargo run -p xtask --quiet -- lint-seams
+    cargo run -p xtask --quiet -- check-api-contract
 
 lint-ui:
     pnpm --filter dashboard lint

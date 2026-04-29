@@ -3,6 +3,7 @@
 //!     cargo run -p xtask -- gen-event-docs           # write docs/events.md
 //!     cargo run -p xtask -- gen-event-docs --check   # verify in sync
 //!     cargo run -p xtask -- lint-seams               # check the seam rule
+//!     cargo run -p xtask -- check-api-contract       # check dashboard ↔ backend surface
 //!     cargo run -p xtask -- slot <subcommand>        # per-worktree dev slot allocator (#194)
 //!
 //! The event catalog is derived from `crates/onsager-spine/src/factory_event.rs`
@@ -14,9 +15,15 @@
 //! `lint-seams` enforces the canonical seam rule from ADR 0004 / spec #131
 //! Lever B — see [`lint_seams`] for the full check list.
 //!
+//! `check-api-contract` enforces spec #131 Lever F — every backend route
+//! has a dashboard caller (or sits on a reasoned allowlist), and every
+//! dashboard call points at a real backend route. See
+//! [`lint_api_contract`].
+//!
 //! `slot` allocates and manages per-worktree dev slots backed by docker-compose
 //! projects on disjoint ports. See [`slot`] for the full surface.
 
+mod lint_api_contract;
 mod lint_seams;
 mod slot;
 
@@ -43,10 +50,17 @@ fn main() -> ExitCode {
                 lint_seams::run()
             }
         }
+        Some("check-api-contract") => {
+            if args.next().is_some() {
+                Err(anyhow!("check-api-contract takes no arguments"))
+            } else {
+                lint_api_contract::run()
+            }
+        }
         Some("slot") => slot::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
+            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
         )),
     };
 
