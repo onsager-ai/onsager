@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ExternalLink, Inbox, RefreshCw } from "lucide-react"
+import { Inbox, RefreshCw } from "lucide-react"
 import { Link, useSearchParams } from "react-router-dom"
 
 import {
@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/table"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { BackfillDialog } from "@/components/BackfillDialog"
+import { IssueActionsMenu } from "@/components/IssueActionsMenu"
 import { useActiveWorkspace } from "@/lib/workspace"
 
 type StateFilter = "open" | "closed" | "all"
@@ -289,7 +290,16 @@ export function IssuesPage() {
             <>
               <div className="flex flex-col gap-2 md:hidden">
                 {rows.map((r) => (
-                  <IssueCard key={rowKey(r)} row={r} />
+                  <IssueCard
+                    key={rowKey(r)}
+                    row={r}
+                    projectId={selectedProjectId}
+                    listQueryKey={[
+                      "project-issues",
+                      selectedProjectId,
+                      stateFilter,
+                    ]}
+                  />
                 ))}
               </div>
               <div className="hidden md:block">
@@ -334,22 +344,16 @@ export function IssuesPage() {
                             {display.updatedAt}
                           </TableCell>
                           <TableCell>
-                            {display.htmlUrl ? (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                render={
-                                  <a
-                                    href={display.htmlUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                  />
-                                }
-                              >
-                                <ExternalLink className="h-3.5 w-3.5" />
-                                <span className="sr-only">Open in GitHub</span>
-                              </Button>
-                            ) : null}
+                            <IssueActionsMenu
+                              projectId={selectedProjectId}
+                              issueNumber={r.issue?.number ?? null}
+                              htmlUrl={display.htmlUrl}
+                              listQueryKey={[
+                                "project-issues",
+                                selectedProjectId,
+                                stateFilter,
+                              ]}
+                            />
                           </TableCell>
                         </TableRow>
                       )
@@ -432,20 +436,33 @@ function describeRow(row: HydratedIssueRow): RowDisplay {
   }
 }
 
-function IssueCard({ row }: { row: HydratedIssueRow }) {
+function IssueCard({
+  row,
+  projectId,
+  listQueryKey,
+}: {
+  row: HydratedIssueRow
+  projectId: string | null
+  listQueryKey: readonly unknown[]
+}) {
   const display = describeRow(row)
   const cardClass =
     "flex flex-col gap-1.5 rounded-lg border p-3 transition-colors active:bg-accent"
-  const inner = (
-    <>
+  return (
+    <div className={cardClass}>
       <div className="flex items-start justify-between gap-2">
         <span className="line-clamp-2 text-sm font-medium">{display.title}</span>
-        <Badge
-          variant={display.openState ? "default" : "secondary"}
-          className="shrink-0"
-        >
-          {display.stateLabel}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-1">
+          <Badge variant={display.openState ? "default" : "secondary"}>
+            {display.stateLabel}
+          </Badge>
+          <IssueActionsMenu
+            projectId={projectId}
+            issueNumber={row.issue?.number ?? null}
+            htmlUrl={display.htmlUrl}
+            listQueryKey={listQueryKey}
+          />
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>{display.subtitle}</span>
@@ -455,21 +472,8 @@ function IssueCard({ row }: { row: HydratedIssueRow }) {
       {display.labels.length > 0 ? (
         <LabelChips labels={display.labels} />
       ) : null}
-    </>
+    </div>
   )
-  if (display.htmlUrl) {
-    return (
-      <a
-        href={display.htmlUrl}
-        target="_blank"
-        rel="noreferrer"
-        className={cardClass}
-      >
-        {inner}
-      </a>
-    )
-  }
-  return <div className={cardClass}>{inner}</div>
 }
 
 function LabelChips({ labels }: { labels: string[] }) {
