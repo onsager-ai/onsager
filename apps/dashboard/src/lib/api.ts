@@ -276,6 +276,33 @@ export interface ProjectIssueRow {
   updated_at: string;
 }
 
+/// Detail-shape counterpart to `ProjectIssueRow` (#205). Adds the
+/// fields the list endpoint omits — body, assignees, milestone, and
+/// the created/closed timestamps. Hits the same proxy cache as the
+/// list endpoint and uses the same fail-open envelope: `issue` is
+/// null and `error` is set when the upstream is rate-limited or
+/// unreachable.
+export interface ProjectIssueDetail {
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  author: string | null;
+  labels: string[];
+  assignees: string[];
+  comments: number;
+  body: string | null;
+  milestone: { title: string; state: string } | null;
+  created_at: string | null;
+  updated_at: string;
+  closed_at: string | null;
+}
+
+export interface ProjectIssueDetailResponse {
+  issue: ProjectIssueDetail | null;
+  error?: string;
+}
+
 export interface ProjectPullRow {
   number: number;
   title: string;
@@ -984,6 +1011,10 @@ export const api = {
       `/projects/${encodeURIComponent(projectId)}/issues${qs}`,
     );
   },
+  getProjectIssue: (projectId: string, number: number) =>
+    request<ProjectIssueDetailResponse>(
+      `/projects/${encodeURIComponent(projectId)}/issues/${number}`,
+    ),
   listProjectPulls: (projectId: string, state?: 'open' | 'closed' | 'all') => {
     const qs = state ? `?state=${state}` : '';
     return request<ProjectLiveListResponse<ProjectPullRow>>(

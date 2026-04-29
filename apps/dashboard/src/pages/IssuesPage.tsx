@@ -294,6 +294,7 @@ export function IssuesPage() {
                     key={rowKey(r)}
                     row={r}
                     projectId={selectedProjectId}
+                    workspaceSlug={workspace.slug}
                     listQueryKey={[
                       "project-issues",
                       selectedProjectId,
@@ -317,12 +318,26 @@ export function IssuesPage() {
                   <TableBody>
                     {rows.map((r) => {
                       const display = describeRow(r)
+                      const detailNumber = detailIssueNumber(r)
+                      const detailHref =
+                        selectedProjectId && detailNumber != null
+                          ? `/workspaces/${workspace.slug}/issues/${selectedProjectId}/${detailNumber}`
+                          : null
                       return (
                         <TableRow key={rowKey(r)}>
                           <TableCell className="max-w-md">
-                            <div className="truncate font-medium">
-                              {display.title}
-                            </div>
+                            {detailHref ? (
+                              <Link
+                                to={detailHref}
+                                className="block truncate font-medium hover:underline"
+                              >
+                                {display.title}
+                              </Link>
+                            ) : (
+                              <div className="truncate font-medium">
+                                {display.title}
+                              </div>
+                            )}
                             <div className="text-xs text-muted-foreground">
                               {display.subtitle}
                             </div>
@@ -399,6 +414,18 @@ function rowKey(row: HydratedIssueRow): string {
   return row.skeleton?.id ?? Math.random().toString(36)
 }
 
+/// Extract the issue number for the detail-page link. Prefers the live
+/// row's number; falls back to parsing the skeleton's `external_ref`
+/// tail (`...:issue:42`) so skeleton-only rows can still navigate. Returns
+/// null if neither side has a usable number.
+function detailIssueNumber(row: HydratedIssueRow): number | null {
+  if (row.issue) return row.issue.number
+  const tail = row.skeleton?.external_ref?.split(":issue:").pop()
+  if (!tail) return null
+  const parsed = Number.parseInt(tail, 10)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 /// Project hydrated + skeleton rows down to the values the table/card
 /// renderers display. Skeleton-only rows derive their state from the
 /// artifact's lifecycle column and surface a "—" placeholder for fields
@@ -439,21 +466,38 @@ function describeRow(row: HydratedIssueRow): RowDisplay {
 function IssueCard({
   row,
   projectId,
+  workspaceSlug,
   listQueryKey,
 }: {
   row: HydratedIssueRow
   projectId: string | null
+  workspaceSlug: string
   listQueryKey: readonly unknown[]
 }) {
   const display = describeRow(row)
-  // No interactive cursor / press state on the card itself — the row
-  // is no longer a single clickable surface; per-row navigation lives
-  // in the kebab menu's "Open in GitHub" item.
+  const detailNumber = detailIssueNumber(row)
+  const detailHref =
+    projectId && detailNumber != null
+      ? `/workspaces/${workspaceSlug}/issues/${projectId}/${detailNumber}`
+      : null
+  // The whole card is not a single clickable surface (the kebab needs
+  // its own hit target); the title is the link, the rest is metadata.
   const cardClass = "flex flex-col gap-1.5 rounded-lg border p-3"
   return (
     <div className={cardClass}>
       <div className="flex items-start justify-between gap-2">
-        <span className="line-clamp-2 text-sm font-medium">{display.title}</span>
+        {detailHref ? (
+          <Link
+            to={detailHref}
+            className="line-clamp-2 text-sm font-medium hover:underline"
+          >
+            {display.title}
+          </Link>
+        ) : (
+          <span className="line-clamp-2 text-sm font-medium">
+            {display.title}
+          </span>
+        )}
         <div className="flex shrink-0 items-center gap-1">
           <Badge variant={display.openState ? "default" : "secondary"}>
             {display.stateLabel}

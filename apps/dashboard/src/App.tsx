@@ -23,6 +23,9 @@ const ArtifactsPage = lazy(() =>
 const IssuesPage = lazy(() =>
   import("@/pages/IssuesPage").then((m) => ({ default: m.IssuesPage })),
 )
+const IssueDetailPage = lazy(() =>
+  import("@/pages/IssueDetailPage").then((m) => ({ default: m.IssueDetailPage })),
+)
 const ArtifactDetailPage = lazy(() =>
   import("@/pages/ArtifactDetailPage").then((m) => ({ default: m.ArtifactDetailPage })),
 )
@@ -296,6 +299,10 @@ function AppRoutes() {
                             <Route
                               path="issues"
                               element={<LazyRoute variant="list"><IssuesPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="issues/:projectId/:number"
+                              element={<LazyRoute variant="detail"><IssueDetailPage /></LazyRoute>}
                             />
                             <Route
                               path="spine"
