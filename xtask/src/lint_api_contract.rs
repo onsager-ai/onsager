@@ -268,9 +268,188 @@ fn read_next_string(source: &str, mut i: usize) -> Option<(String, usize, usize)
     None
 }
 
+// ---------------------------------------------------------------------------
+// Normalization
+// ---------------------------------------------------------------------------
+
+/// Reduce a backend axum path to the comparison namespace shared with
+/// dashboard calls.
+///
+/// - Strip the leading `/api/` (dashboard calls are written without it
+///   since `API_BASE = '/api'`) or just the leading `/`.
+/// - Replace path params `{name}` → `{x}`, catchall `{*name}` → `{*x}`.
+/// - For synodic, prepend `governance/`. The dashboard reaches synodic
+///   only via stiglab's `/api/governance/{*path}` proxy, so a synodic
+///   route at `/foo` corresponds to the dashboard call `/governance/foo`.
+pub fn normalize_backend(path: &str, subsystem: &str) -> String {
+    let stripped = path
+        .strip_prefix("/api/")
+        .or_else(|| path.strip_prefix('/'))
+        .unwrap_or(path);
+    let scoped = if subsystem == "synodic" {
+        format!("governance/{}", stripped)
+    } else {
+        stripped.to_string()
+    };
+    rewrite_path_params(&scoped)
+}
+
+/// Reduce a dashboard call path to the comparison namespace.
+///
+/// - `${scoped(...)}` and `${qs}` interpolations resolve to query
+///   suffixes (`?workspace_id=...&...`). Replace them with `?` so
+///   the trailing query gets stripped.
+/// - Other `${...}` blocks are path-segment values — replace with `{x}`.
+/// - Drop everything from the first `?` onward.
+/// - Trim a leading `/`.
+pub fn normalize_dashboard(path: &str) -> String {
+    let mut s = String::new();
+    let bytes = path.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
+            let mut j = i + 2;
+            let mut depth = 1usize;
+            while j < bytes.len() && depth > 0 {
+                match bytes[j] {
+                    b'{' => depth += 1,
+                    b'}' => depth -= 1,
+                    _ => {}
+                }
+                j += 1;
+            }
+            let inside = path
+                .get(i + 2..j.saturating_sub(1))
+                .unwrap_or("")
+                .trim();
+            if inside.starts_with("scoped(") || inside == "qs" {
+                s.push('?');
+            } else {
+                s.push_str("{x}");
+            }
+            i = j;
+        } else {
+            s.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    let s = s.split('?').next().unwrap_or("").trim_start_matches('/').to_string();
+    s
+}
+
+/// Rewrite axum path params: `{name}` → `{x}`, `{*name}` → `{*x}`.
+fn rewrite_path_params(path: &str) -> String {
+    let mut out = String::new();
+    let bytes = path.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'{' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != b'}' {
+                j += 1;
+            }
+            let inside = path.get(i + 1..j).unwrap_or("");
+            if inside.starts_with('*') {
+                out.push_str("{*x}");
+            } else {
+                out.push_str("{x}");
+            }
+            i = (j + 1).min(bytes.len());
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out.trim_start_matches('/').to_string()
+}
+
+/// Does a normalized dashboard call match a normalized backend route?
+/// Exact equality wins; a backend ending in `{*x}` matches any path
+/// that shares its prefix (axum catchall semantics).
+pub fn matches_route(dashboard: &str, backend: &str) -> bool {
+    if dashboard == backend {
+        return true;
+    }
+    if let Some(prefix) = backend.strip_suffix("{*x}") {
+        return dashboard.starts_with(prefix);
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Allowlist
+// ---------------------------------------------------------------------------
+
+/// Backend routes that legitimately have no `request<T>(...)` /
+/// `EventSource(...)` caller in the dashboard. Each entry needs a
+/// reason; the lint prints them on every run so the list stays
+/// reviewable rather than invisible.
+///
+/// Entries here are matched against the **raw** axum path (before
+/// normalization) so the file-grep stays trivial: an allowlist line
+/// `/api/foo` lines up with the `.route("/api/foo", ...)` call in
+/// `mod.rs`.
+pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
+    (
+        "/agent/ws",
+        "agent worker WebSocket — agent binaries connect, not the dashboard",
+    ),
+    (
+        "/api/auth/github",
+        "OAuth start — entered via `<a href>` from LoginPage, not request<T>",
+    ),
+    (
+        "/api/auth/github/callback",
+        "OAuth callback — GitHub redirects the browser here",
+    ),
+    (
+        "/api/auth/sso/redeem",
+        "cross-environment SSO delegation — server-to-server, owner process only",
+    ),
+    (
+        "/api/auth/sso/finish",
+        "browser lands here after owner-side OAuth completes; no fetch",
+    ),
+    (
+        "/api/github-app/install-start",
+        "GitHub App install kickoff — `window.location.href` from WorkspaceCard, not request<T>",
+    ),
+    (
+        "/api/github-app/callback",
+        "GitHub App install callback — entered by GitHub redirect",
+    ),
+    (
+        "/api/github-app/webhook",
+        "forgiving alias for the GitHub webhook receiver — entered by GitHub",
+    ),
+    (
+        "/api/webhooks/github",
+        "GitHub webhook receiver for the workflow runtime",
+    ),
+    (
+        "/webhooks/github",
+        "portal webhook proxy — receives GitHub webhooks for the portal binary",
+    ),
+    (
+        "/api/governance/{*path}",
+        "catchall proxy that forwards to synodic; covered route-by-route via the synodic check",
+    ),
+    (
+        "/api/tenants",
+        "bridge-debt: 308 redirect to /api/workspaces (#173 — pending removal)",
+    ),
+    (
+        "/api/tenants/{*rest}",
+        "bridge-debt: 308 redirect to /api/workspaces/* (#173 — pending removal)",
+    ),
+    (
+        "/health",
+        "synodic internal health endpoint — ops-only, not a dashboard surface",
+    ),
+];
+
 pub fn run() -> Result<()> {
-    // Implementation lands in subsequent chunks: normalization +
-    // allowlist, bidirectional comparison.
+    // Implementation lands in chunk 5: bidirectional comparison.
     println!("api-contract lint: skeleton (no checks wired yet — spec #151)");
     Ok(())
 }
@@ -442,5 +621,85 @@ mod tests {
         let calls = parse_ts_calls(&root.join("apps/dashboard/src/lib/sse.ts")).unwrap();
         let paths: Vec<_> = calls.iter().map(|c| c.path.as_str()).collect();
         assert!(paths.iter().any(|p| p.contains("/sessions/") && p.ends_with("/logs")));
+    }
+
+    #[test]
+    fn normalize_backend_strips_api_prefix_and_rewrites_params() {
+        assert_eq!(normalize_backend("/api/health", "stiglab"), "health");
+        assert_eq!(normalize_backend("/api/workspaces", "stiglab"), "workspaces");
+        assert_eq!(
+            normalize_backend("/api/workspaces/{id}/members", "stiglab"),
+            "workspaces/{x}/members"
+        );
+        assert_eq!(
+            normalize_backend("/api/governance/{*path}", "stiglab"),
+            "governance/{*x}"
+        );
+        assert_eq!(normalize_backend("/agent/ws", "stiglab"), "agent/ws");
+    }
+
+    #[test]
+    fn normalize_backend_scopes_synodic_under_governance() {
+        assert_eq!(normalize_backend("/health", "synodic"), "governance/health");
+        assert_eq!(normalize_backend("/events", "synodic"), "governance/events");
+        assert_eq!(
+            normalize_backend("/events/{id}/resolve", "synodic"),
+            "governance/events/{x}/resolve"
+        );
+        assert_eq!(
+            normalize_backend("/escalations/{id}/propose-resolution", "synodic"),
+            "governance/escalations/{x}/propose-resolution"
+        );
+    }
+
+    #[test]
+    fn normalize_dashboard_collapses_interpolations() {
+        assert_eq!(normalize_dashboard("/health"), "health");
+        assert_eq!(normalize_dashboard("/sessions/${id}"), "sessions/{x}");
+        assert_eq!(
+            normalize_dashboard("/workspaces/${encodeURIComponent(id)}/members"),
+            "workspaces/{x}/members"
+        );
+    }
+
+    #[test]
+    fn normalize_dashboard_drops_scoped_query_suffix() {
+        assert_eq!(normalize_dashboard("/nodes${scoped(workspaceId)}"), "nodes");
+        assert_eq!(
+            normalize_dashboard("/governance/rules${scoped(workspaceId)}"),
+            "governance/rules"
+        );
+        assert_eq!(
+            normalize_dashboard(
+                "/spine/events${scoped(workspaceId, { event_type: 'foo', limit: 10 })}"
+            ),
+            "spine/events"
+        );
+        assert_eq!(
+            normalize_dashboard("/projects/${encodeURIComponent(id)}/issues${qs}"),
+            "projects/{x}/issues"
+        );
+    }
+
+    #[test]
+    fn matches_route_handles_exact_and_catchall() {
+        assert!(matches_route("workspaces", "workspaces"));
+        assert!(matches_route("workspaces/{x}", "workspaces/{x}"));
+        assert!(!matches_route("workspaces", "workspaces/{x}"));
+        assert!(matches_route("governance/rules", "governance/{*x}"));
+        assert!(matches_route(
+            "governance/events/123/resolve",
+            "governance/{*x}"
+        ));
+        assert!(!matches_route("workspaces", "governance/{*x}"));
+    }
+
+    #[test]
+    fn allowlist_entries_are_unique_and_have_reasons() {
+        let mut seen = std::collections::BTreeSet::new();
+        for (path, reason) in EXTERNAL_ONLY_ROUTES {
+            assert!(seen.insert(*path), "duplicate allowlist entry: {path}");
+            assert!(!reason.trim().is_empty(), "missing reason for {path}");
+        }
     }
 }
