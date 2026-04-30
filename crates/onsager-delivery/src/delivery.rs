@@ -22,7 +22,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use onsager_artifact::BundleId;
+use onsager_artifact::ArtifactVersionId;
 use onsager_warehouse::Bundle;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -196,7 +196,7 @@ impl fmt::Display for DeliveryStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Delivery {
     pub delivery_id: DeliveryId,
-    pub bundle_id: BundleId,
+    pub bundle_id: ArtifactVersionId,
     pub consumer_id: ConsumerId,
     pub kind: DeliveryKind,
     #[serde(skip_serializing_if = "Option::is_none")]

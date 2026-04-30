@@ -11,7 +11,7 @@ pub mod bundle;
 
 pub use bundle::*;
 
-// Re-export BundleId (which lives in onsager-artifact to avoid an
+// Re-export ArtifactVersionId (which lives in onsager-artifact to avoid an
 // artifact↔warehouse dependency cycle) so callers can reach it via
 // the warehouse crate as well.
-pub use onsager_artifact::BundleId;
+pub use onsager_artifact::ArtifactVersionId;

@@ -27,32 +27,32 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use chrono::{DateTime, SubsecRound, Utc};
-use onsager_artifact::{ArtifactId, BundleId};
+use onsager_artifact::{ArtifactId, ArtifactVersionId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
 // ---------------------------------------------------------------------------
-// BundleId hashing helper
+// ArtifactVersionId hashing helper
 // ---------------------------------------------------------------------------
 
-/// Derive a deterministic [`BundleId`] from the canonical manifest, artifact
+/// Derive a deterministic [`ArtifactVersionId`] from the canonical manifest, artifact
 /// id, and version. Two seals of the same artifact at the same version with
 /// identical manifests produce the same id (the `(artifact_id, version)`
 /// UNIQUE then rejects the reseal as `VersionConflict`); two different
 /// artifacts with identical files produce different ids, so they do not
 /// collide.
 ///
-/// The [`BundleId`] type itself lives in `onsager-artifact`; only the hashing
+/// The [`ArtifactVersionId`] type itself lives in `onsager-artifact`; only the hashing
 /// rule (which depends on [`Manifest`]) lives here.
 fn bundle_id_from_manifest(
     manifest: &Manifest,
     artifact_id: &ArtifactId,
     version: u32,
-) -> BundleId {
+) -> ArtifactVersionId {
     // Hash over (artifact_id, version, canonical manifest bytes). Including
     // artifact_id + version ensures two artifacts that happen to ship
-    // identical files don't collide on the same BundleId; identical reseals
+    // identical files don't collide on the same ArtifactVersionId; identical reseals
     // of the same artifact at the same version do collide (which the
     // (artifact_id, version) UNIQUE then rejects as VersionConflict).
     let mut hasher = Sha256::new();
@@ -62,7 +62,7 @@ fn bundle_id_from_manifest(
     hasher.update([0u8]);
     let canonical = serde_json::to_vec(manifest).expect("Manifest must be serialisable as JSON");
     hasher.update(&canonical);
-    BundleId::new(format!("bnd_{}", hex::encode(hasher.finalize())))
+    ArtifactVersionId::new(format!("bnd_{}", hex::encode(hasher.finalize())))
 }
 
 // ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ pub struct ManifestEntry {
 
 /// Ordered list of manifest entries.
 ///
-/// Sorting by `path` is part of the canonicalisation that makes [`BundleId`]
+/// Sorting by `path` is part of the canonicalisation that makes [`ArtifactVersionId`]
 /// deterministic across reseals.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -121,11 +121,11 @@ impl Outputs {
 /// A sealed, immutable bundle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bundle {
-    pub bundle_id: BundleId,
+    pub bundle_id: ArtifactVersionId,
     pub artifact_id: ArtifactId,
     pub version: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub supersedes: Option<BundleId>,
+    pub supersedes: Option<ArtifactVersionId>,
     pub manifest: Manifest,
     /// Backend-specific URI pointing at the sealed content root
     /// (e.g. `file:///var/onsager/blobs` for the filesystem backend).
@@ -160,10 +160,10 @@ pub trait Warehouse: Send + Sync {
     async fn seal(&self, request: SealRequest) -> Result<Bundle, SealError>;
 
     /// Look up a sealed bundle by id.
-    async fn fetch(&self, bundle_id: &BundleId) -> Result<Bundle, FetchError>;
+    async fn fetch(&self, bundle_id: &ArtifactVersionId) -> Result<Bundle, FetchError>;
 
     /// Whether a bundle with the given id exists.
-    async fn exists(&self, bundle_id: &BundleId) -> Result<bool, FetchError>;
+    async fn exists(&self, bundle_id: &ArtifactVersionId) -> Result<bool, FetchError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ pub enum SealError {
 #[derive(Debug, thiserror::Error)]
 pub enum FetchError {
     #[error("bundle {0} not found")]
-    NotFound(BundleId),
+    NotFound(ArtifactVersionId),
     #[error("warehouse I/O failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("warehouse database error: {0}")]
@@ -331,7 +331,7 @@ impl Warehouse for FilesystemWarehouse {
         .await?;
 
         let (prior_version, supersedes) = match row {
-            Some((v, id)) => (v as u32, Some(BundleId::new(id))),
+            Some((v, id)) => (v as u32, Some(ArtifactVersionId::new(id))),
             None => (0u32, None),
         };
         let version = prior_version + 1;
@@ -397,7 +397,7 @@ impl Warehouse for FilesystemWarehouse {
         })
     }
 
-    async fn fetch(&self, bundle_id: &BundleId) -> Result<Bundle, FetchError> {
+    async fn fetch(&self, bundle_id: &ArtifactVersionId) -> Result<Bundle, FetchError> {
         let row: Option<(
             String,
             String,
@@ -423,10 +423,10 @@ impl Warehouse for FilesystemWarehouse {
             .map_err(|e| FetchError::Corrupted(format!("manifest JSON: {e}")))?;
 
         Ok(Bundle {
-            bundle_id: BundleId::new(bid),
+            bundle_id: ArtifactVersionId::new(bid),
             artifact_id: ArtifactId::new(aid),
             version: version as u32,
-            supersedes: supersedes.map(BundleId::new),
+            supersedes: supersedes.map(ArtifactVersionId::new),
             manifest,
             content_ref,
             sealed_at,
@@ -435,7 +435,7 @@ impl Warehouse for FilesystemWarehouse {
         })
     }
 
-    async fn exists(&self, bundle_id: &BundleId) -> Result<bool, FetchError> {
+    async fn exists(&self, bundle_id: &ArtifactVersionId) -> Result<bool, FetchError> {
         let row: Option<(String,)> =
             sqlx::query_as("SELECT bundle_id FROM bundles WHERE bundle_id = $1")
                 .bind(bundle_id.as_str())
@@ -581,10 +581,10 @@ mod tests {
     #[test]
     fn bundle_roundtrip_json() {
         let bundle = Bundle {
-            bundle_id: BundleId::new("bnd_abc"),
+            bundle_id: ArtifactVersionId::new("bnd_abc"),
             artifact_id: ArtifactId::new("art_xyz"),
             version: 3,
-            supersedes: Some(BundleId::new("bnd_prev")),
+            supersedes: Some(ArtifactVersionId::new("bnd_prev")),
             manifest: Manifest {
                 entries: vec![ManifestEntry {
                     path: "README.md".into(),

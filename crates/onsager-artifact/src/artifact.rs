@@ -84,11 +84,6 @@ impl fmt::Display for ArtifactVersionId {
     }
 }
 
-/// Legacy alias for [`ArtifactVersionId`]. Kept so downstream crates that
-/// still talk about "bundles" (`onsager-warehouse`, forge's sealing path,
-/// the `BundleSealed` event) keep compiling while we migrate callers.
-pub type BundleId = ArtifactVersionId;
-
 // ---------------------------------------------------------------------------
 // Kind
 // ---------------------------------------------------------------------------

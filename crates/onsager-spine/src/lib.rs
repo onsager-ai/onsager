@@ -22,7 +22,7 @@
 //! Value objects, storage backends, and protocols that used to live here have
 //! moved into focused sibling crates:
 //!
-//! - `onsager-artifact` — `Artifact`, `ArtifactId`, `BundleId`, lineage, quality.
+//! - `onsager-artifact` — `Artifact`, `ArtifactId`, `ArtifactVersionId`, lineage, quality.
 //! - `onsager-warehouse` — `Bundle`, `Warehouse`, `FilesystemWarehouse`.
 //! - `onsager-delivery` — `Consumer`, `Delivery`, `Receipt`.
 //! - `onsager-registry` — type catalog, adapters, gate evaluators, seed loader.
@@ -43,14 +43,14 @@ pub mod store;
 
 // Backward-compat re-exports of the artifact value objects. Spine depends on
 // `onsager-artifact` because `FactoryEvent` references `ArtifactId`, `Kind`,
-// `ArtifactState`, `BundleId`, and `QualitySignal`. These re-exports let
-// existing callers keep using `onsager_spine::{ArtifactId, BundleId, ...}`
+// `ArtifactState`, `ArtifactVersionId`, and `QualitySignal`. These re-exports let
+// existing callers keep using `onsager_spine::{ArtifactId, ArtifactVersionId, ...}`
 // without pulling in the warehouse/delivery/registry/protocol crates.
 pub use onsager_artifact as artifact;
 pub use onsager_artifact::{
-    Artifact, ArtifactId, ArtifactState, ArtifactVersion, BundleId, Consumer, ConsumerType,
-    ContentRef, GitContext, HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue,
-    VerticalLineage,
+    Artifact, ArtifactId, ArtifactState, ArtifactVersion, ArtifactVersionId, Consumer,
+    ConsumerType, ContentRef, GitContext, HorizontalLineage, Kind, QualitySignal, QualitySource,
+    QualityValue, VerticalLineage,
 };
 
 pub use extension_event::ExtensionEventRecord;

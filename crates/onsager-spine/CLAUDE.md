@@ -14,7 +14,7 @@ This is a **library crate** (no binaries). The public surface is:
 - **`Namespace`** — validated newtype partitioning `events_ext` between components.
 - **`FactoryEvent` / `FactoryEventKind`** — the typed event vocabulary used by every subsystem. Payloads that reference artifact types pull them from `onsager-artifact`. The wire-level catalog at `docs/events.md` is auto-generated from this enum — run `just gen-event-docs` after adding/editing variants. CI runs `--check` and fails if the catalog is stale.
 
-The crate depends on `onsager-artifact` (for `ArtifactId`, `BundleId`, etc. in event payloads) and nothing else in the workspace.
+The crate depends on `onsager-artifact` (for `ArtifactId`, `ArtifactVersionId`, etc. in event payloads) and nothing else in the workspace.
 
 The library does **not** manage schema. The SQL contract lives in `migrations/001_initial.sql`; downstream services apply it themselves.
 

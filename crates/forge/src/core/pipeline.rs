@@ -22,7 +22,7 @@
 //! per-artifact concurrency by promoting `parked: Option<...>` to
 //! `parked: HashMap<ArtifactId, ParkedDecision>`.
 
-use onsager_artifact::{ArtifactState, BundleId};
+use onsager_artifact::{ArtifactState, ArtifactVersionId};
 use onsager_spine::factory_event::{GatePoint, ShapingOutcome, VerdictSummary};
 use onsager_spine::protocol::{
     GateContext, GateRequest, GateVerdict, ProposedAction, ShapingDecision, ShapingRequest,
@@ -90,7 +90,7 @@ pub enum PipelineEvent {
     /// (warehouse-and-delivery-v0.1 §5.1).
     BundleSealed {
         artifact_id: String,
-        bundle_id: BundleId,
+        bundle_id: ArtifactVersionId,
         version: u32,
     },
     IdleTick,
@@ -102,7 +102,7 @@ pub enum PipelineEvent {
 ///
 /// Production implementations wrap a [`Warehouse`] (async) and block on it
 /// inside a `tokio::runtime::Handle::block_on`. Tests use an in-memory mock
-/// that returns a deterministic [`BundleId`].
+/// that returns a deterministic [`ArtifactVersionId`].
 pub trait SealSink: Send + Sync {
     fn seal_release(
         &self,
@@ -114,7 +114,7 @@ pub trait SealSink: Send + Sync {
 /// Pointer to a bundle that a [`SealSink`] just produced.
 #[derive(Debug, Clone)]
 pub struct SealedRef {
-    pub bundle_id: BundleId,
+    pub bundle_id: ArtifactVersionId,
     pub version: u32,
 }
 
@@ -1122,7 +1122,11 @@ mod tests {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                 + 1;
             Ok(SealedRef {
-                bundle_id: BundleId::new(format!("bnd_mock_{}_{}", artifact_id.as_str(), version)),
+                bundle_id: ArtifactVersionId::new(format!(
+                    "bnd_mock_{}_{}",
+                    artifact_id.as_str(),
+                    version
+                )),
                 version,
             })
         }
