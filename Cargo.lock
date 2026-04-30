@@ -3809,6 +3809,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "onsager-registry",
  "quote",
  "serde",
  "serde_json",

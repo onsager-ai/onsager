@@ -9,12 +9,14 @@
 
 pub mod catalog;
 pub mod evaluators;
+pub mod events;
 pub mod registry;
 pub mod registry_store;
 pub mod seed;
 
 pub use catalog::*;
 pub use evaluators::*;
+pub use events::{EventDefinition, EventManifest, Subsystem, EVENTS};
 pub use registry::*;
 pub use registry_store::*;
 pub use seed::*;

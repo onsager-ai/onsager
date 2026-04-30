@@ -16,6 +16,7 @@ serde_json.workspace = true
 syn = { version = "2", features = ["full", "extra-traits", "visit"] }
 quote = "1"
 toml = "0.8"
+onsager-registry = { path = "../crates/onsager-registry" }
 
 [dev-dependencies]
 tempfile.workspace = true

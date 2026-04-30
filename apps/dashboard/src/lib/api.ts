@@ -451,6 +451,21 @@ export interface WorkflowKindInfo {
   intrinsic_schema: JsonValue;
 }
 
+// Wire shape of `GET /api/registry/events` — one row of the event-type
+// registry manifest (spec #131 Lever E / #150). Mirrors
+// `onsager_registry::EventDefinition`; keep field names + the
+// `EventSubsystem` union in sync by hand when the Rust struct changes.
+export type EventSubsystem = 'forge' | 'stiglab' | 'synodic' | 'ising' | 'portal';
+
+export interface EventManifestEntry {
+  kind: string;
+  schema_version: number;
+  producers: EventSubsystem[];
+  consumers: EventSubsystem[];
+  audit_only: boolean;
+  description: string;
+}
+
 export interface WorkflowStage {
   id: string;
   name: string;
@@ -992,6 +1007,13 @@ export const api = {
   // stiglab).
   listWorkflowKinds: () =>
     request<{ kinds: WorkflowKindInfo[] }>('/workflow/kinds'),
+  // Event-type registry manifest (spec #131 Lever E / #150). Returns
+  // every `FactoryEventKind` variant with its declared producers and
+  // consumers — the dashboard renders this in the architecture / event
+  // catalog view so reviewers can see the cross-subsystem contract
+  // without reading source.
+  listEventManifest: () =>
+    request<{ events: EventManifestEntry[] }>('/registry/events'),
   // GitHub labels for a workspace install + repo. Used by the trigger card
   // combobox so the user selects from existing labels (with an inline
   // create-new affordance) instead of free-texting.
