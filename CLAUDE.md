@@ -55,8 +55,8 @@ captures the decision to make it machine-checkable and the six-lever
 execution plan that spec #131 tracks (A–F: persisted rule →
 mechanical guardrails → finish ADR 0001 migration → spine as SoT →
 registry-backed event types → API/UI contract enforcement). All six
-levers have landed and are CI-enforced via `lint_seams`,
-`lint_api_contract`, and `check_events` (see status below); the
+levers have landed and are CI-enforced via `lint-seams`,
+`check-api-contract`, and `check-events` (see status below); the
 seam rule is now mechanical, not review-time discipline.
 
 Lever status (canonical: ADR 0004's adoption checklist). As of
