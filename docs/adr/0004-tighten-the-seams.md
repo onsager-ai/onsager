@@ -230,7 +230,8 @@ is in its sub-issue. Status as of 2026-04-30:
       `HttpStiglabDispatcher` / `HttpSynodicGate` RPCs are gone;
       coordination flows through `forge.gate_requested` /
       `synodic.gate_verdict` and `forge.shaping_dispatched` /
-      `stiglab.shaping_result_ready`._
+      `stiglab.session_completed` (with
+      `stiglab.shaping_result_ready` emitted alongside it)._
 - [ ] **Lever D** — spine as SoT for workflows; remove
       `workflow_spine_mirror.rs` and the `BundleId` alias.
       _Open: mirror module and alias still in tree._
