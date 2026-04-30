@@ -232,9 +232,14 @@ is in its sub-issue. Status as of 2026-04-30:
       `synodic.gate_verdict` and `forge.shaping_dispatched` /
       `stiglab.session_completed` (with
       `stiglab.shaping_result_ready` emitted alongside it)._
-- [ ] **Lever D** — spine as SoT for workflows; remove
+- [x] **Lever D** — spine as SoT for workflows; remove
       `workflow_spine_mirror.rs` and the `BundleId` alias.
-      _Open: mirror module and alias still in tree._
+      _Landed: closed by PR #225. `workflow_spine_mirror.rs` is gone,
+      stiglab's `workspace_workflows` / `workspace_workflow_stages`
+      collapsed into spine `workflows` / `workflow_stages` (migration
+      013), and `workspace_install_ref` was renamed `install_id`
+      (#219). The `BundleId` → `ArtifactVersionId` alias was removed
+      in #219._
 - [ ] **Lever E** — registry-backed event types + capability
       advertisement (#150). _Open: `lint_seams` carries the producer-
       without-consumer reminder pending the registry manifest._
