@@ -22,6 +22,7 @@ use onsager_spine::factory_event::FactoryEventKind;
 use serde_json::Value;
 
 use crate::server::auth::decrypt_credential;
+use crate::server::db;
 use crate::server::state::AppState;
 use crate::server::webhook_router::{
     route_check_event, route_issues_labeled, route_pull_request_closed, RoutedEvent,
@@ -92,7 +93,7 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
         }
     };
 
-    let lookup = match workflow_db::get_install_webhook_secret_cipher(&state.db, install_id).await {
+    let lookup = match db::get_install_webhook_secret_cipher(&state.db, install_id).await {
         Ok(v) => v,
         Err(e) => {
             tracing::error!("install secret lookup failed: {e}");
@@ -224,8 +225,21 @@ async fn route_event(state: &AppState, event: &str, payload: &Value) -> Vec<Rout
             {
                 return Vec::new();
             }
+            // Workflows live on the spine post-Lever D. Without a spine
+            // pool there is nowhere to look up matches; emit nothing
+            // rather than spuriously failing the webhook (the secret
+            // check already accepted it).
+            let Some(spine) = state.spine.as_ref() else {
+                tracing::warn!(
+                    "spine not connected; dropping issues.labeled lookup for {repo_owner}/{repo_name}"
+                );
+                return Vec::new();
+            };
             let matched = match workflow_db::find_active_github_workflows_for_label(
-                &state.db, repo_owner, repo_name, label,
+                spine.pool(),
+                repo_owner,
+                repo_name,
+                label,
             )
             .await
             {

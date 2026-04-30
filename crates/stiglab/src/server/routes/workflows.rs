@@ -24,34 +24,21 @@ use crate::server::workflow_activation::{
     ActivationError,
 };
 use crate::server::workflow_db;
-use crate::server::workflow_spine_mirror;
 
-/// Push the current `workspace_workflows` row + its stages into the spine
-/// `workflows` schema forge reads. Best-effort: a failure here means the
-/// workflow won't fire until the next successful sync (via another CRUD or
-/// startup backfill), but we don't abort the request — the stiglab-side
-/// write already committed.
-async fn mirror_to_spine(state: &AppState, workflow_id: &str) {
-    let Some(spine) = state.spine.as_ref() else {
-        return;
-    };
-    let workflow = match workflow_db::get_workflow(&state.db, workflow_id).await {
-        Ok(Some(w)) => w,
-        Ok(None) => return,
-        Err(e) => {
-            tracing::warn!(workflow_id, "spine mirror: load workflow failed: {e}");
-            return;
-        }
-    };
-    let stages = match workflow_db::list_stages_for_workflow(&state.db, workflow_id).await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(workflow_id, "spine mirror: load stages failed: {e}");
-            return;
-        }
-    };
-    if let Err(e) = workflow_spine_mirror::upsert(spine.pool(), &workflow, &stages).await {
-        tracing::warn!(workflow_id, "spine mirror: upsert failed: {e}");
+/// 503 when the spine isn't connected — workflow CRUD writes the spine
+/// schema directly post-Lever D, so without a spine pool there is no
+/// place to land a workflow row.
+#[allow(clippy::result_large_err)]
+fn spine_pool(state: &AppState) -> Result<&sqlx::PgPool, Response> {
+    match state.spine.as_ref() {
+        Some(s) => Ok(s.pool()),
+        None => Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "spine not connected; workflow CRUD requires ONSAGER_DATABASE_URL"
+            })),
+        )
+            .into_response()),
     }
 }
 
@@ -263,6 +250,10 @@ pub async fn create_workflow(
     if let Err(r) = require_workspace_access(&state.db, &auth_user, &body.workspace_id).await {
         return r;
     }
+    let spine = match spine_pool(&state) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
 
     let (trigger_kind, mut stages) = match validate_create_body(&body) {
         Ok(v) => v,
@@ -290,7 +281,7 @@ pub async fn create_workflow(
         updated_at: now,
     };
 
-    if let Err(e) = workflow_db::insert_workflow_with_stages(&state.db, &workflow, &stages).await {
+    if let Err(e) = workflow_db::insert_workflow_with_stages(spine, &workflow, &stages).await {
         tracing::error!("failed to insert workflow: {e}");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -298,7 +289,6 @@ pub async fn create_workflow(
         )
             .into_response();
     }
-    mirror_to_spine(&state, &workflow.id).await;
 
     // Activation runs after the row is durable. If it fails the workflow
     // stays `active=false` and the caller sees the activation error.
@@ -351,7 +341,11 @@ pub async fn list_workflows(
     if let Err(r) = require_workspace_access(&state.db, &auth_user, &q.workspace_id).await {
         return r;
     }
-    match workflow_db::list_workflows_for_workspace(&state.db, &q.workspace_id).await {
+    let spine = match spine_pool(&state) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    match workflow_db::list_workflows_for_workspace(spine, &q.workspace_id).await {
         Ok(workflows) => Json(serde_json::json!({ "workflows": workflows })).into_response(),
         Err(e) => {
             tracing::error!("failed to list workflows: {e}");
@@ -369,7 +363,11 @@ pub async fn get_workflow(
     if let Err(r) = require_auth_user(&auth_user) {
         return r;
     }
-    let workflow = match workflow_db::get_workflow(&state.db, &workflow_id).await {
+    let spine = match spine_pool(&state) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let workflow = match workflow_db::get_workflow(spine, &workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return not_found("workflow not found"),
         Err(e) => {
@@ -380,7 +378,7 @@ pub async fn get_workflow(
     if let Err(r) = require_workspace_access(&state.db, &auth_user, &workflow.workspace_id).await {
         return r;
     }
-    let stages = match workflow_db::list_stages_for_workflow(&state.db, &workflow_id).await {
+    let stages = match workflow_db::list_stages_for_workflow(spine, &workflow_id).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("failed to load stages: {e}");
@@ -401,9 +399,9 @@ pub struct RunsQuery {
 /// status derived from `artifacts.current_stage_index` and
 /// `workflow_parked_reason`.
 ///
-/// Stage IDs come from `workspace_workflow_stages` (stiglab DB) in `seq`
-/// order; the per-run stage list aligns 1:1 with that ordering so the
-/// dashboard can zip stages by index.
+/// Stage IDs come from spine `workflow_stages` keyed by `(workflow_id,
+/// stage_order)`; the per-run stage list aligns 1:1 with that ordering so
+/// the dashboard can zip stages by index.
 pub async fn list_workflow_runs(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -413,7 +411,15 @@ pub async fn list_workflow_runs(
     if let Err(r) = require_auth_user(&auth_user) {
         return r;
     }
-    let workflow = match workflow_db::get_workflow(&state.db, &workflow_id).await {
+    // Workflows live on the spine post-Lever D; without a spine pool the
+    // dashboard gets an empty list rather than a 503 so the empty-state
+    // copy still renders sensibly in dev.
+    let Some(spine_emitter) = state.spine.as_ref() else {
+        return Json(serde_json::json!({ "runs": Vec::<serde_json::Value>::new() }))
+            .into_response();
+    };
+    let spine = spine_emitter.pool();
+    let workflow = match workflow_db::get_workflow(spine, &workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return not_found("workflow not found"),
         Err(e) => {
@@ -424,20 +430,12 @@ pub async fn list_workflow_runs(
     if let Err(r) = require_workspace_access(&state.db, &auth_user, &workflow.workspace_id).await {
         return r;
     }
-    let stages = match workflow_db::list_stages_for_workflow(&state.db, &workflow_id).await {
+    let stages = match workflow_db::list_stages_for_workflow(spine, &workflow_id).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("failed to load stages: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
-    };
-
-    let Some(spine) = state.spine.as_ref() else {
-        // Without a spine connection there are no artifacts to surface —
-        // return an empty list rather than 503 so the dashboard's
-        // empty-state copy still renders sensibly in dev.
-        return Json(serde_json::json!({ "runs": Vec::<serde_json::Value>::new() }))
-            .into_response();
     };
 
     let limit = q.limit.unwrap_or(50).clamp(1, 500);
@@ -451,7 +449,7 @@ pub async fn list_workflow_runs(
     )
     .bind(&workflow_id)
     .bind(limit)
-    .fetch_all(spine.pool())
+    .fetch_all(spine)
     .await
     {
         Ok(r) => r,
@@ -567,7 +565,11 @@ pub async fn patch_workflow(
     if let Err(r) = require_auth_user(&auth_user) {
         return r;
     }
-    let workflow = match workflow_db::get_workflow(&state.db, &workflow_id).await {
+    let spine = match spine_pool(&state) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let workflow = match workflow_db::get_workflow(spine, &workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return not_found("workflow not found"),
         Err(e) => {
@@ -608,7 +610,7 @@ pub async fn patch_workflow(
         return r;
     }
 
-    let updated = workflow_db::get_workflow(&state.db, &workflow_id)
+    let updated = workflow_db::get_workflow(spine, &workflow_id)
         .await
         .ok()
         .flatten()
@@ -629,7 +631,11 @@ pub async fn delete_workflow(
     if let Err(r) = require_auth_user(&auth_user) {
         return r;
     }
-    let workflow = match workflow_db::get_workflow(&state.db, &workflow_id).await {
+    let spine = match spine_pool(&state) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let workflow = match workflow_db::get_workflow(spine, &workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return not_found("workflow not found"),
         Err(e) => {
@@ -647,14 +653,9 @@ pub async fn delete_workflow(
         }
     }
 
-    if let Err(e) = workflow_db::delete_workflow(&state.db, &workflow_id).await {
+    if let Err(e) = workflow_db::delete_workflow(spine, &workflow_id).await {
         tracing::error!("failed to delete workflow: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-    }
-    if let Some(spine) = state.spine.as_ref() {
-        if let Err(e) = workflow_spine_mirror::delete(spine.pool(), &workflow_id).await {
-            tracing::warn!(workflow_id = %workflow_id, "spine mirror: delete failed: {e}");
-        }
     }
     Json(serde_json::json!({ "ok": true })).into_response()
 }
@@ -671,7 +672,8 @@ async fn activate_workflow(
     workflow_id: &str,
     headers: &axum::http::HeaderMap,
 ) -> Result<(), Response> {
-    let workflow = match workflow_db::get_workflow(&state.db, workflow_id).await {
+    let spine = spine_pool(state)?;
+    let workflow = match workflow_db::get_workflow(spine, workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return Err(not_found("workflow not found")),
         Err(e) => {
@@ -735,17 +737,17 @@ async fn activate_workflow(
         return Err(map_activation_error(e));
     }
 
-    if let Err(e) = workflow_db::set_workflow_active(&state.db, workflow_id, true).await {
+    if let Err(e) = workflow_db::set_workflow_active(spine, workflow_id, true).await {
         tracing::error!("mark workflow active: {e}");
         return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
     }
-    mirror_to_spine(state, workflow_id).await;
     Ok(())
 }
 
 #[allow(clippy::result_large_err)]
 async fn deactivate_workflow(state: &AppState, workflow_id: &str) -> Result<(), Response> {
-    let workflow = match workflow_db::get_workflow(&state.db, workflow_id).await {
+    let spine = spine_pool(state)?;
+    let workflow = match workflow_db::get_workflow(spine, workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return Err(not_found("workflow not found")),
         Err(e) => {
@@ -754,16 +756,15 @@ async fn deactivate_workflow(state: &AppState, workflow_id: &str) -> Result<(), 
         }
     };
 
-    if let Err(e) = workflow_db::set_workflow_active(&state.db, workflow_id, false).await {
+    if let Err(e) = workflow_db::set_workflow_active(spine, workflow_id, false).await {
         tracing::error!("mark workflow inactive: {e}");
         return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
     }
-    mirror_to_spine(state, workflow_id).await;
 
     // Dedup: keep the webhook if any other active workflow on the same repo
     // still needs it.
     let still_needed = workflow_db::any_other_active_workflow_on_repo(
-        &state.db,
+        spine,
         &workflow.repo_owner,
         &workflow.repo_name,
         workflow_id,
@@ -874,7 +875,7 @@ fn map_activation_error(e: ActivationError) -> Response {
 }
 
 async fn resolve_install_webhook_secret(state: &AppState, install_id: i64) -> Option<String> {
-    let cipher = workflow_db::get_install_webhook_secret_cipher(&state.db, install_id)
+    let cipher = db::get_install_webhook_secret_cipher(&state.db, install_id)
         .await
         .ok()
         .flatten()

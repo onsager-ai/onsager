@@ -264,12 +264,13 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     let _ = sqlx::query("ALTER TABLE tenant_members RENAME TO workspace_members")
         .execute(pool)
         .await;
-    let _ = sqlx::query("ALTER TABLE tenant_workflows RENAME TO workspace_workflows")
-        .execute(pool)
-        .await;
-    let _ = sqlx::query("ALTER TABLE tenant_workflow_stages RENAME TO workspace_workflow_stages")
-        .execute(pool)
-        .await;
+    // Note: pre-#163 `tenant_workflows` / `tenant_workflow_stages` are
+    // not renamed here — Lever D (#149) collapses them into the spine
+    // `workflows` / `workflow_stages` tables, so any stiglab DB still
+    // carrying the old names just lives with stale rows that the spine
+    // migration sweeps. The remaining renames (workspaces, members,
+    // installations, projects, user_pats) stay because those tables
+    // remain stiglab-owned.
     let _ = sqlx::query("ALTER TABLE workspace_members RENAME COLUMN tenant_id TO workspace_id")
         .execute(pool)
         .await;
@@ -278,9 +279,6 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
             .execute(pool)
             .await;
     let _ = sqlx::query("ALTER TABLE projects RENAME COLUMN tenant_id TO workspace_id")
-        .execute(pool)
-        .await;
-    let _ = sqlx::query("ALTER TABLE workspace_workflows RENAME COLUMN tenant_id TO workspace_id")
         .execute(pool)
         .await;
     let _ = sqlx::query("ALTER TABLE user_pats RENAME COLUMN tenant_id TO workspace_id")
@@ -296,15 +294,6 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
         .execute(pool)
         .await;
     let _ = sqlx::query("DROP INDEX IF EXISTS idx_projects_tenant_id")
-        .execute(pool)
-        .await;
-    let _ = sqlx::query("DROP INDEX IF EXISTS idx_tenant_workflows_tenant_id")
-        .execute(pool)
-        .await;
-    let _ = sqlx::query("DROP INDEX IF EXISTS idx_tenant_workflows_repo_active")
-        .execute(pool)
-        .await;
-    let _ = sqlx::query("DROP INDEX IF EXISTS idx_tenant_workflow_stages_workflow_id")
         .execute(pool)
         .await;
 
@@ -438,77 +427,10 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // ── Workflows (issue #81) ──────────────────────────────────────────
-    //
-    // `workspace_workflows` — declarative blueprint persisted per
-    // workspace.  The trigger is currently GitHub-specific so `repo_owner`,
-    // `repo_name`, `trigger_label`, and `install_id` are stored inline; a
-    // second trigger kind would factor these out.
-    //
-    // `workspace_workflow_stages` — ordered stage chain; stages walk in
-    // ascending `seq` order, never reorder.  `params` holds kind-specific
-    // config as free-form JSON (TEXT for SQLite/Postgres portability
-    // through AnyPool).
-    //
-    // No FK declarations — the rest of the stiglab schema uses app-layer
-    // referential checks for the same SQLite/Postgres-portability reasons
-    // documented above.
-    //
-    // Named `workspace_workflows` / `workspace_workflow_stages` (renamed
-    // from `tenant_workflows` in #163) to keep the workspace-scoped
-    // blueprint distinct from the onsager-spine `006_workflows.sql`
-    // migration's `workflows` table — that table is the factory workflow
-    // runtime; this one is the stiglab workspace-level blueprint store.
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS workspace_workflows (
-            id TEXT PRIMARY KEY,
-            workspace_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            trigger_kind TEXT NOT NULL,
-            repo_owner TEXT NOT NULL,
-            repo_name TEXT NOT NULL,
-            trigger_label TEXT NOT NULL,
-            install_id BIGINT NOT NULL,
-            preset_id TEXT,
-            active INTEGER NOT NULL DEFAULT 0,
-            created_by TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_workspace_workflows_workspace_id \
-         ON workspace_workflows (workspace_id)",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_workspace_workflows_repo_active \
-         ON workspace_workflows (repo_owner, repo_name, active)",
-    )
-    .execute(pool)
-    .await?;
-
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS workspace_workflow_stages (
-            id TEXT PRIMARY KEY,
-            workflow_id TEXT NOT NULL,
-            seq INTEGER NOT NULL,
-            gate_kind TEXT NOT NULL,
-            params TEXT NOT NULL,
-            UNIQUE(workflow_id, seq)
-        )",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_workspace_workflow_stages_workflow_id \
-         ON workspace_workflow_stages (workflow_id, seq)",
-    )
-    .execute(pool)
-    .await?;
+    // Workflows (issue #81): the schema lives on the spine
+    // (`workflows` / `workflow_stages`) post-Lever D (#149). Stiglab
+    // writes through `workflow_db.rs` against the spine pool — no
+    // private table here. See spine migrations 006/010/012/013.
 
     // ── 002_workspace_scoped_credentials (issue #164) ────────────────
     //
@@ -2015,6 +1937,28 @@ pub async fn delete_github_app_installation(
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// Look up the webhook-secret cipher for a given numeric install id.
+///
+/// Outer `Option` distinguishes installation presence so the webhook
+/// handler can fail closed on genuinely unknown installations while still
+/// falling back to the global App secret for installs registered via the
+/// OAuth callback (which persist without a cipher):
+/// - `None` — no row for this `install_id` (unknown installation).
+/// - `Some(None)` — row exists, no per-install cipher stored.
+/// - `Some(Some(cipher))` — row exists with a per-install cipher.
+pub async fn get_install_webhook_secret_cipher(
+    pool: &AnyPool,
+    install_id: i64,
+) -> anyhow::Result<Option<Option<String>>> {
+    let row: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT webhook_secret_cipher FROM github_app_installations WHERE install_id = $1",
+    )
+    .bind(install_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(c,)| c))
 }
 
 /// Count projects that still reference a given installation. Used by the

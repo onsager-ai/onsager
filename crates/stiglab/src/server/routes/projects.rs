@@ -1121,8 +1121,26 @@ pub async fn replay_issue_trigger(
     // expensive when an issue has many labels. Pull every active
     // workflow on `(workspace, repo)` once and partition by label
     // in-memory.
+    //
+    // Workflows live on the spine post-Lever D. Without a spine pool
+    // there's nothing to match — return an empty preview (dashboard
+    // surfaces "no matching workflows") rather than 503ing the route.
+    let Some(spine) = state.spine.as_ref() else {
+        tracing::warn!(
+            workspace_id = %project.workspace_id,
+            "spine not connected; replay-trigger has no workflow pool to query"
+        );
+        return Json(serde_json::json!(ReplayResponse {
+            project_id: project.id.clone(),
+            issue_number,
+            dry_run,
+            matches: Vec::new(),
+            event_ids: Vec::new(),
+        }))
+        .into_response();
+    };
     let candidates = match workflow_db::find_active_github_workflows_for_workspace_repo(
-        &state.db,
+        spine.pool(),
         &project.workspace_id,
         &project.repo_owner,
         &project.repo_name,

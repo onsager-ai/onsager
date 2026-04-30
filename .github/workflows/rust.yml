@@ -104,5 +104,9 @@ jobs:
         run: cargo test -p onsager-spine -- --test-threads=1
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      - name: Test stiglab (serial — Lever D #149 routes write the spine schema)
+        run: cargo test -p stiglab -- --test-threads=1
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
       - name: Test remaining crates
-        run: cargo test --workspace --exclude onsager-spine
+        run: cargo test --workspace --exclude onsager-spine --exclude stiglab
