@@ -226,7 +226,7 @@ mod tests {
             }],
             active,
             preset_id: None,
-            workspace_install_ref: None,
+            install_id: None,
             created_by: None,
         }
     }

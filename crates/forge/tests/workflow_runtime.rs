@@ -85,7 +85,7 @@ fn fixture_workflow() -> Workflow {
         ],
         active: true,
         preset_id: Some("github_issue_to_pr".into()),
-        workspace_install_ref: None,
+        install_id: None,
         created_by: None,
     }
 }

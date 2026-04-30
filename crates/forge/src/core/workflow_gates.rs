@@ -524,7 +524,7 @@ mod tests {
             stages: vec![],
             active: true,
             preset_id: None,
-            workspace_install_ref: None,
+            install_id: None,
             created_by: None,
         }
     }
@@ -881,7 +881,7 @@ mod tests {
             stages: vec![],
             active: true,
             preset_id: None,
-            workspace_install_ref: None,
+            install_id: None,
             created_by: Some("user_owner_42".into()),
         };
         let gate = GateSpec::AgentSession {
