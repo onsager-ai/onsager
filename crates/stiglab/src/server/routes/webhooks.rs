@@ -162,7 +162,7 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
         }
     }
 
-    let events = route_event(&state, &event, &parsed).await;
+    let events = route_event(&state, &event, install_id, &parsed).await;
     // Resolve the install → workspace mapping once. The mapping is 1:1
     // by the migration's UNIQUE(install_id) (#164); we look it up here
     // so every emitted event carries `workspace_id` regardless of which
@@ -203,7 +203,17 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
 /// Translate a verified webhook payload into the list of spine events to
 /// emit. Bundled as its own function so it can be unit-tested against a
 /// stubbed DB in future iterations.
-async fn route_event(state: &AppState, event: &str, payload: &Value) -> Vec<RoutedEvent> {
+///
+/// `install_id` is the GitHub App installation that delivered the
+/// webhook. We pass it through to `find_active_github_workflows_for_label`
+/// so a delivery for install A only fires workflows registered under
+/// install A — same `(repo, label)` on a sibling install must not match.
+async fn route_event(
+    state: &AppState,
+    event: &str,
+    install_id: i64,
+    payload: &Value,
+) -> Vec<RoutedEvent> {
     match event {
         "issues" => {
             let repo_owner = payload
@@ -237,6 +247,7 @@ async fn route_event(state: &AppState, event: &str, payload: &Value) -> Vec<Rout
             };
             let matched = match workflow_db::find_active_github_workflows_for_label(
                 spine.pool(),
+                install_id,
                 repo_owner,
                 repo_name,
                 label,

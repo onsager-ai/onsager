@@ -254,20 +254,29 @@ pub async fn delete_workflow(pool: &PgPool, workflow_id: &str) -> anyhow::Result
 /// (mirror history); GIN-indexing isn't worth it at v1's volume.
 pub async fn find_active_github_workflows_for_label(
     pool: &PgPool,
+    install_id: i64,
     repo_owner: &str,
     repo_name: &str,
     label: &str,
 ) -> anyhow::Result<Vec<Workflow>> {
     let repo = format!("{repo_owner}/{repo_name}");
+    let install_id_text = install_id.to_string();
+    // Filter on `install_id` too: GitHub deliveries carry the install
+    // they came from, and two workspaces can each watch the same
+    // `(repo, label)` through different installs. Without this clause
+    // a webhook delivered for install A would also fire workflows
+    // registered under install B.
     let rows = sqlx::query(
         "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
                 workspace_id, install_id, created_by, created_at, updated_at \
            FROM workflows \
           WHERE active = TRUE \
             AND trigger_kind = 'github_issue_webhook' \
-            AND trigger_config ->> 'repo'  = $1 \
-            AND trigger_config ->> 'label' = $2",
+            AND install_id = $1 \
+            AND trigger_config ->> 'repo'  = $2 \
+            AND trigger_config ->> 'label' = $3",
     )
+    .bind(&install_id_text)
     .bind(&repo)
     .bind(label)
     .fetch_all(pool)
@@ -390,7 +399,20 @@ fn row_to_workflow(row: sqlx::postgres::PgRow) -> anyhow::Result<Workflow> {
     let preset_id: Option<String> = row.try_get("preset_id")?;
     let workspace_id: String = row.try_get("workspace_id")?;
     let install_id_text: Option<String> = row.try_get("install_id")?;
-    let created_by: Option<String> = row.try_get("created_by").ok();
+    // Typed read so a missing column errors loudly. NULL is still
+    // legal — spine migration 009 made `created_by` nullable, and
+    // pre-#156 rows persist that way until the owner re-activates.
+    // We collapse NULL to an empty string at the API boundary; the
+    // activation guard then fails the credential check with
+    // `no_credentials_for_workflow`, which is the user-visible signal
+    // to re-activate.
+    let created_by: Option<String> = row.try_get("created_by")?;
+    if created_by.is_none() {
+        tracing::warn!(
+            workflow_id = %row.try_get::<String, _>("workflow_id").unwrap_or_default(),
+            "workflow row has NULL created_by; activation will fail until owner re-activates"
+        );
+    }
     let created_at: DateTime<Utc> = row.try_get("created_at")?;
     let updated_at: DateTime<Utc> = row.try_get("updated_at")?;
 

@@ -58,7 +58,8 @@ async fn try_spine() -> Option<SpineEmitter> {
 
 /// Best-effort cleanup so a fresh test run on an existing DB doesn't
 /// trip over leftover rows from a prior failed run. Targeted at
-/// `(workspace_id, install_id)` so we don't touch other tests' rows.
+/// `workspace_id` — each test seeds a fresh random UUID workspace,
+/// so the predicate is narrow enough to keep parallel tests isolated.
 async fn reset_spine_workflows(spine: &PgPool, workspace_id: &str) {
     let _ = sqlx::query("DELETE FROM workflows WHERE workspace_id = $1")
         .bind(workspace_id)
