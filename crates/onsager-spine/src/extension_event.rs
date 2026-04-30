@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// An extension event record as stored in the `events_ext` table.
 /// Extension events have a namespaced type and a wide JSON payload,
@@ -14,6 +15,10 @@ pub struct ExtensionEventRecord {
     pub metadata: serde_json::Value,
     pub ref_event_id: Option<i64>,
     pub created_at: DateTime<Utc>,
+    /// Portal-minted correlation handle (`#223`); see
+    /// [`crate::store::EventRecord::correlation_id`].
+    #[serde(default)]
+    pub correlation_id: Option<Uuid>,
 }
 
 impl ExtensionEventRecord {

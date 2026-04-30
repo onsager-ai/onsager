@@ -136,14 +136,14 @@ impl Listener {
         let mut max_ext_id: i64 = since_id;
 
         // Backfill core events.
-        let rows: Vec<(i64, String, String)> = sqlx::query_as(
-            "SELECT id, stream_id, event_type FROM events WHERE id > $1 ORDER BY id ASC",
+        let rows: Vec<(i64, String, String, Option<uuid::Uuid>)> = sqlx::query_as(
+            "SELECT id, stream_id, event_type, correlation_id FROM events WHERE id > $1 ORDER BY id ASC",
         )
         .bind(since_id)
         .fetch_all(pool)
         .await?;
 
-        for (id, stream_id, event_type) in rows {
+        for (id, stream_id, event_type, correlation_id) in rows {
             if !self.namespaces.is_empty() && !matches_any_namespace(&stream_id, &self.namespaces) {
                 if id > max_events_id {
                     max_events_id = id;
@@ -158,6 +158,7 @@ impl Listener {
                 id,
                 stream_id,
                 event_type,
+                correlation_id,
             };
             let h = Arc::clone(handler);
             tokio::spawn(async move {
@@ -168,14 +169,14 @@ impl Listener {
         }
 
         // Backfill extension events.
-        let ext_rows: Vec<(i64, String, String)> = sqlx::query_as(
-            "SELECT id, stream_id, event_type FROM events_ext WHERE id > $1 ORDER BY id ASC",
+        let ext_rows: Vec<(i64, String, String, Option<uuid::Uuid>)> = sqlx::query_as(
+            "SELECT id, stream_id, event_type, correlation_id FROM events_ext WHERE id > $1 ORDER BY id ASC",
         )
         .bind(since_id)
         .fetch_all(pool)
         .await?;
 
-        for (id, stream_id, event_type) in ext_rows {
+        for (id, stream_id, event_type, correlation_id) in ext_rows {
             if !self.namespaces.is_empty() && !matches_any_namespace(&stream_id, &self.namespaces) {
                 if id > max_ext_id {
                     max_ext_id = id;
@@ -190,6 +191,7 @@ impl Listener {
                 id,
                 stream_id,
                 event_type,
+                correlation_id,
             };
             let h = Arc::clone(handler);
             tokio::spawn(async move {

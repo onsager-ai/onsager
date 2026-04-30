@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::{PgListener, PgPool, PgPoolOptions};
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 use crate::extension_event::ExtensionEventRecord;
 use crate::factory_event::FactoryEvent;
@@ -17,6 +18,12 @@ pub struct EventRecord {
     pub metadata: serde_json::Value,
     pub sequence: i64,
     pub created_at: DateTime<Utc>,
+    /// Portal-minted correlation handle (`#223`). Lives in its own column —
+    /// not just inside `metadata` — so portal's `await_response` can index
+    /// on it and so the `notify_event` trigger can carry it on the
+    /// pg_notify payload without a row roundtrip.
+    #[serde(default)]
+    pub correlation_id: Option<Uuid>,
 }
 
 /// Metadata attached to every event for traceability.
@@ -36,6 +43,12 @@ pub struct EventNotification {
     pub id: i64,
     pub stream_id: String,
     pub event_type: String,
+    /// Mirror of the inserted row's `correlation_id` column. Carried on the
+    /// notification (per migration 014) so portal's `await_response` can
+    /// match a notification to the request that produced it without
+    /// querying the row.
+    #[serde(default)]
+    pub correlation_id: Option<Uuid>,
 }
 
 /// The PostgreSQL-backed event store — the spine of Onsager.
@@ -66,12 +79,14 @@ impl EventStore {
         let event_type = event.event.event_type();
         let data = serde_json::to_value(event).expect("FactoryEvent must be serializable");
         let meta = serde_json::to_value(metadata).expect("EventMetadata must be serializable");
+        let correlation_id = correlation_id_from(metadata, event);
 
         let row: (i64,) = sqlx::query_as(
             r#"
-            INSERT INTO events (stream_id, stream_type, event_type, data, metadata, sequence)
+            INSERT INTO events (stream_id, stream_type, event_type, data, metadata, sequence, correlation_id)
             VALUES ($1, $2, $3, $4, $5,
-                    COALESCE((SELECT MAX(sequence) + 1 FROM events WHERE stream_id = $1), 1))
+                    COALESCE((SELECT MAX(sequence) + 1 FROM events WHERE stream_id = $1), 1),
+                    $6)
             RETURNING id
             "#,
         )
@@ -80,6 +95,7 @@ impl EventStore {
         .bind(event_type)
         .bind(&data)
         .bind(&meta)
+        .bind(correlation_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -98,11 +114,12 @@ impl EventStore {
         ref_event_id: Option<i64>,
     ) -> Result<i64, sqlx::Error> {
         let meta = serde_json::to_value(metadata).expect("EventMetadata must be serializable");
+        let correlation_id = parse_correlation_id(metadata.correlation_id.as_deref());
 
         let row: (i64,) = sqlx::query_as(
             r#"
-            INSERT INTO events_ext (stream_id, namespace, event_type, data, metadata, ref_event_id)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO events_ext (stream_id, namespace, event_type, data, metadata, ref_event_id, correlation_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING id
             "#,
         )
@@ -112,6 +129,7 @@ impl EventStore {
         .bind(&data)
         .bind(&meta)
         .bind(ref_event_id)
+        .bind(correlation_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -126,7 +144,7 @@ impl EventStore {
     ) -> Result<Vec<EventRecord>, sqlx::Error> {
         sqlx::query_as::<_, EventRecord>(
             r#"
-            SELECT id, stream_id, stream_type, event_type, data, metadata, sequence, created_at
+            SELECT id, stream_id, stream_type, event_type, data, metadata, sequence, created_at, correlation_id
             FROM events
             WHERE stream_id = $1 AND sequence >= $2
             ORDER BY sequence ASC
@@ -145,7 +163,7 @@ impl EventStore {
     ) -> Result<Vec<ExtensionEventRecord>, sqlx::Error> {
         sqlx::query_as::<_, ExtensionEventRecord>(
             r#"
-            SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at
+            SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at, correlation_id
             FROM events_ext
             WHERE stream_id = $1
             ORDER BY created_at ASC
@@ -178,7 +196,7 @@ impl EventStore {
 
         let where_clause = conditions.join(" AND ");
         let sql = format!(
-            "SELECT id, stream_id, stream_type, event_type, data, metadata, sequence, created_at \
+            "SELECT id, stream_id, stream_type, event_type, data, metadata, sequence, created_at, correlation_id \
              FROM events WHERE {where_clause} ORDER BY id DESC LIMIT {limit}"
         );
 
@@ -200,7 +218,7 @@ impl EventStore {
     pub async fn get_event_by_id(&self, id: i64) -> Result<Option<EventRecord>, sqlx::Error> {
         sqlx::query_as::<_, EventRecord>(
             r#"
-            SELECT id, stream_id, stream_type, event_type, data, metadata, sequence, created_at
+            SELECT id, stream_id, stream_type, event_type, data, metadata, sequence, created_at, correlation_id
             FROM events
             WHERE id = $1
             "#,
@@ -233,7 +251,7 @@ impl EventStore {
     ) -> Result<Option<ExtensionEventRecord>, sqlx::Error> {
         sqlx::query_as::<_, ExtensionEventRecord>(
             r#"
-            SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at
+            SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at, correlation_id
             FROM events_ext
             WHERE id = $1
             "#,
@@ -260,7 +278,7 @@ impl EventStore {
 
         let where_clause = conditions.join(" AND ");
         let sql = format!(
-            "SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at \
+            "SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at, correlation_id \
              FROM events_ext WHERE {where_clause} ORDER BY id DESC LIMIT {limit}"
         );
 
@@ -393,12 +411,14 @@ pub async fn append_factory_event_tx(
     let event_type = event.event.event_type();
     let data = serde_json::to_value(event).expect("FactoryEvent must be serializable");
     let meta = serde_json::to_value(metadata).expect("EventMetadata must be serializable");
+    let correlation_id = correlation_id_from(metadata, event);
 
     let row: (i64,) = sqlx::query_as(
         r#"
-        INSERT INTO events (stream_id, stream_type, event_type, data, metadata, sequence)
+        INSERT INTO events (stream_id, stream_type, event_type, data, metadata, sequence, correlation_id)
         VALUES ($1, $2, $3, $4, $5,
-                COALESCE((SELECT MAX(sequence) + 1 FROM events WHERE stream_id = $1), 1))
+                COALESCE((SELECT MAX(sequence) + 1 FROM events WHERE stream_id = $1), 1),
+                $6)
         RETURNING id
         "#,
     )
@@ -407,10 +427,25 @@ pub async fn append_factory_event_tx(
     .bind(event_type)
     .bind(&data)
     .bind(&meta)
+    .bind(correlation_id)
     .fetch_one(&mut **tx)
     .await?;
 
     Ok(row.0)
+}
+
+/// Resolve the correlation_id to write into the typed column. Prefers the
+/// metadata field (the canonical write site portal/forge/stiglab use today)
+/// and falls back to the envelope. Anything that doesn't parse as a UUID
+/// stores NULL — the column is for portal's `await_response` to index on,
+/// and only portal-minted values are guaranteed to be UUIDs.
+fn correlation_id_from(metadata: &EventMetadata, event: &FactoryEvent) -> Option<Uuid> {
+    parse_correlation_id(metadata.correlation_id.as_deref())
+        .or_else(|| parse_correlation_id(event.correlation_id.as_deref()))
+}
+
+fn parse_correlation_id(s: Option<&str>) -> Option<Uuid> {
+    s.and_then(|raw| Uuid::parse_str(raw).ok())
 }
 
 // Implement FromRow for ExtensionEventRecord manually since it has Option<i64>
@@ -426,6 +461,7 @@ impl sqlx::FromRow<'_, sqlx::postgres::PgRow> for ExtensionEventRecord {
             metadata: row.try_get("metadata")?,
             ref_event_id: row.try_get("ref_event_id")?,
             created_at: row.try_get("created_at")?,
+            correlation_id: row.try_get("correlation_id").unwrap_or(None),
         })
     }
 }
