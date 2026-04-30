@@ -13,5 +13,21 @@
 -- and deleting the mirror module — is the rest of Lever D and lands as a
 -- follow-up; it requires a stiglab `workflow_db.rs` rewrite plus a
 -- Postgres-backed test harness that's bigger than this PR.
+--
+-- Idempotent on purpose: the deploy entrypoint
+-- (`crates/stiglab/deploy/entrypoint.sh`) re-runs every migration on every
+-- boot, and `ALTER TABLE ... RENAME COLUMN` errors when the source column
+-- is missing. Guarding on the source column being present makes second-and-
+-- later boots a no-op, matching the rest of the migrations directory.
 
-ALTER TABLE workflows RENAME COLUMN workspace_install_ref TO install_id;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_name = 'workflows'
+           AND column_name = 'workspace_install_ref'
+    ) THEN
+        ALTER TABLE workflows RENAME COLUMN workspace_install_ref TO install_id;
+    END IF;
+END $$;
