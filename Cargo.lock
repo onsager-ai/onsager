@@ -1588,6 +1588,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "onsager-github"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "chrono",
+ "hex",
+ "jsonwebtoken",
+ "onsager-artifact",
+ "onsager-spine",
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "onsager-portal"
 version = "0.1.0"
 dependencies = [
@@ -1599,6 +1621,7 @@ dependencies = [
  "clap",
  "hex",
  "onsager-artifact",
+ "onsager-github",
  "onsager-spine",
  "refract",
  "regex",
@@ -2602,6 +2625,7 @@ dependencies = [
  "hostname",
  "jsonwebtoken",
  "onsager-artifact",
+ "onsager-github",
  "onsager-registry",
  "onsager-spine",
  "rand 0.8.5",

@@ -25,8 +25,10 @@ use onsager_artifact::ArtifactId;
 use onsager_spine::factory_event::FactoryEventKind;
 use onsager_spine::{EventMetadata, EventStore};
 
+use onsager_github::api::issues::{list_recent_issues, Issue};
+use onsager_github::api::pulls::{list_recent_pulls, Pull};
+
 use crate::db::{self, IssueLifecycleState, PrLifecycleState};
-use crate::github::{Client, Issue, Pull};
 
 /// Ingestion strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -75,14 +77,9 @@ pub async fn run(
     let project = db::get_project(pool, project_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("project not found"))?;
-    let client = Client::new(github_token);
-
-    let issues = client
-        .list_recent_issues(&project.repo_owner, &project.repo_name, cap)
-        .await?;
-    let pulls = client
-        .list_recent_pulls(&project.repo_owner, &project.repo_name, cap)
-        .await?;
+    let token = github_token.as_deref();
+    let issues = list_recent_issues(token, &project.repo_owner, &project.repo_name, cap).await?;
+    let pulls = list_recent_pulls(token, &project.repo_owner, &project.repo_name, cap).await?;
 
     let (issues, pulls) = match strategy {
         Strategy::Recent => (issues, pulls),
@@ -250,7 +247,7 @@ mod tests {
             body: None,
             labels: labels
                 .iter()
-                .map(|n| crate::github::Label { name: (*n).into() })
+                .map(|n| onsager_github::api::issues::Label { name: (*n).into() })
                 .collect(),
             pull_request: None,
         }

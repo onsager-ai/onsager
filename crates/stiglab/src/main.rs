@@ -100,6 +100,14 @@ async fn run_server(
     let pool = db::init_pool(&config.database_url).await?;
     tracing::info!("database connected");
 
+    // Register the GitHub adapter into the spine `artifact_adapters`
+    // catalog (closes the empty-catalog drift from migration 004).
+    // Best-effort: a missing table on older schemas shouldn't block
+    // boot. See `onsager_github::adapter::register_any`.
+    if let Err(e) = onsager_github::adapter::register_any(&pool, "default").await {
+        tracing::warn!("github adapter registration skipped: {e}");
+    }
+
     // Dev-login seeding (issue #193). Debug builds always materialize a
     // `${USER}@local` user + `dev` workspace + membership, idempotently,
     // so the LoginPage's "Dev Login" button always has a real user to

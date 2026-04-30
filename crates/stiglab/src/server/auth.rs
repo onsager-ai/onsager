@@ -7,7 +7,6 @@ use base64::Engine;
 use ring::aead;
 use ring::digest;
 use ring::rand::{SecureRandom, SystemRandom};
-use serde::Deserialize;
 
 use crate::server::db;
 use crate::server::sso::secrets_equal;
@@ -71,71 +70,21 @@ pub fn generate_credential_key() -> String {
 }
 
 // ── GitHub OAuth ──
+//
+// The GitHub-specific OAuth helpers live in `onsager_github::api::oauth`.
+// Re-exported here so the existing stiglab call sites keep their import
+// shape unchanged. `GithubUser` is renamed by the library to
+// `GithubOAuthUser`; alias kept for the same reason.
 
-#[derive(Debug, Deserialize)]
-pub struct GithubTokenResponse {
-    pub access_token: String,
-}
+pub use onsager_github::api::oauth::{
+    exchange_code, github_authorize_url, GithubOAuthUser as GithubUser, GithubTokenResponse,
+};
 
-#[derive(Debug, Deserialize)]
-pub struct GithubUser {
-    pub id: i64,
-    pub login: String,
-    pub name: Option<String>,
-    pub avatar_url: Option<String>,
-}
-
-pub fn github_authorize_url(client_id: &str, redirect_uri: &str, state: &str) -> String {
-    let mut url = reqwest::Url::parse("https://github.com/login/oauth/authorize")
-        .expect("hardcoded GitHub OAuth authorize URL must be valid");
-    url.query_pairs_mut()
-        .append_pair("client_id", client_id)
-        .append_pair("redirect_uri", redirect_uri)
-        .append_pair("state", state)
-        .append_pair("scope", "read:user");
-    url.into()
-}
-
-pub async fn exchange_code(
-    client_id: &str,
-    client_secret: &str,
-    code: &str,
-) -> anyhow::Result<GithubTokenResponse> {
-    let client = reqwest::Client::new();
-    let resp = client
-        .post("https://github.com/login/oauth/access_token")
-        .header("Accept", "application/json")
-        .json(&serde_json::json!({
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "code": code,
-        }))
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("GitHub token exchange failed: {text}");
-    }
-
-    Ok(resp.json().await?)
-}
-
+/// Fetch the GitHub user behind an OAuth access token. Wraps the
+/// library helper so call sites that already import `get_github_user`
+/// from this module keep working.
 pub async fn get_github_user(access_token: &str) -> anyhow::Result<GithubUser> {
-    let client = reqwest::Client::new();
-    let resp = client
-        .get("https://api.github.com/user")
-        .header("Authorization", format!("Bearer {access_token}"))
-        .header("User-Agent", "stiglab")
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("GitHub user API failed: {text}");
-    }
-
-    Ok(resp.json().await?)
+    Ok(onsager_github::api::oauth::get_oauth_user(access_token).await?)
 }
 
 /// Generate a random session token (hex-encoded, 32 bytes of randomness).
@@ -597,15 +546,6 @@ mod tests {
         let key = generate_credential_key();
         assert!(decrypt_credential(&key, "tooshort").is_err());
         assert!(decrypt_credential(&key, "not-hex!").is_err());
-    }
-
-    #[test]
-    fn test_github_authorize_url() {
-        let url = github_authorize_url("client123", "https://example.com/callback", "state456");
-        assert!(url.contains("client_id=client123"));
-        assert!(url.contains("state=state456"));
-        assert!(url.contains("scope=read%3Auser"));
-        assert!(url.starts_with("https://github.com/login/oauth/authorize"));
     }
 
     #[test]

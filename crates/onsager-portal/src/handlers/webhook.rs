@@ -16,8 +16,9 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::Value;
 
+use onsager_github::webhook::{verify_signature, SignatureCheck};
+
 use crate::handlers::{issues, pull_request};
-use crate::signature::{verify_signature, SignatureCheck};
 use crate::state::AppState;
 
 /// Header GitHub sends with the event type (e.g. `pull_request`,

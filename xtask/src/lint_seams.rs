@@ -69,6 +69,11 @@ pub fn run() -> Result<()> {
         }
     }
 
+    // Workspace-wide: GitHub HTTP must only be constructed inside
+    // `onsager-github`. Closes the "scattered GitHub call sites" drift
+    // the new library is consolidating (#221, #220 Sub-issue A).
+    check_github_http_wall(&root, &mut violations)?;
+
     let (kept, allowed) = apply_allow_list(violations);
 
     if !allowed.is_empty() {
@@ -550,6 +555,111 @@ fn apply_allow_list(violations: Vec<Violation>) -> (Vec<Violation>, Vec<(Violati
         }
     }
     (kept, allowed)
+}
+
+// ---------------------------------------------------------------------------
+// Workspace-wide: GitHub HTTP wall (#221 / #220 Sub-issue A)
+// ---------------------------------------------------------------------------
+//
+// The `onsager-github` library is the only place that should construct
+// HTTP clients aimed at `api.github.com` / `github.com`. Every other
+// crate must go through the library — that's the "stop the bleeding"
+// move from #221, and it's load-bearing for #150's adapter registry
+// and #220's edge-subsystem promotion.
+//
+// We flag string literals containing the canonical GitHub host
+// substrings rather than `reqwest::Client::new()` directly, because
+// reqwest has plenty of legitimate non-GitHub callers (Anthropic API,
+// SSO endpoints, etc.). Hostname literals are precise.
+
+const GITHUB_HOST_NEEDLES: &[&str] = &[
+    "api.github.com",
+    "github.com/login/oauth",
+    "github.com/app/installations",
+];
+
+/// Crates whose `src/` may legitimately mention GitHub host literals.
+/// The library itself owns the wall.
+const GITHUB_HTTP_WALL_ALLOWED_CRATES: &[&str] = &["onsager-github"];
+
+/// Files known to still construct GitHub HTTP outside the library,
+/// scheduled for migration in a follow-up under #220 Sub-issue A.
+/// Each entry is `(relative-path, reason)`. The reason is grep-able
+/// and printed at every CI run so the debt stays visible. Remove an
+/// entry when its migration PR lands.
+const GITHUB_HTTP_WALL_PENDING_FILES: &[(&str, &str)] = &[
+    (
+        "crates/stiglab/src/server/routes/projects.rs",
+        "list_recent_issues / list_recent_pulls / get_issue / get_pull-style reads — fold into onsager-github::api::{issues,pulls} with the workspace ↔ portal split (#220 Sub-issue B)",
+    ),
+    (
+        "crates/stiglab/src/server/workflow_activation.rs",
+        "ensure_label / register_webhook / deregister_webhook — fold into onsager-github::api::{labels,webhooks} once the workflow URL-resolution + ActivationError shape is decoupled (follow-up to #221)",
+    ),
+];
+
+fn check_github_http_wall(root: &Path, out: &mut Vec<Violation>) -> Result<()> {
+    let crates_dir = root.join("crates");
+    if !crates_dir.is_dir() {
+        return Ok(());
+    }
+    let mut pending_hits: BTreeSet<&'static str> = BTreeSet::new();
+    for entry in std::fs::read_dir(&crates_dir)? {
+        let entry = entry?;
+        let crate_dir = entry.path();
+        if !crate_dir.is_dir() {
+            continue;
+        }
+        let crate_name = match crate_dir.file_name().and_then(|s| s.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        if GITHUB_HTTP_WALL_ALLOWED_CRATES.contains(&crate_name) {
+            continue;
+        }
+        let src = crate_dir.join("src");
+        if !src.is_dir() {
+            continue;
+        }
+        for file in rust_files(&src)? {
+            let rel_path = rel(root, &file);
+            let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+            let pending = GITHUB_HTTP_WALL_PENDING_FILES
+                .iter()
+                .find(|(p, _)| *p == rel_str.as_str());
+            let text = std::fs::read_to_string(&file)
+                .with_context(|| format!("read {}", file.display()))?;
+            for (idx, line) in text.lines().enumerate() {
+                let code = strip_line_comment(line);
+                for needle in GITHUB_HOST_NEEDLES {
+                    if code.contains(needle) {
+                        if let Some((path, _)) = pending {
+                            pending_hits.insert(*path);
+                        } else {
+                            out.push(Violation {
+                                path: rel_path.clone(),
+                                line: idx + 1,
+                                kind: "github-http-wall",
+                                message: format!(
+                                    "crate `{crate_name}` references `{needle}` — GitHub HTTP must go through `onsager-github` (#221)"
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !pending_hits.is_empty() {
+        eprintln!("github-http-wall pending migrations (follow-up to #221):");
+        for (path, reason) in GITHUB_HTTP_WALL_PENDING_FILES {
+            if pending_hits.contains(path) {
+                eprintln!("  {path} — {reason}");
+            }
+        }
+        eprintln!();
+    }
+    Ok(())
 }
 
 #[cfg(test)]
