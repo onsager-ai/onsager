@@ -240,9 +240,15 @@ is in its sub-issue. Status as of 2026-04-30:
       013), and `workspace_install_ref` was renamed `install_id`
       (#219). The `BundleId` → `ArtifactVersionId` alias was removed
       in #219._
-- [ ] **Lever E** — registry-backed event types + capability
-      advertisement (#150). _Open: `lint_seams` carries the producer-
-      without-consumer reminder pending the registry manifest._
+- [x] **Lever E** — registry-backed event types + capability
+      advertisement (#150). _Landed: closed by PR #227. Static
+      manifest at `crates/onsager-registry/src/events.rs` (75 rows,
+      one per `FactoryEventKind` variant) declares producers and
+      consumers per subsystem; `xtask check-events` enforces
+      coverage, both-ends-declared, emit-call-sites match producers,
+      and listener-call-sites match consumers. Manifest exposed at
+      `GET /api/registry/events`. The Lever B warn → hard-fail flip
+      for producer-without-consumer is a small follow-up._
 - [x] **Lever F** — API/UI contract enforcement.
       _Landed: `xtask/src/lint_api_contract.rs` (closed by PR #207)
       asserts every backend route has a dashboard caller (or an

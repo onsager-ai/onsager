@@ -54,14 +54,13 @@ This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md
 captures the decision to make it machine-checkable and the six-lever
 execution plan that spec #131 tracks (A–F: persisted rule →
 mechanical guardrails → finish ADR 0001 migration → spine as SoT →
-registry-backed event types → API/UI contract enforcement). Levers
-B, C, D, and F have landed and are CI-enforced via `lint_seams` and
-`lint_api_contract` (see status below); E remains open and is still
-review-time discipline — treat the drift patterns below as the
-working heuristic until the registry manifest lands.
+registry-backed event types → API/UI contract enforcement). All six
+levers have landed and are CI-enforced via `lint_seams`,
+`lint_api_contract`, and `check_events` (see status below); the
+seam rule is now mechanical, not review-time discipline.
 
 Lever status (canonical: ADR 0004's adoption checklist). As of
-2026-04-30: A, B, C, D, F have landed; E is open.
+2026-04-30: all six levers landed.
 
 - **A** (PR #144): rule persisted in `CLAUDE.md` + skills.
 - **B**: `xtask/src/lint_seams.rs` enforces arch-deps, references
@@ -82,8 +81,13 @@ Lever status (canonical: ADR 0004's adoption checklist). As of
   backfills + drops), the `BundleId` → `ArtifactVersionId` alias is
   gone (#219), and `workspace_install_ref` was renamed `install_id`
   (#219). One schema, one writer.
-- **E** (#150, open): producer-without-consumer is a reminder in
-  `lint_seams` pending the registry manifest.
+- **E** (#150, PR #227): static event manifest at
+  `crates/onsager-registry/src/events.rs` (75 rows, one per
+  `FactoryEventKind` variant) declares producers/consumers per
+  subsystem. `xtask check-events` enforces coverage, both-ends-
+  declared, emit-call-sites match producers, and listener-call-
+  sites match consumers; events with no in-tree consumer are
+  tagged `audit_only`. Manifest exposed at `GET /api/registry/events`.
 - **F** (PR #207): `xtask/src/lint_api_contract.rs` asserts every
   backend route has a dashboard caller (or an allowlisted external-
   only reason) and every dashboard call lands on a backend route.
