@@ -740,8 +740,7 @@ export const api = {
       `/workspaces/${encodeURIComponent(workspaceId)}/credentials/${encodeURIComponent(name)}`,
       { method: 'DELETE' },
     ),
-  // Workspaces (issue #59; renamed from `/tenants` per #163). The backend
-  // emits 308 redirects from `/api/tenants/*` for one release; dashboard
+  // Workspaces (issue #59; renamed from `/tenants` per #163). The dashboard
   // hits the new path directly. Wire envelope is `workspaces`/`workspace`
   // post-rename.
   listWorkspaces: () => request<{ workspaces: Workspace[] }>('/workspaces'),

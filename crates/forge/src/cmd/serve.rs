@@ -29,27 +29,15 @@ use crate::core::workflow_persistence;
 use crate::core::workflow_signal_listener;
 
 /// Shared Forge state accessible from both the HTTP API and the tick loop.
+///
+/// The signal cache and parking maps (`PendingVerdicts`, `PendingShapings`)
+/// are deliberately *not* held here — they're cloned directly into the
+/// listeners and the gate evaluator at startup. Re-introduce them only if
+/// an HTTP route or tick branch actually needs to read them.
 struct ForgeSharedState {
     pipeline: ForgePipeline,
     kernel: BaselineKernel,
     spine: Option<EventStore>,
-    /// Shared signal cache populated by the workflow signal listener and
-    /// consumed by the gate evaluator on each stage-runner tick. Held
-    /// here so the HTTP API can introspect pending gates if a future
-    /// endpoint exposes them.
-    #[allow(dead_code)]
-    signals: SignalCache,
-    /// Verdicts parked from `synodic.gate_verdict` by
-    /// [`gate_verdict_listener`] (spec #131 / ADR 0004 Lever C, phase 3).
-    /// Phase 4 wires the pipeline tick to claim entries on the resume
-    /// path. Held in shared state so the HTTP API and the tick loop see
-    /// the same map.
-    #[allow(dead_code)]
-    pending_verdicts: PendingVerdicts,
-    /// Shaping results parked from `stiglab.shaping_result_ready` by
-    /// [`shaping_result_listener`]. Same wiring story as above.
-    #[allow(dead_code)]
-    pending_shapings: PendingShapings,
 }
 
 type SharedForge = Arc<RwLock<ForgeSharedState>>;
@@ -129,9 +117,6 @@ pub fn run(database_url: &str, tick_ms: u64) {
             pipeline,
             kernel: BaselineKernel::new(),
             spine,
-            signals: signals.clone(),
-            pending_verdicts: pending_verdicts.clone(),
-            pending_shapings: pending_shapings.clone(),
         }));
 
         // Start HTTP API.

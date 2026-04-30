@@ -6,7 +6,7 @@
 //! for the event store, in which case emissions become no-ops and results
 //! are returned via the return value only.
 
-use onsager_spine::factory_event::{FactoryEventKind, TokenUsage};
+use onsager_spine::factory_event::FactoryEventKind;
 use onsager_spine::{EventMetadata, EventStore};
 
 use crate::decomposer::{DecomposerError, DecomposerRegistry, DecompositionResult};
@@ -118,12 +118,6 @@ impl Refract {
         Ok(())
     }
 }
-
-/// Compile-time assertion: if a new [`FactoryEventKind`] variant is added
-/// the `TokenUsage` import is still referenced — refract may want to
-/// eventually surface LLM cost of LLM-backed decomposers (issue #39).
-#[allow(dead_code)]
-fn _compile_check(_u: TokenUsage) {}
 
 #[cfg(test)]
 mod tests {
