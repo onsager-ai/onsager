@@ -36,6 +36,7 @@ Apply labels when creating the issue:
 - `area:ising` — continuous improvement engine
 - `area:stiglab` — agent session orchestration
 - `area:synodic` — agent governance
+- `area:portal` — edge subsystem (public HTTP, OAuth, webhooks, credentials)
 - `area:dashboard` — React UI under `apps/dashboard`
 - `area:onsager` — the `onsager` dispatcher CLI
 - `area:infra` — CI, migrations, docker-compose, justfile, workflows

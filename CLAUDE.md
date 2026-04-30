@@ -20,15 +20,23 @@ ships with its dev-process counterpart enabled, and every durable
 dev-process pattern is filed as evidence for a future primitive.
 
 ```
-         onsager-spine (event bus lib)
-        /       |        |        \
-   forge    stiglab   synodic    ising    <- do NOT depend on each other
+                onsager-spine (event bus lib)
+         /     /     |        |        \
+   portal  forge  stiglab  synodic   ising
+   (edge)         (factory subsystems — AI-native concerns)
 ```
 
-**Architectural invariant**: subsystems (`forge`, `stiglab`, `synodic`, `ising`)
-must NOT import each other, and must NOT be statically linked into the same
-binary. The `onsager` dispatcher has zero business dependencies -- it discovers
-subsystem binaries on PATH.
+**Architectural invariant**: subsystems (`portal`, `forge`, `stiglab`,
+`synodic`, `ising`) must NOT import each other, and must NOT be statically
+linked into the same binary. The `onsager` dispatcher has zero business
+dependencies -- it discovers subsystem binaries on PATH.
+
+`portal` is the **edge** subsystem — eventually the only one that hosts
+public HTTP routes (dashboard API, GitHub webhooks, OAuth, credential
+CRUD). Factory subsystems (`forge`, `stiglab`, `synodic`, `ising`) live
+behind the seam and coordinate exclusively via the spine. Spec #222
+promotes portal to first-class peer status; while that migration is in
+flight stiglab still owns the bulk of the external HTTP surface.
 
 ## The seam rule (canonical)
 
@@ -36,7 +44,8 @@ subsystem binaries on PATH.
 > - **User-facing endpoints** called by the dashboard.
 > - **Webhooks** called by external services (GitHub, etc.).
 >
-> Subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
+> The external HTTP boundary is owned by `portal` (the edge subsystem).
+> Factory subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
 > **exclusively** via the spine: events on the bus + reads against
 > shared spine tables. No subsystem makes HTTP calls to another
 > subsystem. No subsystem imports another subsystem's crate.
