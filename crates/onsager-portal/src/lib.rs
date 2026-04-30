@@ -29,6 +29,7 @@
 pub mod backfill;
 pub mod config;
 pub mod db;
+pub mod feedback;
 pub mod gate;
 pub mod handlers;
 pub mod migrate;
