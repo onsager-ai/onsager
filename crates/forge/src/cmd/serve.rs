@@ -24,6 +24,7 @@ use crate::core::stage_runner::{self, StageEvent};
 use crate::core::trigger_subscriber::{
     self, register_artifact_from_trigger, trigger_external_ref, TriggerFired, TriggerHandler,
 };
+use crate::core::workflow::Workflow;
 use crate::core::workflow_gates::{LiveGateEvaluator, SpineGateEmitter};
 use crate::core::workflow_persistence;
 use crate::core::workflow_signal_listener;
@@ -312,10 +313,26 @@ pub fn run(database_url: &str, tick_ms: u64) {
                     }
                 }
 
-                // Emit stage lifecycle events to the spine.
+                // Emit stage lifecycle events to the spine. The workflow
+                // is looked up by id from the per-tick snapshot so the
+                // emit can stamp `workspace_id` into every payload (#230);
+                // a stage event whose workflow vanished mid-tick is dropped
+                // rather than emitted with a missing workspace.
                 for event in &stage_events {
                     if let Some(ref spine) = spine {
-                        emit_stage_event(spine, event).await;
+                        let workflow_id = match event {
+                            StageEvent::StageEntered { workflow_id, .. }
+                            | StageEvent::GatePassed { workflow_id, .. }
+                            | StageEvent::GateFailed { workflow_id, .. }
+                            | StageEvent::StageAdvanced { workflow_id, .. } => workflow_id,
+                        };
+                        match workflows_snapshot.get(workflow_id) {
+                            Some(wf) => emit_stage_event(spine, wf, event).await,
+                            None => tracing::warn!(
+                                workflow_id = %workflow_id,
+                                "forge: dropping stage event for vanished workflow"
+                            ),
+                        }
                     }
                     tracing::info!("forge stage: {event:?}");
                 }
@@ -628,7 +645,7 @@ impl TriggerHandler for WorkflowTriggerHandler {
                 );
                 return Ok(());
             }
-            emit_stage_event(&spine, &stage_event).await;
+            emit_stage_event(&spine, &workflow, &stage_event).await;
         }
         Ok(())
     }
@@ -993,12 +1010,21 @@ async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
 /// Emit a workflow stage event to the spine (issue #80). Uses the
 /// `workflow` namespace so the dashboard's live view can subscribe with
 /// a single filter.
-async fn emit_stage_event(spine: &EventStore, event: &StageEvent) {
+///
+/// Every payload carries `workspace_id` (#230). The dashboard's
+/// `/api/spine/events` endpoint filters with `data->>'workspace_id' = $1`
+/// (`crates/stiglab/src/server/routes/spine.rs:195`); a stage event
+/// missing this field would land in `events_ext` but be invisible to
+/// every workspace-scoped read. Sourced from the in-memory `Workflow`
+/// the runner already has in scope, so no extra DB hit.
+async fn emit_stage_event(spine: &EventStore, workflow: &Workflow, event: &StageEvent) {
     let metadata = onsager_spine::EventMetadata {
         correlation_id: None,
         causation_id: None,
         actor: "forge".to_string(),
     };
+
+    let workspace_id = workflow.workspace_id.as_str();
 
     let (stream_id, event_type, data) = match event {
         StageEvent::StageEntered {
@@ -1012,6 +1038,7 @@ async fn emit_stage_event(spine: &EventStore, event: &StageEvent) {
             serde_json::json!({
                 "artifact_id": artifact_id,
                 "workflow_id": workflow_id,
+                "workspace_id": workspace_id,
                 "stage_index": stage_index,
                 "stage_name": stage_name,
             }),
@@ -1027,6 +1054,7 @@ async fn emit_stage_event(spine: &EventStore, event: &StageEvent) {
             serde_json::json!({
                 "artifact_id": artifact_id,
                 "workflow_id": workflow_id,
+                "workspace_id": workspace_id,
                 "stage_index": stage_index,
                 "gate_kind": gate_kind,
             }),
@@ -1043,6 +1071,7 @@ async fn emit_stage_event(spine: &EventStore, event: &StageEvent) {
             serde_json::json!({
                 "artifact_id": artifact_id,
                 "workflow_id": workflow_id,
+                "workspace_id": workspace_id,
                 "stage_index": stage_index,
                 "gate_kind": gate_kind,
                 "reason": reason,
@@ -1059,6 +1088,7 @@ async fn emit_stage_event(spine: &EventStore, event: &StageEvent) {
             serde_json::json!({
                 "artifact_id": artifact_id,
                 "workflow_id": workflow_id,
+                "workspace_id": workspace_id,
                 "from_stage_index": from_stage_index,
                 "to_stage_index": to_stage_index,
             }),

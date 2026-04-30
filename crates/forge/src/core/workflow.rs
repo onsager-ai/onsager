@@ -118,6 +118,13 @@ pub struct Workflow {
     pub trigger: TriggerSpec,
     pub stages: Vec<StageSpec>,
     pub active: bool,
+    /// Workspace this workflow belongs to. Stamped into every stage event
+    /// `data` payload so the workspace-scoped `/api/spine/events` filter
+    /// (`data->>'workspace_id' = $1`) can find them — without this, stage
+    /// events land in `events_ext` but are silently invisible to the
+    /// dashboard's workflow detail page (#230). Spine column is `NOT NULL`
+    /// post-#149, so this is required.
+    pub workspace_id: String,
     #[serde(default)]
     pub preset_id: Option<String>,
     #[serde(default)]
@@ -204,6 +211,7 @@ mod tests {
             },
             stages: vec![],
             active: true,
+            workspace_id: "ws_test".into(),
             preset_id: None,
             install_id: None,
             created_by: None,
@@ -235,6 +243,7 @@ mod tests {
                 },
             ],
             active: true,
+            workspace_id: "ws_test".into(),
             preset_id: None,
             install_id: None,
             created_by: None,
@@ -270,6 +279,7 @@ mod tests {
                 params: serde_json::json!({"timeout_minutes": 30}),
             }],
             active: true,
+            workspace_id: "ws_test".into(),
             preset_id: Some("github_issue_to_pr".into()),
             install_id: Some("install_42".into()),
             created_by: Some("user_42".into()),

@@ -225,6 +225,7 @@ mod tests {
                 params: serde_json::Value::Null,
             }],
             active,
+            workspace_id: "ws_test".into(),
             preset_id: None,
             install_id: None,
             created_by: None,
