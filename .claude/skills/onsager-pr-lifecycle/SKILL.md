@@ -96,10 +96,12 @@ enforced post-push if the pre-push scan was skipped or overridden.
 ### The `## Delivers` subsection
 
 For `Part of #N` PRs (and ideally all PRs), include a `## Delivers`
-subsection in the body listing the exact Plan items this PR ticks, copied
-verbatim from the spec's `## Plan`. After merge, use this list to tick
-the parent spec's checkboxes manually — see "Issue progress labels"
-below.
+subsection in the body listing the exact Plan items this PR ticks. Copy
+the item text verbatim from the spec's `## Plan`, but mark each as
+`- [x]` (the PR delivers them, even though the corresponding boxes on
+the spec are still `- [ ]` until you tick them after merge). Use this
+list to tick the parent spec's checkboxes — see "Issue progress
+labels" below.
 
 Example PR body:
 
