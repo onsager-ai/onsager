@@ -1,515 +1,540 @@
-//! Workflow + workflow_stages CRUD helpers (issue #81).
+//! Workflow CRUD against the spine `workflows` / `workflow_stages` tables.
 //!
-//! Kept out of `db.rs` to keep the per-subsystem tables grouped together;
-//! the workflow surface is large enough (CRUD + stage chain + active-repo
-//! lookup for the webhook router) to justify its own module.
+//! Lever D (#149): stiglab no longer keeps a private `workspace_workflows`
+//! schema mirrored into the spine — there is one table, owned by the
+//! spine, and stiglab writes to it directly. The translation that used to
+//! live in `workflow_spine_mirror.rs` (gate_kind → target_state + gates
+//! JSON, repo + label → trigger_config JSON) is folded into this module,
+//! where it is the single read/write boundary.
+//!
+//! Pool: spine `PgPool`. The earlier `AnyPool` against stiglab's own
+//! database is gone; the spine schema is Postgres-only and `JSONB` /
+//! `BOOLEAN` / `TIMESTAMPTZ` round-trips don't go through `Any`.
+//!
+//! In production stiglab and spine point at the same Postgres, so this is
+//! just a pool name change. In topologies where they're separate, workflow
+//! routes 503 when the spine is unreachable — same posture as the rest of
+//! the workflow surface (`list_workflow_runs` already returns an empty
+//! list without a spine).
 
+use anyhow::Context;
 use chrono::{DateTime, Utc};
-use sqlx::AnyPool;
+use serde_json::json;
+use sqlx::{PgPool, Row};
 
 use crate::core::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
 
-/// Row shape straight out of the `workspace_workflows` table. `i32` is the
-/// AnyPool-portable boolean — both SQLite and Postgres store the column as
-/// `INTEGER`.
-#[derive(sqlx::FromRow)]
-struct WorkflowRow {
-    id: String,
-    workspace_id: String,
-    name: String,
-    trigger_kind: String,
-    repo_owner: String,
-    repo_name: String,
-    trigger_label: String,
-    install_id: i64,
-    preset_id: Option<String>,
-    active: i32,
-    created_by: String,
-    created_at: String,
-    updated_at: String,
-}
+// ── Translation between stiglab's API types and the spine schema ──────────
 
-impl TryFrom<WorkflowRow> for Workflow {
-    type Error = anyhow::Error;
-    fn try_from(r: WorkflowRow) -> anyhow::Result<Self> {
-        Ok(Workflow {
-            id: r.id,
-            workspace_id: r.workspace_id,
-            name: r.name,
-            trigger_kind: r.trigger_kind.parse::<TriggerKind>()?,
-            repo_owner: r.repo_owner,
-            repo_name: r.repo_name,
-            trigger_label: r.trigger_label,
-            install_id: r.install_id,
-            preset_id: r.preset_id,
-            active: r.active != 0,
-            created_by: r.created_by,
-            created_at: DateTime::parse_from_rfc3339(&r.created_at)?.with_timezone(&Utc),
-            updated_at: DateTime::parse_from_rfc3339(&r.updated_at)?.with_timezone(&Utc),
-        })
+/// stiglab persists `'github-issue-webhook'` (kebab); the spine
+/// `workflows.trigger_kind` CHECK constraint requires the snake form.
+fn trigger_kind_to_spine(kind: TriggerKind) -> &'static str {
+    match kind {
+        TriggerKind::GithubIssueWebhook => "github_issue_webhook",
     }
 }
 
-#[derive(sqlx::FromRow)]
-struct WorkflowStageRow {
-    id: String,
-    workflow_id: String,
-    seq: i32,
-    gate_kind: String,
-    params: String,
-}
-
-impl TryFrom<WorkflowStageRow> for WorkflowStage {
-    type Error = anyhow::Error;
-    fn try_from(r: WorkflowStageRow) -> anyhow::Result<Self> {
-        Ok(WorkflowStage {
-            id: r.id,
-            workflow_id: r.workflow_id,
-            seq: r.seq,
-            gate_kind: r.gate_kind.parse::<GateKind>()?,
-            params: serde_json::from_str(&r.params)?,
-        })
+fn trigger_kind_from_spine(s: &str) -> anyhow::Result<TriggerKind> {
+    match s {
+        "github_issue_webhook" => Ok(TriggerKind::GithubIssueWebhook),
+        other => Err(anyhow::anyhow!("unknown spine trigger_kind: {other}")),
     }
 }
+
+/// Pack the per-row GitHub trigger fields into the JSON shape forge reads.
+fn trigger_config_for(workflow: &Workflow) -> serde_json::Value {
+    match workflow.trigger_kind {
+        TriggerKind::GithubIssueWebhook => json!({
+            "repo": format!("{}/{}", workflow.repo_owner, workflow.repo_name),
+            "label": workflow.trigger_label,
+        }),
+    }
+}
+
+/// Reverse of [`trigger_config_for`]. The mirror has been writing the
+/// `{repo, label}` shape since it shipped, so every spine row that exists
+/// today round-trips cleanly. Returns `(repo_owner, repo_name, label)`.
+fn parse_trigger_config(cfg: &serde_json::Value) -> anyhow::Result<(String, String, String)> {
+    let repo = cfg
+        .get("repo")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("trigger_config.repo missing or non-string"))?;
+    let label = cfg
+        .get("label")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("trigger_config.label missing or non-string"))?;
+    let (owner, name) = repo
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("trigger_config.repo is not 'owner/name': {repo}"))?;
+    Ok((owner.to_string(), name.to_string(), label.to_string()))
+}
+
+/// Translate stiglab's `gate_kind` + opaque `params` into the spine's
+/// `(target_state, gates)` pair. The artifact-state transitions match the
+/// "issue → PR" flow forge expects: agent-session moves Draft → InProgress,
+/// review-style gates move to UnderReview.
+fn translate_stage(
+    gate_kind: GateKind,
+    params: &serde_json::Value,
+) -> (Option<&'static str>, serde_json::Value) {
+    match gate_kind {
+        GateKind::AgentSession => {
+            let gate = json!({
+                "kind": "agent_session",
+                "shaping_intent": params.clone(),
+            });
+            (Some("in_progress"), json!([gate]))
+        }
+        GateKind::ExternalCheck => {
+            let check_name = params
+                .get("check_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("ci");
+            let gate = json!({
+                "kind": "external_check",
+                "check_name": check_name,
+            });
+            (Some("under_review"), json!([gate]))
+        }
+        GateKind::Governance => {
+            let gate_point = params.get("gate_point").and_then(|v| v.as_str());
+            let gate = match gate_point {
+                Some(p) => json!({"kind": "governance", "gate_point": p}),
+                None => json!({"kind": "governance"}),
+            };
+            (Some("under_review"), json!([gate]))
+        }
+        GateKind::ManualApproval => {
+            let signal_kind = params
+                .get("signal_kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("dashboard_approve");
+            let gate = json!({
+                "kind": "manual_approval",
+                "signal_kind": signal_kind,
+            });
+            (Some("under_review"), json!([gate]))
+        }
+    }
+}
+
+// ── Public CRUD surface ───────────────────────────────────────────────────
 
 /// Insert a workflow row plus its ordered stage chain in a single
-/// transaction. Rolls back on any error so a partial workflow (header
-/// without stages) can't leak into the DB.
+/// transaction. Both ends of the spine `workflows` ↔ `workflow_stages`
+/// FK move atomically so a partial workflow can't leak.
 pub async fn insert_workflow_with_stages(
-    pool: &AnyPool,
+    pool: &PgPool,
     workflow: &Workflow,
     stages: &[WorkflowStage],
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
 
+    let trigger_kind = trigger_kind_to_spine(workflow.trigger_kind);
+    let trigger_config = trigger_config_for(workflow);
+    let install_id_text = workflow.install_id.to_string();
+
     sqlx::query(
-        "INSERT INTO workspace_workflows (id, workspace_id, name, trigger_kind, repo_owner, repo_name, \
-                                          trigger_label, install_id, preset_id, active, created_by, \
-                                          created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+        "INSERT INTO workflows (workflow_id, name, trigger_kind, trigger_config, \
+                                active, preset_id, workspace_id, install_id, \
+                                created_by, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
     )
     .bind(&workflow.id)
-    .bind(&workflow.workspace_id)
     .bind(&workflow.name)
-    .bind(workflow.trigger_kind.to_string())
-    .bind(&workflow.repo_owner)
-    .bind(&workflow.repo_name)
-    .bind(&workflow.trigger_label)
-    .bind(workflow.install_id)
+    .bind(trigger_kind)
+    .bind(&trigger_config)
+    .bind(workflow.active)
     .bind(workflow.preset_id.as_deref())
-    .bind(if workflow.active { 1 } else { 0 })
+    .bind(&workflow.workspace_id)
+    .bind(&install_id_text)
     .bind(&workflow.created_by)
-    .bind(workflow.created_at.to_rfc3339())
-    .bind(workflow.updated_at.to_rfc3339())
+    .bind(workflow.created_at)
+    .bind(workflow.updated_at)
     .execute(&mut *tx)
-    .await?;
+    .await
+    .context("insert spine workflows row")?;
 
-    for s in stages {
+    for stage in stages {
+        let (target_state, gates) = translate_stage(stage.gate_kind, &stage.params);
         sqlx::query(
-            "INSERT INTO workspace_workflow_stages (id, workflow_id, seq, gate_kind, params) \
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO workflow_stages (workflow_id, stage_order, name, \
+                                          target_state, gates, params) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
-        .bind(&s.id)
-        .bind(&s.workflow_id)
-        .bind(s.seq)
-        .bind(s.gate_kind.to_string())
-        .bind(serde_json::to_string(&s.params)?)
+        .bind(&workflow.id)
+        .bind(stage.seq)
+        .bind(stage.gate_kind.to_string())
+        .bind(target_state)
+        .bind(&gates)
+        .bind(&stage.params)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .context("insert spine workflow_stages row")?;
     }
 
     tx.commit().await?;
     Ok(())
 }
 
-pub async fn get_workflow(pool: &AnyPool, workflow_id: &str) -> anyhow::Result<Option<Workflow>> {
-    let row = sqlx::query_as::<_, WorkflowRow>(
-        "SELECT id, workspace_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
-                install_id, preset_id, active, created_by, created_at, updated_at \
-         FROM workspace_workflows WHERE id = $1",
+pub async fn get_workflow(pool: &PgPool, workflow_id: &str) -> anyhow::Result<Option<Workflow>> {
+    let row = sqlx::query(
+        "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                workspace_id, install_id, created_by, created_at, updated_at \
+           FROM workflows WHERE workflow_id = $1",
     )
     .bind(workflow_id)
     .fetch_optional(pool)
     .await?;
-    row.map(|r| r.try_into()).transpose()
+    row.map(row_to_workflow).transpose()
 }
 
 pub async fn list_workflows_for_workspace(
-    pool: &AnyPool,
+    pool: &PgPool,
     workspace_id: &str,
 ) -> anyhow::Result<Vec<Workflow>> {
-    let rows = sqlx::query_as::<_, WorkflowRow>(
-        "SELECT id, workspace_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
-                install_id, preset_id, active, created_by, created_at, updated_at \
-         FROM workspace_workflows WHERE workspace_id = $1 ORDER BY created_at ASC",
+    let rows = sqlx::query(
+        "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                workspace_id, install_id, created_by, created_at, updated_at \
+           FROM workflows WHERE workspace_id = $1 ORDER BY created_at ASC",
     )
     .bind(workspace_id)
     .fetch_all(pool)
     .await?;
-    rows.into_iter().map(|r| r.try_into()).collect()
-}
-
-/// List every workflow across workspaces. Used by the spine-mirror startup
-/// backfill so workflows pre-dating the bridge sync into the spine schema.
-pub async fn list_all_workflows(pool: &AnyPool) -> anyhow::Result<Vec<Workflow>> {
-    let rows = sqlx::query_as::<_, WorkflowRow>(
-        "SELECT id, workspace_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
-                install_id, preset_id, active, created_by, created_at, updated_at \
-         FROM workspace_workflows ORDER BY created_at ASC",
-    )
-    .fetch_all(pool)
-    .await?;
-    rows.into_iter().map(|r| r.try_into()).collect()
+    rows.into_iter().map(row_to_workflow).collect()
 }
 
 pub async fn list_stages_for_workflow(
-    pool: &AnyPool,
+    pool: &PgPool,
     workflow_id: &str,
 ) -> anyhow::Result<Vec<WorkflowStage>> {
-    let rows = sqlx::query_as::<_, WorkflowStageRow>(
-        "SELECT id, workflow_id, seq, gate_kind, params FROM workspace_workflow_stages \
-         WHERE workflow_id = $1 ORDER BY seq ASC",
+    let rows = sqlx::query(
+        "SELECT workflow_id, stage_order, name, params \
+           FROM workflow_stages WHERE workflow_id = $1 ORDER BY stage_order ASC",
     )
     .bind(workflow_id)
     .fetch_all(pool)
     .await?;
-    rows.into_iter().map(|r| r.try_into()).collect()
+    rows.into_iter().map(row_to_stage).collect()
 }
 
-/// Toggle the `active` flag and bump `updated_at`.
+/// Toggle the `active` flag and bump `updated_at`. The `workflow_updated`
+/// trigger on the spine table sets `updated_at = NOW()` automatically; we
+/// don't need a manual bind.
 pub async fn set_workflow_active(
-    pool: &AnyPool,
+    pool: &PgPool,
     workflow_id: &str,
     active: bool,
 ) -> anyhow::Result<()> {
-    sqlx::query("UPDATE workspace_workflows SET active = $1, updated_at = $2 WHERE id = $3")
-        .bind(if active { 1 } else { 0 })
-        .bind(Utc::now().to_rfc3339())
+    sqlx::query("UPDATE workflows SET active = $1 WHERE workflow_id = $2")
+        .bind(active)
         .bind(workflow_id)
         .execute(pool)
         .await?;
     Ok(())
 }
 
-/// Delete the workflow row and its ordered stage chain in a single
-/// transaction. Callers are expected to have deactivated the workflow
-/// first (the label-watcher side effect is undone before the row goes
-/// away); this helper only touches the database state.
-pub async fn delete_workflow(pool: &AnyPool, workflow_id: &str) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM workspace_workflow_stages WHERE workflow_id = $1")
+/// Delete the workflow row. `workflow_stages` is `ON DELETE CASCADE` so
+/// the stage chain goes with it — no explicit per-stage DELETE.
+pub async fn delete_workflow(pool: &PgPool, workflow_id: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM workflows WHERE workflow_id = $1")
         .bind(workflow_id)
-        .execute(&mut *tx)
+        .execute(pool)
         .await?;
-    sqlx::query("DELETE FROM workspace_workflows WHERE id = $1")
-        .bind(workflow_id)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
     Ok(())
 }
 
 /// Find every **active** workflow whose `github-issue-webhook` trigger
-/// targets this repo and matches the supplied label set. The webhook router
+/// targets this repo and matches the supplied label. The webhook router
 /// calls this to decide which workflows should fire `trigger.fired` for a
 /// given `issues.labeled` payload.
+///
+/// The match runs against `trigger_config -> 'repo'` and
+/// `trigger_config -> 'label'` because spine packs those into the JSON
+/// (mirror history); GIN-indexing isn't worth it at v1's volume.
 pub async fn find_active_github_workflows_for_label(
-    pool: &AnyPool,
+    pool: &PgPool,
+    install_id: i64,
     repo_owner: &str,
     repo_name: &str,
     label: &str,
 ) -> anyhow::Result<Vec<Workflow>> {
-    // Bind the trigger-kind string via the enum's `Display` so the SQL
-    // doesn't drift if the string representation ever changes.
-    let trigger_kind = TriggerKind::GithubIssueWebhook.to_string();
-    let rows = sqlx::query_as::<_, WorkflowRow>(
-        "SELECT id, workspace_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
-                install_id, preset_id, active, created_by, created_at, updated_at \
-         FROM workspace_workflows \
-         WHERE active = 1 AND trigger_kind = $1 \
-           AND repo_owner = $2 AND repo_name = $3 AND trigger_label = $4",
+    let repo = format!("{repo_owner}/{repo_name}");
+    let install_id_text = install_id.to_string();
+    // Filter on `install_id` too: GitHub deliveries carry the install
+    // they came from, and two workspaces can each watch the same
+    // `(repo, label)` through different installs. Without this clause
+    // a webhook delivered for install A would also fire workflows
+    // registered under install B.
+    let rows = sqlx::query(
+        "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                workspace_id, install_id, created_by, created_at, updated_at \
+           FROM workflows \
+          WHERE active = TRUE \
+            AND trigger_kind = 'github_issue_webhook' \
+            AND install_id = $1 \
+            AND trigger_config ->> 'repo'  = $2 \
+            AND trigger_config ->> 'label' = $3",
     )
-    .bind(&trigger_kind)
-    .bind(repo_owner)
-    .bind(repo_name)
+    .bind(&install_id_text)
+    .bind(&repo)
     .bind(label)
     .fetch_all(pool)
     .await?;
-    rows.into_iter().map(|r| r.try_into()).collect()
+    rows.into_iter().map(row_to_workflow).collect()
 }
 
-/// Find every **active** workflow whose `github-issue-webhook` trigger
-/// targets this repo + label, scoped to a single workspace. Used by the
-/// dashboard's manual-replay route so the matched set respects the
-/// caller's workspace boundary even when the same `(repo_owner, repo_name)`
-/// is connected to multiple workspaces.
+/// Same as [`find_active_github_workflows_for_label`] but scoped to a
+/// single workspace. Used by the dashboard's manual-replay route so the
+/// matched set respects the caller's workspace boundary even when the
+/// same `(repo_owner, repo_name)` is connected to multiple workspaces.
 pub async fn find_active_github_workflows_for_label_in_workspace(
-    pool: &AnyPool,
+    pool: &PgPool,
     workspace_id: &str,
     repo_owner: &str,
     repo_name: &str,
     label: &str,
 ) -> anyhow::Result<Vec<Workflow>> {
-    let trigger_kind = TriggerKind::GithubIssueWebhook.to_string();
-    let rows = sqlx::query_as::<_, WorkflowRow>(
-        "SELECT id, workspace_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
-                install_id, preset_id, active, created_by, created_at, updated_at \
-         FROM workspace_workflows \
-         WHERE active = 1 AND workspace_id = $1 AND trigger_kind = $2 \
-           AND repo_owner = $3 AND repo_name = $4 AND trigger_label = $5",
+    let repo = format!("{repo_owner}/{repo_name}");
+    let rows = sqlx::query(
+        "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                workspace_id, install_id, created_by, created_at, updated_at \
+           FROM workflows \
+          WHERE active = TRUE \
+            AND workspace_id = $1 \
+            AND trigger_kind = 'github_issue_webhook' \
+            AND trigger_config ->> 'repo'  = $2 \
+            AND trigger_config ->> 'label' = $3",
     )
     .bind(workspace_id)
-    .bind(&trigger_kind)
-    .bind(repo_owner)
-    .bind(repo_name)
+    .bind(&repo)
     .bind(label)
     .fetch_all(pool)
     .await?;
-    rows.into_iter().map(|r| r.try_into()).collect()
+    rows.into_iter().map(row_to_workflow).collect()
 }
 
 /// All active `github-issue-webhook` workflows for `(workspace, repo)` —
 /// returned without label filtering so callers iterating over many
 /// candidate labels can do one round-trip and partition in-memory.
 pub async fn find_active_github_workflows_for_workspace_repo(
-    pool: &AnyPool,
+    pool: &PgPool,
     workspace_id: &str,
     repo_owner: &str,
     repo_name: &str,
 ) -> anyhow::Result<Vec<Workflow>> {
-    let trigger_kind = TriggerKind::GithubIssueWebhook.to_string();
-    let rows = sqlx::query_as::<_, WorkflowRow>(
-        "SELECT id, workspace_id, name, trigger_kind, repo_owner, repo_name, trigger_label, \
-                install_id, preset_id, active, created_by, created_at, updated_at \
-         FROM workspace_workflows \
-         WHERE active = 1 AND workspace_id = $1 AND trigger_kind = $2 \
-           AND repo_owner = $3 AND repo_name = $4",
+    let repo = format!("{repo_owner}/{repo_name}");
+    let rows = sqlx::query(
+        "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                workspace_id, install_id, created_by, created_at, updated_at \
+           FROM workflows \
+          WHERE active = TRUE \
+            AND workspace_id = $1 \
+            AND trigger_kind = 'github_issue_webhook' \
+            AND trigger_config ->> 'repo' = $2",
     )
     .bind(workspace_id)
-    .bind(&trigger_kind)
-    .bind(repo_owner)
-    .bind(repo_name)
+    .bind(&repo)
     .fetch_all(pool)
     .await?;
-    rows.into_iter().map(|r| r.try_into()).collect()
+    rows.into_iter().map(row_to_workflow).collect()
 }
 
 /// Whether any other active workflow on `(repo_owner, repo_name)` still
 /// needs webhook delivery. Used by the deactivation hook to decide if it
 /// can deregister the repo-level webhook.
 pub async fn any_other_active_workflow_on_repo(
-    pool: &AnyPool,
+    pool: &PgPool,
     repo_owner: &str,
     repo_name: &str,
     exclude_workflow_id: &str,
 ) -> anyhow::Result<bool> {
+    let repo = format!("{repo_owner}/{repo_name}");
     let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM workspace_workflows \
-         WHERE active = 1 AND repo_owner = $1 AND repo_name = $2 AND id <> $3",
+        "SELECT COUNT(*) FROM workflows \
+          WHERE active = TRUE \
+            AND trigger_kind = 'github_issue_webhook' \
+            AND trigger_config ->> 'repo' = $1 \
+            AND workflow_id <> $2",
     )
-    .bind(repo_owner)
-    .bind(repo_name)
+    .bind(&repo)
     .bind(exclude_workflow_id)
     .fetch_one(pool)
     .await?;
     Ok(count > 0)
 }
 
-/// Look up the webhook-secret cipher for a given numeric install id.
-///
-/// Outer `Option` distinguishes installation presence so the webhook
-/// handler can fail closed on genuinely unknown installations while still
-/// falling back to the global App secret for installs registered via the
-/// OAuth callback (which persist without a cipher):
-/// - `None` — no row for this `install_id` (unknown installation).
-/// - `Some(None)` — row exists, no per-install cipher stored.
-/// - `Some(Some(cipher))` — row exists with a per-install cipher.
-pub async fn get_install_webhook_secret_cipher(
-    pool: &AnyPool,
-    install_id: i64,
-) -> anyhow::Result<Option<Option<String>>> {
-    let row: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT webhook_secret_cipher FROM github_app_installations WHERE install_id = $1",
-    )
-    .bind(install_id)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row.map(|(c,)| c))
-}
-
-/// Resolve `(install_id, repo_owner, repo_name)` for a workflow — used by the
-/// activation hook to know which install token to mint.
+/// Resolve `(install_id, repo_owner, repo_name)` for a workflow — used by
+/// the activation hook to know which install token to mint.
 pub async fn get_workflow_install_target(
-    pool: &AnyPool,
+    pool: &PgPool,
     workflow_id: &str,
 ) -> anyhow::Result<Option<(i64, String, String)>> {
-    let row: Option<(i64, String, String)> = sqlx::query_as(
-        "SELECT install_id, repo_owner, repo_name FROM workspace_workflows WHERE id = $1",
-    )
-    .bind(workflow_id)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row)
+    let row =
+        sqlx::query("SELECT install_id, trigger_config FROM workflows WHERE workflow_id = $1")
+            .bind(workflow_id)
+            .fetch_optional(pool)
+            .await?;
+    let Some(row) = row else { return Ok(None) };
+    let install_id_text: Option<String> = row.try_get("install_id").ok();
+    let install_id: i64 = install_id_text
+        .as_deref()
+        .and_then(|s| s.parse::<i64>().ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!("workflow {workflow_id} has missing/non-numeric install_id")
+        })?;
+    let cfg: serde_json::Value = row.try_get("trigger_config")?;
+    let (owner, name, _) = parse_trigger_config(&cfg)?;
+    Ok(Some((install_id, owner, name)))
+}
+
+// ── Row → struct helpers ──────────────────────────────────────────────────
+
+fn row_to_workflow(row: sqlx::postgres::PgRow) -> anyhow::Result<Workflow> {
+    let id: String = row.try_get("workflow_id")?;
+    let name: String = row.try_get("name")?;
+    let trigger_kind_raw: String = row.try_get("trigger_kind")?;
+    let trigger_config: serde_json::Value = row.try_get("trigger_config")?;
+    let active: bool = row.try_get("active")?;
+    let preset_id: Option<String> = row.try_get("preset_id")?;
+    let workspace_id: String = row.try_get("workspace_id")?;
+    let install_id_text: Option<String> = row.try_get("install_id")?;
+    // Typed read so a missing column errors loudly. NULL is still
+    // legal — spine migration 009 made `created_by` nullable, and
+    // pre-#156 rows persist that way until the owner re-activates.
+    // We collapse NULL to an empty string at the API boundary; the
+    // activation guard then fails the credential check with
+    // `no_credentials_for_workflow`, which is the user-visible signal
+    // to re-activate.
+    let created_by: Option<String> = row.try_get("created_by")?;
+    if created_by.is_none() {
+        tracing::warn!(
+            workflow_id = %row.try_get::<String, _>("workflow_id").unwrap_or_default(),
+            "workflow row has NULL created_by; activation will fail until owner re-activates"
+        );
+    }
+    let created_at: DateTime<Utc> = row.try_get("created_at")?;
+    let updated_at: DateTime<Utc> = row.try_get("updated_at")?;
+
+    let trigger_kind = trigger_kind_from_spine(&trigger_kind_raw)?;
+    let (repo_owner, repo_name, trigger_label) = parse_trigger_config(&trigger_config)?;
+    let install_id: i64 = install_id_text
+        .as_deref()
+        .and_then(|s| s.parse::<i64>().ok())
+        .ok_or_else(|| anyhow::anyhow!("workflow {id} has missing/non-numeric install_id"))?;
+
+    Ok(Workflow {
+        id,
+        workspace_id,
+        name,
+        trigger_kind,
+        repo_owner,
+        repo_name,
+        trigger_label,
+        install_id,
+        preset_id,
+        active,
+        created_by: created_by.unwrap_or_default(),
+        created_at,
+        updated_at,
+    })
+}
+
+/// Stage rows on spine don't carry an explicit `id` (PK is
+/// `(workflow_id, stage_order)`). Synthesize a stable `${workflow_id}#${seq}`
+/// string for the dashboard's per-stage anchors — the same input always
+/// produces the same id, which is the contract callers rely on.
+fn row_to_stage(row: sqlx::postgres::PgRow) -> anyhow::Result<WorkflowStage> {
+    let workflow_id: String = row.try_get("workflow_id")?;
+    let stage_order: i32 = row.try_get("stage_order")?;
+    let name: String = row.try_get("name")?;
+    let params: serde_json::Value = row.try_get("params")?;
+    let gate_kind = name
+        .parse::<GateKind>()
+        .map_err(|e| anyhow::anyhow!("workflow_stages.name not a known gate kind ({name}): {e}"))?;
+    Ok(WorkflowStage {
+        id: format!("{workflow_id}#{stage_order}"),
+        workflow_id,
+        seq: stage_order,
+        gate_kind,
+        params,
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    //! Pure-function unit tests for the translation helpers. Round-trip
+    //! coverage against a real Postgres lives in
+    //! `tests/workflow_db_pg.rs` (gated on `DATABASE_URL`).
+
     use super::*;
-    use crate::core::workflow::{GateKind, TriggerKind};
-    use crate::server::db::run_migrations;
-    use chrono::Utc;
-    use serde_json::json;
-    use sqlx::pool::PoolOptions;
-    use uuid::Uuid;
+    use crate::core::workflow::{TriggerKind, Workflow};
 
-    async fn pool() -> AnyPool {
-        sqlx::any::install_default_drivers();
-        let pool = PoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .expect("sqlite in-memory connect");
-        run_migrations(&pool).await.expect("migrations");
-        pool
+    #[test]
+    fn agent_session_maps_to_in_progress() {
+        let (state, gates) =
+            translate_stage(GateKind::AgentSession, &json!({"action": "implement"}));
+        assert_eq!(state, Some("in_progress"));
+        assert_eq!(gates[0]["kind"], "agent_session");
+        assert_eq!(gates[0]["shaping_intent"]["action"], "implement");
     }
 
-    fn sample_workflow(workspace: &str, repo: &str, label: &str, active: bool) -> Workflow {
-        let now = Utc::now();
-        Workflow {
-            id: format!("wf_{}", Uuid::new_v4()),
-            workspace_id: workspace.to_string(),
-            name: "sdd".to_string(),
+    #[test]
+    fn external_check_pulls_check_name() {
+        let (state, gates) =
+            translate_stage(GateKind::ExternalCheck, &json!({"check_name": "ci/test"}));
+        assert_eq!(state, Some("under_review"));
+        assert_eq!(gates[0]["kind"], "external_check");
+        assert_eq!(gates[0]["check_name"], "ci/test");
+    }
+
+    #[test]
+    fn manual_approval_defaults_signal_kind() {
+        let (_, gates) = translate_stage(GateKind::ManualApproval, &json!({}));
+        assert_eq!(gates[0]["signal_kind"], "dashboard_approve");
+    }
+
+    #[test]
+    fn trigger_kind_round_trips_through_spine_form() {
+        let s = trigger_kind_to_spine(TriggerKind::GithubIssueWebhook);
+        assert_eq!(s, "github_issue_webhook");
+        assert_eq!(
+            trigger_kind_from_spine(s).unwrap(),
+            TriggerKind::GithubIssueWebhook
+        );
+    }
+
+    #[test]
+    fn trigger_config_round_trips() {
+        let w = Workflow {
+            id: "wf_x".into(),
+            workspace_id: "w".into(),
+            name: "x".into(),
             trigger_kind: TriggerKind::GithubIssueWebhook,
-            repo_owner: "acme".to_string(),
-            repo_name: repo.to_string(),
-            trigger_label: label.to_string(),
+            repo_owner: "owner".into(),
+            repo_name: "repo".into(),
+            trigger_label: "planned".into(),
             install_id: 42,
-            preset_id: Some("github-issue-to-pr".to_string()),
-            active,
-            created_by: "u1".to_string(),
-            created_at: now,
-            updated_at: now,
-        }
-    }
-
-    fn agent_stage(workflow_id: &str) -> WorkflowStage {
-        WorkflowStage {
-            id: Uuid::new_v4().to_string(),
-            workflow_id: workflow_id.to_string(),
-            seq: 0,
-            gate_kind: GateKind::AgentSession,
-            params: json!({"action": "implement-and-open-pr"}),
-        }
-    }
-
-    #[tokio::test]
-    async fn insert_and_get_round_trip() {
-        let pool = pool().await;
-        let wf = sample_workflow("w1", "widgets", "spec", false);
-        let stage = agent_stage(&wf.id);
-        insert_workflow_with_stages(&pool, &wf, std::slice::from_ref(&stage))
-            .await
-            .unwrap();
-
-        let loaded = get_workflow(&pool, &wf.id).await.unwrap().unwrap();
-        assert_eq!(loaded.id, wf.id);
-        assert_eq!(loaded.trigger_kind, TriggerKind::GithubIssueWebhook);
-        assert!(!loaded.active);
-
-        let stages = list_stages_for_workflow(&pool, &wf.id).await.unwrap();
-        assert_eq!(stages.len(), 1);
-        assert_eq!(stages[0].gate_kind, GateKind::AgentSession);
-    }
-
-    #[tokio::test]
-    async fn active_lookup_filters_on_label_and_repo() {
-        let pool = pool().await;
-        let wf_a = sample_workflow("w1", "widgets", "spec", true);
-        let wf_b = sample_workflow("w1", "widgets", "bug", true);
-        let wf_c = sample_workflow("w1", "widgets", "spec", false); // inactive
-        let wf_d = sample_workflow("w1", "gadgets", "spec", true); // wrong repo
-        for wf in [&wf_a, &wf_b, &wf_c, &wf_d] {
-            insert_workflow_with_stages(&pool, wf, std::slice::from_ref(&agent_stage(&wf.id)))
-                .await
-                .unwrap();
-        }
-
-        let hits = find_active_github_workflows_for_label(&pool, "acme", "widgets", "spec")
-            .await
-            .unwrap();
-        let ids: Vec<_> = hits.iter().map(|w| w.id.as_str()).collect();
-        assert_eq!(ids, vec![wf_a.id.as_str()]);
-    }
-
-    #[tokio::test]
-    async fn workspace_scoped_lookup_excludes_other_workspaces() {
-        let pool = pool().await;
-        let wf_a = sample_workflow("w1", "widgets", "spec", true);
-        let wf_b = sample_workflow("w2", "widgets", "spec", true);
-        for wf in [&wf_a, &wf_b] {
-            insert_workflow_with_stages(&pool, wf, std::slice::from_ref(&agent_stage(&wf.id)))
-                .await
-                .unwrap();
-        }
-        let hits = find_active_github_workflows_for_label_in_workspace(
-            &pool, "w1", "acme", "widgets", "spec",
-        )
-        .await
-        .unwrap();
-        let ids: Vec<_> = hits.iter().map(|w| w.id.as_str()).collect();
-        assert_eq!(ids, vec![wf_a.id.as_str()]);
-    }
-
-    #[tokio::test]
-    async fn set_active_and_any_other_active_works() {
-        let pool = pool().await;
-        let wf_a = sample_workflow("w1", "widgets", "spec", true);
-        let wf_b = sample_workflow("w1", "widgets", "bug", true);
-        for wf in [&wf_a, &wf_b] {
-            insert_workflow_with_stages(&pool, wf, std::slice::from_ref(&agent_stage(&wf.id)))
-                .await
-                .unwrap();
-        }
-        assert!(
-            any_other_active_workflow_on_repo(&pool, "acme", "widgets", &wf_a.id)
-                .await
-                .unwrap()
-        );
-        set_workflow_active(&pool, &wf_b.id, false).await.unwrap();
-        assert!(
-            !any_other_active_workflow_on_repo(&pool, "acme", "widgets", &wf_a.id)
-                .await
-                .unwrap()
+            preset_id: None,
+            active: true,
+            created_by: "u".into(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let cfg = trigger_config_for(&w);
+        assert_eq!(cfg["repo"], "owner/repo");
+        assert_eq!(cfg["label"], "planned");
+        let (owner, name, label) = parse_trigger_config(&cfg).unwrap();
+        assert_eq!(
+            (owner.as_str(), name.as_str(), label.as_str()),
+            ("owner", "repo", "planned")
         );
     }
 
-    #[tokio::test]
-    async fn delete_workflow_drops_row_and_stages() {
-        let pool = pool().await;
-        let wf = sample_workflow("w1", "widgets", "spec", false);
-        insert_workflow_with_stages(&pool, &wf, std::slice::from_ref(&agent_stage(&wf.id)))
-            .await
-            .unwrap();
-
-        delete_workflow(&pool, &wf.id).await.unwrap();
-
-        assert!(get_workflow(&pool, &wf.id).await.unwrap().is_none());
-        let stages = list_stages_for_workflow(&pool, &wf.id).await.unwrap();
-        assert!(stages.is_empty());
-    }
-
-    #[tokio::test]
-    async fn list_workflows_for_workspace_scopes() {
-        let pool = pool().await;
-        let wf_a = sample_workflow("w1", "widgets", "spec", true);
-        let wf_b = sample_workflow("w2", "widgets", "spec", true);
-        for wf in [&wf_a, &wf_b] {
-            insert_workflow_with_stages(&pool, wf, std::slice::from_ref(&agent_stage(&wf.id)))
-                .await
-                .unwrap();
-        }
-        let w1 = list_workflows_for_workspace(&pool, "w1").await.unwrap();
-        assert_eq!(w1.len(), 1);
-        assert_eq!(w1[0].workspace_id, "w1");
+    #[test]
+    fn parse_trigger_config_rejects_malformed() {
+        assert!(parse_trigger_config(&json!({})).is_err());
+        assert!(parse_trigger_config(&json!({"repo": "no-slash", "label": "x"})).is_err());
+        assert!(parse_trigger_config(&json!({"repo": "a/b"})).is_err());
     }
 }

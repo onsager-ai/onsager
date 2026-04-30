@@ -45,14 +45,14 @@ This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md
 captures the decision to make it machine-checkable and the six-lever
 execution plan that spec #131 tracks (A–F: persisted rule →
 mechanical guardrails → finish ADR 0001 migration → spine as SoT →
-registry-backed event types → API/UI contract enforcement). Levers B,
-C, and F have landed and are CI-enforced via `lint_seams` and
-`lint_api_contract` (see status below); D and E remain open and are
-still review-time discipline — treat the drift patterns below as the
-working heuristics for the open levers.
+registry-backed event types → API/UI contract enforcement). Levers
+B, C, D, and F have landed and are CI-enforced via `lint_seams` and
+`lint_api_contract` (see status below); E remains open and is still
+review-time discipline — treat the drift patterns below as the
+working heuristic until the registry manifest lands.
 
 Lever status (canonical: ADR 0004's adoption checklist). As of
-2026-04-30: A, B, C, F have landed; D and E are open.
+2026-04-30: A, B, C, D, F have landed; E is open.
 
 - **A** (PR #144): rule persisted in `CLAUDE.md` + skills.
 - **B**: `xtask/src/lint_seams.rs` enforces arch-deps, references
@@ -67,8 +67,12 @@ Lever status (canonical: ADR 0004's adoption checklist). As of
   `forge.gate_requested` / `synodic.gate_verdict` and
   `forge.shaping_dispatched` / `stiglab.session_completed` (with
   `stiglab.shaping_result_ready` emitted alongside it).
-- **D** (open): `crates/stiglab/src/server/workflow_spine_mirror.rs`
-  and the `BundleId` → `ArtifactVersionId` alias still in tree.
+- **D** (#149): `workflow_spine_mirror.rs` is gone, stiglab's
+  `workspace_workflows` / `workspace_workflow_stages` collapse into
+  the spine `workflows` / `workflow_stages` tables (migration 013
+  backfills + drops), the `BundleId` → `ArtifactVersionId` alias is
+  gone (#219), and `workspace_install_ref` was renamed `install_id`
+  (#219). One schema, one writer.
 - **E** (#150, open): producer-without-consumer is a reminder in
   `lint_seams` pending the registry manifest.
 - **F** (PR #207): `xtask/src/lint_api_contract.rs` asserts every
@@ -115,10 +119,10 @@ the seam** over a bridge. If a bridge is the right call for now, file a
 follow-up issue with a `bridge-debt` label and a target removal date.
 
 - **Parallel schemas across subsystems.** If two subsystems each persist their
-  own version of the same concept (e.g. stiglab `tenant_workflows` vs spine
-  `workflows`, PR #129), the spine wins — the private table should be
-  collapsed into the spine table with a discriminator column (e.g. `tenant_id`).
-  The mirror/translator pattern is a bridge, not a destination.
+  own version of the same concept (former drift, retired by Lever D #149:
+  stiglab `workspace_workflows` vs spine `workflows`), the spine wins — the
+  private table is collapsed into the spine table with a `workspace_id`
+  discriminator. The mirror/translator pattern is a bridge, not a destination.
 - **Producer with no consumer.** A subsystem can emit events that nothing
   consumes if a consumer is coded but undeployed (PR #127). Treat new event
   types as a contract: producer + consumer + deploy manifest land together,

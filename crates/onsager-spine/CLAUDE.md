@@ -57,10 +57,11 @@ What this means for the spine specifically:
   listener pair, not a request/response surface. ADR 0001 documents
   why; spec #131 is closing the last place this is still violated.
 - **Spine tables are the single source of truth.** Subsystem-private
-  tables that mirror a spine concept (e.g. `tenant_workflows` ↔
-  `workflows`, PR #129) are the Lever D drift pattern: collapse into
-  the spine table with a discriminator column rather than building a
-  mirror.
+  tables that mirror a spine concept are the Lever D drift pattern:
+  collapse into the spine table with a discriminator column rather
+  than building a mirror. Former canonical example — stiglab's
+  `workspace_workflows` ↔ spine `workflows` — was retired by Lever D
+  (#149); the spine is now the only writer of workflow schema.
 
 See [ADR 0001](../../docs/adr/0001-event-bus-coordination-model.md) for
 the original decision and spec #131 for the six-lever enforcement plan.

@@ -17,7 +17,7 @@ use axum::http::{Request, StatusCode};
 use chrono::Utc;
 use ring::hmac;
 use sqlx::pool::PoolOptions;
-use sqlx::AnyPool;
+use sqlx::{AnyPool, PgPool};
 use stiglab::core::workflow::{TriggerKind, Workflow, WorkflowStage};
 use stiglab::core::{
     GateKind, GitHubAccountType, GitHubAppInstallation, Workspace, WorkspaceMember,
@@ -25,6 +25,7 @@ use stiglab::core::{
 use stiglab::server::auth::encrypt_credential;
 use stiglab::server::config::ServerConfig;
 use stiglab::server::db;
+use stiglab::server::spine::SpineEmitter;
 use stiglab::server::state::AppState;
 use stiglab::server::workflow_db;
 use tower::ServiceExt;
@@ -42,6 +43,28 @@ async fn test_pool() -> AnyPool {
         .expect("sqlite connect");
     db::run_migrations(&pool).await.expect("migrations");
     pool
+}
+
+/// Spine emitter wired to `DATABASE_URL` for tests that seed
+/// `workflows` rows. Returns `None` when the env var is unset so the
+/// test can skip cleanly in a sqlite-only run; matches the convention
+/// in `crates/onsager-warehouse/tests/warehouse_flow.rs`. CI provides
+/// the URL via the rust.yml `postgres:16` service container; locally
+/// `just dev` exposes one on `:5432`.
+async fn try_spine() -> Option<SpineEmitter> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    Some(SpineEmitter::connect(&url).await.expect("spine connect"))
+}
+
+/// Best-effort cleanup so a fresh test run on an existing DB doesn't
+/// trip over leftover rows from a prior failed run. Targeted at
+/// `workspace_id` — each test seeds a fresh random UUID workspace,
+/// so the predicate is narrow enough to keep parallel tests isolated.
+async fn reset_spine_workflows(spine: &PgPool, workspace_id: &str) {
+    let _ = sqlx::query("DELETE FROM workflows WHERE workspace_id = $1")
+        .bind(workspace_id)
+        .execute(spine)
+        .await;
 }
 
 async fn seed_workspace_and_installation(pool: &AnyPool, install_numeric_id: i64) -> String {
@@ -148,7 +171,7 @@ async fn seed_workspace_and_installation_without_cipher(
     workspace_id
 }
 
-async fn seed_active_workflow(pool: &AnyPool, workspace_id: &str, install_id: i64, label: &str) {
+async fn seed_active_workflow(spine: &PgPool, workspace_id: &str, install_id: i64, label: &str) {
     let now = Utc::now();
     let wf = Workflow {
         id: format!("wf_{}", Uuid::new_v4()),
@@ -172,9 +195,15 @@ async fn seed_active_workflow(pool: &AnyPool, workspace_id: &str, install_id: i6
         gate_kind: GateKind::AgentSession,
         params: serde_json::json!({}),
     };
-    workflow_db::insert_workflow_with_stages(pool, &wf, &[stage])
+    workflow_db::insert_workflow_with_stages(spine, &wf, &[stage])
         .await
         .unwrap();
+}
+
+fn app_state_with_spine(pool: AnyPool, spine: Option<SpineEmitter>) -> AppState {
+    let mut s = app_state(pool);
+    s.spine = spine;
+    s
 }
 
 fn app_state(pool: AnyPool) -> AppState {
@@ -221,12 +250,17 @@ fn issues_labeled_payload(install_id: i64, label: &str) -> Vec<u8> {
 
 #[tokio::test]
 async fn webhook_with_valid_signature_returns_202() {
+    let Some(spine) = try_spine().await else {
+        eprintln!("skipping: DATABASE_URL not set");
+        return;
+    };
     let pool = test_pool().await;
     let install_id = 987;
     let workspace_id = seed_workspace_and_installation(&pool, install_id).await;
-    seed_active_workflow(&pool, &workspace_id, install_id, "spec").await;
+    reset_spine_workflows(spine.pool(), &workspace_id).await;
+    seed_active_workflow(spine.pool(), &workspace_id, install_id, "spec").await;
 
-    let state = app_state(pool);
+    let state = app_state_with_spine(pool, Some(spine));
     let config = state.config.clone();
     let app = stiglab::server::build_router(state, &config);
 
@@ -255,12 +289,17 @@ async fn webhook_alias_under_github_app_prefix_returns_202() {
     // no handler at `/api/github-app/webhook`, so an App configured to
     // POST its webhook there never reached the handler. Verify the alias
     // catches it.
+    let Some(spine) = try_spine().await else {
+        eprintln!("skipping: DATABASE_URL not set");
+        return;
+    };
     let pool = test_pool().await;
     let install_id = 987;
     let workspace_id = seed_workspace_and_installation(&pool, install_id).await;
-    seed_active_workflow(&pool, &workspace_id, install_id, "spec").await;
+    reset_spine_workflows(spine.pool(), &workspace_id).await;
+    seed_active_workflow(spine.pool(), &workspace_id, install_id, "spec").await;
 
-    let state = app_state(pool);
+    let state = app_state_with_spine(pool, Some(spine));
     let config = state.config.clone();
     let app = stiglab::server::build_router(state, &config);
 

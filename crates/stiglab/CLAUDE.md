@@ -40,12 +40,14 @@ What this means for stiglab specifically:
   `onsager-protocol` crate is gone). It must NOT depend on `forge`,
   `synodic`, or `ising`. CI will hard-fail this once Lever B's
   architecture lint lands.
-- **Spine as single source of truth.** `src/server/workflow_db.rs` +
-  `src/server/workflow_spine_mirror.rs` are the live drift example —
-  stiglab owns `workspace_workflows` while the spine owns `workflows`.
-  Lever D collapses these into the spine schema with a `workspace_id`
-  discriminator, in one PR, alongside removal of the mirror module.
-  New code: write to spine tables directly; do not extend the mirror.
+- **Spine as single source of truth.** Lever D (#149) is done. Stiglab
+  no longer keeps a private `workspace_workflows` schema —
+  `src/server/workflow_db.rs` writes the spine `workflows` /
+  `workflow_stages` tables directly, the `workflow_spine_mirror.rs`
+  translator is gone, and the source tables are dropped by the spine
+  migration. New code: write to spine tables directly via the spine
+  pool (`state.spine.as_ref().pool()`); do not introduce a
+  per-subsystem mirror table for spine-owned data.
 - **In-memory caches.** State the spine owns is read from the spine.
   Cache only with an explicit invalidation path tied to a spine event
   (the PR #123 drift pattern is what happens otherwise).
@@ -64,8 +66,8 @@ src/
     webhook_router.rs   <- GitHub webhook (allowed seam)
     spine.rs            <- spine read/write helpers (preferred path
                             for cross-subsystem coordination)
-    workflow_db.rs      <- Lever D target: collapse into spine
-    workflow_spine_mirror.rs  <- Lever D target: delete with the migration
+    workflow_db.rs      <- workflow CRUD against the spine pool
+                            (post-Lever D)
     ws/                 <- agent WebSocket (allowed seam)
 ```
 

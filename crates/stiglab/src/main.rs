@@ -145,16 +145,6 @@ async fn run_server(
 
     let state = AppState::new(pool.clone(), config.clone(), spine);
 
-    // Backfill the spine `workflows` schema from `workspace_workflows` so
-    // forge can resolve workflows created before the mirror landed (and
-    // self-heal any drift caused by best-effort CRUD-time mirroring).
-    if let Some(spine) = state.spine.as_ref() {
-        match stiglab::server::workflow_spine_mirror::backfill(&state.db, spine.pool()).await {
-            Ok(n) => tracing::info!("workflow spine backfill: synced {n} workflow(s)"),
-            Err(e) => tracing::warn!("workflow spine backfill failed: {e}"),
-        }
-    }
-
     // Spawn the forge.shaping_dispatched listener (spec #131 / ADR 0004
     // Lever C, phase 3). Replaces the legacy `forge → POST /api/shaping`
     // HTTP path with an event-driven flow: the listener consumes each
