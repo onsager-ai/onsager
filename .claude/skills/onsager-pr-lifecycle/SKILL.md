@@ -1,14 +1,14 @@
 ---
 name: onsager-pr-lifecycle
-description: Manage an Onsager PR after it's been pushed — spec-issue linking, CI triage, review-comment discipline, merge-conflict recovery on open PRs, webhook subscription, and label alignment. Triggers include "CI is failing", "check is red", "link this issue", "Closes vs Part of", "respond to review", "subscribe to PR", "triage PR", "the PR is ready", "PR has conflicts", "branch has conflicts with main", "merge conflict on the PR", or when a github-webhook-activity event arrives. Paired with `onsager-dev-process` (overall loop), `issue-spec` (spec creation), `onsager-pre-push` (which owns the pre-push conflict walkthrough), and the GitHub-triggered Claude Routines under `.claude/routines/`.
+description: Manage an Onsager PR after it's been pushed — spec-issue linking, CI triage, review-comment discipline, merge-conflict recovery on open PRs, webhook subscription, and label alignment. Triggers include "CI is failing", "check is red", "link this issue", "Closes vs Part of", "respond to review", "subscribe to PR", "triage PR", "the PR is ready", "PR has conflicts", "branch has conflicts with main", "merge conflict on the PR", or when a github-webhook-activity event arrives. Paired with `onsager-dev-process` (overall loop), `issue-spec` (spec creation), and `onsager-pre-push` (which owns the pre-push conflict walkthrough).
 ---
 
 # onsager-pr-lifecycle
 
 Everything that happens after `git push` on an Onsager PR. Covers spec-issue
 linking (and its enforcement), CI triage, review-comment response discipline,
-webhook subscriptions, and the manual fallback for label alignment when
-routines aren't configured.
+webhook subscriptions, and the manual ticking of Plan items / umbrella
+trackers on merge.
 
 ## Tool discipline
 
@@ -35,8 +35,8 @@ available, and is deliberately limited to read-only audits.
 Don't add write-side scripts here. Anything that mutates GitHub state for
 Claude belongs as an `mcp__github__*` call documented in
 `references/github-ops.md`; anything that mutates state for humans
-belongs in a Claude routine or workflow under `.github/workflows/`,
-not in this skill's `scripts/`.
+belongs in a workflow under `.github/workflows/`, not in this skill's
+`scripts/`.
 
 ## Spec-issue linking (mandatory)
 
@@ -97,9 +97,9 @@ enforced post-push if the pre-push scan was skipped or overridden.
 
 For `Part of #N` PRs (and ideally all PRs), include a `## Delivers`
 subsection in the body listing the exact Plan items this PR ticks, copied
-verbatim from the spec's `## Plan`. The `pr-merged-progress` routine uses
-this on merge to tick the parent spec's checkboxes. Without it, a human
-has to tick them manually.
+verbatim from the spec's `## Plan`. After merge, use this list to tick
+the parent spec's checkboxes manually — see "Issue progress labels"
+below.
 
 Example PR body:
 
@@ -132,12 +132,12 @@ These transitions happen automatically:
 - PR closed unmerged with no other open PR → reverts to `planned` (via
   `pr-spec-sync.yml`).
 - PR merged with `Closes #N` → issue auto-closes (GitHub).
-- PR merged with `Part of #N` → Plan checkboxes tick on the parent spec
-  (via the `pr-merged-progress` Claude routine, if configured).
+- PR merged with `Part of #N` → Plan checkboxes on the parent spec are
+  ticked manually by whoever merges (or shortly after).
 
-**If the `pr-merged-progress` routine is NOT configured**, you are
-responsible for ticking Plan checkboxes on parent specs after merge. The
-label flips on open/close-unmerged always happen via the workflow.
+You are responsible for ticking Plan checkboxes on parent specs after
+merge. The label flips on open/close-unmerged always happen via the
+workflow.
 
 Never bypass the `draft → planned` gate from within this skill — that's a
 human decision. If the linked spec is still `draft`, comment on the PR
@@ -165,10 +165,8 @@ After merge, for each auto-closed or explicitly-closed issue in the PR:
    note that the tracker itself is now a candidate for closure — don't
    close it unilaterally (the author or a human decides), just flag it.
 
-The `pr-merged-progress` routine automates the common case. This section
-is the manual fallback for when (a) routines aren't configured,
-(b) routines ran but couldn't disambiguate, or (c) the tracker uses a
-non-standard checklist shape the routine didn't recognize.
+This refresh is manual. Run through it for every merged PR that closes
+(or `Part of`) a sub-issue in a tracker.
 
 ## CI triage
 
@@ -279,10 +277,6 @@ tags. The harness forwards them as user messages.
 - Events are already filtered to CI failures + reviews. Treat each as
   actionable; skip only if it's a duplicate of one you just addressed.
 
-Routine-triggered events (label flips, Plan checkbox ticks) do not flow
-through webhook subscription — they're handled in the routine's own
-session, visible at claude.ai/code under the routine's run list.
-
 ## Reporting back to the user
 
 After handling a webhook event, end with one or two sentences: what the
@@ -296,5 +290,5 @@ commit message in chat — the user can see it on the PR.
 | [`onsager-dev-process`](../onsager-dev-process/SKILL.md) | Top-level SDD loop; points here for the post-push stage. |
 | [`issue-spec`](../issue-spec/SKILL.md) | Creates the spec issue this PR links to. |
 | [`onsager-pre-push`](../onsager-pre-push/SKILL.md) | Runs before `git push`; enforces the spec-link check locally. |
-| [`.claude/routines/`](../../routines/README.md) | Automates the label transitions this skill describes manually. |
-| [`ci-triage`](../ci-triage/SKILL.md) | Shared failure taxonomy + `main-red` issue convention; called from `main-ci-failure` routine and from this skill's CI triage flow. |
+| [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) | Automates the open / close-unmerged label transitions. Plan-item ticks remain manual. |
+| [`ci-triage`](../ci-triage/SKILL.md) | Shared failure taxonomy + `main-red` issue convention; called from this skill's CI triage flow. |

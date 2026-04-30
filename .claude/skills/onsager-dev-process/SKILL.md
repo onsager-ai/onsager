@@ -1,16 +1,17 @@
 ---
 name: onsager-dev-process
-description: The end-to-end spec-issue-driven dev loop for Onsager — spec → branch → implement → PR → merge → closure. Use when asked "how do I start work", "what's the process", "SDD loop", "spec-driven development", "how do we ship a change", "from scratch what do I do", or when you're about to begin a non-trivial change and haven't yet decided how to split spec/PR. Delegates to `issue-spec` (spec writing), `onsager-pre-push` (pre-push checks), `onsager-pr-lifecycle` (post-push), and the GitHub-triggered Claude Routines under `.claude/routines/`.
+description: The end-to-end spec-issue-driven dev loop for Onsager — spec → branch → implement → PR → merge → closure. Use when asked "how do I start work", "what's the process", "SDD loop", "spec-driven development", "how do we ship a change", "from scratch what do I do", or when you're about to begin a non-trivial change and haven't yet decided how to split spec/PR. Delegates to `issue-spec` (spec writing), `onsager-pre-push` (pre-push checks), and `onsager-pr-lifecycle` (post-push).
 ---
 
 # onsager-dev-process
 
 The spec-issue-driven development (SDD) loop on Onsager. Every non-trivial
 change starts as a GitHub spec issue, proceeds through a PR that references
-it, and closes when the PR merges. When Claude Routines are configured,
-status labels on the issue track progress automatically; otherwise follow
-the manual fallback documented in `onsager-pr-lifecycle`. Humans only touch
-the `draft → planned` alignment gate.
+it, and closes when the PR merges. The `pr-spec-sync` GitHub Action handles
+the open / close-unmerged label flips deterministically; everything else
+(Plan-checkbox ticks, umbrella tracker refresh, `main-red` issue
+maintenance) is manual and documented in `onsager-pr-lifecycle` and
+`ci-triage`. Humans only touch the `draft → planned` alignment gate.
 
 ## The loop
 
@@ -27,9 +28,6 @@ the `draft → planned` alignment gate.
      │        │                                                        │
      │        │ label: planned                                         │
      │        ↓                                                        │
-     │   spec-planned-review routine  ← sanity check                   │
-     │        │                                                        │
-     │        ↓                                                        │
      │   branch + implement                                            │
      │        │                                                        │
      │        ↓                                                        │
@@ -45,7 +43,8 @@ the `draft → planned` alignment gate.
      │        ↓                                                        │
      │   merge                                                         │
      │        │                                                        │
-     │        │ pr-merged-progress routine → tick Plan items / close   │
+     │        │ Closes #N → GitHub auto-closes spec                    │
+     │        │ Part of #N → tick Plan items manually (pr-lifecycle)   │
      │        ↓                                                        │
      │   spec closed (Closes) OR Plan items ticked (Part of)           │
      │                                                                 │
@@ -79,10 +78,6 @@ Only a human moves the `draft` label to `planned`. This signals:
 - Design approach approved.
 - Scope and priority accepted.
 
-If the `spec-planned-review` routine is configured, it posts a sanity-check
-comment when the label flips. If the routine flags issues, fix them before
-starting implementation.
-
 Never bypass this gate automatically. An AI may draft the spec and propose
 the flip; it may not execute the flip.
 
@@ -92,7 +87,7 @@ Branch naming convention:
 
 - Human-owned branches: any name.
 - Claude-owned branches: `claude/spec-<N>-<slug>` or `claude/<descriptor>`.
-  The harness enforces the `claude/` prefix on cloud routines.
+  The harness enforces the `claude/` prefix on cloud sessions.
 
 Implement the spec's Plan items in order. Keep commits small and focused.
 Commit messages should be imperative and under 72 chars.
@@ -159,7 +154,8 @@ PR body must begin with a linking line:
 | Related work that shouldn't close the spec        | `Refs #N`      |
 
 Under `## Delivers`, list the Plan items this PR ticks (exact text from the
-spec's Plan). The `pr-merged-progress` routine uses this to tick checkboxes.
+spec's Plan). After merge, tick those checkboxes manually on the parent
+spec — see `onsager-pr-lifecycle`.
 
 If the PR is genuinely trivial (typo, doc-only, one-line obvious fix),
 apply the `trivial` label and skip the spec-linking requirement. Use
@@ -189,9 +185,9 @@ No human action needed on labels during review.
 ### 7. Merge
 
 - `Closes #N` PRs auto-close the spec on merge.
-- `Part of #N` / `Refs #N` PRs leave the spec open; the
-  `pr-merged-progress` routine ticks the delivered Plan items and, if all
-  sub-issues of a parent are closed, pings the parent.
+- `Part of #N` / `Refs #N` PRs leave the spec open; tick the delivered
+  Plan items manually on the parent spec, and if all sub-issues of a
+  parent are closed, ping the parent. See `onsager-pr-lifecycle`.
 - The `in-progress` label disappears when the issue closes; for parents,
   a human closes the parent once the spec is end-to-end verified.
 
@@ -233,9 +229,8 @@ The labels on a spec issue must reflect reality at all times:
 | (closed) | All Plan items delivered, spec closed. |
 
 The `pr-spec-sync` workflow handles the open and close-unmerged
-transitions; the `pr-merged-progress` routine handles Plan-item ticks on
-merge. If the merged-progress routine is disabled, the
-`onsager-pr-lifecycle` skill documents the manual transitions.
+transitions. Plan-item ticks on merge are manual; the
+`onsager-pr-lifecycle` skill documents the procedure.
 
 ## Anti-patterns (don't)
 
@@ -245,8 +240,9 @@ merge. If the merged-progress routine is disabled, the
 - **Moving `draft → planned` as the AI.** Human-only transition.
 - **Closing a spec manually when you meant `Closes #N`.** Let GitHub do it
   via the PR merge so the timeline has the auditable link.
-- **Editing Plan checkboxes to mark items done before the PR merges.** The
-  routine ticks them on merge. Editing them early breaks the audit trail.
+- **Editing Plan checkboxes to mark items done before the PR merges.**
+  Tick them on merge, not before. Editing them early breaks the audit
+  trail.
 - **Cross-subsystem PRs.** If a PR touches two subsystems (other than
   spine), it should have been split at the spec stage. Stop, split the
   spec, split the PR.
@@ -264,16 +260,11 @@ merge. If the merged-progress routine is disabled, the
 
 ## Delegation map
 
-| Stage | Skill / routine |
-|-------|-----------------|
+| Stage | Skill / workflow |
+|-------|------------------|
 | Write the spec | [`issue-spec`](../issue-spec/SKILL.md) |
-| Sanity-check `planned` specs | [`spec-planned-review`](../../routines/spec-planned-review.md) |
 | Pre-push checks | [`onsager-pre-push`](../onsager-pre-push/SKILL.md) |
 | On PR open → flip to `in-progress` | [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) |
 | CI triage, review, iterate | [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md) |
-| On PR merge → tick Plan items | [`pr-merged-progress`](../../routines/pr-merged-progress.md) |
+| On PR merge → tick Plan items / refresh tracker | [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md) (manual) |
 | On PR close (unmerged) → revert label | [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) |
-
-Routines live at [claude.ai/code/routines](https://claude.ai/code/routines);
-their version-controlled prompts are in `.claude/routines/`. See that
-directory's `README.md` for setup.

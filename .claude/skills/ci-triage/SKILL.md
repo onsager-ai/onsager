@@ -1,13 +1,14 @@
 ---
 name: ci-triage
-description: Triage failed CI runs on the Onsager repo — classify regression vs flake vs infra, maintain a single rolling `main-red` issue when main is broken, and point humans at the suspect commit. Use when a workflow fails on `main`, when the `main-ci-failure` routine hands off, or when a human asks "is main red?", "why did CI fail on main?", "triage this workflow run", "classify this failure". Paired with `onsager-pr-lifecycle` (PR-side CI triage) and the `web-testing` skill (invoked for `e2e` failures).
+description: Triage failed CI runs on the Onsager repo — classify regression vs flake vs infra, maintain a single rolling `main-red` issue when main is broken, and point humans at the suspect commit. Use when a workflow fails on `main`, or when a human asks "is main red?", "why did CI fail on main?", "triage this workflow run", "classify this failure". Paired with `onsager-pr-lifecycle` (PR-side CI triage) and the `web-testing` skill (invoked for `e2e` failures).
 ---
 
 # ci-triage
 
 Shared logic for classifying a failed CI workflow run and recording the
-outcome. Callable from the `main-ci-failure` routine (unattended) and from
-`onsager-pr-lifecycle` when a human is triaging a red check on an open PR.
+outcome. Used by humans (or Claude in an interactive session) when
+triaging a red `main` workflow or a red check on an open PR — the latter
+via `onsager-pr-lifecycle`.
 
 This skill owns the taxonomy, the de-dup rules for the `main-red` issue, and
 the issue template. Workflow-specific reproduction steps live in other skills
@@ -58,8 +59,8 @@ Before filing:
    `infra` or `needs-human` if applicable.
 
 When main goes green again (the next successful run on the same workflow),
-close the issue with a comment naming the green run id. The
-`main-ci-failure` routine handles this close path on success events.
+close the issue with a comment naming the green run id. This close step
+is manual.
 
 ## Issue body template
 
@@ -91,10 +92,11 @@ Keep the excerpt tight. Dumping the full log helps nobody.
 
 ## Reproducing locally
 
-If the routine is running unattended it can't run `cargo` or `pnpm` — it must
-classify from logs alone. A human invoking this skill via
-`onsager-pr-lifecycle` should reproduce before filing, using the commands in
+A human invoking this skill via `onsager-pr-lifecycle` should reproduce
+before filing, using the commands in
 [`onsager-pr-lifecycle`'s CI triage section](../onsager-pr-lifecycle/SKILL.md).
+For a `main` failure caught from outside a PR, check out `main` at the
+suspect SHA and run the same commands locally before filing.
 
 For `e2e` failures specifically, delegate classification to
 [`web-testing`'s triage mode](../web-testing/SKILL.md) — it handles
@@ -102,8 +104,8 @@ regression-vs-flake for browser-driven tests (the ambiguous case).
 
 ## Log access
 
-`WebFetch` **cannot read authenticated GitHub Actions logs** (403). From the
-routine you have:
+`WebFetch` **cannot read authenticated GitHub Actions logs** (403). The
+GitHub MCP gives you:
 
 - `mcp__github__pull_request_read` with `method: get_check_runs` — step
   names, status, timings (no log body).
@@ -138,6 +140,5 @@ prior commit; a real flake can mention a touched file by coincidence.
 
 | Surface | Role |
 |---------|------|
-| [`.claude/routines/main-ci-failure.md`](../../routines/main-ci-failure.md) | Unattended caller; fires on `workflow_run.completed` for main. |
 | [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md) | Interactive caller; humans use this when triaging a red PR check. |
 | [`web-testing`](../web-testing/SKILL.md) | Delegated to for `e2e` workflow classification. |
