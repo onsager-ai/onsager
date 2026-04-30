@@ -218,6 +218,13 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/workflow/kinds",
             get(routes::workflow_kinds::list_workflow_kinds),
         )
+        // Event-type registry manifest (spec #131 Lever E / #150).
+        // Static, human-reviewed manifest of every FactoryEventKind
+        // variant — which subsystems produce it and which consume it.
+        .route(
+            "/api/registry/events",
+            get(routes::registry_events::list_events),
+        )
         // Spine API — exposes shared event spine data to the dashboard
         .route("/api/spine/events", get(routes::spine::list_events))
         .route(

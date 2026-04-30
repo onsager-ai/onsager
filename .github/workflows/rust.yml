@@ -93,6 +93,8 @@ jobs:
         run: cargo run -p xtask --quiet -- lint-seams
       - name: API/UI contract lint (spec #131 Lever F / #151)
         run: cargo run -p xtask --quiet -- check-api-contract
+      - name: Event-type registry manifest check (spec #131 Lever E / #150)
+        run: cargo run -p xtask --quiet -- check-events
       - name: Apply database migrations
         run: |
           for f in crates/onsager-spine/migrations/*.sql; do

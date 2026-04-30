@@ -4,6 +4,7 @@
 //!     cargo run -p xtask -- gen-event-docs --check   # verify in sync
 //!     cargo run -p xtask -- lint-seams               # check the seam rule
 //!     cargo run -p xtask -- check-api-contract       # check dashboard ↔ backend surface
+//!     cargo run -p xtask -- check-events             # check event-type registry manifest (#150)
 //!     cargo run -p xtask -- slot <subcommand>        # per-worktree dev slot allocator (#194)
 //!
 //! The event catalog is derived from `crates/onsager-spine/src/factory_event.rs`
@@ -23,6 +24,7 @@
 //! `slot` allocates and manages per-worktree dev slots backed by docker-compose
 //! projects on disjoint ports. See [`slot`] for the full surface.
 
+mod check_events;
 mod lint_api_contract;
 mod lint_seams;
 mod slot;
@@ -57,10 +59,17 @@ fn main() -> ExitCode {
                 lint_api_contract::run()
             }
         }
+        Some("check-events") => {
+            if args.next().is_some() {
+                Err(anyhow!("check-events takes no arguments"))
+            } else {
+                check_events::run()
+            }
+        }
         Some("slot") => slot::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
+            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
         )),
     };
 
