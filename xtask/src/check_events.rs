@@ -388,7 +388,10 @@ fn extract_first_string(s: &str) -> Option<String> {
                 }
                 j += 1;
             }
-            if j <= bytes.len() {
+            // Only return when the closing `"` is actually found on this
+            // line — an unterminated open-quote (e.g. a multi-line raw
+            // string) must not be mis-parsed as an event kind.
+            if j < bytes.len() && bytes[j] == b'"' {
                 return Some(s[start..j].to_string());
             }
             return None;
@@ -531,6 +534,15 @@ mod tests {
             extract_first_string(r#"if x == "hello\"world""#),
             Some(r#"hello\"world"#.to_string())
         );
+    }
+
+    /// Regression: an unterminated quote on the line (e.g. the start of a
+    /// multi-line raw string) must not produce a partial match. Without
+    /// the `j < bytes.len()` guard this returned `Some("foo")` for the
+    /// fragment, which would mis-parse as an event kind.
+    #[test]
+    fn extract_first_string_returns_none_for_unterminated_quote() {
+        assert_eq!(extract_first_string(r#"let s = "foo"#), None);
     }
 
     #[test]

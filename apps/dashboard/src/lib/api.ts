@@ -453,9 +453,8 @@ export interface WorkflowKindInfo {
 
 // Wire shape of `GET /api/registry/events` — one row of the event-type
 // registry manifest (spec #131 Lever E / #150). Mirrors
-// `onsager_registry::EventDefinition`. Exact parity with the Rust
-// definition is enforced by the manifest's `manifest_serializes_to_json`
-// test on the backend side.
+// `onsager_registry::EventDefinition`; keep field names + the
+// `EventSubsystem` union in sync by hand when the Rust struct changes.
 export type EventSubsystem = 'forge' | 'stiglab' | 'synodic' | 'ising' | 'portal';
 
 export interface EventManifestEntry {
