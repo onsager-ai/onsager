@@ -178,7 +178,7 @@ A new bundle was sealed for an artifact (§5.1).
 | Field | Type | Description |
 |---|---|---|
 | `artifact_id` | `ArtifactId` |  |
-| `bundle_id` | `BundleId` |  |
+| `bundle_id` | `ArtifactVersionId` |  |
 | `version` | `u32` |  |
 
 ## `delivery` events
@@ -194,7 +194,7 @@ A delivery attempt succeeded; the receipt is stored on the delivery row (§5.3).
 
 | Field | Type | Description |
 |---|---|---|
-| `bundle_id` | `BundleId` |  |
+| `bundle_id` | `ArtifactVersionId` |  |
 | `consumer_id` | `String` |  |
 
 ### `delivery.failed`
@@ -206,7 +206,7 @@ A delivery attempt failed; includes whether the worker will retry or has marked 
 
 | Field | Type | Description |
 |---|---|---|
-| `bundle_id` | `BundleId` |  |
+| `bundle_id` | `ArtifactVersionId` |  |
 | `consumer_id` | `String` |  |
 | `reason` | `String` |  |
 | `abandoned` | `bool` | Whether the delivery has been abandoned (terminal) or will retry. |
