@@ -67,7 +67,7 @@ The `draft → planned` transition is the **human-AI alignment gate**. Only a hu
 
 `planned → in-progress` happens automatically when a PR referencing the issue is opened (via `.github/workflows/pr-spec-sync.yml`).
 
-`in-progress → closed` happens automatically on PR merge with a `Closes #N` keyword. `Part of #N` PRs don't close the parent; the routine updates the parent's Plan checkboxes instead.
+`in-progress → closed` happens automatically on PR merge with a `Closes #N` keyword. `Part of #N` PRs don't close the parent; the merger ticks the parent's Plan checkboxes manually (see `onsager-pr-lifecycle`).
 
 ## Sections
 
@@ -145,7 +145,7 @@ Per-session overrides are out of scope for now.
 - Items should be small enough to verify in isolation.
 - Order reflects implementation sequence.
 - If a plan has more than ~10 items, the spec is too big — split into sub-issues.
-- Checkboxes serve as progress tracking on the issue itself; the `pr-merged-progress` routine ticks them as `Part of #N` PRs merge.
+- Checkboxes serve as progress tracking on the issue itself; tick them manually as `Part of #N` PRs merge (see `onsager-pr-lifecycle`).
 
 ### Test
 

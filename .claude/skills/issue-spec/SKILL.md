@@ -305,7 +305,7 @@ Once a spec moves to `planned`:
 2. Follow the SDD loop in `onsager-dev-process`.
 3. Pre-push via `onsager-pre-push` (includes a spec-link check).
 4. PR body must include `Closes #N` (slice complete) or `Part of #N` (scaffolding).
-5. The `pr-spec-sync.yml` workflow flips the issue to `in-progress` on PR open; the `pr-merged-progress` routine handles merge.
+5. The `pr-spec-sync.yml` workflow flips the issue to `in-progress` on PR open; on merge GitHub auto-closes `Closes #N` issues and the merger ticks Plan items on `Part of #N` parents manually (see `onsager-pr-lifecycle`).
 
 ## References
 

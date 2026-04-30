@@ -119,8 +119,9 @@ mcp__github__unsubscribe_pr_activity
   pullNumber: <int>
 ```
 
-Routine-triggered events (label flips, Plan checkbox ticks) do **not** flow
-through this subscription — they run in the routine's own session.
+Workflow-triggered label flips (via `pr-spec-sync.yml`) do **not** flow
+through this subscription. Plan checkbox ticks on `Part of #N` parents
+are manual.
 
 ## Ticking an umbrella tracker checkbox
 

@@ -22,14 +22,14 @@ Four concrete observations from #40's trail:
    updated outside the transaction that owns the work*. Same defect
    class, different scale.
 2. **Umbrella tracker drift** — #40's Progress section required a manual
-   refresh comment to reflect reality. The `pr-merged-progress` routine
-   now refreshes umbrella trackers when sub-issues close. That routine is
-   an `ising.rule_proposed → safe-auto` loop (#36) in everything but
-   name.
+   refresh comment to reflect reality. Today this refresh is a manual
+   step in `onsager-pr-lifecycle`; the same shape — *observe sub-issue
+   close → propose checkbox tick → apply* — is the `ising.rule_proposed
+   → safe-auto` loop (#36) we want to automate.
 3. **Process lessons landing in skills** — the "multi-issue `Closes`
    discipline" lesson was captured in `onsager-pre-push`, not in code.
-   Skills, routines, and CLAUDE.md currently serve as the
-   human-readable supervisor policy (#37).
+   Skills and CLAUDE.md currently serve as the human-readable
+   supervisor policy (#37).
 4. **#40 as a Refract output** — "architectural review" decomposed into
    themes, reading order, dependency graph, and acceptance cut. That is
    exactly the shape `intent.submitted → refract.decomposed` (#35) is
@@ -58,7 +58,7 @@ rule → modify inner loop* — sliced by time horizon:
 | Horizon             | Primitive          | Current dev-process analog            |
 | ------------------- | ------------------ | ------------------------------------- |
 | per-intent          | Refract (#35)      | umbrella tracker (#40 itself)         |
-| hours–days          | Ising (#36)        | `pr-merged-progress` routine          |
+| hours–days          | Ising (#36)        | manual umbrella tracker refresh       |
 | per-decision        | Supervisor (#37)   | skills + CLAUDE.md + human sequencing |
 | per-week operator   | Productivity (#38) | commented updates on the tracker      |
 | per-call accounting | Budget (#39)       | `claude/*` session tokens (ungrouped) |
@@ -82,9 +82,9 @@ been observed.
 ### Positive
 
 - New subsystems get a *pre-existing fixture* for their acceptance
-  tests. #40 is Refract's fixture; the `pr-merged-progress` routine is
-  Ising's first concrete rule; CLAUDE.md + skills are Supervisor's
-  initial policy corpus.
+  tests. #40 is Refract's fixture; the manual umbrella-tracker refresh
+  step is Ising's first concrete rule waiting to be automated;
+  CLAUDE.md + skills are Supervisor's initial policy corpus.
 - Design conversations shift from "which feature next?" to "which loop
   is currently open?" — a sharper question that reveals dependencies
   across the #35/#36/#37/#38/#39 set.
@@ -121,10 +121,9 @@ PR-sized change.
       every new ADR, state the analog the decision already has in how we
       run the repo. ADR 0001's analog is the GitHub webhook bus; note
       this retroactively in 0001.
-- [ ] **Skill / routine template** (`.claude/skills/*/SKILL.md`,
-      `.claude/routines/*.md`) grows a "Factory primitive this
-      anticipates" section: state which Onsager primitive (if any) this
-      skill is a dev-process prototype of.
+- [ ] **Skill template** (`.claude/skills/*/SKILL.md`) grows a "Factory
+      primitive this anticipates" section: state which Onsager
+      primitive (if any) this skill is a dev-process prototype of.
 - [ ] **Umbrella tracker template** grows a "Fixture-for" field at the
       top: when a tracker is opened, declare which subsystem (if any)
       will eventually consume it as acceptance data.
@@ -146,8 +145,8 @@ Not a re-plan of the work — a re-statement of acceptance.
   met in a merged PR" — the #43 bug, automated.
 - **#37 Supervisor** — precondition: emit
   `supervisor.decision_requested` / `supervisor.decision_made` events
-  from the existing Claude Routines wherever a human currently
-  intervenes. Capture before synthesize.
+  from the existing GitHub Actions / skill-based dev-process surfaces
+  wherever a human currently intervenes. Capture before synthesize.
 - **#38 Productivity** — prototype metrics against the GitHub webhook
   stream first; switch to factory events once internal volume exists.
   Validates the metric shapes before committing to dashboards.
@@ -163,5 +162,4 @@ Not a re-plan of the work — a re-statement of acceptance.
   own small doc PR.
 - Any changes to subsystem scope beyond the acceptance-criteria tweaks
   noted above.
-- Making skills/routines self-modifying — that is the #37 endgame, not
-  this ADR.
+- Making skills self-modifying — that is the #37 endgame, not this ADR.

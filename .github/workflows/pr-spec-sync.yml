@@ -1,11 +1,9 @@
 name: pr-spec-sync
 
-# Keep linked spec-issue labels in sync with PR state without burning
-# Claude routine quota. Replaces the `pr-opened-progress` and
-# `pr-closed-unmerged` routines with deterministic GitHub Actions logic.
-# The merged-PR path still needs LLM judgment (Plan-checkbox mapping,
-# umbrella refresh, implicit-reference audit) and stays in the
-# `pr-merged-progress` routine.
+# Keep linked spec-issue labels in sync with PR state. Handles the
+# deterministic open / close-unmerged transitions; the merged-PR path
+# (Plan-checkbox mapping, umbrella refresh, implicit-reference audit)
+# is handled manually via the onsager-pr-lifecycle skill.
 
 on:
   pull_request:
