@@ -1,9 +1,10 @@
 //! GitHub webhook signature verification.
 //!
-//! GitHub signs every webhook delivery with HMAC-SHA256 using the per-app
-//! installation's webhook secret. The signature arrives in the
-//! `X-Hub-Signature-256` header as `"sha256=<hex digest>"`. Constant-time
-//! comparison is mandatory to avoid leaking the secret via timing.
+//! GitHub signs every webhook delivery with HMAC-SHA256 using the
+//! per-app installation's webhook secret. The signature arrives in the
+//! `X-Hub-Signature-256` header as `"sha256=<hex digest>"`.
+//! Constant-time comparison is mandatory to avoid leaking the secret
+//! via timing.
 
 use ring::hmac;
 
@@ -15,11 +16,8 @@ pub enum SignatureCheck {
     Malformed,
 }
 
-/// Verify a `sha256=...` signature header against the raw body using `secret`.
-///
-/// The header MUST be the full `sha256=<hex>` string GitHub sends. `secret`
-/// is the per-installation webhook secret (the plaintext, after the portal
-/// has decrypted `webhook_secret_cipher`).
+/// Verify a `sha256=...` signature header against the raw body using
+/// `secret`.
 pub fn verify_signature(header: &str, body: &[u8], secret: &[u8]) -> SignatureCheck {
     let Some(sig_hex) = header.strip_prefix("sha256=") else {
         return SignatureCheck::Malformed;
@@ -37,7 +35,6 @@ pub fn verify_signature(header: &str, body: &[u8], secret: &[u8]) -> SignatureCh
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ring::hmac;
 
     fn sign(body: &[u8], secret: &[u8]) -> String {
         let key = hmac::Key::new(hmac::HMAC_SHA256, secret);

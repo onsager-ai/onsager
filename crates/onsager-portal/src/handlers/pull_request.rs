@@ -12,9 +12,10 @@ use onsager_spine::factory_event::FactoryEventKind;
 use onsager_spine::EventMetadata;
 use serde_json::Value;
 
+use onsager_github::api::pulls::CheckConclusion;
+
 use crate::db::{self, InstallationRecord, PrLifecycleState};
 use crate::gate::{GateInput, Verdict};
-use crate::github::CheckConclusion;
 use crate::state::AppState;
 
 const GIT_NAMESPACE: &str = "git";
@@ -254,8 +255,7 @@ pub async fn handle(
 
             // Best-effort GitHub check run. Only attempted when a token is
             // configured — installation-token signing is a Phase 2 follow-up.
-            if state.config.github_token.is_some() {
-                let client = crate::github::Client::new(state.config.github_token.clone());
+            if let Some(tok) = state.config.github_token.as_deref() {
                 let (conclusion, summary) = match &v {
                     Verdict::Allow => (
                         CheckConclusion::Success,
@@ -264,14 +264,14 @@ pub async fn handle(
                     Verdict::Deny { reason } => {
                         // Post the rationale as a review comment so the
                         // contributor sees why the gate failed.
-                        if let Err(e) = client
-                            .post_issue_comment(
-                                owner,
-                                name,
-                                pr_number,
-                                &format!("**synodic/gate denied**: {reason}"),
-                            )
-                            .await
+                        if let Err(e) = onsager_github::api::issues::post_issue_comment(
+                            Some(tok),
+                            owner,
+                            name,
+                            pr_number,
+                            &format!("**synodic/gate denied**: {reason}"),
+                        )
+                        .await
                         {
                             tracing::warn!(error = %e, "Deny comment post failed");
                         }
@@ -289,9 +289,16 @@ pub async fn handle(
                         format!("synodic/gate: escalate — {reason}"),
                     ),
                 };
-                if let Err(e) = client
-                    .create_check_run(owner, name, &head_sha, "synodic/gate", conclusion, &summary)
-                    .await
+                if let Err(e) = onsager_github::api::pulls::create_check_run(
+                    Some(tok),
+                    owner,
+                    name,
+                    &head_sha,
+                    "synodic/gate",
+                    conclusion,
+                    &summary,
+                )
+                .await
                 {
                     tracing::warn!(error = %e, "check-run post failed");
                 }
@@ -326,41 +333,50 @@ pub async fn handle(
     // Phase 2 label-sync migration (`.github/workflows/pr-spec-sync.yml`).
     // Best-effort: only attempted when a github_token is configured. Failures
     // are logged so the workflow can stay live as a safety net during rollout.
-    if state.config.github_token.is_some() && !body.is_empty() {
-        let linked = crate::handlers::spec_link::linked_issues(&body);
-        if !linked.is_empty() {
-            let client = crate::github::Client::new(state.config.github_token.clone());
-            for issue_number in linked {
-                let result = match (act, merged) {
-                    (PrAction::Opened, _) => {
-                        client
-                            .set_label(owner, name, issue_number, "in-progress", true)
-                            .await
-                    }
-                    (PrAction::Closed, true) => {
-                        // PR merged — move spec from `in-progress` to `done`
-                        // to mirror the human-driven label progression.
-                        let _ = client
-                            .set_label(owner, name, issue_number, "in-progress", false)
+    if let Some(tok) = state.config.github_token.as_deref() {
+        if !body.is_empty() {
+            let linked = crate::handlers::spec_link::linked_issues(&body);
+            if !linked.is_empty() {
+                use onsager_github::api::issues::set_label;
+                for issue_number in linked {
+                    let result = match (act, merged) {
+                        (PrAction::Opened, _) => {
+                            set_label(Some(tok), owner, name, issue_number, "in-progress", true)
+                                .await
+                        }
+                        (PrAction::Closed, true) => {
+                            // PR merged — move spec from `in-progress` to `done`
+                            // to mirror the human-driven label progression.
+                            let _ = set_label(
+                                Some(tok),
+                                owner,
+                                name,
+                                issue_number,
+                                "in-progress",
+                                false,
+                            )
                             .await;
-                        client
-                            .set_label(owner, name, issue_number, "done", true)
-                            .await
-                    }
-                    (PrAction::Closed, false) => {
-                        // Closed without merge — revert to `planned` so the
-                        // spec re-enters the queue cleanly.
-                        let _ = client
-                            .set_label(owner, name, issue_number, "in-progress", false)
+                            set_label(Some(tok), owner, name, issue_number, "done", true).await
+                        }
+                        (PrAction::Closed, false) => {
+                            // Closed without merge — revert to `planned` so the
+                            // spec re-enters the queue cleanly.
+                            let _ = set_label(
+                                Some(tok),
+                                owner,
+                                name,
+                                issue_number,
+                                "in-progress",
+                                false,
+                            )
                             .await;
-                        client
-                            .set_label(owner, name, issue_number, "planned", true)
-                            .await
+                            set_label(Some(tok), owner, name, issue_number, "planned", true).await
+                        }
+                        (PrAction::Synchronize, _) => Ok(()),
+                    };
+                    if let Err(e) = result {
+                        tracing::warn!(error = %e, issue = issue_number, "spec label sync failed");
                     }
-                    (PrAction::Synchronize, _) => Ok(()),
-                };
-                if let Err(e) = result {
-                    tracing::warn!(error = %e, issue = issue_number, "spec label sync failed");
                 }
             }
         }

@@ -100,6 +100,21 @@ async fn run_server(
     let pool = db::init_pool(&config.database_url).await?;
     tracing::info!("database connected");
 
+    // Register the GitHub adapter into the spine `artifact_adapters`
+    // catalog (closes the empty-catalog drift from migration 004).
+    // The query is Postgres-specific (`ON CONFLICT`, JSONB cast) and
+    // the table only exists in the spine schema, so guard on the URL
+    // scheme — stiglab's dev default is SQLite.
+    if config.database_url.starts_with("postgres://")
+        || config.database_url.starts_with("postgresql://")
+    {
+        if let Err(e) = onsager_github::adapter::register_any(&pool, "default").await {
+            tracing::warn!("github adapter registration skipped: {e}");
+        }
+    } else {
+        tracing::debug!("skipping github adapter registration on non-Postgres backend");
+    }
+
     // Dev-login seeding (issue #193). Debug builds always materialize a
     // `${USER}@local` user + `dev` workspace + membership, idempotently,
     // so the LoginPage's "Dev Login" button always has a real user to
