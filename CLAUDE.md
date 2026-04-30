@@ -49,15 +49,26 @@ registry-backed event types → API/UI contract enforcement). Until the
 levers all land, the rule is review-time discipline; treat the drift
 patterns below as the working heuristics.
 
-Lever C status (#148): seam rule passing. The legacy
-`HttpStiglabDispatcher` / `HttpSynodicGate` HTTP RPCs in
-`crates/forge/src/cmd/serve.rs` are gone (phase 5), as are the
-`POST /api/shaping` and `POST /api/gate` endpoints they called.
-Forge ↔ stiglab/synodic coordination flows through the spine only —
-`forge.gate_requested` / `synodic.gate_verdict` and
-`forge.shaping_dispatched` / `stiglab.shaping_result_ready`. New code
-must not reintroduce sibling-subsystem HTTP calls; the seam-rule lint
-in `xtask` enforces this.
+Lever status (canonical: ADR 0004's adoption checklist). As of
+2026-04-30: A, B, C, F have landed; D and E are open.
+
+- **A** (PR #144): rule persisted in `CLAUDE.md` + skills.
+- **B**: `xtask/src/lint_seams.rs` enforces arch-deps, sibling-
+  subsystem HTTP, `serde(alias)`, `*_mirror.rs`, and legacy type
+  aliases. New code must not reintroduce sibling-subsystem HTTP
+  calls — the lint hard-fails.
+- **C** (#148): `HttpStiglabDispatcher` / `HttpSynodicGate` and
+  `POST /api/shaping` / `POST /api/gate` are gone. Forge ↔
+  stiglab/synodic flows through the spine only —
+  `forge.gate_requested` / `synodic.gate_verdict` and
+  `forge.shaping_dispatched` / `stiglab.shaping_result_ready`.
+- **D** (open): `crates/stiglab/src/server/workflow_spine_mirror.rs`
+  and the `BundleId` → `ArtifactVersionId` alias still in tree.
+- **E** (#150, open): producer-without-consumer is a reminder in
+  `lint_seams` pending the registry manifest.
+- **F** (PR #207): `xtask/src/lint_api_contract.rs` asserts every
+  backend route has a dashboard caller (or an allowlisted external-
+  only reason) and every dashboard call lands on a backend route.
 
 ## Internal aesthetic
 

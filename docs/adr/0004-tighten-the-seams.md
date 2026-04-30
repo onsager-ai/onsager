@@ -217,18 +217,31 @@ registry entry that CI validates.
 ## Adoption checklist
 
 Execution lives in the child specs of #131. Each lever's checklist
-is in its sub-issue:
+is in its sub-issue. Status as of 2026-04-30:
 
 - [x] **Lever A** — persist the rule in `CLAUDE.md` + skills.
       _Landed: PR #144._
-- [ ] **Lever B** — mechanical guardrails (no-escape-hatch CI lint).
-- [ ] **Lever C** — complete the ADR 0001 migration; delete
-      `onsager-protocol`.
+- [x] **Lever B** — mechanical guardrails (no-escape-hatch CI lint).
+      _Landed: `xtask/src/lint_seams.rs` enforces arch-deps, sibling-
+      subsystem HTTP, `serde(alias)`, `*_mirror.rs`, and legacy type
+      aliases; producer-without-consumer is gated on Lever E._
+- [x] **Lever C** — complete the ADR 0001 migration; delete
+      `onsager-protocol`. _Landed: closed by PR #148. The
+      `HttpStiglabDispatcher` / `HttpSynodicGate` RPCs are gone;
+      coordination flows through `forge.gate_requested` /
+      `synodic.gate_verdict` and `forge.shaping_dispatched` /
+      `stiglab.shaping_result_ready`._
 - [ ] **Lever D** — spine as SoT for workflows; remove
       `workflow_spine_mirror.rs` and the `BundleId` alias.
+      _Open: mirror module and alias still in tree._
 - [ ] **Lever E** — registry-backed event types + capability
-      advertisement.
-- [ ] **Lever F** — API/UI contract enforcement.
+      advertisement (#150). _Open: `lint_seams` carries the producer-
+      without-consumer reminder pending the registry manifest._
+- [x] **Lever F** — API/UI contract enforcement.
+      _Landed: `xtask/src/lint_api_contract.rs` (closed by PR #207)
+      asserts every backend route has a dashboard caller (or an
+      allowlisted external-only reason) and every dashboard call
+      lands on a backend route._
 
 ## Out of scope
 
