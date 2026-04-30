@@ -260,3 +260,31 @@ is in its sub-issue. Status as of 2026-04-30:
 - **A retroactive audit of every existing `serde(alias)` and type
   alias in the workspace.** Lever B's lint applies to *new* code;
   pre-existing aliases get triaged as their owning sub-issues land.
+
+## Amendment 2026-04-30 — clause-1 vs clause-2 ownership
+
+Spec #222 (promote `onsager-portal` to a first-class edge subsystem)
+surfaced a structural gap in the rule as originally stated: clause 2
+(subsystems coordinate via the spine, no sibling-subsystem HTTP) is
+machine-checkable and lever-B-enforced, but **clause 1 (the external
+HTTP boundary itself) had no concrete owner**. Stiglab carried it by
+default — every new external concern (OAuth callback, credential CRUD,
+webhook ingest, workflow CRUD, preset registry) landed in stiglab
+because stiglab was the only subsystem with a public HTTP surface, and
+stiglab consequently grew into a kitchen-sink edge.
+
+The amendment names the owner. **Clause 1 is owned by `portal`.**
+Portal becomes a peer of `forge` / `stiglab` / `synodic` / `ising`,
+governed by the same seam-rule discipline (clause 2 still applies — it
+coordinates with the factory subsystems exclusively via the spine, and
+must not import their crates). The distinguishing concern is the
+*outer skin*: portal is the only subsystem permitted to host public
+HTTP routes that aren't the spine read-API. Future external
+integrations (GitLab, Slack, Linear) attach to portal, not to a random
+factory subsystem.
+
+The lint-seams check already permits portal HTTP, so no enforcement
+change is required. The structural surgery — moving routes, schema, and
+the GitHub side-effects of `workflow_activation` — is scoped under
+spec #222 and gated on #149 (Lever D, landed) and #161 children A/B
+(workspace as first-class scope, landed).
