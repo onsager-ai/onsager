@@ -121,7 +121,7 @@ pub struct Workflow {
     #[serde(default)]
     pub preset_id: Option<String>,
     #[serde(default)]
-    pub workspace_install_ref: Option<String>,
+    pub install_id: Option<String>,
     /// User this workflow runs on behalf of (issue #156). Threaded into
     /// `ShapingRequest.created_by` so stiglab can decrypt the matching
     /// `CLAUDE_CODE_OAUTH_TOKEN`. `None` for workflows that pre-date the
@@ -205,7 +205,7 @@ mod tests {
             stages: vec![],
             active: true,
             preset_id: None,
-            workspace_install_ref: None,
+            install_id: None,
             created_by: None,
         };
         assert_eq!(wf.trigger_artifact_kind(), "github-issue");
@@ -236,7 +236,7 @@ mod tests {
             ],
             active: true,
             preset_id: None,
-            workspace_install_ref: None,
+            install_id: None,
             created_by: None,
         };
 
@@ -271,7 +271,7 @@ mod tests {
             }],
             active: true,
             preset_id: Some("github_issue_to_pr".into()),
-            workspace_install_ref: Some("install_42".into()),
+            install_id: Some("install_42".into()),
             created_by: Some("user_42".into()),
         };
 

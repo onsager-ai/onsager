@@ -7,7 +7,8 @@
 
 use chrono::{DateTime, Utc};
 use onsager_artifact::{
-    ArtifactId, ArtifactState, BundleId, DeliverableId, Kind, KindId, QualitySignal, WorkflowRunId,
+    ArtifactId, ArtifactState, ArtifactVersionId, DeliverableId, Kind, KindId, QualitySignal,
+    WorkflowRunId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -108,20 +109,20 @@ pub enum FactoryEventKind {
     /// A new bundle was sealed for an artifact (§5.1).
     BundleSealed {
         artifact_id: ArtifactId,
-        bundle_id: BundleId,
+        bundle_id: ArtifactVersionId,
         version: u32,
     },
 
     /// A delivery attempt succeeded; the receipt is stored on the delivery row (§5.3).
     DeliverySucceeded {
-        bundle_id: BundleId,
+        bundle_id: ArtifactVersionId,
         consumer_id: String,
     },
 
     /// A delivery attempt failed; includes whether the worker will retry or
     /// has marked the delivery `Abandoned` (§5.3).
     DeliveryFailed {
-        bundle_id: BundleId,
+        bundle_id: ArtifactVersionId,
         consumer_id: String,
         reason: String,
         /// Whether the delivery has been abandoned (terminal) or will retry.

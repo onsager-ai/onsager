@@ -30,7 +30,7 @@ pub async fn upsert(
 
     let trigger_kind = trigger_kind_to_spine(workflow.trigger_kind);
     let trigger_config = trigger_config_for(workflow);
-    let install_ref = workflow.install_id.to_string();
+    let install_id_text = workflow.install_id.to_string();
 
     // `created_by` (issue #156) is the owner identity stiglab uses to
     // decrypt CLAUDE_CODE_OAUTH_TOKEN at shaping-dispatch time. Mirror it
@@ -40,7 +40,7 @@ pub async fn upsert(
     // unblocks the dispatch path the next time the gate evaluates.
     sqlx::query(
         "INSERT INTO workflows (workflow_id, name, trigger_kind, trigger_config, \
-                                active, preset_id, workspace_install_ref, created_by) \
+                                active, preset_id, install_id, created_by) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          ON CONFLICT (workflow_id) DO UPDATE SET \
              name = EXCLUDED.name, \
@@ -48,7 +48,7 @@ pub async fn upsert(
              trigger_config = EXCLUDED.trigger_config, \
              active = EXCLUDED.active, \
              preset_id = EXCLUDED.preset_id, \
-             workspace_install_ref = EXCLUDED.workspace_install_ref, \
+             install_id = EXCLUDED.install_id, \
              created_by = EXCLUDED.created_by",
     )
     .bind(&workflow.id)
@@ -57,7 +57,7 @@ pub async fn upsert(
     .bind(&trigger_config)
     .bind(workflow.active)
     .bind(workflow.preset_id.as_deref())
-    .bind(&install_ref)
+    .bind(&install_id_text)
     .bind(&workflow.created_by)
     .execute(&mut *tx)
     .await
