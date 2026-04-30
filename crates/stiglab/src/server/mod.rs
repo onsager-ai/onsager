@@ -19,9 +19,7 @@ pub mod ws;
 
 pub use sqlx::AnyPool;
 
-use axum::extract::OriginalUri;
-use axum::http::{header, HeaderValue, StatusCode};
-use axum::response::IntoResponse;
+use axum::http::{header, HeaderValue};
 use axum::routing::{any, delete, get, post, put};
 use axum::Router;
 use tower::ServiceBuilder;
@@ -33,31 +31,6 @@ use tower_http::trace::TraceLayer;
 
 use config::ServerConfig;
 use state::AppState;
-
-/// 308 Permanent Redirect handler for legacy `/api/tenants/*` paths.
-///
-/// Rewrites `/api/tenants` → `/api/workspaces` (and any subpath) while
-/// preserving the original query string.  308 is the right status here:
-/// unlike 301, it forbids the client from changing the request method,
-/// so POST/PATCH/DELETE bodies replay against the new path verbatim.
-///
-/// This is bridge-debt — see the follow-up issue filed with #163.  The
-/// redirect goes away one release after #163 lands.
-async fn redirect_tenants_to_workspaces(OriginalUri(uri): OriginalUri) -> impl IntoResponse {
-    let path = uri.path();
-    // Strip the `/api/tenants` prefix; what remains is either empty or a
-    // `/...` suffix that we splice onto `/api/workspaces`.
-    let suffix = path.strip_prefix("/api/tenants").unwrap_or("");
-    let mut location = format!("/api/workspaces{suffix}");
-    if let Some(q) = uri.query() {
-        location.push('?');
-        location.push_str(q);
-    }
-    (
-        StatusCode::PERMANENT_REDIRECT,
-        [(header::LOCATION, location)],
-    )
-}
 
 /// Build the Axum router with all API routes, CORS, and optional static file serving.
 pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
@@ -197,15 +170,6 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/projects/{id}/issues/{number}/replay-trigger",
             post(routes::projects::replay_issue_trigger),
         )
-        // Legacy `/api/tenants/*` paths — return 308 Permanent Redirect to
-        // the new `/api/workspaces/*` surface so existing clients (CLI,
-        // PATs, dashboards on older deploys) keep working for one release.
-        // See the bridge-debt follow-up issue filed alongside #163; the
-        // removal date is one release after #163 lands.  308 (not 301)
-        // preserves the request method and body so POST/PATCH/DELETE
-        // re-issue cleanly.
-        .route("/api/tenants", any(redirect_tenants_to_workspaces))
-        .route("/api/tenants/{*rest}", any(redirect_tenants_to_workspaces))
         // Governance proxy — forwards to synodic on internal port
         .route("/api/governance/{*path}", any(routes::governance::proxy))
         // Portal webhook proxy — forwards `/webhooks/github` to the

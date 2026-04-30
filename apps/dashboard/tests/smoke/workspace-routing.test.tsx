@@ -7,15 +7,13 @@ import { rememberLastUsedWorkspace } from "@/lib/workspace"
 
 // Pull in the App's redirect helpers indirectly: rendering the full App.tsx
 // pulls in lazy-loaded chunks and the entire AuthProvider; what we actually
-// want to assert is that the bare path bounces to the active workspace and
-// that legacy paths bounce to the same place under `/workspaces/<active>`.
+// want to assert is that the bare path bounces to the active workspace.
 //
 // To keep the test focused, we replicate the App.tsx route table for just
-// the redirect rows under test (BarePathRedirect + LegacyRedirect). The
-// test depends on:
+// the redirect row under test (BarePathRedirect). The test depends on:
 //   * `api.listWorkspaces` returning a known workspace list
 //   * `localStorage` carrying the last-used slug
-// — and that's enough surface to pin the redirect contract from spec #166.
+// — and that's enough surface to pin the bare-path redirect contract.
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({
@@ -48,8 +46,8 @@ vi.mock("@/lib/api", () => ({
   },
 }))
 
-// Re-export the redirect components from a tiny shim — App.tsx hides them
-// behind module-private bindings, but they're built on Navigate and the
+// Re-export the redirect component from a tiny shim — App.tsx hides it
+// behind a module-private binding, but it's built on Navigate and the
 // listWorkspaces query, both of which we can re-construct here.
 import { Navigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
@@ -68,18 +66,6 @@ function BarePathRedirect() {
   return <Navigate to={`/workspaces/${active.slug}`} replace />
 }
 
-function LegacyRedirect({ to }: { to: string }) {
-  const { data } = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: api.listWorkspaces,
-  })
-  const workspaces = data?.workspaces ?? []
-  if (workspaces.length === 0) return null
-  const lastUsed = readLastUsedWorkspace()
-  const active = workspaces.find((w) => w.slug === lastUsed) ?? workspaces[0]
-  return <Navigate to={`/workspaces/${active.slug}/${to}`} replace />
-}
-
 function LocationProbe() {
   const loc = useLocation()
   return <div data-testid="location">{loc.pathname}</div>
@@ -92,7 +78,6 @@ function renderRoute(initial: string) {
       <MemoryRouter initialEntries={[initial]}>
         <Routes>
           <Route path="/" element={<BarePathRedirect />} />
-          <Route path="/sessions" element={<LegacyRedirect to="sessions" />} />
           <Route path="/workspaces/:workspace/*" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
@@ -100,7 +85,7 @@ function renderRoute(initial: string) {
   )
 }
 
-describe("App-level redirects (#166)", () => {
+describe("App-level bare-path redirect (#166)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     if (typeof window !== "undefined") {
@@ -123,15 +108,6 @@ describe("App-level redirects (#166)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent(
         "/workspaces/beta",
-      ),
-    )
-  })
-
-  it("legacy `/sessions` bounces to the active workspace's sessions", async () => {
-    renderRoute("/sessions")
-    await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent(
-        "/workspaces/acme/sessions",
       ),
     )
   })

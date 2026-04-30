@@ -5,7 +5,6 @@
 //! lookup for the webhook router) to justify its own module.
 
 use chrono::{DateTime, Utc};
-use serde_json::Value;
 use sqlx::AnyPool;
 
 use crate::core::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
@@ -351,12 +350,6 @@ pub async fn get_workflow_install_target(
     .fetch_optional(pool)
     .await?;
     Ok(row)
-}
-
-/// Convenience: store a stage's `params` as JSON text.
-#[allow(dead_code)]
-pub fn serialize_params(v: &Value) -> anyhow::Result<String> {
-    serde_json::to_string(v).map_err(Into::into)
 }
 
 #[cfg(test)]
