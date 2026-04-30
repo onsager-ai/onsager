@@ -436,14 +436,6 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "catchall proxy that forwards to synodic; covered route-by-route via the synodic check",
     ),
     (
-        "/api/tenants",
-        "bridge-debt: 308 redirect to /api/workspaces (#173 — pending removal)",
-    ),
-    (
-        "/api/tenants/{*rest}",
-        "bridge-debt: 308 redirect to /api/workspaces/* (#173 — pending removal)",
-    ),
-    (
         "/health",
         "synodic internal health endpoint — ops-only, not a dashboard surface",
     ),
