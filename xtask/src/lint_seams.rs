@@ -624,30 +624,16 @@ fn check_github_http_wall(root: &Path, out: &mut Vec<Violation>) -> Result<()> {
         for file in rust_files(&src)? {
             let rel_path = rel(root, &file);
             let rel_str = rel_path.to_string_lossy().replace('\\', "/");
-            let pending = GITHUB_HTTP_WALL_PENDING_FILES
-                .iter()
-                .find(|(p, _)| *p == rel_str.as_str());
             let text = std::fs::read_to_string(&file)
                 .with_context(|| format!("read {}", file.display()))?;
-            for (idx, line) in text.lines().enumerate() {
-                let code = strip_line_comment(line);
-                for needle in GITHUB_HOST_NEEDLES {
-                    if code.contains(needle) {
-                        if let Some((path, _)) = pending {
-                            pending_hits.insert(*path);
-                        } else {
-                            out.push(Violation {
-                                path: rel_path.clone(),
-                                line: idx + 1,
-                                kind: "github-http-wall",
-                                message: format!(
-                                    "crate `{crate_name}` references `{needle}` — GitHub HTTP must go through `onsager-github` (#221)"
-                                ),
-                            });
-                        }
-                    }
-                }
-            }
+            scan_github_http_wall(
+                crate_name,
+                &rel_path,
+                &rel_str,
+                &text,
+                out,
+                &mut pending_hits,
+            );
         }
     }
     if !pending_hits.is_empty() {
@@ -660,6 +646,40 @@ fn check_github_http_wall(root: &Path, out: &mut Vec<Violation>) -> Result<()> {
         eprintln!();
     }
     Ok(())
+}
+
+/// Per-file github-http-wall scan, factored out so unit tests can
+/// exercise the rule without a tempdir + filesystem layout.
+fn scan_github_http_wall(
+    crate_name: &str,
+    rel_path: &Path,
+    rel_str: &str,
+    text: &str,
+    out: &mut Vec<Violation>,
+    pending_hits: &mut BTreeSet<&'static str>,
+) {
+    let pending = GITHUB_HTTP_WALL_PENDING_FILES
+        .iter()
+        .find(|(p, _)| *p == rel_str);
+    for (idx, line) in text.lines().enumerate() {
+        let code = strip_line_comment(line);
+        for needle in GITHUB_HOST_NEEDLES {
+            if code.contains(needle) {
+                if let Some((path, _)) = pending {
+                    pending_hits.insert(*path);
+                } else {
+                    out.push(Violation {
+                        path: rel_path.to_path_buf(),
+                        line: idx + 1,
+                        kind: "github-http-wall",
+                        message: format!(
+                            "crate `{crate_name}` references `{needle}` — GitHub HTTP must go through `onsager-github` (#221)"
+                        ),
+                    });
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -868,5 +888,91 @@ mod tests {
         let bad = "// seam-allow:";
         let reason = bad.strip_prefix("// seam-allow:").unwrap().trim();
         assert!(reason.is_empty(), "empty-reason allow must NOT pass");
+    }
+
+    // ── github-http-wall ─────────────────────────────────────────
+
+    #[test]
+    fn github_http_wall_flags_disallowed_crate() {
+        let mut violations = Vec::new();
+        let mut pending = BTreeSet::new();
+        let path = Path::new("crates/stiglab/src/foo.rs");
+        scan_github_http_wall(
+            "stiglab",
+            path,
+            "crates/stiglab/src/foo.rs",
+            r#"let url = "https://api.github.com/repos/x/y";"#,
+            &mut violations,
+            &mut pending,
+        );
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].kind, "github-http-wall");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn github_http_wall_pending_file_reported_not_violated() {
+        let mut violations = Vec::new();
+        let mut pending = BTreeSet::new();
+        // Use the first pending entry so we exercise the real allowlist
+        // rather than a fixture that could drift.
+        let (pending_path, _) = GITHUB_HTTP_WALL_PENDING_FILES[0];
+        let path = Path::new(pending_path);
+        scan_github_http_wall(
+            "stiglab",
+            path,
+            pending_path,
+            r#"let url = "https://api.github.com/foo";"#,
+            &mut violations,
+            &mut pending,
+        );
+        assert!(
+            violations.is_empty(),
+            "pending file must not produce a violation"
+        );
+        assert!(pending.contains(pending_path));
+    }
+
+    #[test]
+    fn github_http_wall_ignores_clean_file() {
+        let mut violations = Vec::new();
+        let mut pending = BTreeSet::new();
+        let path = Path::new("crates/stiglab/src/clean.rs");
+        scan_github_http_wall(
+            "stiglab",
+            path,
+            "crates/stiglab/src/clean.rs",
+            "fn no_github_here() { let _ = \"https://example.com\"; }",
+            &mut violations,
+            &mut pending,
+        );
+        assert!(violations.is_empty());
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn github_http_wall_strips_comment_to_avoid_seam_allow_self_match() {
+        // A `// seam-allow:` comment that itself mentions a GitHub URL
+        // string shouldn't trip the wall — comments are stripped first.
+        let mut violations = Vec::new();
+        let mut pending = BTreeSet::new();
+        let path = Path::new("crates/stiglab/src/clean.rs");
+        scan_github_http_wall(
+            "stiglab",
+            path,
+            "crates/stiglab/src/clean.rs",
+            "// seam-allow: notes about api.github.com\nfn x() {}",
+            &mut violations,
+            &mut pending,
+        );
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn github_http_wall_allowed_crate_list_contains_library() {
+        // Cheap regression guard: removing `onsager-github` from the
+        // allowlist would lock the library out of writing its own
+        // GitHub HTTP code.
+        assert!(GITHUB_HTTP_WALL_ALLOWED_CRATES.contains(&"onsager-github"));
     }
 }

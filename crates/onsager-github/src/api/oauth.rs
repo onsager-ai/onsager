@@ -70,7 +70,7 @@ pub async fn exchange_code(
 pub async fn get_oauth_user(access_token: &str) -> Result<GithubOAuthUser, GithubError> {
     let resp = client()
         .get("https://api.github.com/user")
-        .header("Authorization", format!("Bearer {access_token}"))
+        .bearer_auth(access_token)
         .send()
         .await?;
 

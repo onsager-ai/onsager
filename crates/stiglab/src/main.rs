@@ -102,10 +102,17 @@ async fn run_server(
 
     // Register the GitHub adapter into the spine `artifact_adapters`
     // catalog (closes the empty-catalog drift from migration 004).
-    // Best-effort: a missing table on older schemas shouldn't block
-    // boot. See `onsager_github::adapter::register_any`.
-    if let Err(e) = onsager_github::adapter::register_any(&pool, "default").await {
-        tracing::warn!("github adapter registration skipped: {e}");
+    // The query is Postgres-specific (`ON CONFLICT`, JSONB cast) and
+    // the table only exists in the spine schema, so guard on the URL
+    // scheme — stiglab's dev default is SQLite.
+    if config.database_url.starts_with("postgres://")
+        || config.database_url.starts_with("postgresql://")
+    {
+        if let Err(e) = onsager_github::adapter::register_any(&pool, "default").await {
+            tracing::warn!("github adapter registration skipped: {e}");
+        }
+    } else {
+        tracing::debug!("skipping github adapter registration on non-Postgres backend");
     }
 
     // Dev-login seeding (issue #193). Debug builds always materialize a
