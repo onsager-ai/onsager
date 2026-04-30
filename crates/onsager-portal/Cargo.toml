@@ -37,3 +37,6 @@ ring = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
 regex = "1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

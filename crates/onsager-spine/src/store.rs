@@ -461,7 +461,7 @@ impl sqlx::FromRow<'_, sqlx::postgres::PgRow> for ExtensionEventRecord {
             metadata: row.try_get("metadata")?,
             ref_event_id: row.try_get("ref_event_id")?,
             created_at: row.try_get("created_at")?,
-            correlation_id: row.try_get("correlation_id").unwrap_or(None),
+            correlation_id: row.try_get("correlation_id")?,
         })
     }
 }

@@ -17,11 +17,13 @@
 --      the pg_notify payload, letting in-process subscribers filter
 --      without a DB roundtrip.
 --
--- Adding a JSONB-derived column instead of refactoring every producer to
--- pass the UUID through a new param keeps this migration backwards-
--- compatible: anything writing the field into the existing JSON payload
--- (FactoryEvent.correlation_id / EventMetadata.correlation_id) gets the
--- column populated for free via the trigger.
+-- The column is *not* derived from JSON by a trigger — writers must bind
+-- it explicitly. `EventStore::append_factory_event{,_tx}` /
+-- `append_ext` parse `EventMetadata.correlation_id` (with a fallback to
+-- `FactoryEvent.correlation_id`) as a UUID and bind to `$N`. Pre-#223
+-- producers that stop at the JSON envelope simply land NULL in the
+-- column — which is fine, the partial index is `WHERE correlation_id IS
+-- NOT NULL`, and only portal-minted UUIDs need to be awaited.
 
 ALTER TABLE events     ADD COLUMN IF NOT EXISTS correlation_id UUID;
 ALTER TABLE events_ext ADD COLUMN IF NOT EXISTS correlation_id UUID;

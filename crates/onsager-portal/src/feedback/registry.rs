@@ -25,6 +25,12 @@ use uuid::Uuid;
 /// anything that needs more is misclassified.
 pub const MAX_SYNC_TIMEOUT: Duration = Duration::from_millis(2000);
 
+/// Default bounded-channel capacity for the pg_notify pump. Generous
+/// enough to absorb bursts (a typical fast-write turnover is dozens of
+/// notifications/second) without giving slow consumers an OOM rope.
+/// Override via [`CorrelationRegistry::start_with_capacity`].
+pub const DEFAULT_NOTIFY_CAPACITY: usize = 1024;
+
 type WaiterMap = HashMap<Uuid, oneshot::Sender<EventNotification>>;
 
 /// Routes spine notifications back to the request handler that
@@ -48,8 +54,23 @@ impl CorrelationRegistry {
     /// Subscribe to spine notifications and route correlation-tagged
     /// events to the matching [`Waiter`]. Spawns a background task
     /// that runs until the underlying `pg_notify` channel closes.
+    /// Uses [`DEFAULT_NOTIFY_CAPACITY`]; call
+    /// [`Self::start_with_capacity`] to tune.
     pub async fn start(&self, store: &EventStore) -> Result<(), sqlx::Error> {
-        let mut rx = store.subscribe().await?;
+        self.start_with_capacity(store, DEFAULT_NOTIFY_CAPACITY)
+            .await
+    }
+
+    /// Like [`Self::start`] but with a caller-chosen channel capacity.
+    /// Backed by [`EventStore::subscribe_bounded`] so a stalled pump
+    /// applies backpressure on the sender rather than growing the
+    /// channel without bound (the warning on `EventStore::subscribe`).
+    pub async fn start_with_capacity(
+        &self,
+        store: &EventStore,
+        capacity: usize,
+    ) -> Result<(), sqlx::Error> {
+        let mut rx = store.subscribe_bounded(capacity).await?;
         let waiters = Arc::clone(&self.waiters);
         tokio::spawn(async move {
             while let Some(notification) = rx.recv().await {
@@ -79,7 +100,21 @@ impl CorrelationRegistry {
         let (tx, rx) = oneshot::channel();
         {
             let mut map = self.waiters.lock().expect("CorrelationRegistry poisoned");
-            map.insert(correlation_id, tx);
+            // Multiple waiters per id are not supported (UUIDs are
+            // unique by construction). Catch a double-register in
+            // debug builds; in release we'd cancel the previous
+            // waiter implicitly otherwise — log loudly so the bug
+            // surfaces in production too.
+            if let Some(_dup) = map.insert(correlation_id, tx) {
+                debug_assert!(
+                    false,
+                    "CorrelationRegistry: duplicate register for {correlation_id}"
+                );
+                tracing::error!(
+                    %correlation_id,
+                    "duplicate register; previous waiter cancelled"
+                );
+            }
         }
         Waiter {
             correlation_id,
@@ -235,26 +270,27 @@ mod tests {
     }
 
     /// `MAX_SYNC_TIMEOUT` clamps overlong asks down to 2s — the cap
-    /// the spec contracts on (`#223`).
-    #[tokio::test]
+    /// the spec contracts on (`#223`). Uses a paused clock so the
+    /// assertion is on logic (clamp value), not wall-clock timing
+    /// that can flake under CI load.
+    #[tokio::test(start_paused = true)]
     async fn timeout_is_clamped_to_max_sync_timeout() {
         let registry = CorrelationRegistry::new();
         let id = Uuid::new_v4();
         let waiter = registry.register(id);
 
-        // Ask for an hour — should fall back to 2s. Use a short polling
-        // window: the actual max is 2s but we don't want the test to
-        // wait that long. Instead, verify that asking for `Duration::MAX`
-        // resolves to a Timeout and that it returned within our budget.
+        // Ask for an hour. Paused clock + auto-advance means the
+        // sleep inside `tokio::time::timeout` virtually advances to
+        // exactly MAX_SYNC_TIMEOUT (2s) before the future resolves.
         let started = tokio::time::Instant::now();
-        let result = tokio::time::timeout(
-            Duration::from_millis(2200),
-            waiter.timeout(Duration::from_secs(3600)),
-        )
-        .await
-        .expect("clamped wait must finish inside 2.2s");
+        let result = waiter.timeout(Duration::from_secs(3600)).await;
+        let elapsed = started.elapsed();
+
         assert!(matches!(result, Err(AwaitError::Timeout)));
-        assert!(started.elapsed() <= Duration::from_millis(2200));
+        assert_eq!(
+            elapsed, MAX_SYNC_TIMEOUT,
+            "expected clamp to MAX_SYNC_TIMEOUT, got {elapsed:?}"
+        );
     }
 
     /// A waiter that's dropped without polling releases its slot —
