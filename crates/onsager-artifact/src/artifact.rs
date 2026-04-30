@@ -58,8 +58,9 @@ impl fmt::Display for ArtifactId {
 /// identical files produce different ids, so they do not collide.
 ///
 /// The legacy `bnd_` prefix is accepted on read for one release cycle; new
-/// ids are minted with `ver_`. The type was previously named `BundleId`; a
-/// deprecated alias remains at the crate root.
+/// ids are minted with `ver_`. The type was previously named `BundleId` (PR
+/// #107); the alias was retired in #149 and call sites now reference
+/// `ArtifactVersionId` directly.
 ///
 /// This type lives here (not in `onsager-warehouse`) so that `Artifact` can
 /// reference versions without creating an artifact↔warehouse cycle. The

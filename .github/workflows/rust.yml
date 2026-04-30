@@ -95,11 +95,9 @@ jobs:
         run: cargo run -p xtask --quiet -- check-api-contract
       - name: Apply database migrations
         run: |
-          psql "$DATABASE_URL" -f crates/onsager-spine/migrations/001_initial.sql
-          psql "$DATABASE_URL" -f crates/onsager-spine/migrations/002_artifacts.sql
-          psql "$DATABASE_URL" -f crates/onsager-spine/migrations/003_artifacts_git_context.sql
-          psql "$DATABASE_URL" -f crates/onsager-spine/migrations/004_artifact_pipeline.sql
-          psql "$DATABASE_URL" -f crates/onsager-spine/migrations/005_warehouse_delivery.sql
+          for f in crates/onsager-spine/migrations/*.sql; do
+            psql "$DATABASE_URL" -f "$f"
+          done
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
       - name: Test onsager-spine (serial — shares DB)
