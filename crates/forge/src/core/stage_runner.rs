@@ -356,6 +356,7 @@ mod tests {
             },
             stages,
             active: true,
+            workspace_id: "ws_test".into(),
             preset_id: None,
             install_id: None,
             created_by: None,

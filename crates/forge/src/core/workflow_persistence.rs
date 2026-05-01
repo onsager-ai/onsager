@@ -35,27 +35,24 @@ async fn load_workflows_filtered(
     pool: &PgPool,
     only_id: Option<&str>,
 ) -> Result<HashMap<String, Workflow>, sqlx::Error> {
-    let wf_rows = match only_id {
-        Some(id) => {
-            sqlx::query(
-                "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                        install_id, created_by \
+    let wf_rows =
+        match only_id {
+            Some(id) => sqlx::query(
+                "SELECT workflow_id, name, trigger_kind, trigger_config, active, workspace_id, \
+                        preset_id, install_id, created_by \
                    FROM workflows WHERE workflow_id = $1",
             )
             .bind(id)
             .fetch_all(pool)
-            .await?
-        }
-        None => {
-            sqlx::query(
-                "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                        install_id, created_by \
+            .await?,
+            None => sqlx::query(
+                "SELECT workflow_id, name, trigger_kind, trigger_config, active, workspace_id, \
+                        preset_id, install_id, created_by \
                    FROM workflows",
             )
             .fetch_all(pool)
-            .await?
-        }
-    };
+            .await?,
+        };
 
     let mut workflows = HashMap::new();
     for row in wf_rows {
@@ -64,6 +61,7 @@ async fn load_workflows_filtered(
         let trigger_kind: String = row.get("trigger_kind");
         let trigger_config: serde_json::Value = row.get("trigger_config");
         let active: bool = row.get("active");
+        let workspace_id: String = row.get("workspace_id");
         let preset_id: Option<String> = row.get("preset_id");
         let install_id: Option<String> = row.get("install_id");
         let created_by: Option<String> = row.try_get("created_by").ok().flatten();
@@ -161,6 +159,7 @@ async fn load_workflows_filtered(
                 trigger,
                 stages,
                 active,
+                workspace_id,
                 preset_id,
                 install_id,
                 created_by,

@@ -74,6 +74,13 @@ pub fn run() -> Result<()> {
     // the new library is consolidating (#221, #220 Sub-issue A).
     check_github_http_wall(&root, &mut violations)?;
 
+    // Forge-specific: every workflow stage event payload must carry
+    // `workspace_id`. The dashboard's `/api/spine/events` filter requires
+    // it (`crates/stiglab/src/server/routes/spine.rs`); a stage event
+    // missing the field lands in `events_ext` but is invisible to the
+    // workflow detail page. See #230.
+    check_workflow_event_workspace_id(&root, &mut violations)?;
+
     let (kept, allowed) = apply_allow_list(violations);
 
     if !allowed.is_empty() {
@@ -682,6 +689,126 @@ fn scan_github_http_wall(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Forge: every workflow stage event payload carries `workspace_id` (#230)
+// ---------------------------------------------------------------------------
+
+const STAGE_EVENT_TYPES: &[&str] = &[
+    "\"stage.entered\"",
+    "\"stage.gate_passed\"",
+    "\"stage.gate_failed\"",
+    "\"stage.advanced\"",
+];
+
+fn check_workflow_event_workspace_id(root: &Path, out: &mut Vec<Violation>) -> Result<()> {
+    let src = root.join("crates").join("forge").join("src");
+    if !src.is_dir() {
+        return Ok(());
+    }
+    for file in rust_files(&src)? {
+        let text =
+            std::fs::read_to_string(&file).with_context(|| format!("read {}", file.display()))?;
+        scan_stage_event_payload(&rel(root, &file), &text, out);
+    }
+    Ok(())
+}
+
+/// For each stage-event type literal in `text`, find the next
+/// `serde_json::json!({ ... })` block and assert it contains the substring
+/// `"workspace_id"`. Pure text walk — no AST — so the same scan exercises in
+/// unit tests below.
+///
+/// Heuristic, not perfect: assumes the json literal follows the event-type
+/// string within ~400 bytes (the existing `emit_stage_event` arms are <100
+/// bytes). False positives require a stage event type literal that isn't
+/// part of an emit; the codebase has none today.
+fn scan_stage_event_payload(rel_path: &Path, text: &str, out: &mut Vec<Violation>) {
+    for event_type in STAGE_EVENT_TYPES {
+        let mut search_from = 0usize;
+        while let Some(rel_idx) = text[search_from..].find(event_type) {
+            let abs = search_from + rel_idx;
+            search_from = abs + event_type.len();
+
+            // Skip if it's inside a comment line: walk back to the start of
+            // the line and check for `//` or `*` (block-comment continuation).
+            let line_start = text[..abs].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let line_prefix = &text[line_start..abs];
+            let trimmed = line_prefix.trim_start();
+            if trimmed.starts_with("//") || trimmed.starts_with('*') {
+                continue;
+            }
+
+            // Window after the event-type literal in which we expect the
+            // json! macro to appear.
+            let window_end = (abs + 400).min(text.len());
+            let window = &text[abs..window_end];
+            let Some(json_rel) = window.find("serde_json::json!({") else {
+                continue;
+            };
+            let json_start = abs + json_rel + "serde_json::json!(".len();
+            let Some(json_end) = find_matching_brace(text, json_start) else {
+                continue;
+            };
+            let json_body = &text[json_start..=json_end];
+            if json_body.contains("\"workspace_id\"") {
+                continue;
+            }
+
+            let line_no = text[..abs].matches('\n').count() + 1;
+            out.push(Violation {
+                path: rel_path.to_path_buf(),
+                line: line_no,
+                kind: "stage-event-workspace-id",
+                message: format!(
+                    "stage event {event_type} payload is missing `workspace_id` — \
+                     the dashboard's `/api/spine/events` filter requires \
+                     `data->>'workspace_id'`; without it the event is invisible to \
+                     the workflow detail page (#230)"
+                ),
+            });
+        }
+    }
+}
+
+/// Find the position of the matching `}` for the `{` at `open_idx` in
+/// `text`. Counts brace depth ignoring braces inside string literals. Used
+/// by the stage-event lint to bound the json! macro body without parsing
+/// Rust. Returns `None` if no match is found before EOF (malformed input).
+fn find_matching_brace(text: &str, open_idx: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if bytes.get(open_idx) != Some(&b'{') {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut prev_backslash = false;
+    let mut i = open_idx;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if c == b'\\' && !prev_backslash {
+                prev_backslash = true;
+            } else {
+                if c == b'"' && !prev_backslash {
+                    in_str = false;
+                }
+                prev_backslash = false;
+            }
+        } else if c == b'"' {
+            in_str = true;
+        } else if c == b'{' {
+            depth += 1;
+        } else if c == b'}' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -974,5 +1101,73 @@ mod tests {
         // allowlist would lock the library out of writing its own
         // GitHub HTTP code.
         assert!(GITHUB_HTTP_WALL_ALLOWED_CRATES.contains(&"onsager-github"));
+    }
+
+    // ---- stage-event workspace_id (#230) ---------------------------
+
+    #[test]
+    fn flags_stage_event_missing_workspace_id() {
+        let mut v = Vec::new();
+        let src = r#"
+            let data = (
+                "stage.gate_failed",
+                serde_json::json!({
+                    "artifact_id": "a",
+                    "workflow_id": "w",
+                    "reason": "x",
+                }),
+            );
+        "#;
+        scan_stage_event_payload(fake_path(), src, &mut v);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].kind, "stage-event-workspace-id");
+    }
+
+    #[test]
+    fn accepts_stage_event_with_workspace_id() {
+        let mut v = Vec::new();
+        let src = r#"
+            let data = (
+                "stage.entered",
+                serde_json::json!({
+                    "artifact_id": "a",
+                    "workflow_id": "w",
+                    "workspace_id": "ws",
+                    "stage_index": 0,
+                }),
+            );
+        "#;
+        scan_stage_event_payload(fake_path(), src, &mut v);
+        assert!(v.is_empty(), "well-formed payload must not fire: {:?}", v);
+    }
+
+    #[test]
+    fn stage_event_lint_ignores_doc_comments() {
+        // Docstrings that mention the event-type literal must not trip the
+        // lint — only call-site emissions count.
+        let mut v = Vec::new();
+        let src = r#"
+            /// Documents how `"stage.gate_failed"` payloads are shaped.
+            fn unrelated() {}
+        "#;
+        scan_stage_event_payload(fake_path(), src, &mut v);
+        assert!(v.is_empty(), "doc comments must not fire: {:?}", v);
+    }
+
+    #[test]
+    fn stage_event_lint_flags_each_missing_arm() {
+        // A match with all four arms missing workspace_id should produce
+        // four violations, one per arm — so a partial fix can't pass.
+        let mut v = Vec::new();
+        let src = r#"
+            match e {
+                A => ("stage.entered",      serde_json::json!({ "x": 1 })),
+                B => ("stage.gate_passed",  serde_json::json!({ "x": 1 })),
+                C => ("stage.gate_failed",  serde_json::json!({ "x": 1 })),
+                D => ("stage.advanced",     serde_json::json!({ "x": 1 })),
+            }
+        "#;
+        scan_stage_event_payload(fake_path(), src, &mut v);
+        assert_eq!(v.len(), 4, "expected one violation per arm: {:?}", v);
     }
 }
