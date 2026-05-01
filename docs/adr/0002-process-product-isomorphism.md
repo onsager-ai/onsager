@@ -1,6 +1,6 @@
 # ADR 0002 — Process ↔ product isomorphism as design discipline
 
-- **Status**: Accepted
+- **Status**: Accepted (amended 2026-05-01 — see Amendment below)
 - **Date**: 2026-04-19
 - **Tracking issues**: #40 (architectural review)
 - **Supersedes**: none
@@ -163,3 +163,52 @@ Not a re-plan of the work — a re-statement of acceptance.
 - Any changes to subsystem scope beyond the acceptance-criteria tweaks
   noted above.
 - Making skills self-modifying — that is the #37 endgame, not this ADR.
+
+## Amendment (2026-05-01) — scope down outer-loop primitives
+
+A 2026-05-01 project review concluded that the explicit five-primitive
+outer-loop programme this ADR named — Refract (#35), Ising (#36),
+Supervisor (#37), Productivity (#38), Budget (#39) — is more ceremony
+than the current scale of the project warrants. The dev-process
+surfaces that motivated those primitives — umbrella trackers, manual
+tracker refresh, skills + CLAUDE.md, weekly comments, `claude/*`
+session tokens — continue to fulfil the roles those primitives would
+automate, and the inner-loop programme (ADR 0001 / ADR 0004 levers
+A–F) has landed without forcing any of them.
+
+What changes:
+
+- The **process ↔ product isomorphism** principle stays as design
+  discipline. The "Dev-process counterpart" sections in ADR templates
+  and skill templates remain useful and are retained.
+- The **specific commitment** to ship #35 / #36 / #37 / #38 / #39 as a
+  named outer-loop programme is dropped. Those tracking issues were
+  closed `completed` on the same day this ADR was accepted (rolled up
+  into the ADR rather than implemented); the rolled-up commitment is
+  what's being scoped down here. No new `not-planned` closures are
+  needed.
+- Capabilities they enumerated (rule-proposal automation, supervisor
+  decision capture, per-session budget accounting, factory throughput
+  metrics, intent decomposition) are not pre-empted. If a concrete
+  forcing function appears, each gets its own targeted spec at that
+  point, scoped against the actual problem rather than the
+  dev-process analogy.
+
+What stays unchanged:
+
+- ADR 0002's two-loop framing as descriptive of how the system
+  operates today.
+- `ising` as an existing subsystem crate (continuous improvement
+  engine); the scope-down is on the #36 outer-loop programme, not on
+  the crate itself.
+- The same-defect-class rule (process bugs and product bugs are the
+  same bug at different scales).
+- The umbrella-tracker, skill, and ADR-template "dev-process
+  counterpart" patterns the original adoption checklist established.
+
+Trigger for revisit: if dev-process drift accumulates at a rate the
+existing surfaces can't absorb (e.g. supervisor-style review
+decisions become high-volume enough that capturing them by hand is
+the bottleneck), reopen the relevant primitive as its own ADR with
+its own forcing-function evidence — not as part of a pre-committed
+five-primitive programme.
