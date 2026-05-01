@@ -128,8 +128,8 @@ and shipped on the same footing as feature work.
 Loose runtime coupling is correct and stays — but the seams it creates are
 informal, and recent PRs show drift accumulating in predictable shapes. When
 designing or reviewing a change, watch for these and prefer **unification at
-the seam** over a bridge. If a bridge is the right call for now, file a
-follow-up issue with a `bridge-debt` label and a target removal date.
+the seam** over a bridge. Bridges aren't a destination — collapse them in
+the same PR that introduces them.
 
 - **Parallel schemas across subsystems.** If two subsystems each persist their
   own version of the same concept (former drift, retired by Lever D #149:
@@ -154,12 +154,15 @@ follow-up issue with a `bridge-debt` label and a target removal date.
   defensive in a single, named place, not at every call site.
 - **Compat aliases that ossify.** Renames with `serde(alias=...)` or type
   aliases "for one release" (PR #107 `BundleId` → `ArtifactVersionId`) tend
-  to outlive their intended window. File a `bridge-debt` issue at rename
-  time; remove the alias on the target date, not "eventually".
+  to outlive their intended window. Land the rename and the alias removal
+  in the same PR; don't open a removal-date window. `lint-seams` hard-fails
+  on new `serde(alias)` and on legacy type aliases.
 
 The strategy spec #131 captures the full reasoning and the six-lever plan
-to make these contracts enforced rather than informal. Until that lands,
-treat the patterns above as review-time heuristics.
+that made these contracts enforced. The patterns above are now caught
+mechanically by `lint-seams`, `check-api-contract`, and `check-events`;
+the bullets stay as a glossary of the failure modes those checks were
+designed against.
 
 ## Workspace layout
 
