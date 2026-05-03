@@ -24,11 +24,13 @@
 -- `workflows` directly still won't violate the FK, even if it forgets
 -- the application cleanup.
 
+-- Combine DROP + ADD into one ALTER TABLE so the constraint change is
+-- atomic — split statements would leave a window with no FK at all,
+-- and a concurrent INSERT with a stale workflow_id could violate the
+-- new ADD when it's re-applied.
 ALTER TABLE artifacts
-    DROP CONSTRAINT IF EXISTS artifacts_workflow_id_fkey;
-
-ALTER TABLE artifacts
-    ADD CONSTRAINT artifacts_workflow_id_fkey
-    FOREIGN KEY (workflow_id)
-    REFERENCES workflows(workflow_id)
-    ON DELETE SET NULL;
+    DROP CONSTRAINT IF EXISTS artifacts_workflow_id_fkey,
+    ADD  CONSTRAINT artifacts_workflow_id_fkey
+         FOREIGN KEY (workflow_id)
+         REFERENCES workflows(workflow_id)
+         ON DELETE SET NULL;

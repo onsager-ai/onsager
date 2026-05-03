@@ -54,16 +54,22 @@ async fn seed_workflow(spine: &PgPool, workspace_id: &str) -> String {
     id
 }
 
-async fn seed_parked_artifact(spine: &PgPool, workflow_id: &str) -> String {
+async fn seed_parked_artifact(spine: &PgPool, workspace_id: &str, workflow_id: &str) -> String {
+    // Match the production invariant: an artifact parked by a workflow
+    // shares that workflow's workspace. Without this, the row would
+    // default to `workspace_id = 'default'` while the workflow has a
+    // random UUID, which is a fixture state that can't happen at
+    // runtime.
     let artifact_id = format!("art_{}", Uuid::new_v4());
     sqlx::query(
         "INSERT INTO artifacts \
-            (artifact_id, kind, name, owner, created_by, state, \
+            (artifact_id, kind, name, owner, created_by, state, workspace_id, \
              workflow_id, current_stage_index, workflow_parked_reason) \
          VALUES ($1, 'code', 'delete-test', 'tester', 'tester', \
-                 'under_review', $2, 0, 'agent_session: stuck')",
+                 'under_review', $2, $3, 0, 'agent_session: stuck')",
     )
     .bind(&artifact_id)
+    .bind(workspace_id)
     .bind(workflow_id)
     .execute(spine)
     .await
@@ -79,7 +85,7 @@ async fn delete_workflow_with_parked_artifact_succeeds() {
     };
     let workspace_id = format!("ws-{}", Uuid::new_v4());
     let workflow_id = seed_workflow(&spine, &workspace_id).await;
-    let artifact_id = seed_parked_artifact(&spine, &workflow_id).await;
+    let artifact_id = seed_parked_artifact(&spine, &workspace_id, &workflow_id).await;
 
     workflow_db::delete_workflow(&spine, &workflow_id)
         .await
