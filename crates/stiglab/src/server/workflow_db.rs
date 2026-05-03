@@ -236,11 +236,45 @@ pub async fn set_workflow_active(
 
 /// Delete the workflow row. `workflow_stages` is `ON DELETE CASCADE` so
 /// the stage chain goes with it — no explicit per-stage DELETE.
+///
+/// Artifacts that still reference this workflow are detached in the
+/// same transaction: `workflow_id`, `current_stage_index` and
+/// `workflow_parked_reason` all NULL out together so the read side's
+/// "not workflow-tagged" invariant (workflow_id IS NULL ⇒ no stage
+/// state) holds. Without this the FK switched to `ON DELETE SET NULL`
+/// in migration 015 would clear `workflow_id` but leave stale stage
+/// indices and park reasons behind on the orphan rows. See #233.
+///
+/// We row-lock the workflow up front (`SELECT ... FOR UPDATE`) so a
+/// concurrent forge `register_artifact_from_trigger` can't tag a new
+/// artifact with this workflow_id between the artifact UPDATE and the
+/// workflow DELETE. Without the lock such a late writer's artifact
+/// would have its `workflow_id` cleared by the FK cascade but keep
+/// stale `current_stage_index` / `workflow_parked_reason` columns
+/// behind. With the lock, the trigger handler blocks on the SELECT,
+/// the DELETE commits, the trigger's workflow lookup then misses and
+/// it drops the trigger — no orphan stage state can leak.
 pub async fn delete_workflow(pool: &PgPool, workflow_id: &str) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT workflow_id FROM workflows WHERE workflow_id = $1 FOR UPDATE")
+        .bind(workflow_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "UPDATE artifacts \
+            SET workflow_id            = NULL, \
+                current_stage_index    = NULL, \
+                workflow_parked_reason = NULL \
+          WHERE workflow_id = $1",
+    )
+    .bind(workflow_id)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("DELETE FROM workflows WHERE workflow_id = $1")
         .bind(workflow_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(())
 }
 
