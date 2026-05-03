@@ -236,11 +236,31 @@ pub async fn set_workflow_active(
 
 /// Delete the workflow row. `workflow_stages` is `ON DELETE CASCADE` so
 /// the stage chain goes with it — no explicit per-stage DELETE.
+///
+/// Artifacts that still reference this workflow are detached in the
+/// same transaction: `workflow_id`, `current_stage_index` and
+/// `workflow_parked_reason` all NULL out together so the read side's
+/// "not workflow-tagged" invariant (workflow_id IS NULL ⇒ no stage
+/// state) holds. Without this the FK switched to `ON DELETE SET NULL`
+/// in migration 015 would clear `workflow_id` but leave stale stage
+/// indices and park reasons behind on the orphan rows. See #233.
 pub async fn delete_workflow(pool: &PgPool, workflow_id: &str) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "UPDATE artifacts \
+            SET workflow_id            = NULL, \
+                current_stage_index    = NULL, \
+                workflow_parked_reason = NULL \
+          WHERE workflow_id = $1",
+    )
+    .bind(workflow_id)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("DELETE FROM workflows WHERE workflow_id = $1")
         .bind(workflow_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(())
 }
 
