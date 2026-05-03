@@ -40,7 +40,7 @@ reviewed table of every `FactoryEventKind` variant. Each row declares:
 | Add a `FactoryEventKind` variant | Add a row to `EVENTS` in the same PR. Producer + consumer must be wired or the event tagged `audit_only`. |
 | Add a new producer for an existing event | Append the subsystem to `producers`. |
 | Add a new listener for an existing event | Append the subsystem to `consumers`; flip `audit_only` to `false` if it was set. |
-| Backwards-incompatible payload change | Bump `schema_version`. Producer + consumer for the new version must ship together (Lever B's producer-without-consumer check enforces this once flipped to hard-fail). |
+| Backwards-incompatible payload change | Bump `schema_version`. Producer + consumer support for the new version must ship together — coordinated via PRs / tests / review (`check-events` only enforces that a manifest row has ≥1 producer and either ≥1 consumer or `audit_only = true`; it does not reason about `schema_version`). |
 | Backwards-compatible payload change (new optional field) | No version bump; manifest review still required — flag the change in the PR description. |
 | Remove a `FactoryEventKind` variant | Remove the manifest row in the same PR. |
 

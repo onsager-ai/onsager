@@ -16,8 +16,9 @@
 //! 5. **Legacy `pub type X = Y;`** — a type alias whose adjacent doc-comment
 //!    contains "legacy" / "compat" / "deprecated" / "alias for" / "renamed".
 //!
-//! Producer-without-consumer is **gated on Lever E #150** — currently a
-//! reminder, not a check.
+//! Producer-without-consumer is enforced separately by `check-events`
+//! (Lever E / #150) against the registry manifest in
+//! `crates/onsager-registry/src/events.rs`.
 //!
 //! ## Escape hatch
 //!
@@ -123,10 +124,6 @@ pub fn run() -> Result<()> {
         "seam-rule lint: clean (subsystems: {}; {} allowed exemption(s))",
         SUBSYSTEMS.join(", "),
         allowed.len()
-    );
-    eprintln!(
-        "note: producer-without-consumer check is gated on Lever E (#150). \
-         Until that lands, new event types still need a manual reviewer."
     );
     Ok(())
 }

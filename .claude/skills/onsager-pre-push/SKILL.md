@@ -270,8 +270,9 @@ hint — see `xtask/src/lint_seams.rs` for the full set):
   doc-comment contains "legacy" / "deprecated" / "compat" / "alias
   for" / "renamed" / "for backwards" / "until …".
 
-(`producer-without-consumer` is gated on Lever E #150 and currently
-warn-only.)
+(`producer-without-consumer` is enforced by `check-events` (Lever E /
+#150) against the manifest in `crates/onsager-registry/src/events.rs`
+— a separate hard-fail step in CI.)
 
 What `check-api-contract` catches (Lever F / #151 — see
 `xtask/src/lint_api_contract.rs`):
