@@ -1002,14 +1002,21 @@ async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
     // #183: events_ext.workspace_id is a real column. Resolve from the
     // event's artifact when present; system-scoped events (forge.error,
     // bundle-sealed warehouse rows that lost their artifact ref) fall
-    // back to "default".
+    // back to "default". Lookup errors are logged so a real DB problem
+    // doesn't silently mis-scope every event (Copilot review on #235).
     let workspace_id = match pipeline_event_artifact_id(event) {
-        Some(art) => spine
-            .lookup_workspace_for_artifact(art)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "default".to_string()),
+        Some(art) => match spine.lookup_workspace_for_artifact(art).await {
+            Ok(Some(ws)) => ws,
+            Ok(None) => "default".to_string(),
+            Err(e) => {
+                tracing::warn!(
+                    artifact_id = art,
+                    event_type,
+                    "forge workspace lookup failed; falling back to 'default': {e}"
+                );
+                "default".to_string()
+            }
+        },
         None => "default".to_string(),
     };
 

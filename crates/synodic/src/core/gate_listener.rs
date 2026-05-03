@@ -79,14 +79,25 @@ impl Dispatcher {
         // #183: events_ext.workspace_id is a real column. Resolve from
         // the artifact this verdict is about; fall back to "default"
         // for the (rare) case where the artifact is no longer present
-        // (e.g. archived between request and verdict).
-        let workspace_id = self
+        // (e.g. archived between request and verdict). Lookup errors
+        // are logged so a real DB problem doesn't silently mis-scope
+        // every verdict (Copilot review on #235).
+        let workspace_id = match self
             .store
             .lookup_workspace_for_artifact(artifact_id.as_str())
             .await
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "default".to_string());
+        {
+            Ok(Some(ws)) => ws,
+            Ok(None) => "default".to_string(),
+            Err(e) => {
+                tracing::warn!(
+                    %artifact_id,
+                    %gate_id,
+                    "synodic workspace lookup failed; falling back to 'default': {e}"
+                );
+                "default".to_string()
+            }
+        };
         let event = FactoryEventKind::SynodicGateVerdict {
             gate_id: gate_id.to_string(),
             artifact_id,

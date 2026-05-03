@@ -54,17 +54,25 @@ impl SpineEmitter {
     /// look up the artifact's workspace when the event names one,
     /// fall back to `"default"` for system events that genuinely have
     /// no tenant (node lifecycle, idle ticks, etc.).
+    ///
+    /// Lookup errors are logged distinctly from `Ok(None)` so a real
+    /// DB problem doesn't silently mis-scope every event into the
+    /// default workspace (Copilot review on #235).
     async fn resolve_workspace(&self, event: &FactoryEventKind) -> String {
-        let artifact_id = artifact_id_for_workspace_lookup(event);
-        match artifact_id {
-            Some(id) => self
-                .store
-                .lookup_workspace_for_artifact(id)
-                .await
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| SYSTEM_WORKSPACE.to_string()),
-            None => SYSTEM_WORKSPACE.to_string(),
+        let Some(artifact_id) = artifact_id_for_workspace_lookup(event) else {
+            return SYSTEM_WORKSPACE.to_string();
+        };
+        match self.store.lookup_workspace_for_artifact(artifact_id).await {
+            Ok(Some(ws)) => ws,
+            Ok(None) => SYSTEM_WORKSPACE.to_string(),
+            Err(e) => {
+                tracing::warn!(
+                    artifact_id,
+                    event_type = event.event_type(),
+                    "spine workspace lookup failed; falling back to {SYSTEM_WORKSPACE}: {e}"
+                );
+                SYSTEM_WORKSPACE.to_string()
+            }
         }
     }
 

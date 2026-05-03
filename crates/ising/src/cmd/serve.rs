@@ -364,14 +364,21 @@ async fn append_insight_emitted(
 
     // #183: events_ext.workspace_id is a real column. `subject_ref`
     // is free-form (artifact id, artifact kind, rule id) — try
-    // lookup_workspace_for_artifact and fall back to "default" for
-    // non-artifact subjects.
-    let workspace_id = spine
-        .lookup_workspace_for_artifact(subject_ref)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "default".to_string());
+    // lookup_workspace_for_artifact; non-artifact subjects fall back
+    // to "default" via Ok(None). Lookup errors are logged distinctly
+    // so a DB problem doesn't silently mis-scope every insight
+    // (Copilot review on #235).
+    let workspace_id = match spine.lookup_workspace_for_artifact(subject_ref).await {
+        Ok(Some(ws)) => ws,
+        Ok(None) => "default".to_string(),
+        Err(e) => {
+            tracing::warn!(
+                subject_ref,
+                "ising workspace lookup for insight_emitted failed; falling back to 'default': {e}"
+            );
+            "default".to_string()
+        }
+    };
 
     let id = spine
         .append_ext(
@@ -411,13 +418,20 @@ async fn append_rule_proposed(
 
     // #183: same pattern as insight_emitted — `subject_ref` may name
     // an artifact, an artifact kind, or a rule id. Try the artifact
-    // lookup and fall back to "default" for non-artifact subjects.
-    let workspace_id = spine
-        .lookup_workspace_for_artifact(subject_ref)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "default".to_string());
+    // lookup; non-artifact subjects fall back to "default" via
+    // Ok(None). Lookup errors are logged distinctly (Copilot review
+    // on #235).
+    let workspace_id = match spine.lookup_workspace_for_artifact(subject_ref).await {
+        Ok(Some(ws)) => ws,
+        Ok(None) => "default".to_string(),
+        Err(e) => {
+            tracing::warn!(
+                subject_ref,
+                "ising workspace lookup for rule_proposed failed; falling back to 'default': {e}"
+            );
+            "default".to_string()
+        }
+    };
 
     let id = spine
         .append_ext(

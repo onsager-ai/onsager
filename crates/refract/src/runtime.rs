@@ -117,15 +117,23 @@ impl Refract {
         // artifact layer (an intent fans out into artifacts that may
         // span workspaces); when the decompose result names artifacts
         // we resolve from the first one, else fall back to "default".
+        // Lookup errors are logged distinctly so a real DB problem
+        // doesn't silently mis-scope every refract event (Copilot
+        // review on #235).
         let workspace_id = match event {
             FactoryEventKind::RefractDecomposed { artifact_ids, .. } => {
                 match artifact_ids.first() {
-                    Some(id) => spine
-                        .lookup_workspace_for_artifact(id)
-                        .await
-                        .ok()
-                        .flatten()
-                        .unwrap_or_else(|| "default".to_string()),
+                    Some(id) => match spine.lookup_workspace_for_artifact(id).await {
+                        Ok(Some(ws)) => ws,
+                        Ok(None) => "default".to_string(),
+                        Err(e) => {
+                            tracing::warn!(
+                                artifact_id = id,
+                                "refract workspace lookup failed; falling back to 'default': {e}"
+                            );
+                            "default".to_string()
+                        }
+                    },
                     None => "default".to_string(),
                 }
             }

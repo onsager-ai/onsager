@@ -44,7 +44,7 @@ async fn spine_events_filter_excludes_other_workspaces() {
             &stream_id,
             "forge",
             "test.scope_w1",
-            serde_json::json!({"workspace_id": w1}),
+            serde_json::json!({"workspace_id": w1.clone()}),
             &metadata,
             None,
         )
@@ -56,7 +56,7 @@ async fn spine_events_filter_excludes_other_workspaces() {
             &stream_id,
             "forge",
             "test.scope_w2",
-            serde_json::json!({"workspace_id": w2}),
+            serde_json::json!({"workspace_id": w2.clone()}),
             &metadata,
             None,
         )
