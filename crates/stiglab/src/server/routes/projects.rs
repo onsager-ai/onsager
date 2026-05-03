@@ -1243,6 +1243,7 @@ pub async fn replay_issue_trigger(
             }
             match spine
                 .emit_raw(
+                    &project.workspace_id,
                     &ev.kind.stream_id(),
                     spine_namespace(&ev.kind),
                     "stiglab",

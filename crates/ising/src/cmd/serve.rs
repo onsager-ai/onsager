@@ -362,8 +362,20 @@ async fn append_insight_emitted(
         ..Default::default()
     };
 
+    // #183: events_ext.workspace_id is a real column. `subject_ref`
+    // is free-form (artifact id, artifact kind, rule id) — try
+    // lookup_workspace_for_artifact and fall back to "default" for
+    // non-artifact subjects.
+    let workspace_id = spine
+        .lookup_workspace_for_artifact(subject_ref)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "default".to_string());
+
     let id = spine
         .append_ext(
+            &workspace_id,
             &stream_id,
             "ising",
             "ising.insight_emitted",
@@ -384,11 +396,11 @@ async fn append_rule_proposed(
     spine: &EventStore,
     event: &FactoryEventKind,
 ) -> Result<i64, anyhow::Error> {
-    if !matches!(event, FactoryEventKind::IsingRuleProposed { .. }) {
+    let FactoryEventKind::IsingRuleProposed { subject_ref, .. } = event else {
         return Err(anyhow::anyhow!(
             "append_rule_proposed called with non-IsingRuleProposed variant"
         ));
-    }
+    };
 
     let stream_id = event.stream_id();
     let data = serde_json::to_value(event)?;
@@ -397,8 +409,19 @@ async fn append_rule_proposed(
         ..Default::default()
     };
 
+    // #183: same pattern as insight_emitted — `subject_ref` may name
+    // an artifact, an artifact kind, or a rule id. Try the artifact
+    // lookup and fall back to "default" for non-artifact subjects.
+    let workspace_id = spine
+        .lookup_workspace_for_artifact(subject_ref)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "default".to_string());
+
     let id = spine
         .append_ext(
+            &workspace_id,
             &stream_id,
             "ising",
             "ising.rule_proposed",

@@ -4,6 +4,12 @@
 use onsager_spine::factory_event::{FactoryEventKind, TokenUsage};
 use onsager_spine::{EventMetadata, EventStore};
 
+/// Default workspace_id stamped on `events_ext` rows whose source event
+/// has no resolvable tenant (system telemetry — node lifecycle, idle
+/// ticks, catch-up completions). Per #183 the column is NOT NULL; this
+/// is the canonical fallback for cross-workspace events.
+const SYSTEM_WORKSPACE: &str = "default";
+
 /// Emits factory events to the Onsager event spine under the "stiglab" namespace.
 #[derive(Clone)]
 pub struct SpineEmitter {
@@ -28,10 +34,38 @@ impl SpineEmitter {
         let data = serde_json::to_value(&event).unwrap_or_default();
         let stream_id = event.stream_id();
         let event_type = event.event_type();
+        let workspace_id = self.resolve_workspace(&event).await;
 
         self.store
-            .append_ext(&stream_id, "stiglab", event_type, data, &metadata, None)
+            .append_ext(
+                &workspace_id,
+                &stream_id,
+                "stiglab",
+                event_type,
+                data,
+                &metadata,
+                None,
+            )
             .await
+    }
+
+    /// Resolve the tenant scope for a factory event (#183). Per-variant
+    /// match lives here so every call site shares the same policy:
+    /// look up the artifact's workspace when the event names one,
+    /// fall back to `"default"` for system events that genuinely have
+    /// no tenant (node lifecycle, idle ticks, etc.).
+    async fn resolve_workspace(&self, event: &FactoryEventKind) -> String {
+        let artifact_id = artifact_id_for_workspace_lookup(event);
+        match artifact_id {
+            Some(id) => self
+                .store
+                .lookup_workspace_for_artifact(id)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| SYSTEM_WORKSPACE.to_string()),
+            None => SYSTEM_WORKSPACE.to_string(),
+        }
     }
 
     /// Get a reference to the underlying PostgreSQL pool for direct queries.
@@ -51,10 +85,13 @@ impl SpineEmitter {
     /// Used for events that don't map to a `FactoryEventKind` variant (e.g.,
     /// artifact registration from the dashboard).
     ///
-    /// `namespace` identifies the event store partition; `actor` identifies
-    /// the service or user that originated the event.
+    /// `workspace_id` (#183) is the tenant scope; pass `"default"` for
+    /// system events with no tenant. `namespace` identifies the event
+    /// store partition; `actor` identifies the service or user that
+    /// originated the event.
     pub async fn emit_raw(
         &self,
+        workspace_id: &str,
         stream_id: &str,
         namespace: &str,
         actor: &str,
@@ -68,6 +105,7 @@ impl SpineEmitter {
         };
         self.store
             .append_ext(
+                workspace_id,
                 stream_id,
                 namespace,
                 event_type,
@@ -167,5 +205,91 @@ impl SpineEmitter {
             artifact_id: artifact_id.map(str::to_owned),
         })
         .await
+    }
+}
+
+/// Extract the artifact_id a `FactoryEventKind` is scoped to, for
+/// `events_ext.workspace_id` resolution (#183). Returns `None` for
+/// system events that genuinely have no tenant — node lifecycle,
+/// catch-up completions, idle ticks — those land under `"default"`.
+fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
+    match event {
+        FactoryEventKind::ArtifactRegistered { artifact_id, .. }
+        | FactoryEventKind::ArtifactStateChanged { artifact_id, .. }
+        | FactoryEventKind::ArtifactVersionCreated { artifact_id, .. }
+        | FactoryEventKind::ArtifactLineageExtended { artifact_id, .. }
+        | FactoryEventKind::ArtifactQualityRecorded { artifact_id, .. }
+        | FactoryEventKind::ArtifactRouted { artifact_id, .. }
+        | FactoryEventKind::ArtifactArchived { artifact_id, .. }
+        | FactoryEventKind::BundleSealed { artifact_id, .. }
+        | FactoryEventKind::GitBranchCreated { artifact_id, .. }
+        | FactoryEventKind::GitCommitPushed { artifact_id, .. }
+        | FactoryEventKind::GitPrOpened { artifact_id, .. }
+        | FactoryEventKind::GitPrReviewReceived { artifact_id, .. }
+        | FactoryEventKind::GitCiCompleted { artifact_id, .. }
+        | FactoryEventKind::GitPrMerged { artifact_id, .. }
+        | FactoryEventKind::GitPrClosed { artifact_id, .. }
+        | FactoryEventKind::ForgeShapingDispatched { artifact_id, .. }
+        | FactoryEventKind::ForgeShapingReturned { artifact_id, .. }
+        | FactoryEventKind::ForgeGateRequested { artifact_id, .. }
+        | FactoryEventKind::ForgeGateVerdict { artifact_id, .. }
+        | FactoryEventKind::ForgeDecisionMade { artifact_id, .. }
+        | FactoryEventKind::StiglabShapingResultReady { artifact_id, .. }
+        | FactoryEventKind::SynodicGateEvaluated { artifact_id, .. }
+        | FactoryEventKind::SynodicGateDenied { artifact_id, .. }
+        | FactoryEventKind::SynodicGateModified { artifact_id, .. }
+        | FactoryEventKind::SynodicGateVerdict { artifact_id, .. }
+        | FactoryEventKind::SynodicEscalationStarted { artifact_id, .. }
+        | FactoryEventKind::SynodicEscalationResolved { artifact_id, .. }
+        | FactoryEventKind::SynodicEscalationTimedOut { artifact_id, .. }
+        | FactoryEventKind::SynodicGateResolutionProposed { artifact_id, .. }
+        | FactoryEventKind::DeliverableUpdated { artifact_id, .. }
+        | FactoryEventKind::StageEntered { artifact_id, .. }
+        | FactoryEventKind::StageGatePassed { artifact_id, .. }
+        | FactoryEventKind::StageGateFailed { artifact_id, .. }
+        | FactoryEventKind::StageAdvanced { artifact_id, .. } => Some(artifact_id.as_str()),
+        FactoryEventKind::StiglabSessionCompleted { artifact_id, .. }
+        | FactoryEventKind::StiglabSessionFailed { artifact_id, .. } => artifact_id.as_deref(),
+        // Variants below name no artifact — system / cross-workspace
+        // telemetry. Fall back to "default".
+        FactoryEventKind::DeliverySucceeded { .. }
+        | FactoryEventKind::DeliveryFailed { .. }
+        | FactoryEventKind::DeliverableCreated { .. }
+        | FactoryEventKind::ForgeInsightObserved { .. }
+        | FactoryEventKind::ForgeIdleTick
+        | FactoryEventKind::ForgeStateChanged { .. }
+        | FactoryEventKind::StiglabSessionCreated { .. }
+        | FactoryEventKind::StiglabSessionDispatched { .. }
+        | FactoryEventKind::StiglabSessionRunning { .. }
+        | FactoryEventKind::StiglabSessionAborted { .. }
+        | FactoryEventKind::StiglabEventUpgraded { .. }
+        | FactoryEventKind::StiglabNodeRegistered { .. }
+        | FactoryEventKind::StiglabNodeDeregistered { .. }
+        | FactoryEventKind::StiglabNodeHeartbeatMissed { .. }
+        | FactoryEventKind::SynodicRuleProposed { .. }
+        | FactoryEventKind::SynodicRuleApproved { .. }
+        | FactoryEventKind::SynodicRuleDisabled { .. }
+        | FactoryEventKind::SynodicRuleVersionCreated { .. }
+        | FactoryEventKind::IsingInsightDetected { .. }
+        | FactoryEventKind::IsingInsightEmitted { .. }
+        | FactoryEventKind::IsingInsightSuppressed { .. }
+        | FactoryEventKind::IsingRuleProposed { .. }
+        | FactoryEventKind::IsingAnalyzerError { .. }
+        | FactoryEventKind::IsingCatchupCompleted { .. }
+        | FactoryEventKind::IntentSubmitted { .. }
+        | FactoryEventKind::RefractDecomposed { .. }
+        | FactoryEventKind::RefractFailed { .. }
+        | FactoryEventKind::TriggerFired { .. }
+        | FactoryEventKind::TypeProposed { .. }
+        | FactoryEventKind::TypeApproved { .. }
+        | FactoryEventKind::TypeDeprecated { .. }
+        | FactoryEventKind::AdapterRegistered { .. }
+        | FactoryEventKind::AdapterDeprecated { .. }
+        | FactoryEventKind::GateRegistered { .. }
+        | FactoryEventKind::GateDeprecated { .. }
+        | FactoryEventKind::ProfileRegistered { .. }
+        | FactoryEventKind::ProfileDeprecated { .. }
+        | FactoryEventKind::GateCheckUpdated { .. }
+        | FactoryEventKind::GateManualApprovalSignal { .. } => None,
     }
 }

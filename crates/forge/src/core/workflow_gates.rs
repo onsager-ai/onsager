@@ -68,11 +68,16 @@ pub trait GateEmitter: Send + Sync {
     /// accepted the append; `false` lets the caller defer marking the
     /// gate as dispatched so a transient append failure doesn't strand
     /// the artifact (see `evaluate_agent_session`).
-    fn emit_shaping_dispatched(&self, request: &ShapingRequest) -> bool;
+    ///
+    /// `workspace_id` (#183) is the tenant scope for the emitted
+    /// `events_ext` row — sourced from the workflow that owns the
+    /// dispatching artifact.
+    fn emit_shaping_dispatched(&self, workspace_id: &str, request: &ShapingRequest) -> bool;
 
     /// Emit `forge.gate_requested` keyed on `gate_id`. Same return
     /// semantics as [`Self::emit_shaping_dispatched`].
-    fn emit_gate_requested(&self, gate_id: &str, request: &GateRequest) -> bool;
+    fn emit_gate_requested(&self, workspace_id: &str, gate_id: &str, request: &GateRequest)
+        -> bool;
 }
 
 /// Production [`GateEmitter`] backed by an [`EventStore`]. Calls into
@@ -89,7 +94,7 @@ impl SpineGateEmitter {
         Self { store }
     }
 
-    fn emit(&self, stream_id: &str, kind: FactoryEventKind) -> bool {
+    fn emit(&self, workspace_id: &str, stream_id: &str, kind: FactoryEventKind) -> bool {
         let metadata = EventMetadata {
             actor: "forge".into(),
             ..Default::default()
@@ -97,10 +102,15 @@ impl SpineGateEmitter {
         let event_type = kind.event_type();
         let data = serde_json::to_value(&kind).expect("FactoryEventKind must serialize");
         let outcome = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(
-                self.store
-                    .append_ext(stream_id, "forge", event_type, data, &metadata, None),
-            )
+            tokio::runtime::Handle::current().block_on(self.store.append_ext(
+                workspace_id,
+                stream_id,
+                "forge",
+                event_type,
+                data,
+                &metadata,
+                None,
+            ))
         });
         match outcome {
             Ok(_) => true,
@@ -117,8 +127,9 @@ impl SpineGateEmitter {
 }
 
 impl GateEmitter for SpineGateEmitter {
-    fn emit_shaping_dispatched(&self, request: &ShapingRequest) -> bool {
+    fn emit_shaping_dispatched(&self, workspace_id: &str, request: &ShapingRequest) -> bool {
         self.emit(
+            workspace_id,
             &format!("forge:{}", request.artifact_id),
             FactoryEventKind::ForgeShapingDispatched {
                 request_id: request.request_id.clone(),
@@ -129,8 +140,14 @@ impl GateEmitter for SpineGateEmitter {
         )
     }
 
-    fn emit_gate_requested(&self, gate_id: &str, request: &GateRequest) -> bool {
+    fn emit_gate_requested(
+        &self,
+        workspace_id: &str,
+        gate_id: &str,
+        request: &GateRequest,
+    ) -> bool {
         self.emit(
+            workspace_id,
             &format!("forge:{}", request.context.artifact_id),
             FactoryEventKind::ForgeGateRequested {
                 gate_id: gate_id.to_string(),
@@ -246,6 +263,7 @@ impl<E: GateEmitter> LiveGateEvaluator<E> {
     fn evaluate_agent_session(
         &self,
         artifact: &Artifact,
+        workspace_id: &str,
         stage_index: u32,
         shaping_intent: &serde_json::Value,
         created_by: Option<&str>,
@@ -299,7 +317,7 @@ impl<E: GateEmitter> LiveGateEvaluator<E> {
             // postgres/network errors — `already_dispatched` would
             // suppress retries forever, and the completion signal
             // can't arrive for a session that was never created.
-            if self.emitter.emit_shaping_dispatched(&request) {
+            if self.emitter.emit_shaping_dispatched(workspace_id, &request) {
                 self.mark_dispatched(
                     artifact.artifact_id.as_str(),
                     stage_index,
@@ -322,6 +340,7 @@ impl<E: GateEmitter> LiveGateEvaluator<E> {
     fn evaluate_governance(
         &self,
         artifact: &Artifact,
+        workspace_id: &str,
         stage_index: u32,
         gate_point: &Option<String>,
     ) -> GateOutcome {
@@ -387,7 +406,10 @@ impl<E: GateEmitter> LiveGateEvaluator<E> {
             },
         };
         let gate_id = ulid::Ulid::new().to_string();
-        if self.emitter.emit_gate_requested(&gate_id, &request) {
+        if self
+            .emitter
+            .emit_gate_requested(workspace_id, &gate_id, &request)
+        {
             self.governance_in_flight
                 .lock()
                 .expect("governance_in_flight poisoned")
@@ -416,6 +438,7 @@ impl<E: GateEmitter> super::stage_runner::GateEvaluator for LiveGateEvaluator<E>
         match gate {
             GateSpec::AgentSession { shaping_intent } => self.evaluate_agent_session(
                 artifact,
+                &workflow.workspace_id,
                 stage_index,
                 shaping_intent,
                 workflow.created_by.as_deref(),
@@ -424,7 +447,7 @@ impl<E: GateEmitter> super::stage_runner::GateEvaluator for LiveGateEvaluator<E>
                 self.evaluate_external_check(artifact, check_name)
             }
             GateSpec::Governance { gate_point } => {
-                self.evaluate_governance(artifact, stage_index, gate_point)
+                self.evaluate_governance(artifact, &workflow.workspace_id, stage_index, gate_point)
             }
             GateSpec::ManualApproval { signal_kind } => {
                 self.evaluate_manual_approval(artifact, signal_kind)
@@ -477,6 +500,10 @@ mod tests {
         gate_requests: AtomicU32,
         last_shaping_request: Mutex<Option<ShapingRequest>>,
         last_gate_id: Mutex<Option<String>>,
+        /// Workspace_id passed to the most recent emit (#183). Lets the
+        /// regression test assert the workspace propagates from the
+        /// owning workflow into the spine row.
+        last_workspace_id: Mutex<Option<String>>,
         /// When set to false, both emit methods return false to
         /// simulate a transient spine failure.
         accept: std::sync::atomic::AtomicBool,
@@ -490,21 +517,28 @@ mod tests {
         }
     }
     impl GateEmitter for CapturingEmitter {
-        fn emit_shaping_dispatched(&self, request: &ShapingRequest) -> bool {
+        fn emit_shaping_dispatched(&self, workspace_id: &str, request: &ShapingRequest) -> bool {
             if !self.accept.load(Ordering::SeqCst) {
                 return false;
             }
             self.shaping.fetch_add(1, Ordering::SeqCst);
             *self.last_shaping_request.lock().unwrap() = Some(request.clone());
+            *self.last_workspace_id.lock().unwrap() = Some(workspace_id.to_string());
             true
         }
 
-        fn emit_gate_requested(&self, gate_id: &str, _request: &GateRequest) -> bool {
+        fn emit_gate_requested(
+            &self,
+            workspace_id: &str,
+            gate_id: &str,
+            _request: &GateRequest,
+        ) -> bool {
             if !self.accept.load(Ordering::SeqCst) {
                 return false;
             }
             self.gate_requests.fetch_add(1, Ordering::SeqCst);
             *self.last_gate_id.lock().unwrap() = Some(gate_id.to_string());
+            *self.last_workspace_id.lock().unwrap() = Some(workspace_id.to_string());
             true
         }
     }

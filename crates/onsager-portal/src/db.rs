@@ -127,6 +127,10 @@ pub async fn get_project(pool: &PgPool, project_id: &str) -> anyhow::Result<Opti
 pub struct PrArtifactRow {
     pub artifact_id: String,
     pub current_version: i32,
+    /// Tenant scope copied off the spine row (#183). Callers stamp it
+    /// onto every `events_ext` emit so the dashboard's per-workspace
+    /// stream sees the event.
+    pub workspace_id: String,
 }
 
 /// Issue artifact lookup result. Same shape as `PrArtifactRow` but typed
@@ -136,6 +140,8 @@ pub struct PrArtifactRow {
 pub struct IssueArtifactRow {
     pub artifact_id: String,
     pub current_version: i32,
+    /// Tenant scope copied off the spine row (#183).
+    pub workspace_id: String,
 }
 
 /// Look up the artifact previously upserted for `(project_id, pr_number)`.
@@ -146,16 +152,19 @@ pub async fn find_pr_artifact(
     pr_number: u64,
 ) -> anyhow::Result<Option<PrArtifactRow>> {
     let external_ref = pr_external_ref(project_id, pr_number);
-    let row: Option<(String, i32)> = sqlx::query_as(
-        "SELECT artifact_id, current_version FROM artifacts WHERE external_ref = $1",
+    let row: Option<(String, i32, String)> = sqlx::query_as(
+        "SELECT artifact_id, current_version, workspace_id FROM artifacts WHERE external_ref = $1",
     )
     .bind(&external_ref)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|(artifact_id, current_version)| PrArtifactRow {
-        artifact_id,
-        current_version,
-    }))
+    Ok(row.map(
+        |(artifact_id, current_version, workspace_id)| PrArtifactRow {
+            artifact_id,
+            current_version,
+            workspace_id,
+        },
+    ))
 }
 
 /// Upsert the canonical reference-only PR artifact for `(project_id, pr_number)`.
@@ -190,16 +199,17 @@ pub async fn upsert_pr_artifact_ref(
         .execute(&mut *tx)
         .await?;
 
-    let row: (String, i32) = if let Some(existing) = sqlx::query_as::<_, (String, i32)>(
-        "UPDATE artifacts \
+    let row: (String, i32, String) = if let Some(existing) =
+        sqlx::query_as::<_, (String, i32, String)>(
+            "UPDATE artifacts \
             SET state = $2, last_observed_at = NOW() \
           WHERE external_ref = $1 \
-      RETURNING artifact_id, current_version",
-    )
-    .bind(&external_ref)
-    .bind(artifact_state)
-    .fetch_optional(&mut *tx)
-    .await?
+      RETURNING artifact_id, current_version, workspace_id",
+        )
+        .bind(&external_ref)
+        .bind(artifact_state)
+        .fetch_optional(&mut *tx)
+        .await?
     {
         existing
     } else {
@@ -209,7 +219,7 @@ pub async fn upsert_pr_artifact_ref(
                  external_ref, workspace_id, metadata, last_observed_at) \
              VALUES ($1, 'pull_request', NULL, NULL, 'onsager-portal', $2, 1, $3, $4, \
                      jsonb_build_object('project_id', $4::text, 'pr_number', $5::bigint), NOW()) \
-             RETURNING artifact_id, current_version",
+             RETURNING artifact_id, current_version, workspace_id",
         )
         .bind(&new_id)
         .bind(artifact_state)
@@ -225,6 +235,7 @@ pub async fn upsert_pr_artifact_ref(
     Ok(PrArtifactRow {
         artifact_id: row.0,
         current_version: row.1,
+        workspace_id: row.2,
     })
 }
 
@@ -251,16 +262,17 @@ pub async fn upsert_issue_artifact_ref(
         .execute(&mut *tx)
         .await?;
 
-    let row: (String, i32) = if let Some(existing) = sqlx::query_as::<_, (String, i32)>(
-        "UPDATE artifacts \
+    let row: (String, i32, String) = if let Some(existing) =
+        sqlx::query_as::<_, (String, i32, String)>(
+            "UPDATE artifacts \
             SET state = $2, last_observed_at = NOW() \
           WHERE external_ref = $1 \
-      RETURNING artifact_id, current_version",
-    )
-    .bind(&external_ref)
-    .bind(artifact_state)
-    .fetch_optional(&mut *tx)
-    .await?
+      RETURNING artifact_id, current_version, workspace_id",
+        )
+        .bind(&external_ref)
+        .bind(artifact_state)
+        .fetch_optional(&mut *tx)
+        .await?
     {
         existing
     } else {
@@ -270,7 +282,7 @@ pub async fn upsert_issue_artifact_ref(
                  external_ref, workspace_id, metadata, last_observed_at) \
              VALUES ($1, 'github_issue', NULL, NULL, 'onsager-portal', $2, 1, $3, $4, \
                      jsonb_build_object('project_id', $4::text, 'issue_number', $5::bigint), NOW()) \
-             RETURNING artifact_id, current_version",
+             RETURNING artifact_id, current_version, workspace_id",
         )
         .bind(&new_id)
         .bind(artifact_state)
@@ -286,6 +298,7 @@ pub async fn upsert_issue_artifact_ref(
     Ok(IssueArtifactRow {
         artifact_id: row.0,
         current_version: row.1,
+        workspace_id: row.2,
     })
 }
 

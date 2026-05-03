@@ -176,6 +176,7 @@ pub async fn handle(
     let event_id = state
         .spine
         .append_ext(
+            &artifact.workspace_id,
             &stream_id,
             GIT_NAMESPACE,
             event.event_type(),
@@ -244,6 +245,7 @@ pub async fn handle(
             state
                 .spine
                 .append_ext(
+                    &artifact.workspace_id,
                     &artifact.artifact_id,
                     "forge",
                     "forge.gate_verdict",
@@ -316,6 +318,7 @@ pub async fn handle(
                 state
                     .spine
                     .append_ext(
+                        &artifact.workspace_id,
                         &artifact.artifact_id,
                         "synodic",
                         "synodic.escalation_started",

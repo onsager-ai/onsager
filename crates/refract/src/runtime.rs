@@ -111,8 +111,37 @@ impl Refract {
         let data = serde_json::to_value(event)?;
         let stream_id = event.stream_id();
         let event_type = event.event_type();
+
+        // #183: events_ext.workspace_id is a real column. Refract's
+        // intent / decomposed / failed events all live above the
+        // artifact layer (an intent fans out into artifacts that may
+        // span workspaces); when the decompose result names artifacts
+        // we resolve from the first one, else fall back to "default".
+        let workspace_id = match event {
+            FactoryEventKind::RefractDecomposed { artifact_ids, .. } => {
+                match artifact_ids.first() {
+                    Some(id) => spine
+                        .lookup_workspace_for_artifact(id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| "default".to_string()),
+                    None => "default".to_string(),
+                }
+            }
+            _ => "default".to_string(),
+        };
+
         spine
-            .append_ext(&stream_id, "refract", event_type, data, &metadata, None)
+            .append_ext(
+                &workspace_id,
+                &stream_id,
+                "refract",
+                event_type,
+                data,
+                &metadata,
+                None,
+            )
             .await
             .map_err(|e| RuntimeError::Spine(e.to_string()))?;
         Ok(())

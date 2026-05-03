@@ -104,8 +104,15 @@ impl EventStore {
 
     /// Append an extension event linked to a stream.
     /// Returns the assigned event id.
+    ///
+    /// `workspace_id` is mandatory (`#183`) — it lives in a real column
+    /// on `events_ext` with a backing index. Use `"default"` for system
+    /// events that have no tenant; for events tied to an artifact prefer
+    /// [`Self::lookup_workspace_for_artifact`].
+    #[allow(clippy::too_many_arguments)]
     pub async fn append_ext(
         &self,
+        workspace_id: &str,
         stream_id: &str,
         namespace: &str,
         event_type: &str,
@@ -118,8 +125,8 @@ impl EventStore {
 
         let row: (i64,) = sqlx::query_as(
             r#"
-            INSERT INTO events_ext (stream_id, namespace, event_type, data, metadata, ref_event_id, correlation_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO events_ext (stream_id, namespace, event_type, data, metadata, ref_event_id, correlation_id, workspace_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id
             "#,
         )
@@ -130,10 +137,26 @@ impl EventStore {
         .bind(&meta)
         .bind(ref_event_id)
         .bind(correlation_id)
+        .bind(workspace_id)
         .fetch_one(&self.pool)
         .await?;
 
         Ok(row.0)
+    }
+
+    /// Resolve an artifact's workspace_id. Returns `Ok(None)` when the
+    /// artifact isn't in the spine (e.g. system events that name a
+    /// stream key but no row). Producers feed this into
+    /// [`Self::append_ext`] so every emitter pays the same workspace
+    /// resolution path.
+    pub async fn lookup_workspace_for_artifact(
+        &self,
+        artifact_id: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
+        sqlx::query_scalar::<_, String>("SELECT workspace_id FROM artifacts WHERE artifact_id = $1")
+            .bind(artifact_id)
+            .fetch_optional(&self.pool)
+            .await
     }
 
     /// Query core events for a stream, ordered by sequence.
@@ -163,7 +186,7 @@ impl EventStore {
     ) -> Result<Vec<ExtensionEventRecord>, sqlx::Error> {
         sqlx::query_as::<_, ExtensionEventRecord>(
             r#"
-            SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at, correlation_id
+            SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at, correlation_id, workspace_id
             FROM events_ext
             WHERE stream_id = $1
             ORDER BY created_at ASC
@@ -251,7 +274,7 @@ impl EventStore {
     ) -> Result<Option<ExtensionEventRecord>, sqlx::Error> {
         sqlx::query_as::<_, ExtensionEventRecord>(
             r#"
-            SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at, correlation_id
+            SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at, correlation_id, workspace_id
             FROM events_ext
             WHERE id = $1
             "#,
@@ -278,7 +301,7 @@ impl EventStore {
 
         let where_clause = conditions.join(" AND ");
         let sql = format!(
-            "SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at, correlation_id \
+            "SELECT id, stream_id, namespace, event_type, data, metadata, ref_event_id, created_at, correlation_id, workspace_id \
              FROM events_ext WHERE {where_clause} ORDER BY id DESC LIMIT {limit}"
         );
 
@@ -462,6 +485,7 @@ impl sqlx::FromRow<'_, sqlx::postgres::PgRow> for ExtensionEventRecord {
             ref_event_id: row.try_get("ref_event_id")?,
             created_at: row.try_get("created_at")?,
             correlation_id: row.try_get("correlation_id")?,
+            workspace_id: row.try_get("workspace_id")?,
         })
     }
 }
@@ -562,6 +586,51 @@ mod tests {
             rows.is_empty(),
             "found unexpected rows after rollback: {rows:?}"
         );
+    }
+
+    /// `workspace_id` round-trips through `append_ext` → `query_ext_stream`
+    /// (#183). Pinning the column wiring here so a future refactor of the
+    /// SELECT list or the FromRow impl can't silently drop the field.
+    #[tokio::test]
+    async fn append_ext_round_trips_workspace_id() {
+        let Some(url) = db_url() else {
+            eprintln!("skipping: DATABASE_URL not set");
+            return;
+        };
+        let store = EventStore::connect(&url).await.unwrap();
+        let stream_id = format!("forge:art_ws_test_{}", ulid::Ulid::new());
+        let workspace_id = format!("ws_round_trip_{}", ulid::Ulid::new());
+        let metadata = test_metadata();
+
+        let id = store
+            .append_ext(
+                &workspace_id,
+                &stream_id,
+                "forge",
+                "test.workspace_round_trip",
+                serde_json::json!({"hello": "world"}),
+                &metadata,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let rows = store.query_ext_stream(&stream_id).await.unwrap();
+        let row = rows
+            .iter()
+            .find(|r| r.id == id)
+            .expect("appended row visible on read");
+        assert_eq!(row.workspace_id, workspace_id);
+
+        let by_id = store.get_ext_event_by_id(id).await.unwrap().unwrap();
+        assert_eq!(by_id.workspace_id, workspace_id);
+
+        // Clean up.
+        sqlx::query("DELETE FROM events_ext WHERE id = $1")
+            .bind(id)
+            .execute(store.pool())
+            .await
+            .unwrap();
     }
 
     /// Dropped transaction (simulating panic path): event does not persist.
