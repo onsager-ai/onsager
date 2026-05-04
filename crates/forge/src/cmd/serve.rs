@@ -999,11 +999,56 @@ async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
         ),
     };
 
+    // #183: events_ext.workspace_id is a real column. Resolve from the
+    // event's artifact when present; system-scoped events (forge.error,
+    // bundle-sealed warehouse rows that lost their artifact ref) fall
+    // back to "default". Lookup errors are logged so a real DB problem
+    // doesn't silently mis-scope every event (Copilot review on #235).
+    let workspace_id = match pipeline_event_artifact_id(event) {
+        Some(art) => match spine.lookup_workspace_for_artifact(art).await {
+            Ok(Some(ws)) => ws,
+            Ok(None) => "default".to_string(),
+            Err(e) => {
+                tracing::warn!(
+                    artifact_id = art,
+                    event_type,
+                    "forge workspace lookup failed; falling back to 'default': {e}"
+                );
+                "default".to_string()
+            }
+        },
+        None => "default".to_string(),
+    };
+
     if let Err(e) = spine
-        .append_ext(&stream_id, "forge", event_type, data, &metadata, None)
+        .append_ext(
+            &workspace_id,
+            &stream_id,
+            "forge",
+            event_type,
+            data,
+            &metadata,
+            None,
+        )
         .await
     {
         tracing::warn!("failed to emit forge event: {e}");
+    }
+}
+
+/// Extract the artifact_id a pipeline event is scoped to, when one
+/// exists. Used to resolve `events_ext.workspace_id` (#183) without
+/// duplicating the variant match.
+fn pipeline_event_artifact_id(event: &PipelineEvent) -> Option<&str> {
+    match event {
+        PipelineEvent::DecisionMade(d) => Some(d.artifact_id.as_str()),
+        PipelineEvent::ShapingDispatched { artifact_id, .. } => Some(artifact_id.as_str()),
+        PipelineEvent::ShapingReturned { artifact_id, .. } => Some(artifact_id.as_str()),
+        PipelineEvent::GateRequested { artifact_id, .. } => Some(artifact_id.as_str()),
+        PipelineEvent::GateVerdictReceived { artifact_id, .. } => Some(artifact_id.as_str()),
+        PipelineEvent::ArtifactAdvanced { artifact_id, .. } => Some(artifact_id.as_str()),
+        PipelineEvent::BundleSealed { artifact_id, .. } => Some(artifact_id.as_str()),
+        PipelineEvent::IdleTick | PipelineEvent::Error(_) => None,
     }
 }
 
@@ -1096,7 +1141,15 @@ async fn emit_stage_event(spine: &EventStore, workflow: &Workflow, event: &Stage
     };
 
     if let Err(e) = spine
-        .append_ext(&stream_id, "workflow", event_type, data, &metadata, None)
+        .append_ext(
+            workspace_id,
+            &stream_id,
+            "workflow",
+            event_type,
+            data,
+            &metadata,
+            None,
+        )
         .await
     {
         tracing::warn!("failed to emit workflow stage event: {e}");

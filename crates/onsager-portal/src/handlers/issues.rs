@@ -110,6 +110,7 @@ pub async fn handle(
     state
         .spine
         .append_ext(
+            &artifact.workspace_id,
             &stream_id,
             "portal",
             "portal.task_materialized",

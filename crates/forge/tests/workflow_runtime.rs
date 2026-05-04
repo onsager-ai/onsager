@@ -34,10 +34,15 @@ struct AutoAllowEmitter {
     pending: PendingVerdicts,
 }
 impl GateEmitter for AutoAllowEmitter {
-    fn emit_shaping_dispatched(&self, _request: &ShapingRequest) -> bool {
+    fn emit_shaping_dispatched(&self, _workspace_id: &str, _request: &ShapingRequest) -> bool {
         true
     }
-    fn emit_gate_requested(&self, gate_id: &str, _request: &GateRequest) -> bool {
+    fn emit_gate_requested(
+        &self,
+        _workspace_id: &str,
+        gate_id: &str,
+        _request: &GateRequest,
+    ) -> bool {
         self.pending.insert(gate_id, GateVerdict::Allow);
         true
     }

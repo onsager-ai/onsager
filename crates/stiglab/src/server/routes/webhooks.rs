@@ -304,6 +304,7 @@ async fn emit_events(state: &AppState, events: Vec<RoutedEvent>, workspace_id: &
         let namespace = spine_namespace(&ev.kind);
         if let Err(e) = spine
             .emit_raw(
+                workspace_id,
                 &ev.kind.stream_id(),
                 namespace,
                 "stiglab",

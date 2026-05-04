@@ -153,6 +153,7 @@ pub async fn run(
         let stream_id = crate::handlers::pull_request::pr_stream_id(&project.id, pr.number);
         spine
             .append_ext(
+                &artifact.workspace_id,
                 &stream_id,
                 "git",
                 event.event_type(),
@@ -178,6 +179,7 @@ pub async fn run(
         let stream_id = format!("portal:issue:{}", artifact.artifact_id);
         spine
             .append_ext(
+                &artifact.workspace_id,
                 &stream_id,
                 "portal",
                 "portal.task_materialized",

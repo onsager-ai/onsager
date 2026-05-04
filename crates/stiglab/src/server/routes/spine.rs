@@ -145,10 +145,9 @@ pub struct OverrideGateRequest {
 
 /// GET /api/spine/events?workspace=W — query the events_ext table.
 ///
-/// Filters event rows whose payload references the requested workspace
-/// (matched on `data->>'workspace_id'`). The `?workspace=` query param
-/// is required (#164) — a missing value returns 400 so a caller can't
-/// silently scan every workspace's stream.
+/// Filters event rows by `events_ext.workspace_id` (#183). The
+/// `?workspace=` query param is required (#164) — a missing value
+/// returns 400 so a caller can't silently scan every workspace's stream.
 pub async fn list_events(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -186,13 +185,14 @@ pub async fn list_events(
     // `metadata`. The API surfaces them as `stream_type` / `actor` for clients,
     // so we alias on the way out.
     //
-    // Workspace scope is matched on `data->>'workspace_id'`; events that
-    // don't carry the field (legacy, infrastructure-level) are excluded
-    // so a workspace listing never includes another workspace's rows.
+    // Workspace scope is matched on the `workspace_id` column (#183 —
+    // promoted from `data->>'workspace_id'` to a real column with a
+    // backing index). Legacy and system events that have no tenant
+    // carry `'default'` and aren't returned to a tenant-scoped read.
     let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
         "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
                 COALESCE(metadata->>'actor', '') AS actor, created_at \
-         FROM events_ext WHERE data->>'workspace_id' = ",
+         FROM events_ext WHERE workspace_id = ",
     );
     qb.push_bind(workspace_id.to_string());
     if let Some(st) = params.stream_type.as_deref() {
@@ -381,6 +381,7 @@ pub async fn register_artifact(
                 });
                 if let Err(e) = spine
                     .emit_raw(
+                        workspace_id,
                         &format!("forge:{artifact_id}"),
                         "forge",
                         "dashboard",
@@ -709,7 +710,6 @@ pub async fn retry_artifact(
             return r;
         }
     }
-    let _ = workspace_id;
 
     if state_str == "archived" || state_str == "released" {
         return (
@@ -729,6 +729,7 @@ pub async fn retry_artifact(
     });
     if let Err(e) = spine
         .emit_raw(
+            &workspace_id,
             &format!("forge:{id}"),
             "forge",
             actor,
@@ -844,6 +845,7 @@ pub async fn abort_artifact(
     });
     if let Err(e) = spine
         .emit_raw(
+            &workspace_id,
             &format!("forge:{id}"),
             "forge",
             actor,
@@ -952,6 +954,7 @@ pub async fn override_gate(
     });
     if let Err(e) = spine
         .emit_raw(
+            &workspace_id,
             &format!("forge:{id}"),
             "synodic",
             actor,

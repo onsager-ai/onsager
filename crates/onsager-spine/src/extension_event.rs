@@ -19,6 +19,12 @@ pub struct ExtensionEventRecord {
     /// [`crate::store::EventRecord::correlation_id`].
     #[serde(default)]
     pub correlation_id: Option<Uuid>,
+    /// Tenant scope (`#183`). Promoted from `data->>'workspace_id'`
+    /// to a real column with a backing index in migration 016 so the
+    /// dashboard's per-workspace stream read filters cheaply and
+    /// can't drop events whose payload is missing the field.
+    /// `'default'` for legacy/system events with no tenant.
+    pub workspace_id: String,
 }
 
 impl ExtensionEventRecord {
