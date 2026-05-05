@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/sheet"
 import { LabelCombobox } from "./LabelCombobox"
 import { RepoCombobox } from "./RepoCombobox"
+import { TriggerKindPicker } from "./TriggerKindPicker"
 import type { WorkflowTriggerDraft } from "./workflow-draft"
 
 export interface TriggerCardProps {
@@ -110,6 +111,8 @@ function TriggerForm({
 }) {
   return (
     <>
+      <TriggerKindPicker kindTag="github_issue_webhook" />
+
       <div className="space-y-1.5">
         <span className="text-sm font-medium">Repository</span>
         <RepoCombobox

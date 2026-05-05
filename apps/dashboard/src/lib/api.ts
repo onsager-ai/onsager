@@ -466,6 +466,21 @@ export interface EventManifestEntry {
   description: string;
 }
 
+// Wire shape of `GET /api/registry/triggers` (spec #237). One row per
+// `onsager_spine::TriggerKind` variant. Mirrors
+// `onsager_registry::TriggerDefinition`; keep in sync with the Rust
+// struct.
+export type TriggerCategory = 'event' | 'schedule' | 'request' | 'manual';
+export type TriggerUiKind = 'webhook';
+
+export interface TriggerManifestEntry {
+  kind_tag: string;
+  producer: EventSubsystem;
+  category: TriggerCategory;
+  ui_kind: TriggerUiKind;
+  description: string;
+}
+
 export interface WorkflowStage {
   id: string;
   name: string;
@@ -490,13 +505,16 @@ export interface Workflow {
 
 // Wire contract for workflow CRUD. Matches stiglab's `CreateWorkflowBody`
 // / `validate_create_body` exactly — flat trigger fields, numeric GitHub
-// install id, snake_case `active`. Construct with `draftToCreateRequest`
-// from the UI draft + installations list so the numeric id is resolved
-// from the workspace installation record id the draft carries.
+// install id, snake_case `active`. The `trigger_kind` is the registry's
+// snake-case `kind_tag` (e.g. `'github_issue_webhook'`) — fetched at
+// runtime from `/api/registry/triggers` (spec #237). Construct with
+// `draftToCreateRequest` from the UI draft + installations list so the
+// numeric id is resolved from the workspace installation record id the
+// draft carries.
 export interface CreateWorkflowRequest {
   workspace_id: string;
   name: string;
-  trigger_kind: 'github-issue-webhook';
+  trigger_kind: string;
   repo_owner: string;
   repo_name: string;
   trigger_label: string;
@@ -511,18 +529,23 @@ export interface CreateWorkflowStage {
   params: Record<string, unknown>;
 }
 
-// Backend read shapes. Stiglab returns workflows with flat trigger fields
-// and stages as `{ gate_kind, params }` with opaque JSON params. The UI
-// keeps a richer nested `Workflow` shape; the adapters below translate
-// so the rest of the app doesn't have to know the wire format.
+// Backend read shapes. Stiglab returns workflows with the unified
+// `trigger` variant (spec #237) — `{ kind: 'github_issue_webhook',
+// repo, label }` — and stages as `{ gate_kind, params }` with opaque
+// JSON params. The UI keeps a richer nested `Workflow` shape; the
+// adapters below translate so the rest of the app doesn't have to
+// know the wire format.
+interface BackendTrigger {
+  kind: string;
+  repo?: string;
+  label?: string;
+}
+
 interface BackendWorkflow {
   id: string;
   workspace_id: string;
   name: string;
-  trigger_kind: 'github-issue-webhook';
-  repo_owner: string;
-  repo_name: string;
-  trigger_label: string;
+  trigger: BackendTrigger;
   install_id: number;
   preset_id: string | null;
   active: boolean;
@@ -591,6 +614,12 @@ function workflowFromBackend(
   w: BackendWorkflow,
   stages: BackendWorkflowStage[] = [],
 ): Workflow {
+  // Today the only kind is `github_issue_webhook`; the registry
+  // (`/api/registry/triggers`) is the source of truth for which kinds
+  // exist. Per-kind UI translation lives here so the rest of the app
+  // can keep its richer nested trigger shape.
+  const repo = w.trigger.repo ?? '';
+  const [repoOwner = '', repoName = ''] = repo.split('/');
   return {
     id: w.id,
     workspace_id: w.workspace_id,
@@ -600,9 +629,9 @@ function workflowFromBackend(
     trigger: {
       kind: 'github-label',
       install_id: String(w.install_id),
-      repo_owner: w.repo_owner,
-      repo_name: w.repo_name,
-      label: w.trigger_label,
+      repo_owner: repoOwner,
+      repo_name: repoName,
+      label: w.trigger.label ?? '',
     },
     stages: stages.map(stageFromBackend),
     created_at: w.created_at,
@@ -1014,6 +1043,12 @@ export const api = {
   // without reading source.
   listEventManifest: () =>
     request<{ events: EventManifestEntry[] }>('/registry/events'),
+  // Trigger-kind registry manifest (spec #237). Returns every registered
+  // `TriggerKind` variant with its category, UI shape, and description.
+  // Drives `<TriggerKindPicker>` so the dashboard picks kinds from the
+  // catalog instead of hardcoding the union.
+  listTriggerManifest: () =>
+    request<{ triggers: TriggerManifestEntry[] }>('/registry/triggers'),
   // GitHub labels for a workspace install + repo. Used by the trigger card
   // combobox so the user selects from existing labels (with an inline
   // create-new affordance) instead of free-texting.

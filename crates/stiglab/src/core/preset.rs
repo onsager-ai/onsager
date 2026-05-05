@@ -8,7 +8,7 @@
 
 use serde_json::json;
 
-use crate::core::workflow::{GateKind, TriggerKind};
+use crate::core::workflow::GateKind;
 
 /// Stage spec from a preset, before being persisted with `workflow_id` + `seq`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,13 +17,16 @@ pub struct PresetStage {
     pub params: serde_json::Value,
 }
 
-/// Expansion produced by a preset: the trigger kind plus the ordered stage
-/// chain. The caller fills in workflow-specific fields like repo/label at
-/// workflow creation time.
+/// Expansion produced by a preset: the trigger kind tag plus the ordered
+/// stage chain. The caller fills in per-trigger config (e.g. repo / label)
+/// at workflow creation time.
 #[derive(Debug, Clone)]
 pub struct PresetExpansion {
     pub preset_id: String,
-    pub trigger_kind: TriggerKind,
+    /// Snake-case `kind_tag` of the trigger this preset expects, matching
+    /// [`onsager_spine::TriggerKind::kind_tag`]. The caller supplies the
+    /// per-kind config (repo / label) separately.
+    pub trigger_kind_tag: &'static str,
     pub stages: Vec<PresetStage>,
 }
 
@@ -37,7 +40,7 @@ pub fn resolve_preset(id: &str) -> Option<PresetExpansion> {
     match id {
         "github-issue-to-pr" => Some(PresetExpansion {
             preset_id: id.to_string(),
-            trigger_kind: TriggerKind::GithubIssueWebhook,
+            trigger_kind_tag: "github_issue_webhook",
             stages: vec![PresetStage {
                 gate_kind: GateKind::AgentSession,
                 params: json!({
@@ -63,7 +66,7 @@ mod tests {
     fn github_issue_to_pr_expands_as_specced() {
         let p = resolve_preset("github-issue-to-pr").expect("preset should resolve");
         assert_eq!(p.preset_id, "github-issue-to-pr");
-        assert_eq!(p.trigger_kind, TriggerKind::GithubIssueWebhook);
+        assert_eq!(p.trigger_kind_tag, "github_issue_webhook");
         assert_eq!(p.stages.len(), 1);
         assert_eq!(p.stages[0].gate_kind, GateKind::AgentSession);
         assert_eq!(

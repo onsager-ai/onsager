@@ -51,7 +51,7 @@ describe("draftToCreateRequest", () => {
     expect(out).toMatchObject({
       workspace_id: "t_1",
       name: "Issue → PR",
-      trigger_kind: "github-issue-webhook",
+      trigger_kind: "github_issue_webhook",
       repo_owner: "onsager-ai",
       repo_name: "onsager",
       trigger_label: "factory",

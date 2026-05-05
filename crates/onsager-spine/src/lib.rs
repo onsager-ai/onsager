@@ -40,6 +40,7 @@ pub mod listener;
 pub mod namespace;
 pub mod protocol;
 pub mod store;
+pub mod trigger;
 
 // Backward-compat re-exports of the artifact value objects. Spine depends on
 // `onsager-artifact` because `FactoryEvent` references `ArtifactId`, `Kind`,
@@ -63,3 +64,4 @@ pub use namespace::{Namespace, NamespaceError};
 pub use store::{
     append_factory_event_tx, EventMetadata, EventNotification, EventRecord, EventStore,
 };
+pub use trigger::{TriggerKind, TriggerStorageError};

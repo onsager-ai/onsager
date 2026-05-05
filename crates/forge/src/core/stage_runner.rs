@@ -343,14 +343,14 @@ pub fn enter_workflow(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::workflow::{StageSpec, TriggerSpec};
+    use crate::core::workflow::{StageSpec, TriggerKind};
     use onsager_artifact::Kind;
 
     fn make_workflow(id: &str, stages: Vec<StageSpec>) -> Workflow {
         Workflow {
             workflow_id: id.into(),
             name: "test".into(),
-            trigger: TriggerSpec::GithubIssueWebhook {
+            trigger: TriggerKind::GithubIssueWebhook {
                 repo: "a/b".into(),
                 label: "ai".into(),
             },

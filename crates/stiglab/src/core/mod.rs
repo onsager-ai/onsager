@@ -136,16 +136,12 @@ mod tests {
     }
 
     #[test]
-    fn test_trigger_kind_display_and_parse() {
-        assert_eq!(
-            TriggerKind::GithubIssueWebhook.to_string(),
-            "github-issue-webhook"
-        );
-        assert_eq!(
-            "github-issue-webhook".parse::<TriggerKind>().unwrap(),
-            TriggerKind::GithubIssueWebhook
-        );
-        assert!("polling".parse::<TriggerKind>().is_err());
+    fn test_trigger_kind_tag_is_snake_case() {
+        let t = TriggerKind::GithubIssueWebhook {
+            repo: "owner/name".into(),
+            label: "spec".into(),
+        };
+        assert_eq!(t.kind_tag(), "github_issue_webhook");
     }
 
     #[test]

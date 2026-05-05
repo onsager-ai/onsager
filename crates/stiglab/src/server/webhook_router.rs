@@ -76,7 +76,7 @@ pub fn build_trigger_fired_events(
             RoutedEvent {
                 kind: FactoryEventKind::TriggerFired {
                     workflow_id: w.id.clone(),
-                    trigger_kind: w.trigger_kind.to_string(),
+                    trigger_kind: w.trigger.kind_tag().to_string(),
                     payload,
                 },
             }
@@ -255,10 +255,10 @@ mod tests {
             id: "wf_1".to_string(),
             workspace_id: "w1".to_string(),
             name: "sdd".to_string(),
-            trigger_kind: TriggerKind::GithubIssueWebhook,
-            repo_owner: "acme".to_string(),
-            repo_name: "widgets".to_string(),
-            trigger_label: label.to_string(),
+            trigger: TriggerKind::GithubIssueWebhook {
+                repo: "acme/widgets".to_string(),
+                label: label.to_string(),
+            },
             install_id: 42,
             preset_id: Some("github-issue-to-pr".to_string()),
             active: true,

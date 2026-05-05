@@ -1165,9 +1165,12 @@ pub async fn replay_issue_trigger(
         issue.labels.iter().map(|l| l.name.as_str()).collect();
     let mut matches: Vec<(crate::core::workflow::Workflow, String)> = Vec::new();
     for wf in candidates {
-        if label_set.contains(wf.trigger_label.as_str()) {
-            let label = wf.trigger_label.clone();
-            matches.push((wf, label));
+        let Some(label) = wf.github_label() else {
+            continue;
+        };
+        if label_set.contains(label) {
+            let label_owned = label.to_string();
+            matches.push((wf, label_owned));
         }
     }
 

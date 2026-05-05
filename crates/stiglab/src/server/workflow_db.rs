@@ -19,55 +19,11 @@
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
+use onsager_registry::TRIGGERS;
 use serde_json::json;
 use sqlx::{PgPool, Row};
 
 use crate::core::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
-
-// ── Translation between stiglab's API types and the spine schema ──────────
-
-/// stiglab persists `'github-issue-webhook'` (kebab); the spine
-/// `workflows.trigger_kind` CHECK constraint requires the snake form.
-fn trigger_kind_to_spine(kind: TriggerKind) -> &'static str {
-    match kind {
-        TriggerKind::GithubIssueWebhook => "github_issue_webhook",
-    }
-}
-
-fn trigger_kind_from_spine(s: &str) -> anyhow::Result<TriggerKind> {
-    match s {
-        "github_issue_webhook" => Ok(TriggerKind::GithubIssueWebhook),
-        other => Err(anyhow::anyhow!("unknown spine trigger_kind: {other}")),
-    }
-}
-
-/// Pack the per-row GitHub trigger fields into the JSON shape forge reads.
-fn trigger_config_for(workflow: &Workflow) -> serde_json::Value {
-    match workflow.trigger_kind {
-        TriggerKind::GithubIssueWebhook => json!({
-            "repo": format!("{}/{}", workflow.repo_owner, workflow.repo_name),
-            "label": workflow.trigger_label,
-        }),
-    }
-}
-
-/// Reverse of [`trigger_config_for`]. The mirror has been writing the
-/// `{repo, label}` shape since it shipped, so every spine row that exists
-/// today round-trips cleanly. Returns `(repo_owner, repo_name, label)`.
-fn parse_trigger_config(cfg: &serde_json::Value) -> anyhow::Result<(String, String, String)> {
-    let repo = cfg
-        .get("repo")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("trigger_config.repo missing or non-string"))?;
-    let label = cfg
-        .get("label")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("trigger_config.label missing or non-string"))?;
-    let (owner, name) = repo
-        .split_once('/')
-        .ok_or_else(|| anyhow::anyhow!("trigger_config.repo is not 'owner/name': {repo}"))?;
-    Ok((owner.to_string(), name.to_string(), label.to_string()))
-}
 
 /// Translate stiglab's `gate_kind` + opaque `params` into the spine's
 /// `(target_state, gates)` pair. The artifact-state transitions match the
@@ -130,8 +86,10 @@ pub async fn insert_workflow_with_stages(
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
 
-    let trigger_kind = trigger_kind_to_spine(workflow.trigger_kind);
-    let trigger_config = trigger_config_for(workflow);
+    let (trigger_kind, trigger_config) = workflow.trigger.to_storage();
+    if TRIGGERS.lookup(trigger_kind).is_none() {
+        anyhow::bail!("trigger kind {trigger_kind} is not in the registry manifest");
+    }
     let install_id_text = workflow.install_id.to_string();
 
     sqlx::query(
@@ -404,11 +362,12 @@ pub async fn get_workflow_install_target(
     pool: &PgPool,
     workflow_id: &str,
 ) -> anyhow::Result<Option<(i64, String, String)>> {
-    let row =
-        sqlx::query("SELECT install_id, trigger_config FROM workflows WHERE workflow_id = $1")
-            .bind(workflow_id)
-            .fetch_optional(pool)
-            .await?;
+    let row = sqlx::query(
+        "SELECT install_id, trigger_kind, trigger_config FROM workflows WHERE workflow_id = $1",
+    )
+    .bind(workflow_id)
+    .fetch_optional(pool)
+    .await?;
     let Some(row) = row else { return Ok(None) };
     let install_id_text: Option<String> = row.try_get("install_id").ok();
     let install_id: i64 = install_id_text
@@ -417,9 +376,18 @@ pub async fn get_workflow_install_target(
         .ok_or_else(|| {
             anyhow::anyhow!("workflow {workflow_id} has missing/non-numeric install_id")
         })?;
+    let kind_tag: String = row.try_get("trigger_kind")?;
     let cfg: serde_json::Value = row.try_get("trigger_config")?;
-    let (owner, name, _) = parse_trigger_config(&cfg)?;
-    Ok(Some((install_id, owner, name)))
+    let trigger = TriggerKind::from_storage(&kind_tag, &cfg)
+        .with_context(|| format!("workflow {workflow_id} has unparseable trigger"))?;
+    match trigger {
+        TriggerKind::GithubIssueWebhook { repo, .. } => {
+            let (owner, name) = repo.split_once('/').ok_or_else(|| {
+                anyhow::anyhow!("workflow {workflow_id} trigger_config.repo not 'owner/name'")
+            })?;
+            Ok(Some((install_id, owner.to_string(), name.to_string())))
+        }
+    }
 }
 
 // ── Row → struct helpers ──────────────────────────────────────────────────
@@ -450,8 +418,8 @@ fn row_to_workflow(row: sqlx::postgres::PgRow) -> anyhow::Result<Workflow> {
     let created_at: DateTime<Utc> = row.try_get("created_at")?;
     let updated_at: DateTime<Utc> = row.try_get("updated_at")?;
 
-    let trigger_kind = trigger_kind_from_spine(&trigger_kind_raw)?;
-    let (repo_owner, repo_name, trigger_label) = parse_trigger_config(&trigger_config)?;
+    let trigger = TriggerKind::from_storage(&trigger_kind_raw, &trigger_config)
+        .with_context(|| format!("workflow {id} has unparseable trigger"))?;
     let install_id: i64 = install_id_text
         .as_deref()
         .and_then(|s| s.parse::<i64>().ok())
@@ -461,10 +429,7 @@ fn row_to_workflow(row: sqlx::postgres::PgRow) -> anyhow::Result<Workflow> {
         id,
         workspace_id,
         name,
-        trigger_kind,
-        repo_owner,
-        repo_name,
-        trigger_label,
+        trigger,
         install_id,
         preset_id,
         active,
@@ -502,7 +467,6 @@ mod tests {
     //! `tests/workflow_db_pg.rs` (gated on `DATABASE_URL`).
 
     use super::*;
-    use crate::core::workflow::{TriggerKind, Workflow};
 
     #[test]
     fn agent_session_maps_to_in_progress() {
@@ -529,46 +493,16 @@ mod tests {
     }
 
     #[test]
-    fn trigger_kind_round_trips_through_spine_form() {
-        let s = trigger_kind_to_spine(TriggerKind::GithubIssueWebhook);
-        assert_eq!(s, "github_issue_webhook");
-        assert_eq!(
-            trigger_kind_from_spine(s).unwrap(),
-            TriggerKind::GithubIssueWebhook
-        );
-    }
-
-    #[test]
-    fn trigger_config_round_trips() {
-        let w = Workflow {
-            id: "wf_x".into(),
-            workspace_id: "w".into(),
-            name: "x".into(),
-            trigger_kind: TriggerKind::GithubIssueWebhook,
-            repo_owner: "owner".into(),
-            repo_name: "repo".into(),
-            trigger_label: "planned".into(),
-            install_id: 42,
-            preset_id: None,
-            active: true,
-            created_by: "u".into(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+    fn trigger_storage_round_trip() {
+        let original = TriggerKind::GithubIssueWebhook {
+            repo: "owner/repo".into(),
+            label: "planned".into(),
         };
-        let cfg = trigger_config_for(&w);
+        let (kind_tag, cfg) = original.to_storage();
+        assert_eq!(kind_tag, "github_issue_webhook");
         assert_eq!(cfg["repo"], "owner/repo");
         assert_eq!(cfg["label"], "planned");
-        let (owner, name, label) = parse_trigger_config(&cfg).unwrap();
-        assert_eq!(
-            (owner.as_str(), name.as_str(), label.as_str()),
-            ("owner", "repo", "planned")
-        );
-    }
-
-    #[test]
-    fn parse_trigger_config_rejects_malformed() {
-        assert!(parse_trigger_config(&json!({})).is_err());
-        assert!(parse_trigger_config(&json!({"repo": "no-slash", "label": "x"})).is_err());
-        assert!(parse_trigger_config(&json!({"repo": "a/b"})).is_err());
+        let back = TriggerKind::from_storage(kind_tag, &cfg).unwrap();
+        assert_eq!(back, original);
     }
 }

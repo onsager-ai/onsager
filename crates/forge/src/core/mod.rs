@@ -27,4 +27,4 @@ pub use session_listener::{SessionCompleted, SessionCompletedHandler};
 pub use signal_cache::{Signal, SignalCache, SignalOutcome};
 pub use stage_runner::{advance_workflow_artifacts, enter_workflow, GateEvaluator, StageEvent};
 pub use state::ForgeState;
-pub use workflow::{GateOutcome, GateSpec, StageSpec, TriggerSpec, Workflow};
+pub use workflow::{GateOutcome, GateSpec, StageSpec, TriggerKind, Workflow};
