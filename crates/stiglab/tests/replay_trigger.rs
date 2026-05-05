@@ -6,8 +6,8 @@
 //!
 //! End-to-end coverage of the dry-run match resolution + spine emission
 //! requires a GitHub stub and is left to manual testing on the preview
-//! deploy. The unit tests in `server::webhook_router` already pin the
-//! payload shape produced by `build_trigger_fired_events`.
+//! deploy. The unit tests in `onsager_spine::webhook_routing` already pin
+//! the payload shape produced by `build_trigger_fired_events`.
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};

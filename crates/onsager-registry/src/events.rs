@@ -573,7 +573,9 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "trigger.fired",
             schema_version: 1,
-            producers: &[Subsystem::Stiglab],
+            // Stiglab is the manual-replay producer; portal is the live
+            // GitHub-webhook producer (#222 Slice 1).
+            producers: &[Subsystem::Stiglab, Subsystem::Portal],
             consumers: &[Subsystem::Forge],
             audit_only: false,
             description: "A trigger (e.g. a GitHub issue webhook) fired.",
@@ -687,7 +689,8 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "gate.check_updated",
             schema_version: 1,
-            producers: &[Subsystem::Stiglab],
+            // Portal owns the GitHub webhook ingress as of #222 Slice 1.
+            producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Forge],
             audit_only: false,
             description: "A GitHub check_suite/check_run/status arrived for a tracked PR.",
@@ -695,7 +698,8 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "gate.manual_approval_signal",
             schema_version: 1,
-            producers: &[Subsystem::Stiglab],
+            // Portal owns the GitHub webhook ingress as of #222 Slice 1.
+            producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Forge],
             audit_only: false,
             description: "A manual-approval gate received a signal (e.g. PR merged).",

@@ -11,7 +11,6 @@ pub mod shaping_listener;
 pub mod spine;
 pub mod sso;
 pub mod state;
-pub mod webhook_router;
 pub mod workflow_activation;
 pub mod workflow_db;
 pub mod ws;
@@ -171,30 +170,18 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         )
         // Governance proxy — forwards to synodic on internal port
         .route("/api/governance/{*path}", any(routes::governance::proxy))
-        // Portal webhook proxy — forwards `/webhooks/github` to the
-        // onsager-portal binary running on an internal port so the
-        // Railway service exposes a single external origin.
+        // Portal webhook proxy — every GitHub delivery (PR lineage,
+        // workflow trigger fire, gate signals) is handled by the
+        // onsager-portal binary. The proxy preserves raw body bytes
+        // and forwards `X-Hub-Signature-256` / `X-GitHub-Event` so
+        // the signature check on the portal side still verifies.
+        // `/api/webhooks/github` and `/api/github-app/webhook` are
+        // backward-compat aliases — older GitHub Apps configured
+        // against the workflow-runtime path or the install-flow path
+        // continue to work without touching their webhook URL.
         .route("/webhooks/github", any(routes::portal::proxy))
-        // Workflow runtime webhook receiver (issue #81). Distinct from the
-        // legacy `/webhooks/github` portal proxy — this endpoint feeds the
-        // workflow runtime on stiglab directly. GitHub caps webhook payloads
-        // at 25 MiB; a 1 MiB cap here is generous for the events we handle
-        // (`issues`, `pull_request`, `check_*`, `status`) while blunting
-        // DoS-via-giant-body.
-        .route(
-            "/api/webhooks/github",
-            post(routes::webhooks::handle).layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)),
-        )
-        // Forgiving alias for the webhook receiver. `/api/github-app/*`
-        // hosts the GET-only OAuth/install flow and had no POST handler
-        // here, so a GitHub App configured to POST its webhook to
-        // `/api/github-app/webhook` (a plausible-looking but wrong URL)
-        // had every delivery silently dropped. Accept it so a
-        // misconfigured App heals itself.
-        .route(
-            "/api/github-app/webhook",
-            post(routes::webhooks::handle).layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)),
-        )
+        .route("/api/webhooks/github", any(routes::portal::proxy))
+        .route("/api/github-app/webhook", any(routes::portal::proxy))
         // Workflow CRUD (issue #81).
         .route(
             "/api/workflows",

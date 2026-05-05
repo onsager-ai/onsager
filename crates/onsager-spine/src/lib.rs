@@ -41,6 +41,7 @@ pub mod namespace;
 pub mod protocol;
 pub mod store;
 pub mod trigger;
+pub mod webhook_routing;
 
 // Backward-compat re-exports of the artifact value objects. Spine depends on
 // `onsager-artifact` because `FactoryEvent` references `ArtifactId`, `Kind`,
@@ -65,3 +66,7 @@ pub use store::{
     append_factory_event_tx, EventMetadata, EventNotification, EventRecord, EventStore,
 };
 pub use trigger::{TriggerKind, TriggerStorageError};
+pub use webhook_routing::{
+    build_trigger_fired_events, route_check_event, route_issues_labeled, route_pull_request_closed,
+    spine_namespace, trigger_source, IssueTriggerContext, RoutedEvent, WorkflowMatch,
+};

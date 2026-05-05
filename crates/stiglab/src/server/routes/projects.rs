@@ -35,14 +35,15 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use sqlx::{AnyPool, PgPool};
 
+use onsager_spine::webhook_routing::{
+    build_trigger_fired_events, spine_namespace, trigger_source, IssueTriggerContext, RoutedEvent,
+    WorkflowMatch,
+};
+
 use crate::server::auth::AuthUser;
 use crate::server::db;
 use crate::server::github_app;
-use crate::server::routes::webhooks::spine_namespace;
 use crate::server::state::AppState;
-use crate::server::webhook_router::{
-    build_trigger_fired_events, trigger_source, IssueTriggerContext, RoutedEvent,
-};
 use crate::server::workflow_db;
 
 const HARD_CAP: usize = 200;
@@ -1210,10 +1211,14 @@ pub async fn replay_issue_trigger(
     // produces one event per workflow for that label — matching the
     // webhook path which fires once per `(label, workflow)` pair.
     let mut event_ids = Vec::new();
-    let mut by_label: std::collections::BTreeMap<String, Vec<crate::core::workflow::Workflow>> =
+    let mut by_label: std::collections::BTreeMap<String, Vec<WorkflowMatch>> =
         std::collections::BTreeMap::new();
     for (wf, label) in matches {
-        by_label.entry(label).or_default().push(wf);
+        by_label.entry(label).or_default().push(WorkflowMatch {
+            id: wf.id,
+            workspace_id: wf.workspace_id,
+            trigger_kind_tag: wf.trigger.kind_tag().to_string(),
+        });
     }
     for (label, wfs) in by_label {
         let events: Vec<RoutedEvent> = build_trigger_fired_events(

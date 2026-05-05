@@ -56,6 +56,47 @@ pub async fn find_installation_by_install_id(
     ))
 }
 
+/// Active GitHub-issue-webhook workflows that match a `(install, repo, label)`
+/// triple. The webhook handler emits one `TriggerFired` per row.
+///
+/// Filters on `install_id` so a delivery for install A only fires workflows
+/// registered under install A — same `(repo, label)` on a sibling install
+/// must not match (issue #164).
+pub async fn find_active_github_workflows_for_label(
+    pool: &PgPool,
+    install_id: i64,
+    repo_owner: &str,
+    repo_name: &str,
+    label: &str,
+) -> anyhow::Result<Vec<onsager_spine::WorkflowMatch>> {
+    let repo = format!("{repo_owner}/{repo_name}");
+    let install_id_text = install_id.to_string();
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT workflow_id, workspace_id, trigger_kind \
+           FROM workflows \
+          WHERE active = TRUE \
+            AND trigger_kind = 'github_issue_webhook' \
+            AND install_id = $1 \
+            AND trigger_config ->> 'repo'  = $2 \
+            AND trigger_config ->> 'label' = $3",
+    )
+    .bind(&install_id_text)
+    .bind(&repo)
+    .bind(label)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(workflow_id, workspace_id, trigger_kind)| onsager_spine::WorkflowMatch {
+                id: workflow_id,
+                workspace_id,
+                trigger_kind_tag: trigger_kind,
+            },
+        )
+        .collect())
+}
+
 /// A project row resolved from `(installation, repo_owner, repo_name)`.
 #[derive(Debug, Clone)]
 pub struct ProjectRecord {

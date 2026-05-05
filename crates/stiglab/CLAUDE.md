@@ -19,9 +19,11 @@ coordination.
 What this means for stiglab specifically:
 
 - **Allowed HTTP surfaces.** Routes under `src/server/routes/` that are
-  called by the dashboard, and webhook receivers (e.g. the GitHub
-  webhook router at `src/server/webhook_router.rs`) called by external
-  services. Both are "external boundary" by definition.
+  called by the dashboard. GitHub webhook ingestion has moved to portal
+  (spec #222) — stiglab keeps `/webhooks/github`, `/api/webhooks/github`,
+  and `/api/github-app/webhook` as backward-compat reverse proxies that
+  forward raw bytes to portal so existing GitHub App webhook URLs
+  continue to work without operator action.
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `synodic`,
   or `ising`. **Lever C status (#148): no remaining violation** —
   `HttpStiglabDispatcher` and the `POST /api/shaping` route it
@@ -63,7 +65,8 @@ src/
   core/                 <- session lifecycle, queue, drain logic
   server/
     routes/             <- dashboard-facing HTTP (allowed seam)
-    webhook_router.rs   <- GitHub webhook (allowed seam)
+                            + reverse proxies to portal for GitHub webhook
+                            ingress (`routes::portal::proxy`)
     spine.rs            <- spine read/write helpers (preferred path
                             for cross-subsystem coordination)
     workflow_db.rs      <- workflow CRUD against the spine pool
