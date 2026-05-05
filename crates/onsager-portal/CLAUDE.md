@@ -50,8 +50,16 @@ promotion plan.
 Spec #222 promotes portal from a thin webhook+proxy service to a
 first-class edge subsystem. The migration is staged:
 
-- **Foundation (this work).** ADR 0004 amendment, `area:portal`
+- **Foundation (landed).** ADR 0004 amendment, `area:portal`
   label, root `CLAUDE.md` topology update, this file.
+- **Operational shell (landed).** Portal runs alongside the factory
+  subsystems via `just dev` on `:3002` (matches the `PORTAL_PORT`
+  default stiglab's transitional proxy expects). `just dev-portal`
+  starts it standalone. The `crates/onsager-portal/migrations/`
+  directory is live and applied at startup (alongside the legacy
+  inline `CREATE TABLE` calls that haven't been migrated to `.sql`
+  files yet); first table to land via the new path is
+  `portal_webhook_secrets` (open question 3 of #222).
 - **Routes (follow-ups).** Move `/api/webhooks/github`,
   `/api/workflows/*`, `/api/credentials/*`, `/api/installations/*`,
   `/api/workspaces/*`, `/auth/github/*`, and the preset registry
@@ -60,9 +68,9 @@ first-class edge subsystem. The migration is staged:
 - **Schema split (follow-ups).** `workspaces` /
   `workspace_members` / `projects` move into
   `crates/onsager-spine/migrations/`; `user_credentials`,
-  `github_app_installations`, `user_pats`,
-  `portal_webhook_secrets` move into
-  `crates/onsager-portal/migrations/`. Atomic per-PR per Lever B.
+  `github_app_installations`, `user_pats` move into
+  `crates/onsager-portal/migrations/` next to the
+  `portal_webhook_secrets` migration. Atomic per-PR per Lever B.
 
 While the migration is in flight, stiglab still hosts most of the
 external HTTP surface — that is the drift #222 closes, not a pattern
