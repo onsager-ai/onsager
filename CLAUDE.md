@@ -2,7 +2,52 @@
 
 AI factory stack — monorepo for the Onsager event bus and its subsystems.
 
+## What makes Onsager Onsager
+
+These commitments define Onsager-the-factory's identity — the monorepo and
+its subsystems. They do not, in general, prescribe the internal structure
+of what the factory produces; downstream artifacts and deployed systems
+are their own viable systems with their own identities.
+
+The exception is **how** the factory operates on its work (specs as ground
+truth, below) — that commitment binds both Onsager's self-construction and
+its production discipline.
+
+- **Event-bus factory, not service mesh.** Subsystems coordinate through
+  the spine (events, pg_notify, shared tables), not through synchronous
+  calls. [ADR 0001](docs/adr/0001-event-bus-coordination-model.md) is
+  this commitment's first concretization. Scope: factory only.
+- **Artifacts are the unit of meaning.** Every persistent, lifecycle-bearing
+  object in the factory is an artifact — internal-authored ones (specs,
+  designs) and external-referenced ones (PRs, Issues) alike. Factory
+  subsystems (Forge, Refract, Synodic, Ising) operate on artifacts; events
+  are state-change notifications, not first-class entities. Scope: factory
+  only — products of the factory have their own ontology.
+- **Specs are ground truth, code is downstream.** When spec and code
+  conflict, the code is wrong. Specs are amended deliberately; code is
+  amended to match. Scope: both factory self-construction and factory
+  production discipline — Onsager sessions producing artifacts inherit
+  this constraint.
+- **Internal symmetry is load-bearing.** Equivalent concepts must have
+  equivalent shapes (names, types, error models, write paths). Asymmetry
+  between equivalents is a defect, not a polish concern. The seam rule
+  and three lints (`lint-seams`, `check-events`, `check-api-contract`)
+  are this commitment's enforcement surface. Scope: factory only;
+  applies to session-produced code when it lands in the monorepo.
+
+Changes to the four bullets above carry an `Identity impact: yes` flag
+in the modifying ADR and require explicit rationale. Changes to anything
+below in this file are by default `Identity impact: no`. ADRs themselves
+may carry either value — the flag tracks whether the ADR touches the
+four bullets above, not where the change lives.
+
+See [ADR 0005](docs/adr/0005-s5-governance-scales-with-scale.md) for
+the meta-rule on how this S5 layer evolves with operational scale.
+
 ## Architecture
+
+See § What makes Onsager Onsager (above) for the identity commitments
+these architectural choices instantiate.
 
 Onsager is a **factory event bus** architecture. Subsystems are runtime-decoupled
 via a shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel.
