@@ -551,7 +551,7 @@ mod tests {
         Workflow {
             workflow_id: "wf".into(),
             name: "t".into(),
-            trigger: crate::core::workflow::TriggerSpec::GithubIssueWebhook {
+            trigger: crate::core::workflow::TriggerKind::GithubIssueWebhook {
                 repo: "a/b".into(),
                 label: "ai".into(),
             },
@@ -909,7 +909,7 @@ mod tests {
         let wf = Workflow {
             workflow_id: "wf".into(),
             name: "t".into(),
-            trigger: crate::core::workflow::TriggerSpec::GithubIssueWebhook {
+            trigger: crate::core::workflow::TriggerKind::GithubIssueWebhook {
                 repo: "a/b".into(),
                 label: "ai".into(),
             },

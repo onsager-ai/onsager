@@ -208,7 +208,8 @@ function RepoRow({
     create.mutate({
       workspace_id: workspaceId,
       name: draft.name,
-      trigger_kind: "github-issue-webhook",
+      // Snake-case `kind_tag` from the registry manifest (#237).
+      trigger_kind: "github_issue_webhook",
       install_id: githubInstallId,
       repo_owner: repo.owner,
       repo_name: repo.name,

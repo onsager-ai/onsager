@@ -225,6 +225,14 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/registry/events",
             get(routes::registry_events::list_events),
         )
+        // Trigger-kind registry manifest (spec #237 / parent #236).
+        // Static, human-reviewed manifest of every TriggerKind variant —
+        // its producer subsystem, category, and UI form shape. Read by
+        // the dashboard's `<TriggerKindPicker>`.
+        .route(
+            "/api/registry/triggers",
+            get(routes::registry_triggers::list_triggers),
+        )
         // Spine API — exposes shared event spine data to the dashboard
         .route("/api/spine/events", get(routes::spine::list_events))
         .route(

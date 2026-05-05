@@ -155,6 +155,11 @@ pub struct CreateStageBody {
 }
 
 /// Validation helper kept public for unit tests.
+///
+/// `trigger_kind` accepts the registry's snake-case `kind_tag`
+/// (`"github_issue_webhook"`); per-kind config (`repo_owner`,
+/// `repo_name`, `trigger_label`) is taken from the body's flat fields
+/// and assembled into the unified [`TriggerKind`] variant.
 pub fn validate_create_body(
     body: &CreateWorkflowBody,
 ) -> Result<(TriggerKind, Vec<WorkflowStage>), String> {
@@ -162,15 +167,10 @@ pub fn validate_create_body(
         return Err("name is required".into());
     }
 
-    let trigger_kind = body
-        .trigger_kind
-        .parse::<TriggerKind>()
-        .map_err(|e| e.to_string())?;
-
-    match trigger_kind {
-        TriggerKind::GithubIssueWebhook => {
+    let trigger = match body.trigger_kind.as_str() {
+        "github_issue_webhook" => {
             if body.trigger_label.trim().is_empty() {
-                return Err("trigger_label is required for github-issue-webhook".into());
+                return Err("trigger_label is required for github_issue_webhook".into());
             }
             if body.repo_owner.trim().is_empty() || body.repo_name.trim().is_empty() {
                 return Err("repo_owner and repo_name are required".into());
@@ -178,8 +178,13 @@ pub fn validate_create_body(
             if body.install_id <= 0 {
                 return Err("install_id is required".into());
             }
+            TriggerKind::GithubIssueWebhook {
+                repo: format!("{}/{}", body.repo_owner.trim(), body.repo_name.trim()),
+                label: body.trigger_label.trim().to_string(),
+            }
         }
-    }
+        other => return Err(format!("invalid trigger kind: {other}")),
+    };
 
     // Reject requests that ship both a preset and explicit stages — the
     // two are mutually exclusive and silently preferring one is surprising.
@@ -193,6 +198,13 @@ pub fn validate_create_body(
         }
         let expansion =
             resolve_preset(preset_id).ok_or_else(|| format!("unknown preset_id: {preset_id}"))?;
+        if expansion.trigger_kind_tag != trigger.kind_tag() {
+            return Err(format!(
+                "preset {preset_id} expects trigger_kind {} but got {}",
+                expansion.trigger_kind_tag,
+                trigger.kind_tag()
+            ));
+        }
         expansion
             .stages
             .into_iter()
@@ -227,7 +239,7 @@ pub fn validate_create_body(
         out
     };
 
-    Ok((trigger_kind, stages))
+    Ok((trigger, stages))
 }
 
 /// POST /api/workflows — create a workflow. If `active=true`, the
@@ -255,7 +267,7 @@ pub async fn create_workflow(
         Err(r) => return r,
     };
 
-    let (trigger_kind, mut stages) = match validate_create_body(&body) {
+    let (trigger, mut stages) = match validate_create_body(&body) {
         Ok(v) => v,
         Err(e) => return bad_request(e),
     };
@@ -269,10 +281,7 @@ pub async fn create_workflow(
         id: workflow_id.clone(),
         workspace_id: body.workspace_id.clone(),
         name: body.name.trim().to_string(),
-        trigger_kind,
-        repo_owner: body.repo_owner.trim().to_string(),
-        repo_name: body.repo_name.trim().to_string(),
-        trigger_label: body.trigger_label.trim().to_string(),
+        trigger,
         install_id: body.install_id,
         preset_id: body.preset_id.clone(),
         active: false,
@@ -710,29 +719,24 @@ async fn activate_workflow(
         }
     };
 
-    if let Err(e) = ensure_repo_in_scope(&token, &workflow.repo_owner, &workflow.repo_name).await {
+    let Some((repo_owner, repo_name)) = workflow.github_repo() else {
+        return Err(bad_request(
+            "workflow trigger has no GitHub repo to activate".to_string(),
+        ));
+    };
+    let label = workflow
+        .github_label()
+        .ok_or_else(|| bad_request("workflow trigger has no GitHub label".to_string()))?;
+    if let Err(e) = ensure_repo_in_scope(&token, repo_owner, repo_name).await {
         return Err(map_activation_error(e));
     }
-    if let Err(e) = ensure_label_exists(
-        &token,
-        &workflow.repo_owner,
-        &workflow.repo_name,
-        &workflow.trigger_label,
-    )
-    .await
-    {
+    if let Err(e) = ensure_label_exists(&token, repo_owner, repo_name, label).await {
         return Err(map_activation_error(e));
     }
 
     let secret = resolve_install_webhook_secret(state, workflow.install_id).await;
-    if let Err(e) = ensure_webhook_registered(
-        &token,
-        &workflow.repo_owner,
-        &workflow.repo_name,
-        secret.as_deref(),
-        headers,
-    )
-    .await
+    if let Err(e) =
+        ensure_webhook_registered(&token, repo_owner, repo_name, secret.as_deref(), headers).await
     {
         return Err(map_activation_error(e));
     }
@@ -763,14 +767,14 @@ async fn deactivate_workflow(state: &AppState, workflow_id: &str) -> Result<(), 
 
     // Dedup: keep the webhook if any other active workflow on the same repo
     // still needs it.
-    let still_needed = workflow_db::any_other_active_workflow_on_repo(
-        spine,
-        &workflow.repo_owner,
-        &workflow.repo_name,
-        workflow_id,
-    )
-    .await
-    .unwrap_or(true);
+    let Some((repo_owner, repo_name)) = workflow.github_repo() else {
+        // Non-GitHub trigger: nothing to deregister.
+        return Ok(());
+    };
+    let still_needed =
+        workflow_db::any_other_active_workflow_on_repo(spine, repo_owner, repo_name, workflow_id)
+            .await
+            .unwrap_or(true);
     if still_needed {
         return Ok(());
     }
@@ -786,7 +790,7 @@ async fn deactivate_workflow(state: &AppState, workflow_id: &str) -> Result<(), 
     let Ok(token) = mint_installation_token(&app_jwt, workflow.install_id).await else {
         return Ok(());
     };
-    let _ = deregister_webhook(&token, &workflow.repo_owner, &workflow.repo_name).await;
+    let _ = deregister_webhook(&token, repo_owner, repo_name).await;
     Ok(())
 }
 
@@ -892,7 +896,7 @@ mod tests {
         CreateWorkflowBody {
             workspace_id: "w1".into(),
             name: "sdd".into(),
-            trigger_kind: "github-issue-webhook".into(),
+            trigger_kind: "github_issue_webhook".into(),
             repo_owner: "acme".into(),
             repo_name: "widgets".into(),
             trigger_label: "spec".into(),
@@ -906,7 +910,13 @@ mod tests {
     #[test]
     fn validate_preset_expands_to_stage_chain() {
         let (trigger, stages) = validate_create_body(&base_body()).unwrap();
-        assert_eq!(trigger, TriggerKind::GithubIssueWebhook);
+        assert_eq!(
+            trigger,
+            TriggerKind::GithubIssueWebhook {
+                repo: "acme/widgets".into(),
+                label: "spec".into(),
+            }
+        );
         assert_eq!(stages.len(), 1);
         assert_eq!(stages[0].gate_kind, GateKind::AgentSession);
         assert_eq!(stages[0].seq, 0);

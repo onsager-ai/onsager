@@ -13,7 +13,7 @@ use forge::core::pending::PendingVerdicts;
 use forge::core::signal_cache::{Signal, SignalCache, SignalOutcome};
 use forge::core::stage_runner::advance_workflow_artifacts;
 use forge::core::trigger_subscriber::{register_artifact_from_trigger, TriggerFired};
-use forge::core::workflow::{GateSpec, StageSpec, TriggerSpec, Workflow};
+use forge::core::workflow::{GateSpec, StageSpec, TriggerKind, Workflow};
 use forge::core::workflow_gates::{
     external_check_signal_kind, GateEmitter, LiveGateEvaluator, AGENT_SESSION_SIGNAL,
 };
@@ -52,7 +52,7 @@ fn fixture_workflow() -> Workflow {
     Workflow {
         workflow_id: "wf_issue_to_pr".into(),
         name: "issue-to-pr".into(),
-        trigger: TriggerSpec::GithubIssueWebhook {
+        trigger: TriggerKind::GithubIssueWebhook {
             repo: "onsager-ai/onsager".into(),
             label: "ai-implementable".into(),
         },

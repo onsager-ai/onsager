@@ -64,4 +64,4 @@ pub use namespace::{Namespace, NamespaceError};
 pub use store::{
     append_factory_event_tx, EventMetadata, EventNotification, EventRecord, EventStore,
 };
-pub use trigger::{TriggerCategory, TriggerKind};
+pub use trigger::{TriggerKind, TriggerStorageError};

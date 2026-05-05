@@ -207,14 +207,14 @@ pub fn register_artifact_from_trigger(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::workflow::{StageSpec, TriggerSpec};
+    use crate::core::workflow::{StageSpec, TriggerKind};
     use onsager_artifact::ArtifactState;
 
     fn make_workflow(active: bool) -> Workflow {
         Workflow {
             workflow_id: "wf_1".into(),
             name: "issue-to-pr".into(),
-            trigger: TriggerSpec::GithubIssueWebhook {
+            trigger: TriggerKind::GithubIssueWebhook {
                 repo: "a/b".into(),
                 label: "ai".into(),
             },

@@ -11,25 +11,8 @@
 //! `persistence.rs` rebuilds it on startup.
 
 use onsager_artifact::ArtifactState;
-use onsager_spine::TriggerKind;
+pub use onsager_spine::TriggerKind;
 use serde::{Deserialize, Serialize};
-
-/// A workflow-runtime trigger. v1 ships only the GitHub-issue webhook.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TriggerSpec {
-    /// A GitHub `issues.labeled` webhook whose label matches `label`.
-    GithubIssueWebhook { repo: String, label: String },
-}
-
-impl TriggerSpec {
-    /// Stable string used as the `trigger_kind` column value.
-    pub fn kind_tag(&self) -> &'static str {
-        match self {
-            TriggerSpec::GithubIssueWebhook { .. } => TriggerKind::GithubIssueWebhook.snake_case(),
-        }
-    }
-}
 
 /// One gate in a stage's gate set. All gates in a stage must pass before
 /// the runner advances.
@@ -116,7 +99,7 @@ pub struct StageSpec {
 pub struct Workflow {
     pub workflow_id: String,
     pub name: String,
-    pub trigger: TriggerSpec,
+    pub trigger: TriggerKind,
     pub stages: Vec<StageSpec>,
     pub active: bool,
     /// Workspace this workflow belongs to. Stamped into every stage event
@@ -151,10 +134,10 @@ impl Workflow {
     ///
     /// v1 only has `github_issue_webhook` → produces `github-issue`
     /// artifacts. When more trigger kinds arrive, this grows into a
-    /// match on `TriggerSpec`.
+    /// match on `TriggerKind`.
     pub fn trigger_artifact_kind(&self) -> &'static str {
         match self.trigger {
-            TriggerSpec::GithubIssueWebhook { .. } => "github-issue",
+            TriggerKind::GithubIssueWebhook { .. } => "github-issue",
         }
     }
 }
@@ -164,8 +147,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trigger_kind_tag_matches_db_check() {
-        let trigger = TriggerSpec::GithubIssueWebhook {
+    fn trigger_kind_tag_matches_db_column() {
+        let trigger = TriggerKind::GithubIssueWebhook {
             repo: "onsager-ai/onsager".into(),
             label: "ai-implementable".into(),
         };
@@ -206,7 +189,7 @@ mod tests {
         let wf = Workflow {
             workflow_id: "wf_1".into(),
             name: "test".into(),
-            trigger: TriggerSpec::GithubIssueWebhook {
+            trigger: TriggerKind::GithubIssueWebhook {
                 repo: "a/b".into(),
                 label: "x".into(),
             },
@@ -225,7 +208,7 @@ mod tests {
         let wf = Workflow {
             workflow_id: "wf_2".into(),
             name: "test".into(),
-            trigger: TriggerSpec::GithubIssueWebhook {
+            trigger: TriggerKind::GithubIssueWebhook {
                 repo: "a/b".into(),
                 label: "x".into(),
             },
@@ -262,7 +245,7 @@ mod tests {
         let wf = Workflow {
             workflow_id: "wf_3".into(),
             name: "issue-to-pr".into(),
-            trigger: TriggerSpec::GithubIssueWebhook {
+            trigger: TriggerKind::GithubIssueWebhook {
                 repo: "x/y".into(),
                 label: "ai".into(),
             },

@@ -1,8 +1,12 @@
 //! Workflow domain model — persisted declarative production-line blueprint
 //! that the dashboard surfaces and forge executes (issue #81 / parent #79).
 //!
+//! Trigger kinds and per-kind config live in [`onsager_spine::TriggerKind`]
+//! (the canonical registry-backed type, spec #237). Stage / gate kinds are
+//! still stiglab-local.
+//!
 //! v1 semantics:
-//! - **Trigger** kinds: `github-issue-webhook` only. Polling triggers are v2.
+//! - **Trigger** kinds: `github_issue_webhook` only.
 //! - **Stage** kinds (per stage-gate pair): `agent-session`, `external-check`,
 //!   `governance`, `manual-approval`.
 //! - Ordering is static — stages run in declared order, never reordered.
@@ -13,39 +17,12 @@
 //! without forcing a schema churn when v1 adds new gates.
 
 use chrono::{DateTime, Utc};
-use onsager_spine::TriggerKind as SpineTriggerKind;
+pub use onsager_spine::TriggerKind;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
 use crate::core::error::StiglabError;
-
-/// What fires a workflow. v1 ships only `GithubIssueWebhook`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum TriggerKind {
-    GithubIssueWebhook,
-}
-
-impl fmt::Display for TriggerKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TriggerKind::GithubIssueWebhook => write!(f, "{}", SpineTriggerKind::GithubIssueWebhook.kebab_case()),
-        }
-    }
-}
-
-impl FromStr for TriggerKind {
-    type Err = StiglabError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            s if s == SpineTriggerKind::GithubIssueWebhook.kebab_case() => Ok(TriggerKind::GithubIssueWebhook),
-            other => Err(StiglabError::InvalidState(format!(
-                "invalid trigger kind: {other}"
-            ))),
-        }
-    }
-}
 
 /// Gate kind attached to a workflow stage. These map to the four gate runtime
 /// implementations forge ships.
@@ -104,11 +81,9 @@ pub struct Workflow {
     pub id: String,
     pub workspace_id: String,
     pub name: String,
-    pub trigger_kind: TriggerKind,
-    /// Required for `github-issue-webhook`: the repo and label to watch.
-    pub repo_owner: String,
-    pub repo_name: String,
-    pub trigger_label: String,
+    /// Trigger kind + per-kind config. Persisted as
+    /// `(workflows.trigger_kind, workflows.trigger_config)`.
+    pub trigger: TriggerKind,
     /// Workspace GitHub App install that fires this workflow (reused from
     /// issue #70 — no per-workflow install flow).
     pub install_id: i64,
@@ -119,4 +94,23 @@ pub struct Workflow {
     pub created_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl Workflow {
+    /// `(repo_owner, repo_name)` extracted from the trigger config when the
+    /// kind is `GithubIssueWebhook`. The webhook activation / deactivation
+    /// helpers use this; for any other kind they should not be calling.
+    pub fn github_repo(&self) -> Option<(&str, &str)> {
+        match &self.trigger {
+            TriggerKind::GithubIssueWebhook { repo, .. } => repo.split_once('/'),
+        }
+    }
+
+    /// The label this workflow filters on, when the trigger is a GitHub
+    /// `issues.labeled` webhook.
+    pub fn github_label(&self) -> Option<&str> {
+        match &self.trigger {
+            TriggerKind::GithubIssueWebhook { label, .. } => Some(label.as_str()),
+        }
+    }
 }

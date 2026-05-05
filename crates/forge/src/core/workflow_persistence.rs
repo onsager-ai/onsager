@@ -11,8 +11,7 @@ use onsager_artifact::{Artifact, ArtifactState};
 use sqlx::{PgPool, Row};
 
 use super::persistence::state_to_db;
-use super::workflow::{GateSpec, StageSpec, TriggerSpec, Workflow};
-use onsager_spine::TriggerKind;
+use super::workflow::{GateSpec, StageSpec, TriggerKind, Workflow};
 
 /// Load every active workflow into memory. Inactive workflows with
 /// in-flight artifacts are also needed so the stage runner can continue
@@ -193,15 +192,8 @@ pub async fn persist_artifact_workflow_state(
     Ok(())
 }
 
-fn parse_trigger(kind: &str, config: &serde_json::Value) -> Option<TriggerSpec> {
-    if kind == TriggerKind::GithubIssueWebhook.snake_case() {
-        Some(TriggerSpec::GithubIssueWebhook {
-            repo: config.get("repo")?.as_str()?.to_string(),
-            label: config.get("label")?.as_str()?.to_string(),
-        })
-    } else {
-        None
-    }
+fn parse_trigger(kind: &str, config: &serde_json::Value) -> Option<TriggerKind> {
+    TriggerKind::from_storage(kind, config).ok()
 }
 
 fn state_from_db_str(s: &str) -> Option<ArtifactState> {
@@ -231,7 +223,7 @@ mod tests {
         let trigger = parse_trigger("github_issue_webhook", &config).expect("some");
         assert_eq!(
             trigger,
-            TriggerSpec::GithubIssueWebhook {
+            TriggerKind::GithubIssueWebhook {
                 repo: "a/b".into(),
                 label: "ai".into(),
             }

@@ -212,7 +212,11 @@ export function draftToCreateRequest(
   return {
     workspace_id: workspaceId,
     name: draft.name.trim(),
-    trigger_kind: "github-issue-webhook",
+    // Snake-case `kind_tag` from the registry manifest (#237).
+    // `<TriggerKindPicker>` could expose this for selection, but today
+    // the draft form is GitHub-only so we hardcode the only registered
+    // tag — matching whatever `/api/registry/triggers` returns.
+    trigger_kind: "github_issue_webhook",
     install_id: install.install_id,
     repo_owner: draft.trigger.repo_owner,
     repo_name: draft.trigger.repo_name,
