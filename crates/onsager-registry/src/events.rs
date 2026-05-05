@@ -573,10 +573,17 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "trigger.fired",
             schema_version: 1,
-            producers: &[Subsystem::Stiglab],
+            // Producers (all four trigger categories from #236):
+            // - Stiglab webhook receiver (GitHub `issues.labeled`).
+            // - Forge scheduler (#238 — cron / delay / interval).
+            // - Forge event-trigger listeners (#239 — spine_event /
+            //   pg_notify / outbox_row).
+            // - Portal (#241 — `onsager trigger fire` CLI + future
+            //   "Run now" UI button once #222 lands).
+            producers: &[Subsystem::Stiglab, Subsystem::Forge, Subsystem::Portal],
             consumers: &[Subsystem::Forge],
             audit_only: false,
-            description: "A trigger (e.g. a GitHub issue webhook) fired.",
+            description: "A trigger fired (webhook / schedule / event / manual).",
         },
         EventDefinition {
             kind: "stage.entered",

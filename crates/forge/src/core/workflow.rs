@@ -132,12 +132,30 @@ impl Workflow {
 
     /// The artifact kind produced by this workflow's trigger.
     ///
-    /// v1 only has `github_issue_webhook` → produces `github-issue`
-    /// artifacts. When more trigger kinds arrive, this grows into a
-    /// match on `TriggerKind`.
+    /// One static tag per category, so dashboard / analytics queries can
+    /// group by trigger source without parsing `trigger_kind`:
+    ///
+    /// - `github-issue` — GitHub-issue webhook (the original v1 mapping).
+    /// - `scheduled-tick` — `cron` / `delay` / `interval`.
+    /// - `spine-event`, `pg-notify`, `outbox-row` — the three event
+    ///   sources from #239.
+    /// - `manual-trigger` — `Manual { name }`.
+    /// - `replay` — replay of a past `TriggerFired`.
+    ///
+    /// The stage runner doesn't currently branch on `Kind`; this tag is
+    /// purely a label. Future workflow authors can refine the match if
+    /// they want kind-specific filtering.
     pub fn trigger_artifact_kind(&self) -> &'static str {
         match self.trigger {
             TriggerKind::GithubIssueWebhook { .. } => "github-issue",
+            TriggerKind::Cron { .. } | TriggerKind::Delay { .. } | TriggerKind::Interval { .. } => {
+                "scheduled-tick"
+            }
+            TriggerKind::SpineEvent { .. } => "spine-event",
+            TriggerKind::PgNotify { .. } => "pg-notify",
+            TriggerKind::OutboxRow { .. } => "outbox-row",
+            TriggerKind::Manual { .. } => "manual-trigger",
+            TriggerKind::Replay { .. } => "replay",
         }
     }
 }

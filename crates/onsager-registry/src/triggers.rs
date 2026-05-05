@@ -28,30 +28,60 @@ use serde::Serialize;
 
 use crate::events::Subsystem;
 
-/// High-level trigger taxonomy. Dashboards use this to group kinds; the
-/// factory runtime treats them all the same — every fired trigger lands
-/// on the spine as `trigger.fired`.
+/// High-level trigger taxonomy (per #236). Dashboards use this to group
+/// kinds; the factory runtime treats them all the same — every fired
+/// trigger lands on the spine as `trigger.fired`.
+///
+/// The split mirrors the spec's four categories:
+///
+/// - **Event** — internal event-bus signals (`spine_event`, `pg_notify`,
+///   `outbox_row`). Producer is always forge.
+/// - **Schedule** — time-based fires (`cron`, `delay`, `interval`).
+///   Producer is always forge.
+/// - **Request** — external HTTP requests (webhooks: GitHub, Telegram,
+///   …). Producer is the edge subsystem hosting the receiver (stiglab
+///   today; portal once #222 lands).
+/// - **Manual** — user-initiated fires (UI button, CLI, replay).
+///   Producer is portal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerCategory {
-    /// External events delivered as webhooks (e.g. GitHub).
+    /// Internal event-bus signals (spine events, pg_notify channels,
+    /// outbox rows).
     Event,
-    /// Time-based fires (cron / interval) — reserved for v2.
+    /// Time-based fires (cron / delay / interval).
     Schedule,
-    /// Caller-initiated requests via dashboard or CLI — reserved for v2.
+    /// External HTTP requests — webhooks (GitHub today; Telegram etc.
+    /// in the works).
     Request,
-    /// Explicit human "go" signals — reserved for v2.
+    /// User-initiated fires (UI button, CLI, replay).
     Manual,
 }
 
 /// UI form shape used by the dashboard `<TriggerKindPicker>` to render
-/// per-kind config. Today there is exactly one — `Webhook` — which
-/// displays the existing GitHub-issue config form. Future kinds (cron,
-/// interval) will introduce additional shapes.
+/// per-kind config. Each shape maps to a concrete form layout in the
+/// dashboard's trigger picker; new shapes land alongside new variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerUiKind {
+    /// Webhook receivers (the existing GitHub-issue form).
     Webhook,
+    /// Cron-expression input with a human-readable preview.
+    Cron,
+    /// Single-shot delay (seconds + anchor selector).
+    Delay,
+    /// Recurring interval (period in seconds).
+    Interval,
+    /// Spine `FactoryEventKind` selector + optional JSON filter.
+    SpineEvent,
+    /// Postgres `NOTIFY` channel name + optional JSON filter.
+    PgNotify,
+    /// Outbox table name + SQL `WHERE` clause.
+    Outbox,
+    /// Manual-fire button label.
+    Manual,
+    /// Replay of a past `TriggerFired` by event id.
+    Replay,
 }
 
 /// One row of the trigger-kind registry manifest.
@@ -88,13 +118,79 @@ impl TriggerManifest {
 /// The canonical trigger-kind registry. Every variant in
 /// `onsager_spine::TriggerKind` must have a row here.
 pub const TRIGGERS: TriggerManifest = TriggerManifest {
-    triggers: &[TriggerDefinition {
-        kind_tag: "github_issue_webhook",
-        producer: Subsystem::Stiglab,
-        category: TriggerCategory::Event,
-        ui_kind: TriggerUiKind::Webhook,
-        description: "Fires when a GitHub issue is labeled with the configured label.",
-    }],
+    triggers: &[
+        TriggerDefinition {
+            kind_tag: "github_issue_webhook",
+            producer: Subsystem::Stiglab,
+            // Category 3 per #236 — webhooks are external HTTP requests,
+            // not internal event-bus signals. Putting them in `Event`
+            // would force `check-triggers` to allow Stiglab as an Event
+            // producer, weakening enforcement for true event triggers
+            // like `spine_event`.
+            category: TriggerCategory::Request,
+            ui_kind: TriggerUiKind::Webhook,
+            description: "Fires when a GitHub issue is labeled with the configured label.",
+        },
+        // -- Schedule (#238) -----------------------------------------------
+        TriggerDefinition {
+            kind_tag: "cron",
+            producer: Subsystem::Forge,
+            category: TriggerCategory::Schedule,
+            ui_kind: TriggerUiKind::Cron,
+            description: "Fires on a cron schedule (5- or 6-field expression, optional timezone).",
+        },
+        TriggerDefinition {
+            kind_tag: "delay",
+            producer: Subsystem::Forge,
+            category: TriggerCategory::Schedule,
+            ui_kind: TriggerUiKind::Delay,
+            description: "Fires once after a fixed delay measured from the workflow's activation.",
+        },
+        TriggerDefinition {
+            kind_tag: "interval",
+            producer: Subsystem::Forge,
+            category: TriggerCategory::Schedule,
+            ui_kind: TriggerUiKind::Interval,
+            description: "Fires periodically at a fixed interval (in seconds).",
+        },
+        // -- Event (#239) --------------------------------------------------
+        TriggerDefinition {
+            kind_tag: "spine_event",
+            producer: Subsystem::Forge,
+            category: TriggerCategory::Event,
+            ui_kind: TriggerUiKind::SpineEvent,
+            description: "Fires when a spine FactoryEventKind matches; optional JSON filter.",
+        },
+        TriggerDefinition {
+            kind_tag: "pg_notify",
+            producer: Subsystem::Forge,
+            category: TriggerCategory::Event,
+            ui_kind: TriggerUiKind::PgNotify,
+            description: "Fires on a Postgres NOTIFY channel; optional JSON filter on the payload.",
+        },
+        TriggerDefinition {
+            kind_tag: "outbox_row",
+            producer: Subsystem::Forge,
+            category: TriggerCategory::Event,
+            ui_kind: TriggerUiKind::Outbox,
+            description: "Polls an outbox table for new rows matching a WHERE clause.",
+        },
+        // -- Manual (#241) -------------------------------------------------
+        TriggerDefinition {
+            kind_tag: "manual",
+            producer: Subsystem::Portal,
+            category: TriggerCategory::Manual,
+            ui_kind: TriggerUiKind::Manual,
+            description: "Fires from a UI button or `onsager trigger fire` CLI command.",
+        },
+        TriggerDefinition {
+            kind_tag: "replay",
+            producer: Subsystem::Portal,
+            category: TriggerCategory::Manual,
+            ui_kind: TriggerUiKind::Replay,
+            description: "Re-emits the payload of a past TriggerFired event by event id.",
+        },
+    ],
 };
 
 #[cfg(test)]
@@ -104,7 +200,19 @@ mod tests {
     #[test]
     fn manifest_has_one_entry_per_known_kind() {
         let kinds: Vec<&str> = TRIGGERS.triggers.iter().map(|t| t.kind_tag).collect();
+        // Foundation kinds.
         assert!(kinds.contains(&"github_issue_webhook"));
+        // Schedule (#238).
+        assert!(kinds.contains(&"cron"));
+        assert!(kinds.contains(&"delay"));
+        assert!(kinds.contains(&"interval"));
+        // Event (#239).
+        assert!(kinds.contains(&"spine_event"));
+        assert!(kinds.contains(&"pg_notify"));
+        assert!(kinds.contains(&"outbox_row"));
+        // Manual (#241).
+        assert!(kinds.contains(&"manual"));
+        assert!(kinds.contains(&"replay"));
         // Every kind_tag must be unique.
         let mut seen = std::collections::HashSet::new();
         for k in &kinds {
@@ -113,10 +221,37 @@ mod tests {
     }
 
     #[test]
+    fn manifest_categories_match_taxonomy() {
+        // Schedule kinds.
+        for k in ["cron", "delay", "interval"] {
+            assert_eq!(
+                TRIGGERS.lookup(k).unwrap().category,
+                TriggerCategory::Schedule
+            );
+        }
+        // Event kinds (internal event-bus signals only).
+        for k in ["spine_event", "pg_notify", "outbox_row"] {
+            assert_eq!(TRIGGERS.lookup(k).unwrap().category, TriggerCategory::Event);
+        }
+        // Request kinds — external HTTP webhooks.
+        assert_eq!(
+            TRIGGERS.lookup("github_issue_webhook").unwrap().category,
+            TriggerCategory::Request
+        );
+        // Manual kinds.
+        for k in ["manual", "replay"] {
+            assert_eq!(
+                TRIGGERS.lookup(k).unwrap().category,
+                TriggerCategory::Manual
+            );
+        }
+    }
+
+    #[test]
     fn lookup_returns_known_entry() {
         let entry = TRIGGERS.lookup("github_issue_webhook").unwrap();
         assert_eq!(entry.producer, Subsystem::Stiglab);
-        assert_eq!(entry.category, TriggerCategory::Event);
+        assert_eq!(entry.category, TriggerCategory::Request);
         assert_eq!(entry.ui_kind, TriggerUiKind::Webhook);
     }
 
@@ -133,7 +268,7 @@ mod tests {
         let first = &triggers[0];
         assert_eq!(first["kind_tag"], "github_issue_webhook");
         assert_eq!(first["producer"], "stiglab");
-        assert_eq!(first["category"], "event");
+        assert_eq!(first["category"], "request");
         assert_eq!(first["ui_kind"], "webhook");
         assert!(first["description"].as_str().is_some());
     }

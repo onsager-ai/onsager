@@ -25,6 +25,7 @@
 //! projects on disjoint ports. See [`slot`] for the full surface.
 
 mod check_events;
+mod check_triggers;
 mod lint_api_contract;
 mod lint_seams;
 mod slot;
@@ -66,10 +67,17 @@ fn main() -> ExitCode {
                 check_events::run()
             }
         }
+        Some("check-triggers") => {
+            if args.next().is_some() {
+                Err(anyhow!("check-triggers takes no arguments"))
+            } else {
+                check_triggers::run()
+            }
+        }
         Some("slot") => slot::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
+            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
         )),
     };
 

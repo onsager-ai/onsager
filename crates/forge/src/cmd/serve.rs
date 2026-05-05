@@ -10,6 +10,7 @@ use onsager_artifact::Kind;
 use onsager_spine::EventStore;
 
 use crate::core::artifact_store::ArtifactStore;
+use crate::core::event_triggers;
 use crate::core::gate_verdict_listener;
 use crate::core::insight_cache::InsightCache;
 use crate::core::insight_listener;
@@ -17,6 +18,7 @@ use crate::core::kernel::BaselineKernel;
 use crate::core::pending::{PendingShapings, PendingVerdicts};
 use crate::core::persistence;
 use crate::core::pipeline::{ForgePipeline, PipelineEvent};
+use crate::core::scheduler;
 use crate::core::session_listener::{self, SessionCompleted, SessionCompletedHandler};
 use crate::core::shaping_result_listener;
 use crate::core::signal_cache::SignalCache;
@@ -417,6 +419,81 @@ pub fn run(database_url: &str, tick_ms: u64) {
             };
             if let Err(e) = trigger_subscriber::run(store, handler, None).await {
                 tracing::error!("forge: trigger subscriber exited: {e}");
+            }
+        });
+
+        // Spawn the schedule-trigger producer (#238). Ticks every 5s,
+        // emits `trigger.fired` for any active cron / delay / interval
+        // workflow whose next-fire-at has passed. The supervisor inside
+        // `scheduler::run` catches panics and restarts with backoff so a
+        // bug in the tick body cannot take down forge.
+        let scheduler_shared = shared.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = scheduler_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: scheduler disabled (no spine connection)");
+                return;
+            };
+            if let Err(e) = scheduler::run(store).await {
+                tracing::error!("forge: scheduler exited: {e}");
+            }
+        });
+
+        // Spawn the spine-event trigger listener (#239). Subscribes to
+        // every spine event, matches against active `SpineEvent`
+        // workflows, and re-emits `trigger.fired` for matches.
+        let event_shared = shared.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = event_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: event-trigger listener disabled (no spine connection)");
+                return;
+            };
+            if let Err(e) = event_triggers::run_spine_event_listener(store).await {
+                tracing::error!("forge: event-trigger listener exited: {e}");
+            }
+        });
+
+        // Spawn the pg_notify trigger listener (#239). LISTEN-s on every
+        // declared `PgNotify` channel; refreshes its channel set every
+        // 30s so newly-created workflows light up without a restart.
+        let pgn_shared = shared.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = pgn_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: pg_notify trigger listener disabled (no spine connection)");
+                return;
+            };
+            if let Err(e) = event_triggers::run_pg_notify_listener(store).await {
+                tracing::error!("forge: pg_notify trigger listener exited: {e}");
+            }
+        });
+
+        // Spawn the outbox-row trigger poller (#239). Polls every 2s
+        // (per #239 resolution); advances a per-workflow cursor in the
+        // `outbox_trigger_cursor` sidecar so a restart never replays
+        // already-fired rows.
+        let outbox_shared = shared.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = outbox_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: outbox poller disabled (no spine connection)");
+                return;
+            };
+            if let Err(e) = event_triggers::run_outbox_poller(store).await {
+                tracing::error!("forge: outbox poller exited: {e}");
             }
         });
 
