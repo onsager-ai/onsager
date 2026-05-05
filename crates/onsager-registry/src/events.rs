@@ -574,12 +574,13 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "trigger.fired",
             schema_version: 1,
             // Producers (all four trigger categories from #236):
-            // - Stiglab webhook receiver (GitHub `issues.labeled`).
+            // - Stiglab manual-replay route (`/api/projects/:id/issues/:n/replay-trigger`).
             // - Forge scheduler (#238 — cron / delay / interval).
             // - Forge event-trigger listeners (#239 — spine_event /
             //   pg_notify / outbox_row).
-            // - Portal (#241 — `onsager trigger fire` CLI + future
-            //   "Run now" UI button once #222 lands).
+            // - Portal — live GitHub `issues.labeled` webhook receiver
+            //   (#222 Slice 1) plus the future `onsager trigger fire` CLI
+            //   / "Run now" UI button (#241).
             producers: &[Subsystem::Stiglab, Subsystem::Forge, Subsystem::Portal],
             consumers: &[Subsystem::Forge],
             audit_only: false,
@@ -694,7 +695,8 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "gate.check_updated",
             schema_version: 1,
-            producers: &[Subsystem::Stiglab],
+            // Portal owns the GitHub webhook ingress as of #222 Slice 1.
+            producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Forge],
             audit_only: false,
             description: "A GitHub check_suite/check_run/status arrived for a tracked PR.",
@@ -702,7 +704,8 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "gate.manual_approval_signal",
             schema_version: 1,
-            producers: &[Subsystem::Stiglab],
+            // Portal owns the GitHub webhook ingress as of #222 Slice 1.
+            producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Forge],
             audit_only: false,
             description: "A manual-approval gate received a signal (e.g. PR merged).",

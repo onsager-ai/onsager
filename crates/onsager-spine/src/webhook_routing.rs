@@ -1,25 +1,27 @@
-//! Stateless webhook routing logic (issue #81).
+//! Stateless GitHub-webhook → spine-event routing.
 //!
-//! Takes a parsed GitHub webhook payload + the matched set of active
-//! workflows and decides which spine events to emit. Kept isolated from the
-//! HTTP handler so unit tests can exercise the routing rules without spinning
-//! up Axum, a DB, or a real spine.
+//! Lives on the spine because both **portal** (the live webhook ingress at
+//! `POST /webhooks/github`) and **stiglab** (the dashboard-driven manual
+//! replay route) translate webhook payloads into the same
+//! [`FactoryEventKind`] variants. Hosting the routing rules here keeps a
+//! single source of truth so the two paths can't drift in subtle shape
+//! differences — only in the `source` field of `TriggerFired`.
 //!
-//! Rules:
+//! Rules (issue #81):
 //! - `issues.labeled` → one `workflow.trigger_fired` per matched workflow
 //!   (label matched a workflow's configured trigger label). Zero matches
 //!   produces zero events; the caller ignores the webhook.
-//! - `check_suite.completed` / `check_run.completed` / `status` →
-//!   `gate.check_updated` keyed by repo + PR. Emitted only when a PR number
-//!   is resolvable from the payload.
+//! - `check_suite.completed` / `check_run.completed` → `gate.check_updated`
+//!   keyed by repo + PR. Emitted only when a PR number is resolvable.
+//!   `status` events carry no PR number and are skipped here — forge's
+//!   external-check gate cross-references on commit SHA instead.
 //! - `pull_request.closed` with `merged=true` → `gate.manual_approval_signal`
 //!   keyed by repo + PR.
 //! - Anything else → no events (caller returns 202 so GitHub stops retrying).
 
-use onsager_spine::factory_event::FactoryEventKind;
 use serde_json::Value;
 
-use crate::core::workflow::Workflow;
+use crate::factory_event::FactoryEventKind;
 
 /// A single spine event the webhook handler should emit.
 #[derive(Debug, Clone, PartialEq)]
@@ -48,13 +50,24 @@ pub struct IssueTriggerContext<'a> {
     pub replayed_by: Option<&'a str>,
 }
 
+/// Minimal portable view of a workflow that the routing functions need —
+/// just enough to build a `TriggerFired` payload. Both portal and stiglab
+/// project their richer `Workflow` types into this shape so the routing
+/// stays subsystem-agnostic.
+#[derive(Debug, Clone)]
+pub struct WorkflowMatch {
+    pub id: String,
+    pub workspace_id: String,
+    pub trigger_kind_tag: String,
+}
+
 /// Build one `TriggerFired` event per matching workflow from an
 /// already-resolved context. Shared by the live webhook path and the
 /// manual replay route so both produce identical payload shapes — the
 /// only difference is the `source` field (and an optional `replayed_by`).
 pub fn build_trigger_fired_events(
     ctx: &IssueTriggerContext<'_>,
-    matched: &[Workflow],
+    matched: &[WorkflowMatch],
 ) -> Vec<RoutedEvent> {
     matched
         .iter()
@@ -76,7 +89,7 @@ pub fn build_trigger_fired_events(
             RoutedEvent {
                 kind: FactoryEventKind::TriggerFired {
                     workflow_id: w.id.clone(),
-                    trigger_kind: w.trigger.kind_tag().to_string(),
+                    trigger_kind: w.trigger_kind_tag.clone(),
                     payload,
                 },
             }
@@ -87,9 +100,9 @@ pub fn build_trigger_fired_events(
 /// Inspect an `issues` payload; if action is `labeled`, return one
 /// `TriggerFired` per matching workflow.
 ///
-/// `workflows` should already be filtered to the caller's label-match set —
+/// `matched` should already be filtered to the caller's label-match set —
 /// the router emits one event per entry without re-checking.
-pub fn route_issues_labeled(payload: &Value, matched: &[Workflow]) -> Vec<RoutedEvent> {
+pub fn route_issues_labeled(payload: &Value, matched: &[WorkflowMatch]) -> Vec<RoutedEvent> {
     if payload.get("action").and_then(Value::as_str) != Some("labeled") {
         return Vec::new();
     }
@@ -148,8 +161,6 @@ pub fn route_check_event(event: &str, payload: &Value) -> Option<RoutedEvent> {
                 return None;
             }
             let cs = payload.get("check_suite")?;
-            // Pull the first PR number; GitHub includes the full PR array on
-            // check_suite deliveries for the head sha.
             let pr_number = cs
                 .get("pull_requests")
                 .and_then(Value::as_array)
@@ -193,13 +204,7 @@ pub fn route_check_event(event: &str, payload: &Value) -> Option<RoutedEvent> {
                 .to_string();
             (name, conclusion, pr_number)
         }
-        "status" => {
-            // `status` events don't include a PR number — forge's
-            // external-check gate is expected to cross-reference on
-            // commit SHA. We skip emission here rather than fabricate
-            // one.
-            return None;
-        }
+        "status" => return None,
         _ => return None,
     };
 
@@ -243,28 +248,28 @@ pub fn route_pull_request_closed(payload: &Value) -> Option<RoutedEvent> {
     })
 }
 
+/// Namespace partition for webhook-sourced spine events. Both the live
+/// webhook handler (portal) and the manual-replay route (stiglab) write
+/// events through this so consumer streams stay unified.
+pub fn spine_namespace(kind: &FactoryEventKind) -> &'static str {
+    match kind {
+        FactoryEventKind::TriggerFired { .. } => "workflow",
+        FactoryEventKind::GateCheckUpdated { .. }
+        | FactoryEventKind::GateManualApprovalSignal { .. } => "gate",
+        _ => "stiglab",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::workflow::TriggerKind;
-    use chrono::Utc;
     use serde_json::json;
 
-    fn sample_workflow(label: &str) -> Workflow {
-        Workflow {
+    fn sample_match(_label: &str) -> WorkflowMatch {
+        WorkflowMatch {
             id: "wf_1".to_string(),
             workspace_id: "w1".to_string(),
-            name: "sdd".to_string(),
-            trigger: TriggerKind::GithubIssueWebhook {
-                repo: "acme/widgets".to_string(),
-                label: label.to_string(),
-            },
-            install_id: 42,
-            preset_id: Some("github-issue-to-pr".to_string()),
-            active: true,
-            created_by: "u1".to_string(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            trigger_kind_tag: "github_issue_webhook".to_string(),
         }
     }
 
@@ -276,7 +281,7 @@ mod tests {
             "label": {"name": "spec"},
             "repository": {"name": "widgets", "owner": {"login": "acme"}},
         });
-        let workflows = vec![sample_workflow("spec"), sample_workflow("spec")];
+        let workflows = vec![sample_match("spec"), sample_match("spec")];
         let out = route_issues_labeled(&payload, &workflows);
         assert_eq!(out.len(), 2);
         for ev in &out {
@@ -306,7 +311,7 @@ mod tests {
             "label": {"name": "spec"},
             "repository": {"name": "widgets", "owner": {"login": "acme"}},
         });
-        let workflows = vec![sample_workflow("spec")];
+        let workflows = vec![sample_match("spec")];
         let from_webhook = route_issues_labeled(&payload, &workflows);
         let from_replay = build_trigger_fired_events(
             &IssueTriggerContext {
@@ -368,7 +373,7 @@ mod tests {
             "issue": {"number": 1},
             "repository": {"name": "widgets", "owner": {"login": "acme"}},
         });
-        let workflows = vec![sample_workflow("spec")];
+        let workflows = vec![sample_match("spec")];
         assert!(route_issues_labeled(&payload, &workflows).is_empty());
     }
 

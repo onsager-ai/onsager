@@ -421,15 +421,15 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
     ),
     (
         "/api/github-app/webhook",
-        "forgiving alias for the GitHub webhook receiver — entered by GitHub",
+        "backward-compat alias for the GitHub webhook receiver — proxies to portal",
     ),
     (
         "/api/webhooks/github",
-        "GitHub webhook receiver for the workflow runtime",
+        "backward-compat alias for the GitHub webhook receiver — proxies to portal",
     ),
     (
         "/webhooks/github",
-        "portal webhook proxy — receives GitHub webhooks for the portal binary",
+        "GitHub webhook receiver — proxies to portal which owns the live handler",
     ),
     (
         "/api/governance/{*path}",

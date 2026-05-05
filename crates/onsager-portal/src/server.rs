@@ -30,9 +30,16 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         gate,
     };
 
+    // The stiglab reverse proxy preserves the request path, so portal
+    // accepts every URL the GitHub App might post to. `/webhooks/github`
+    // is canonical; `/api/webhooks/github` and `/api/github-app/webhook`
+    // are backward-compat aliases for older App configurations
+    // (#222 Slice 1).
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/webhooks/github", post(webhook::handle))
+        .route("/api/webhooks/github", post(webhook::handle))
+        .route("/api/github-app/webhook", post(webhook::handle))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;

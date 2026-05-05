@@ -12,7 +12,6 @@ pub mod sessions;
 pub mod shaping;
 pub mod spine;
 pub mod tasks;
-pub mod webhooks;
 pub mod workflow_kinds;
 pub mod workflows;
 pub mod workspaces;
