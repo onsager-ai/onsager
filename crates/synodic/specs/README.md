@@ -27,7 +27,7 @@ containing a LeanSpec `README.md` with YAML frontmatter.
 | 078 | [Pipeline Telemetry](./078-pipeline-telemetry/) | complete |
 | 079 | [Semantic Inspect](./079-semantic-inspect/) | complete |
 
-The [coordination-model skill](./017-ai-native-coordination-model/skill/)
+The [coordination-model skill](../.claude/skills/coordination-model/)
 remains active for agent coordination playbook validation.
 
 ## Archived Specs

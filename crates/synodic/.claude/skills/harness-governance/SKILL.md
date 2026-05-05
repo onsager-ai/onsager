@@ -1,3 +1,8 @@
+---
+name: harness-governance
+description: AI agent self-reporting for Synodic governance — submit harness signals (tool_call_error, hallucination, compliance_violation, misalignment) at the end of major tasks. Triggers include "self-audit", "harness report", "submit governance signal", "synodic submit".
+---
+
 # harness-governance
 
 AI agent self-reporting skill for Synodic governance.
