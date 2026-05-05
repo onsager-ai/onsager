@@ -83,8 +83,11 @@ pub enum TriggerKind {
 
     // -- Manual (#241) ------------------------------------------------------
     /// Fire on demand from a UI button or CLI command. `name` is the
-    /// workflow-author's label for the button — multiple `Manual` triggers
-    /// per workflow render as separate buttons.
+    /// workflow-author's label for the button (rendered as the button
+    /// text in the UI). The current `workflows` schema persists exactly
+    /// one trigger per workflow; if the umbrella later supports multiple
+    /// triggers per workflow, multiple `Manual { name }` entries would
+    /// render as separate buttons.
     Manual { name: String },
 
     /// Re-emit the payload of a past `TriggerFired` event by event id.
@@ -185,6 +188,15 @@ impl TriggerKind {
         kind_tag: &str,
         config: &serde_json::Value,
     ) -> Result<Self, TriggerStorageError> {
+        // Resolve the static kind tag *first* so an unknown kind always
+        // surfaces as `UnknownKind`, regardless of whether the stored
+        // config happens to be malformed. Otherwise an unknown kind +
+        // a non-object config would be reported as a generic
+        // "InvalidConfig { kind: \"unknown\" }" — the unknown-kind
+        // problem hidden by a config-shape error.
+        let static_tag = static_kind_tag(kind_tag)
+            .ok_or_else(|| TriggerStorageError::UnknownKind(kind_tag.to_string()))?;
+
         // Re-attach the kind discriminant and run serde — keeps the
         // per-variant parsing in one place rather than duplicating a
         // hand-written match for every new variant.
@@ -198,23 +210,16 @@ impl TriggerKind {
             tagged = serde_json::json!({ "kind": kind_tag });
         } else {
             return Err(TriggerStorageError::InvalidConfig {
-                kind: static_kind_tag(kind_tag).unwrap_or("unknown"),
+                kind: static_tag,
                 message: "trigger_config must be a JSON object".into(),
             });
         }
-        match serde_json::from_value::<TriggerKind>(tagged) {
-            Ok(kind) => Ok(kind),
-            Err(e) => {
-                if let Some(static_tag) = static_kind_tag(kind_tag) {
-                    Err(TriggerStorageError::InvalidConfig {
-                        kind: static_tag,
-                        message: e.to_string(),
-                    })
-                } else {
-                    Err(TriggerStorageError::UnknownKind(kind_tag.to_string()))
-                }
+        serde_json::from_value::<TriggerKind>(tagged).map_err(|e| {
+            TriggerStorageError::InvalidConfig {
+                kind: static_tag,
+                message: e.to_string(),
             }
-        }
+        })
     }
 
     /// Split into the persisted `(kind_tag, config)` shape.

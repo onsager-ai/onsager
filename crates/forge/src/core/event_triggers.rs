@@ -312,6 +312,11 @@ async fn emit_event_trigger_fired(
 // PgNotify trigger listener
 // ---------------------------------------------------------------------------
 
+/// Cache of `PgNotify` workflows keyed by channel name. Refreshed on the
+/// same cadence as the LISTEN set, then read directly in the recv path so a
+/// burst of notifications doesn't trigger one DB lookup per message.
+type PgNotifyCache = Arc<Mutex<std::collections::HashMap<String, Vec<EventTriggerCandidate>>>>;
+
 /// Run the pg_notify trigger listener. Maintains one `LISTEN <channel>`
 /// per active `PgNotify` workflow on a dedicated connection; refreshes the
 /// channel set every [`PG_NOTIFY_REFRESH_INTERVAL`].
@@ -319,21 +324,20 @@ pub async fn run_pg_notify_listener(store: EventStore) -> anyhow::Result<()> {
     let mut listener = PgListener::connect_with(store.pool()).await?;
     let listened: Arc<Mutex<std::collections::HashSet<String>>> =
         Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let cache: PgNotifyCache = Arc::new(Mutex::new(std::collections::HashMap::new()));
 
-    // Periodic refresher: discovers new channels, drops removed ones.
-    let store_for_refresh = store.clone();
-    let listened_for_refresh = listened.clone();
     let mut refresh = interval(PG_NOTIFY_REFRESH_INTERVAL);
 
-    refresh_pg_notify_channels(&mut listener, &store_for_refresh, &listened_for_refresh).await?;
+    refresh_pg_notify_channels(&mut listener, &store, &listened, &cache).await?;
 
     loop {
         tokio::select! {
             _ = refresh.tick() => {
                 if let Err(e) = refresh_pg_notify_channels(
                     &mut listener,
-                    &store_for_refresh,
-                    &listened_for_refresh,
+                    &store,
+                    &listened,
+                    &cache,
                 )
                 .await
                 {
@@ -347,6 +351,7 @@ pub async fn run_pg_notify_listener(store: EventStore) -> anyhow::Result<()> {
                             .unwrap_or_else(|_| Value::String(notif.payload().to_string()));
                         if let Err(e) = handle_pg_notify(
                             &store,
+                            &cache,
                             notif.channel(),
                             &payload_json,
                         ).await
@@ -371,13 +376,20 @@ async fn refresh_pg_notify_channels(
     listener: &mut PgListener,
     store: &EventStore,
     listened: &Arc<Mutex<std::collections::HashSet<String>>>,
+    cache: &PgNotifyCache,
 ) -> anyhow::Result<()> {
     let candidates = load_pg_notify_candidates(store.pool()).await?;
     let mut wanted: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut new_cache: std::collections::HashMap<String, Vec<EventTriggerCandidate>> =
+        std::collections::HashMap::new();
     for c in &candidates {
         if let TriggerKind::PgNotify { channel, .. } = &c.trigger {
             if is_safe_channel_name(channel) {
                 wanted.insert(channel.clone());
+                new_cache
+                    .entry(channel.clone())
+                    .or_default()
+                    .push(c.clone());
             } else {
                 tracing::warn!(
                     workflow_id = %c.workflow_id,
@@ -388,24 +400,30 @@ async fn refresh_pg_notify_channels(
         }
     }
 
-    let mut current = listened.lock().await;
-    let to_listen: Vec<String> = wanted.difference(&current).cloned().collect();
-    let to_unlisten: Vec<String> = current.difference(&wanted).cloned().collect();
+    {
+        let mut current = listened.lock().await;
+        let to_listen: Vec<String> = wanted.difference(&current).cloned().collect();
+        let to_unlisten: Vec<String> = current.difference(&wanted).cloned().collect();
 
-    for ch in &to_listen {
-        if let Err(e) = listener.listen(ch).await {
-            tracing::warn!(channel = %ch, "forge pg_notify trigger: LISTEN failed: {e}");
-        } else {
-            current.insert(ch.clone());
+        for ch in &to_listen {
+            if let Err(e) = listener.listen(ch).await {
+                tracing::warn!(channel = %ch, "forge pg_notify trigger: LISTEN failed: {e}");
+            } else {
+                current.insert(ch.clone());
+            }
+        }
+        for ch in &to_unlisten {
+            if let Err(e) = listener.unlisten(ch).await {
+                tracing::warn!(channel = %ch, "forge pg_notify trigger: UNLISTEN failed: {e}");
+            } else {
+                current.remove(ch);
+            }
         }
     }
-    for ch in &to_unlisten {
-        if let Err(e) = listener.unlisten(ch).await {
-            tracing::warn!(channel = %ch, "forge pg_notify trigger: UNLISTEN failed: {e}");
-        } else {
-            current.remove(ch);
-        }
-    }
+
+    // Replace the cache atomically — recv-path lookups see a consistent
+    // (channel → candidates) snapshot.
+    *cache.lock().await = new_cache;
     Ok(())
 }
 
@@ -420,21 +438,23 @@ fn is_safe_channel_name(name: &str) -> bool {
 
 async fn handle_pg_notify(
     store: &EventStore,
+    cache: &PgNotifyCache,
     channel: &str,
     payload: &Value,
 ) -> anyhow::Result<()> {
-    let candidates = load_pg_notify_candidates(store.pool()).await?;
+    // Read the channel → candidates map from cache instead of re-querying
+    // for every NOTIFY. The cache is refreshed every
+    // `PG_NOTIFY_REFRESH_INTERVAL`, so a freshly-created workflow takes at
+    // most that long to start firing — same window as the LISTEN
+    // discovery itself.
+    let candidates: Vec<EventTriggerCandidate> = {
+        let map = cache.lock().await;
+        map.get(channel).cloned().unwrap_or_default()
+    };
     for c in candidates {
-        let TriggerKind::PgNotify {
-            channel: ch,
-            filter,
-        } = &c.trigger
-        else {
+        let TriggerKind::PgNotify { filter, .. } = &c.trigger else {
             continue;
         };
-        if ch != channel {
-            continue;
-        }
         let matches = filter.as_ref().map(|f| f.matches(payload)).unwrap_or(true);
         if !matches {
             continue;
@@ -525,8 +545,12 @@ async fn poll_outbox_for_workflow(
     );
     let rows: Vec<(i64, Value)> = sqlx::query_as(&sql).bind(cursor).fetch_all(pool).await?;
 
-    let mut new_cursor = cursor;
+    // Advance the cursor *before* emitting each row so a crash mid-batch
+    // drops at most one fire instead of replaying the whole already-emitted
+    // prefix on restart. Same reasoning as the scheduler's
+    // persist-then-emit ordering.
     for (id, payload) in &rows {
+        upsert_outbox_cursor(pool, &candidate.workflow_id, *id).await?;
         emit_event_trigger_fired(
             store,
             candidate,
@@ -538,25 +562,27 @@ async fn poll_outbox_for_workflow(
             }),
         )
         .await?;
-        if *id > new_cursor {
-            new_cursor = *id;
-        }
     }
+    Ok(())
+}
 
-    if new_cursor > cursor {
-        sqlx::query(
-            "INSERT INTO outbox_trigger_cursor (workflow_id, last_seen_id, last_seen_at) \
-             VALUES ($1, $2, $3) \
-             ON CONFLICT (workflow_id) DO UPDATE \
-                SET last_seen_id = EXCLUDED.last_seen_id, \
-                    last_seen_at = EXCLUDED.last_seen_at",
-        )
-        .bind(&candidate.workflow_id)
-        .bind(new_cursor)
-        .bind(Utc::now())
-        .execute(pool)
-        .await?;
-    }
+async fn upsert_outbox_cursor(
+    pool: &PgPool,
+    workflow_id: &str,
+    last_seen_id: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO outbox_trigger_cursor (workflow_id, last_seen_id, last_seen_at) \
+         VALUES ($1, $2, $3) \
+         ON CONFLICT (workflow_id) DO UPDATE \
+            SET last_seen_id = EXCLUDED.last_seen_id, \
+                last_seen_at = EXCLUDED.last_seen_at",
+    )
+    .bind(workflow_id)
+    .bind(last_seen_id)
+    .bind(Utc::now())
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -579,12 +605,55 @@ fn is_safe_identifier(s: &str) -> bool {
     }) && s.len() <= 127
 }
 
-/// Reject WHERE-clause text that contains semicolons or comment markers.
-/// A real query parser is out of scope for v1; this catches the obvious
-/// injection shapes. Workflow authors are still expected to write trusted
-/// SQL — outbox triggers are an admin-grade primitive.
+/// Defense-in-depth check on the user-supplied `where_clause`. Outbox
+/// triggers are an admin-grade primitive (workflow authors who can create
+/// `OutboxRow` workflows are trusted), but a real query parser is out of
+/// scope for v1, so this guard catches the obvious DoS / injection shapes:
+///
+/// - statement terminators / comment markers (`;`, `--`, `/*`, `*/`)
+/// - DoS-shaped function calls (`pg_sleep`, `pg_terminate_backend`,
+///   `pg_cancel_backend`, `dblink`, `lo_*`)
+/// - subquery / set-operator keywords (`select`, `union`, `intersect`,
+///   `except`, `with`)
+///
+/// Matching is ASCII-case-insensitive and word-boundary-aware — the
+/// substring `select` inside a column name like `selected` is allowed,
+/// `SELECT 1` is not.
 fn is_safe_where_clause(s: &str) -> bool {
-    !s.contains(';') && !s.contains("--") && !s.contains("/*") && !s.contains("*/")
+    if s.contains(';') || s.contains("--") || s.contains("/*") || s.contains("*/") {
+        return false;
+    }
+    const BANNED_KEYWORDS: &[&str] = &[
+        "select",
+        "union",
+        "intersect",
+        "except",
+        "with",
+        "pg_sleep",
+        "pg_terminate_backend",
+        "pg_cancel_backend",
+        "dblink",
+    ];
+    let lower = s.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    for kw in BANNED_KEYWORDS {
+        let mut start = 0;
+        while let Some(idx) = lower[start..].find(kw) {
+            let absolute = start + idx;
+            let prev_ok = absolute == 0 || !is_word_char(bytes[absolute - 1]);
+            let after = absolute + kw.len();
+            let next_ok = after >= bytes.len() || !is_word_char(bytes[after]);
+            if prev_ok && next_ok {
+                return false;
+            }
+            start = absolute + 1;
+        }
+    }
+    true
+}
+
+fn is_word_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 #[cfg(test)]
@@ -637,10 +706,23 @@ mod tests {
 
     #[test]
     fn safe_where_clause_rules() {
+        // Allowed: simple comparisons, string literals, IS-NULL, allowed
+        // word-suffixes that just happen to spell a banned keyword.
         assert!(is_safe_where_clause("status = 'sealed'"));
         assert!(is_safe_where_clause(""));
+        assert!(is_safe_where_clause("flagged_for_selection IS NOT NULL"));
+        // Statement terminators and comment markers.
         assert!(!is_safe_where_clause("1=1; DROP TABLE"));
         assert!(!is_safe_where_clause("x -- comment"));
         assert!(!is_safe_where_clause("/* nope */ 1=1"));
+        // Subquery / set-operator keywords (case-insensitive, word-boundary).
+        assert!(!is_safe_where_clause("id IN (SELECT id FROM other)"));
+        assert!(!is_safe_where_clause("EXISTS(SELECT 1)"));
+        assert!(!is_safe_where_clause("a UNION b"));
+        assert!(!is_safe_where_clause("with x as (1) 1=1"));
+        // DoS-shaped function calls.
+        assert!(!is_safe_where_clause("pg_sleep(10) IS NULL"));
+        assert!(!is_safe_where_clause("pg_terminate_backend(1) = TRUE"));
+        assert!(!is_safe_where_clause("dblink('host', 'sql') IS NULL"));
     }
 }

@@ -28,19 +28,33 @@ use serde::Serialize;
 
 use crate::events::Subsystem;
 
-/// High-level trigger taxonomy. Dashboards use this to group kinds; the
-/// factory runtime treats them all the same — every fired trigger lands
-/// on the spine as `trigger.fired`.
+/// High-level trigger taxonomy (per #236). Dashboards use this to group
+/// kinds; the factory runtime treats them all the same — every fired
+/// trigger lands on the spine as `trigger.fired`.
+///
+/// The split mirrors the spec's four categories:
+///
+/// - **Event** — internal event-bus signals (`spine_event`, `pg_notify`,
+///   `outbox_row`). Producer is always forge.
+/// - **Schedule** — time-based fires (`cron`, `delay`, `interval`).
+///   Producer is always forge.
+/// - **Request** — external HTTP requests (webhooks: GitHub, Telegram,
+///   …). Producer is the edge subsystem hosting the receiver (stiglab
+///   today; portal once #222 lands).
+/// - **Manual** — user-initiated fires (UI button, CLI, replay).
+///   Producer is portal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerCategory {
-    /// External events delivered as webhooks (e.g. GitHub).
+    /// Internal event-bus signals (spine events, pg_notify channels,
+    /// outbox rows).
     Event,
-    /// Time-based fires (cron / interval) — reserved for v2.
+    /// Time-based fires (cron / delay / interval).
     Schedule,
-    /// Caller-initiated requests via dashboard or CLI — reserved for v2.
+    /// External HTTP requests — webhooks (GitHub today; Telegram etc.
+    /// in the works).
     Request,
-    /// Explicit human "go" signals — reserved for v2.
+    /// User-initiated fires (UI button, CLI, replay).
     Manual,
 }
 
@@ -108,7 +122,12 @@ pub const TRIGGERS: TriggerManifest = TriggerManifest {
         TriggerDefinition {
             kind_tag: "github_issue_webhook",
             producer: Subsystem::Stiglab,
-            category: TriggerCategory::Event,
+            // Category 3 per #236 — webhooks are external HTTP requests,
+            // not internal event-bus signals. Putting them in `Event`
+            // would force `check-triggers` to allow Stiglab as an Event
+            // producer, weakening enforcement for true event triggers
+            // like `spine_event`.
+            category: TriggerCategory::Request,
             ui_kind: TriggerUiKind::Webhook,
             description: "Fires when a GitHub issue is labeled with the configured label.",
         },
@@ -210,15 +229,15 @@ mod tests {
                 TriggerCategory::Schedule
             );
         }
-        // Event kinds.
-        for k in [
-            "github_issue_webhook",
-            "spine_event",
-            "pg_notify",
-            "outbox_row",
-        ] {
+        // Event kinds (internal event-bus signals only).
+        for k in ["spine_event", "pg_notify", "outbox_row"] {
             assert_eq!(TRIGGERS.lookup(k).unwrap().category, TriggerCategory::Event);
         }
+        // Request kinds — external HTTP webhooks.
+        assert_eq!(
+            TRIGGERS.lookup("github_issue_webhook").unwrap().category,
+            TriggerCategory::Request
+        );
         // Manual kinds.
         for k in ["manual", "replay"] {
             assert_eq!(
@@ -232,7 +251,7 @@ mod tests {
     fn lookup_returns_known_entry() {
         let entry = TRIGGERS.lookup("github_issue_webhook").unwrap();
         assert_eq!(entry.producer, Subsystem::Stiglab);
-        assert_eq!(entry.category, TriggerCategory::Event);
+        assert_eq!(entry.category, TriggerCategory::Request);
         assert_eq!(entry.ui_kind, TriggerUiKind::Webhook);
     }
 
@@ -249,7 +268,7 @@ mod tests {
         let first = &triggers[0];
         assert_eq!(first["kind_tag"], "github_issue_webhook");
         assert_eq!(first["producer"], "stiglab");
-        assert_eq!(first["category"], "event");
+        assert_eq!(first["category"], "request");
         assert_eq!(first["ui_kind"], "webhook");
         assert!(first["description"].as_str().is_some());
     }

@@ -2,8 +2,8 @@
 //!
 //! Two surfaces:
 //!
-//!   onsager trigger fire    --manual <name>  [--payload <json>]
-//!   onsager trigger replay  --event <id> <workflow_id>
+//!   onsager trigger fire   <workflow_id> --manual <name> [--payload <json>]
+//!   onsager trigger replay <workflow_id> --event <id>
 //!
 //! Both emit `FactoryEventKind::TriggerFired` to the spine directly via
 //! `EventStore` — no HTTP indirection, independent of portal (#222). The

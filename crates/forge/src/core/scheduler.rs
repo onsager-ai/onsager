@@ -141,7 +141,10 @@ async fn load_schedule_candidates(pool: &PgPool) -> anyhow::Result<Vec<ScheduleC
         let workflow_created_at: DateTime<Utc> = row.try_get("created_at")?;
         let kind_tag: String = row.try_get("trigger_kind")?;
         let cfg: serde_json::Value = row.try_get("trigger_config")?;
-        let last_fired_at: Option<DateTime<Utc>> = row.try_get("last_fired_at").ok();
+        // Use a typed `Option<DateTime<Utc>>` decode and `?` so a real DB
+        // schema/type error surfaces instead of silently being treated as
+        // "never fired" (which would re-fire workflows that did fire).
+        let last_fired_at: Option<DateTime<Utc>> = row.try_get("last_fired_at")?;
         let trigger = match TriggerKind::from_storage(&kind_tag, &cfg) {
             Ok(t) => t,
             Err(e) => {
@@ -184,8 +187,14 @@ async fn process_candidate(
         return Ok(());
     }
 
-    emit_trigger_fired(store, candidate, scheduled_for, now).await?;
+    // Persist `last_fired_at` *before* emitting `trigger.fired` so a crash
+    // between the two steps drops this fire (skip-missed semantics already
+    // permits losing one fire) instead of duplicating it on restart. The
+    // alternative ordering (emit then persist) lets a crash mid-step
+    // re-fire on the next tick because `last_fired_at` is still stale —
+    // the failure mode Copilot flagged on PR #247.
     upsert_state(store.pool(), &candidate.workflow_id, now, scheduled_for).await?;
+    emit_trigger_fired(store, candidate, scheduled_for, now).await?;
     Ok(())
 }
 
