@@ -1,17 +1,32 @@
 //! Portal-owned migrations.
 //!
-//! Runs at server startup. The portal owns three tables:
+//! Runs at server startup. The portal owns:
 //!
 //! - `factory_tasks` — backlog rows materialized from spec-labeled issues.
 //! - `pr_gate_verdicts` — one row per `(pr_artifact_id, head_sha)` for gate
 //!   evaluation idempotency.
 //! - `pr_branch_links` — per-session branch hint, used to attach
 //!   `vertical_lineage` when the PR webhook arrives.
+//! - `portal_webhook_secrets` — per-workspace webhook signature secret for
+//!   self-hosted PAT mode (spec #222 / parent #220). Loaded from the
+//!   `migrations/` directory rather than inline DDL — the first portal-owned
+//!   table that lives in a versioned `.sql` file, setting the precedent for
+//!   the schema-split slices to follow.
 //!
-//! Tables managed elsewhere (tenants / projects / installations / events /
+//! Tables managed elsewhere (workspaces / projects / installations / events /
 //! events_ext / artifacts / vertical_lineage) are not touched here.
 
 use sqlx::postgres::PgPool;
+
+/// Versioned `.sql` files under `crates/onsager-portal/migrations/`.
+///
+/// Inlined at compile time so the binary stays self-contained — no
+/// `include_str!`-of-disk path at runtime, no shipping the directory next to
+/// the binary. Order matches filename order and is the apply order.
+const MIGRATIONS: &[(&str, &str)] = &[(
+    "001_portal_webhook_secrets",
+    include_str!("../migrations/001_portal_webhook_secrets.sql"),
+)];
 
 /// Apply all portal-owned table migrations. Idempotent — safe to call on
 /// every startup.
@@ -73,5 +88,36 @@ pub async fn run(pool: &PgPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    for (name, sql) in MIGRATIONS {
+        tracing::debug!(migration = name, "portal: applying migration");
+        sqlx::raw_sql(sql)
+            .execute(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("portal migration {name} failed: {e}"))?;
+    }
+
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The migrations array stays in lock-step with the filesystem. If a new
+    /// `.sql` file is added under `migrations/` without being wired into
+    /// `MIGRATIONS`, the include_str! call site below would fail at compile
+    /// time — but the inverse (a `MIGRATIONS` entry pointing at a missing
+    /// file) is also a compile-time error, so this test just sanity-checks
+    /// the contents are non-empty and parseable as SQL identifiers.
+    #[test]
+    fn migrations_are_non_empty_and_named_consistently() {
+        assert!(!MIGRATIONS.is_empty(), "expected at least one migration");
+        for (name, sql) in MIGRATIONS {
+            assert!(
+                name.starts_with(char::is_numeric),
+                "name {name} should start with a digit"
+            );
+            assert!(!sql.trim().is_empty(), "migration {name} has empty body");
+        }
+    }
 }

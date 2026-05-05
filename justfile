@@ -58,6 +58,11 @@ dev: dev-infra
     set -euo pipefail
     trap 'pids=$(jobs -p); [ -n "$pids" ] && kill $pids 2>/dev/null || true' EXIT
 
+    echo "==> Starting portal on :3002..."
+    DATABASE_URL="postgres://onsager:onsager@localhost:5432/onsager" \
+    PORTAL_BIND="0.0.0.0:3002" \
+        cargo run -p onsager-portal -- serve &
+
     echo "==> Starting stiglab on :3000..."
     ONSAGER_DATABASE_URL="postgres://onsager:onsager@localhost:5432/onsager" \
         cargo run -p stiglab -- server &
@@ -78,6 +83,7 @@ dev: dev-infra
     echo "  Dashboard:  http://localhost:5173"
     echo "  Stiglab:    http://localhost:3000"
     echo "  Synodic:    http://localhost:3001"
+    echo "  Portal:     http://localhost:3002"
     echo "  Forge:      http://localhost:3003"
     echo "  Postgres:   postgres://onsager:onsager@localhost:5432/onsager"
     echo ""
@@ -107,6 +113,11 @@ dev-forge:
 
 dev-ising:
     cargo run -p ising -- serve --database-url "${DATABASE_URL}"
+
+dev-portal port="3002":
+    DATABASE_URL="${DATABASE_URL:-postgres://onsager:onsager@localhost:5432/onsager}" \
+    PORTAL_BIND="0.0.0.0:{{port}}" \
+        cargo run -p onsager-portal -- serve
 
 dev-stiglab:
     cargo run -p stiglab -- server
