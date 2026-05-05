@@ -12,6 +12,7 @@ use sqlx::{PgPool, Row};
 
 use super::persistence::state_to_db;
 use super::workflow::{GateSpec, StageSpec, TriggerSpec, Workflow};
+use onsager_spine::TriggerKind;
 
 /// Load every active workflow into memory. Inactive workflows with
 /// in-flight artifacts are also needed so the stage runner can continue
@@ -193,12 +194,13 @@ pub async fn persist_artifact_workflow_state(
 }
 
 fn parse_trigger(kind: &str, config: &serde_json::Value) -> Option<TriggerSpec> {
-    match kind {
-        "github_issue_webhook" => Some(TriggerSpec::GithubIssueWebhook {
+    if kind == TriggerKind::GithubIssueWebhook.snake_case() {
+        Some(TriggerSpec::GithubIssueWebhook {
             repo: config.get("repo")?.as_str()?.to_string(),
             label: config.get("label")?.as_str()?.to_string(),
-        }),
-        _ => None,
+        })
+    } else {
+        None
     }
 }
 

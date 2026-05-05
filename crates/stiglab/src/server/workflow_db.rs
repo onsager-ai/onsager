@@ -20,6 +20,7 @@
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde_json::json;
+use onsager_spine::TriggerKind as SpineTriggerKind;
 use sqlx::{PgPool, Row};
 
 use crate::core::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
@@ -30,13 +31,13 @@ use crate::core::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
 /// `workflows.trigger_kind` CHECK constraint requires the snake form.
 fn trigger_kind_to_spine(kind: TriggerKind) -> &'static str {
     match kind {
-        TriggerKind::GithubIssueWebhook => "github_issue_webhook",
+        TriggerKind::GithubIssueWebhook => SpineTriggerKind::GithubIssueWebhook.snake_case(),
     }
 }
 
 fn trigger_kind_from_spine(s: &str) -> anyhow::Result<TriggerKind> {
     match s {
-        "github_issue_webhook" => Ok(TriggerKind::GithubIssueWebhook),
+        s if s == SpineTriggerKind::GithubIssueWebhook.snake_case() => Ok(TriggerKind::GithubIssueWebhook),
         other => Err(anyhow::anyhow!("unknown spine trigger_kind: {other}")),
     }
 }

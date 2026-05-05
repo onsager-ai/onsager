@@ -13,6 +13,7 @@
 //! without forcing a schema churn when v1 adds new gates.
 
 use chrono::{DateTime, Utc};
+use onsager_spine::TriggerKind as SpineTriggerKind;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -29,7 +30,7 @@ pub enum TriggerKind {
 impl fmt::Display for TriggerKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TriggerKind::GithubIssueWebhook => write!(f, "github-issue-webhook"),
+            TriggerKind::GithubIssueWebhook => write!(f, "{}", SpineTriggerKind::GithubIssueWebhook.kebab_case()),
         }
     }
 }
@@ -38,7 +39,7 @@ impl FromStr for TriggerKind {
     type Err = StiglabError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "github-issue-webhook" => Ok(TriggerKind::GithubIssueWebhook),
+            s if s == SpineTriggerKind::GithubIssueWebhook.kebab_case() => Ok(TriggerKind::GithubIssueWebhook),
             other => Err(StiglabError::InvalidState(format!(
                 "invalid trigger kind: {other}"
             ))),

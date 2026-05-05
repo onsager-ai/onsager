@@ -11,6 +11,7 @@
 //! `persistence.rs` rebuilds it on startup.
 
 use onsager_artifact::ArtifactState;
+use onsager_spine::TriggerKind;
 use serde::{Deserialize, Serialize};
 
 /// A workflow-runtime trigger. v1 ships only the GitHub-issue webhook.
@@ -25,7 +26,7 @@ impl TriggerSpec {
     /// Stable string used as the `trigger_kind` column value.
     pub fn kind_tag(&self) -> &'static str {
         match self {
-            TriggerSpec::GithubIssueWebhook { .. } => "github_issue_webhook",
+            TriggerSpec::GithubIssueWebhook { .. } => TriggerKind::GithubIssueWebhook.snake_case(),
         }
     }
 }
