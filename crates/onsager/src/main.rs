@@ -30,9 +30,10 @@ KNOWN SUBCOMMANDS:
     refract     Intent decomposer — expands high-level intents into artifacts
     stiglab     Distributed AI agent session orchestration
     synodic     AI agent governance
+    trigger     Fire or replay workflow triggers (manual / replay)
 ";
 
-const KNOWN: &[&str] = &["forge", "ising", "refract", "stiglab", "synodic"];
+const KNOWN: &[&str] = &["forge", "ising", "refract", "stiglab", "synodic", "trigger"];
 
 fn main() {
     let args: Vec<String> = env::args().collect();

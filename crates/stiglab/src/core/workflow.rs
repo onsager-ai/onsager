@@ -103,6 +103,7 @@ impl Workflow {
     pub fn github_repo(&self) -> Option<(&str, &str)> {
         match &self.trigger {
             TriggerKind::GithubIssueWebhook { repo, .. } => repo.split_once('/'),
+            _ => None,
         }
     }
 
@@ -111,6 +112,7 @@ impl Workflow {
     pub fn github_label(&self) -> Option<&str> {
         match &self.trigger {
             TriggerKind::GithubIssueWebhook { label, .. } => Some(label.as_str()),
+            _ => None,
         }
     }
 }
