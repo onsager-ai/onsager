@@ -60,9 +60,18 @@ fn shared_client() -> &'static reqwest::Client {
 }
 
 /// Base URL for the portal HTTP server (internal, not exposed by Railway).
+///
+/// Trailing `/` is stripped so concatenation with `uri.path()` (which
+/// already begins with `/`) doesn't produce `//api/...` paths — that
+/// changes routing behavior on some axum/matchit versions and breaks
+/// downstream OAuth/cookie expectations. Empty `PORTAL_URL` falls back
+/// to the localhost default.
 fn portal_base_url() -> String {
     if let Ok(url) = std::env::var("PORTAL_URL") {
-        return url;
+        let trimmed = url.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
     }
     let port = std::env::var("PORTAL_PORT").unwrap_or_else(|_| "3002".to_string());
     format!("http://127.0.0.1:{port}")

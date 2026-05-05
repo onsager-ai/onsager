@@ -117,7 +117,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 credential_key,
                 synodic_url,
                 github_token,
-                public_url,
+                public_url: public_url
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|s| s.trim_end_matches('/').to_string()),
                 github_client_id: github_client_id.filter(|s| !s.is_empty()),
                 github_client_secret: github_client_secret.filter(|s| !s.is_empty()),
                 sso_state_secret: sso_state_secret.filter(|s| !s.is_empty()),
