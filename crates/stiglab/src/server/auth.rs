@@ -9,8 +9,23 @@ use ring::digest;
 use ring::rand::{SecureRandom, SystemRandom};
 
 use crate::server::db;
-use crate::server::sso::secrets_equal;
 use crate::server::state::AppState;
+
+/// Constant-time secret comparison. Both inputs are compared as raw bytes.
+/// Short-circuits only on length mismatch — the attacker controls whether
+/// a comparison is made at all, not how long it takes once started.
+fn secrets_equal(a: &str, b: &str) -> bool {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
 
 // ── Credential Encryption (AES-256-GCM) ──
 
@@ -71,35 +86,35 @@ pub fn generate_credential_key() -> String {
 
 // ── GitHub OAuth ──
 //
-// The GitHub-specific OAuth helpers live in `onsager_github::api::oauth`.
-// Re-exported here so the existing stiglab call sites keep their import
-// shape unchanged. `GithubUser` is renamed by the library to
-// `GithubOAuthUser`; alias kept for the same reason.
+// Owner-mode OAuth (sign-in start, callback, SSO finish, /api/auth/me,
+// dev-login) lives in `onsager-portal` post-#222 Slice 5. Stiglab no
+// longer mints sessions; it only validates them on every authenticated
+// request via the cookie path of [`AuthUser`] below.
+//
+// `generate_state` stays in stiglab because the GitHub-App install
+// callback (`/api/github-app/install-start`) builds its own
+// `state` cookie + query-string parameter (`workspace_id.csrf_random`)
+// independent of the OAuth login flow. Slice 3 of spec #222 will move
+// the install routes to portal alongside the workspace tables.
 
-pub use onsager_github::api::oauth::{
-    exchange_code, github_authorize_url, GithubOAuthUser as GithubUser, GithubTokenResponse,
-};
-
-/// Fetch the GitHub user behind an OAuth access token. Wraps the
-/// library helper so call sites that already import `get_github_user`
-/// from this module keep working.
-pub async fn get_github_user(access_token: &str) -> anyhow::Result<GithubUser> {
-    Ok(onsager_github::api::oauth::get_oauth_user(access_token).await?)
-}
-
-/// Generate a random session token (hex-encoded, 32 bytes of randomness).
-pub fn generate_session_token() -> String {
+/// Generate a random CSRF state parameter (16 bytes hex).
+pub fn generate_state() -> String {
     let rng = SystemRandom::new();
-    let mut bytes = [0u8; 32];
+    let mut bytes = [0u8; 16];
     rng.fill(&mut bytes)
         .expect("failed to generate random bytes");
     hex::encode(bytes)
 }
 
-/// Generate a random CSRF state parameter.
-pub fn generate_state() -> String {
+/// Generate a random session token (hex-encoded, 32 bytes of randomness).
+///
+/// Portal mints session cookies in production post-#222 Slice 5; this
+/// helper survives only because stiglab's integration tests seed auth
+/// fixtures by writing rows directly. It is not called from any stiglab
+/// route handler.
+pub fn generate_session_token() -> String {
     let rng = SystemRandom::new();
-    let mut bytes = [0u8; 16];
+    let mut bytes = [0u8; 32];
     rng.fill(&mut bytes)
         .expect("failed to generate random bytes");
     hex::encode(bytes)
@@ -507,22 +522,6 @@ mod tests {
             parse_cookie("  stiglab_session = abc123 ; theme=dark", "stiglab_session"),
             Some("abc123")
         );
-    }
-
-    #[test]
-    fn test_generate_session_token_uniqueness() {
-        let t1 = generate_session_token();
-        let t2 = generate_session_token();
-        assert_ne!(t1, t2);
-        assert_eq!(t1.len(), 64); // 32 bytes hex-encoded
-    }
-
-    #[test]
-    fn test_generate_state_uniqueness() {
-        let s1 = generate_state();
-        let s2 = generate_state();
-        assert_ne!(s1, s2);
-        assert_eq!(s1.len(), 32); // 16 bytes hex-encoded
     }
 
     #[test]

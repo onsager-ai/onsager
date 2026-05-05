@@ -42,15 +42,8 @@ fn auth_enabled_config() -> ServerConfig {
         database_url: "sqlite::memory:".into(),
         static_dir: None,
         cors_origin: None,
-        github_client_id: Some("client-id".into()),
-        github_client_secret: Some("client-secret".into()),
         credential_key: Some(generate_credential_key()),
         public_url: None,
-        github_app_webhook_secret: None,
-        sso_state_secret: None,
-        sso_exchange_secret: None,
-        sso_return_host_allowlist: Vec::new(),
-        sso_auth_domain: None,
         internal_dispatch_token: None,
     }
 }

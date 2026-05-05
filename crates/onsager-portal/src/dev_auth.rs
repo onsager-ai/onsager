@@ -20,6 +20,11 @@
 //! auth extractor reads `user.github_id < 0` to decide
 //! `session_kind: dev`, which is what drives the dashboard's persistent
 //! dev-mode banner. No extra column on `auth_sessions` required.
+//!
+//! `workspaces` and `workspace_members` are still owned by stiglab's
+//! runtime migrations until Slice 3 of spec #222 moves them into the
+//! spine. Portal writes to those tables via raw SQL — same DB, same
+//! shape, no shared crate needed.
 
 #![cfg(debug_assertions)]
 
@@ -28,12 +33,12 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::Utc;
+use sqlx::postgres::PgPool;
 use uuid::Uuid;
 
-use crate::core::{User, Workspace, WorkspaceMember};
-use crate::server::auth::{generate_session_token, SessionKind};
-use crate::server::db;
-use crate::server::state::AppState;
+use crate::auth::{generate_session_token, SessionKind};
+use crate::auth_db::{self, User};
+use crate::state::AppState;
 
 /// Fixed `github_id` for the seeded dev user. Single value (not derived
 /// from `$USER`) keeps the seed idempotent across `$USER` changes — the
@@ -43,11 +48,11 @@ use crate::server::state::AppState;
 /// `auth::session_kind_for_github_id`).
 pub const DEV_GITHUB_ID: i64 = -1;
 
-/// Slug of the workspace the seeder creates.  Stable across boots so
+/// Slug of the workspace the seeder creates. Stable across boots so
 /// localhost links never break between restarts.
 pub const DEV_WORKSPACE_SLUG: &str = "dev";
 
-/// Resolve the username we'll seed.  `$USER` from the boot env, falling
+/// Resolve the username we'll seed. `$USER` from the boot env, falling
 /// back to `dev` so the build works in CI and rootless containers where
 /// `$USER` may be unset.
 pub fn dev_username() -> String {
@@ -57,26 +62,21 @@ pub fn dev_username() -> String {
         .unwrap_or_else(|| "dev".to_string())
 }
 
-/// `${USER}@local` — what shows up on the LoginPage button and the
-/// banner.
+/// `${USER}@local` — what shows up on the LoginPage button and the banner.
 pub fn dev_login_label(username: &str) -> String {
     format!("{username}@local")
 }
 
 /// Idempotently materialize the dev user, the dev workspace, and the
-/// membership linking them.  Called once at server boot from `main.rs`.
-///
-/// Re-running on a warm DB does not duplicate rows: the user is upserted
-/// on `github_id = DEV_GITHUB_ID`; the workspace is fetched by slug
-/// before insert; the membership insert is `OR IGNORE`-style guarded.
-pub async fn seed_dev_user_and_workspace(pool: &sqlx::AnyPool) -> anyhow::Result<()> {
+/// membership linking them. Called once at server boot from `server::run`.
+pub async fn seed_dev_user_and_workspace(pool: &PgPool) -> anyhow::Result<()> {
     let username = dev_username();
     let login = dev_login_label(&username);
     let now = Utc::now();
 
-    // Resolve-or-create the user row.  `upsert_user` keys on `github_id`
+    // Resolve-or-create the user row. `upsert_user` keys on `github_id`
     // (UNIQUE) so the same negative ID survives across reboots.
-    let user_id = match db::get_user_by_github_id(pool, DEV_GITHUB_ID).await? {
+    let user_id = match auth_db::get_user_by_github_id(pool, DEV_GITHUB_ID).await? {
         Some(existing) => existing.id,
         None => Uuid::new_v4().to_string(),
     };
@@ -89,41 +89,64 @@ pub async fn seed_dev_user_and_workspace(pool: &sqlx::AnyPool) -> anyhow::Result
         created_at: now,
         updated_at: now,
     };
-    db::upsert_user(pool, &user).await?;
+    auth_db::upsert_user(pool, &user).await?;
 
-    // Resolve-or-create the workspace.  Slug is the natural key here; a
-    // collision on a fresh DB is impossible because no real user can
-    // legally claim `dev` as a workspace slug before the seeder runs.
-    let existing_ws = db::get_workspace_by_slug(pool, DEV_WORKSPACE_SLUG).await?;
-    let workspace_id = match existing_ws {
-        Some(ref ws) => ws.id.clone(),
+    // Resolve-or-create the workspace. Stiglab owns the `workspaces` /
+    // `workspace_members` schema until Slice 3, so this writes raw SQL
+    // matching stiglab's CREATE TABLE shape.
+    let existing_ws_id: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM workspaces WHERE slug = $1")
+            .bind(DEV_WORKSPACE_SLUG)
+            .fetch_optional(pool)
+            .await?;
+    let workspace_id = match existing_ws_id {
+        Some((id,)) => id,
         None => {
-            let ws = Workspace {
-                id: Uuid::new_v4().to_string(),
-                slug: DEV_WORKSPACE_SLUG.to_string(),
-                name: "Dev workspace".to_string(),
-                created_by: user_id.clone(),
-                created_at: now,
-            };
-            let member = WorkspaceMember {
-                workspace_id: ws.id.clone(),
-                user_id: user_id.clone(),
-                joined_at: now,
-            };
-            db::insert_workspace_with_creator(pool, &ws, &member).await?;
-            ws.id
+            let id = Uuid::new_v4().to_string();
+            let mut tx = pool.begin().await?;
+            sqlx::query(
+                "INSERT INTO workspaces (id, slug, name, created_by, created_at) \
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(&id)
+            .bind(DEV_WORKSPACE_SLUG)
+            .bind("Dev workspace")
+            .bind(&user_id)
+            .bind(now.to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO workspace_members (workspace_id, user_id, joined_at) \
+                 VALUES ($1, $2, $3)",
+            )
+            .bind(&id)
+            .bind(&user_id)
+            .bind(now.to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            id
         }
     };
 
-    // Membership might be missing on a workspace that pre-dated the
-    // seeder (or was created by an earlier `$USER`).  Backfill it.
-    if !db::is_workspace_member(pool, &workspace_id, &user_id).await? {
-        let member = WorkspaceMember {
-            workspace_id: workspace_id.clone(),
-            user_id: user_id.clone(),
-            joined_at: now,
-        };
-        db::insert_workspace_member(pool, &member).await?;
+    // Membership might be missing on a workspace that pre-dated the seeder
+    // (or was created by an earlier `$USER`). Backfill it.
+    let has_member: Option<(String,)> = sqlx::query_as(
+        "SELECT user_id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
+    )
+    .bind(&workspace_id)
+    .bind(&user_id)
+    .fetch_optional(pool)
+    .await?;
+    if has_member.is_none() {
+        sqlx::query(
+            "INSERT INTO workspace_members (workspace_id, user_id, joined_at) VALUES ($1, $2, $3)",
+        )
+        .bind(&workspace_id)
+        .bind(&user_id)
+        .bind(now.to_rfc3339())
+        .execute(pool)
+        .await?;
     }
 
     tracing::info!(
@@ -136,14 +159,11 @@ pub async fn seed_dev_user_and_workspace(pool: &sqlx::AnyPool) -> anyhow::Result
 }
 
 /// `POST /api/auth/dev-login` — mint a session cookie for the seeded dev
-/// user.  Debug-only: the route is not registered in release builds.
+/// user. Debug-only: the route is not registered in release builds.
 pub async fn dev_login(State(state): State<AppState>) -> Response {
-    let user = match db::get_user_by_github_id(&state.db, DEV_GITHUB_ID).await {
+    let user = match auth_db::get_user_by_github_id(&state.pool, DEV_GITHUB_ID).await {
         Ok(Some(u)) => u,
         Ok(None) => {
-            // Should never happen — `seed_dev_user_and_workspace` runs at
-            // boot.  Surface as 500 so the failure is loud rather than
-            // silently re-seeding here (which would mask boot bugs).
             tracing::error!("dev-login: dev user missing; boot seeder didn't run?");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -159,7 +179,9 @@ pub async fn dev_login(State(state): State<AppState>) -> Response {
 
     let session_token = generate_session_token();
     let expires_at = Utc::now() + chrono::Duration::days(30);
-    if let Err(e) = db::create_auth_session(&state.db, &session_token, &user.id, expires_at).await {
+    if let Err(e) =
+        auth_db::create_auth_session(&state.pool, &session_token, &user.id, expires_at).await
+    {
         tracing::error!("dev-login: failed to create auth session: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
@@ -206,8 +228,6 @@ mod tests {
 
     #[test]
     fn dev_username_falls_back_to_dev() {
-        // SAFETY: tests run single-threaded by default; we restore the
-        // env var below to keep cross-test ordering stable.
         let prev = std::env::var("USER").ok();
         std::env::remove_var("USER");
         assert_eq!(dev_username(), "dev");
@@ -224,10 +244,9 @@ mod tests {
 
     #[test]
     fn dev_github_id_is_negative_and_marks_dev() {
-        // Spec: dev users are recognized by negative github_id.
         const _: () = assert!(DEV_GITHUB_ID < 0);
         assert_eq!(
-            crate::server::auth::session_kind_for_github_id(DEV_GITHUB_ID),
+            crate::auth::session_kind_for_github_id(DEV_GITHUB_ID),
             SessionKind::Dev
         );
     }

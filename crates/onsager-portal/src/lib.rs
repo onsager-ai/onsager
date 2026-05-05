@@ -26,12 +26,17 @@
 //! are migrated at startup; everything else (tenant / installation / project /
 //! events / artifacts / lineage) is owned by stiglab and the spine.
 
+pub mod auth;
+pub mod auth_db;
 pub mod backfill;
 pub mod config;
 pub mod db;
+#[cfg(debug_assertions)]
+pub mod dev_auth;
 pub mod feedback;
 pub mod gate;
 pub mod handlers;
 pub mod migrate;
 pub mod server;
+pub mod sso;
 pub mod state;

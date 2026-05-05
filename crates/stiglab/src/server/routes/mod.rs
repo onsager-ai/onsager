@@ -1,4 +1,3 @@
-pub mod auth;
 pub mod credentials;
 pub mod governance;
 pub mod health;

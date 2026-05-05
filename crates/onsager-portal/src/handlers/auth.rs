@@ -1,3 +1,10 @@
+//! `/api/auth/*` route handlers.
+//!
+//! Owns the GitHub OAuth dance, cross-environment SSO delegation,
+//! `/api/auth/me`, and `/api/auth/logout`. Stiglab proxies the same
+//! URLs through `routes::portal::proxy` so existing dashboard fetches
+//! land here without an API_BASE cutover (Slice 6 of spec #222).
+
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -5,18 +12,17 @@ use axum::Json;
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::core::User;
-
-use crate::server::auth::{
+use crate::auth::{
     self, exchange_code, generate_session_token, generate_state, get_github_user,
-    github_authorize_url, AuthUser, RequestPrincipal,
+    github_authorize_url, AuthUser,
 };
-use crate::server::db;
-use crate::server::sso::{
+use crate::auth_db::{self, User};
+use crate::config::Config;
+use crate::sso::{
     self, generate_exchange_code, return_to_allowed, secrets_equal, sign_state, verify_state,
     SsoMode, StateClaims, EXCHANGE_CODE_LIFETIME_SECS, STATE_LIFETIME_SECS,
 };
-use crate::server::state::AppState;
+use crate::state::AppState;
 
 // ── GitHub OAuth entry + callback (owner) / redirect-to-owner (relying) ──
 
@@ -49,14 +55,13 @@ pub async fn github_login(
     match config.sso_mode() {
         None => (StatusCode::NOT_FOUND, "auth not configured").into_response(),
         Some(SsoMode::Relying) => {
-            // Previews never talk to GitHub directly — bounce through prod.
             let auth_domain = config
                 .sso_auth_domain
                 .as_deref()
                 .expect("relying mode implies sso_auth_domain set");
             let Some(public_url) = config.public_url.as_deref() else {
                 tracing::error!(
-                    "cannot initiate relying-mode SSO: STIGLAB_PUBLIC_URL is unset, \
+                    "cannot initiate relying-mode SSO: PORTAL_PUBLIC_URL is unset, \
                      so we have nowhere to tell the owner to send the browser back to"
                 );
                 return (StatusCode::INTERNAL_SERVER_ERROR, "auth misconfigured").into_response();
@@ -80,9 +85,6 @@ pub async fn github_login(
                 return (StatusCode::NOT_FOUND, "auth not configured").into_response();
             };
 
-            // If a `return_to` was provided, it must pass the allowlist
-            // before we even involve GitHub. We reject here rather than at
-            // the callback so misconfigured relying parties fail fast.
             let return_to = match params.return_to {
                 None => None,
                 Some(ref rt) => {
@@ -109,10 +111,6 @@ pub async fn github_login(
                 e: now + STATE_LIFETIME_SECS,
             };
 
-            // When delegation is enabled we HMAC-sign the envelope so the
-            // callback can trust the return_to. When only simple OAuth is
-            // needed, fall back to a bare nonce to preserve existing
-            // behavior on owners that haven't opted into delegation.
             let state_param = if delegate_enabled {
                 let secret = config
                     .sso_state_secret
@@ -137,10 +135,6 @@ pub async fn github_login(
 }
 
 /// GET /api/auth/github/callback — Handle OAuth callback.
-///
-/// In owner mode, exchanges the code for a GitHub token and either mints
-/// a local session (standalone login) or mints an exchange code and 302s
-/// to the return_to URL (delegated login for a preview).
 pub async fn github_callback(
     State(state): State<AppState>,
     Query(params): Query<CallbackParams>,
@@ -159,15 +153,12 @@ pub async fn github_callback(
         return (StatusCode::NOT_FOUND, "auth not configured").into_response();
     };
 
-    // Parse CSRF cookie once — used by both branches below.
     let cookie_header = headers
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let cookie_csrf = auth::parse_cookie(cookie_header, "stiglab_oauth_state");
 
-    // Delegated login carries an HMAC-signed state envelope; standalone
-    // login carries a bare nonce that must equal the CSRF cookie.
     let claims: Option<StateClaims> = if delegate_enabled {
         let secret = config
             .sso_state_secret
@@ -183,9 +174,6 @@ pub async fn github_callback(
             if cookie_csrf != Some(c.c.as_str()) {
                 return (StatusCode::BAD_REQUEST, "invalid OAuth state").into_response();
             }
-            // If the envelope carries a return_to, double-check the
-            // allowlist at redemption time — the allowlist may have been
-            // tightened between start and callback.
             if let Some(ref rt) = c.r {
                 if !return_to_allowed(&config.sso_return_host_allowlist, rt) {
                     tracing::warn!(return_to = %rt, "callback rejected delegated SSO: return_to no longer allowed");
@@ -195,7 +183,6 @@ pub async fn github_callback(
             c.r.clone()
         }
         None => {
-            // Bare-nonce path — matches the pre-delegation behavior.
             if cookie_csrf != Some(params.state.as_str()) {
                 return (StatusCode::BAD_REQUEST, "invalid OAuth state").into_response();
             }
@@ -203,7 +190,6 @@ pub async fn github_callback(
         }
     };
 
-    // Exchange code for token
     let token = match exchange_code(client_id, client_secret, &params.code).await {
         Ok(t) => t,
         Err(e) => {
@@ -212,7 +198,6 @@ pub async fn github_callback(
         }
     };
 
-    // Fetch GitHub user profile
     let gh_user = match get_github_user(&token.access_token).await {
         Ok(u) => u,
         Err(e) => {
@@ -221,8 +206,7 @@ pub async fn github_callback(
         }
     };
 
-    // Upsert user in DB
-    let existing = db::get_user_by_github_id(&state.db, gh_user.id)
+    let existing = auth_db::get_user_by_github_id(&state.pool, gh_user.id)
         .await
         .ok()
         .flatten();
@@ -241,7 +225,7 @@ pub async fn github_callback(
         updated_at: Utc::now(),
     };
 
-    if let Err(e) = db::upsert_user(&state.db, &user).await {
+    if let Err(e) = auth_db::upsert_user(&state.pool, &user).await {
         tracing::error!("failed to upsert user: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
@@ -251,8 +235,6 @@ pub async fn github_callback(
         format!("stiglab_oauth_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}");
 
     if let Some(return_to) = delegated_return_to {
-        // Delegated login: mint a single-use exchange code and 302 home.
-        // The relying party redeems it server-to-server in `sso_finish`.
         let host = match sso::host_of(&return_to) {
             Some(h) => h,
             None => {
@@ -262,7 +244,7 @@ pub async fn github_callback(
         let code = generate_exchange_code();
         let expires_at = Utc::now() + chrono::Duration::seconds(EXCHANGE_CODE_LIFETIME_SECS);
         if let Err(e) =
-            db::insert_sso_exchange_code(&state.db, &code, &user_id, &host, expires_at).await
+            auth_db::insert_sso_exchange_code(&state.pool, &code, &user_id, &host, expires_at).await
         {
             tracing::error!("failed to insert sso exchange code: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
@@ -285,11 +267,12 @@ pub async fn github_callback(
             .into_response();
     }
 
-    // Standalone login: mint a local session.
     let session_token = generate_session_token();
     let expires_at = Utc::now() + chrono::Duration::days(30);
 
-    if let Err(e) = db::create_auth_session(&state.db, &session_token, &user_id, expires_at).await {
+    if let Err(e) =
+        auth_db::create_auth_session(&state.pool, &session_token, &user_id, expires_at).await
+    {
         tracing::error!("failed to create auth session: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
@@ -315,8 +298,6 @@ pub async fn github_callback(
 #[derive(serde::Deserialize)]
 pub struct SsoRedeemRequest {
     pub code: String,
-    /// The host the caller is claiming the code was issued for. Must match
-    /// the host baked into the code at issuance.
     pub host: String,
 }
 
@@ -334,11 +315,6 @@ pub struct SsoUserPayload {
 }
 
 /// POST /api/auth/sso/redeem — Exchange an opaque code for user identity.
-///
-/// Called server-to-server by a relying party. Requires
-/// `Authorization: Bearer <SSO_EXCHANGE_SECRET>`. Returns 404 when this
-/// process is not an owner with delegation enabled — the route simply
-/// doesn't exist on a standalone deploy.
 pub async fn sso_redeem(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -361,7 +337,7 @@ pub async fn sso_redeem(
         return (StatusCode::UNAUTHORIZED, "invalid bearer").into_response();
     }
 
-    match db::redeem_sso_exchange_code(&state.db, &body.code, &body.host).await {
+    match auth_db::redeem_sso_exchange_code(&state.pool, &body.code, &body.host).await {
         Ok(Some(user)) => {
             tracing::info!(
                 user = %user.github_login,
@@ -408,9 +384,6 @@ pub struct SsoFinishParams {
 
 /// GET /api/auth/sso/finish — Relying-side landing after the owner
 /// completes the OAuth dance.
-///
-/// Server-to-server call to the owner's `/sso/redeem`, then mint a local
-/// session and set the `stiglab_session` cookie on our own origin.
 pub async fn sso_finish(
     State(state): State<AppState>,
     Query(params): Query<SsoFinishParams>,
@@ -430,12 +403,12 @@ pub async fn sso_finish(
         .as_deref()
         .expect("relying implies sso_exchange_secret set");
     let Some(public_url) = config.public_url.as_deref() else {
-        tracing::error!("sso_finish: STIGLAB_PUBLIC_URL is unset");
+        tracing::error!("sso_finish: PORTAL_PUBLIC_URL is unset");
         return (StatusCode::INTERNAL_SERVER_ERROR, "auth misconfigured").into_response();
     };
 
     let Some(our_host) = sso::host_of(public_url) else {
-        tracing::error!(public_url, "sso_finish: STIGLAB_PUBLIC_URL has no host");
+        tracing::error!(public_url, "sso_finish: PORTAL_PUBLIC_URL has no host");
         return (StatusCode::INTERNAL_SERVER_ERROR, "auth misconfigured").into_response();
     };
 
@@ -461,11 +434,6 @@ pub async fn sso_finish(
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         tracing::error!(status = %status, body = %text, "sso_finish: redeem rejected");
-        // Owner 4xx ("expired/redeemed/unknown code", "bad bearer") is a
-        // client-facing problem with the preview's request — propagate as
-        // 400. Reserve 502 for real upstream failures (5xx, timeouts,
-        // connectivity) so the preview's browser-visible status matches
-        // the underlying condition.
         let mapped = if status.is_client_error() {
             StatusCode::BAD_REQUEST
         } else {
@@ -482,9 +450,7 @@ pub async fn sso_finish(
         }
     };
 
-    // Upsert the user locally. The preview maintains its own users table;
-    // the github_id is the stable key across environments.
-    let existing = db::get_user_by_github_id(&state.db, payload.user.github_id)
+    let existing = auth_db::get_user_by_github_id(&state.pool, payload.user.github_id)
         .await
         .ok()
         .flatten();
@@ -503,14 +469,16 @@ pub async fn sso_finish(
         updated_at: Utc::now(),
     };
 
-    if let Err(e) = db::upsert_user(&state.db, &user).await {
+    if let Err(e) = auth_db::upsert_user(&state.pool, &user).await {
         tracing::error!("sso_finish: failed to upsert user: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
 
     let session_token = generate_session_token();
     let expires_at = Utc::now() + chrono::Duration::days(30);
-    if let Err(e) = db::create_auth_session(&state.db, &session_token, &user_id, expires_at).await {
+    if let Err(e) =
+        auth_db::create_auth_session(&state.pool, &session_token, &user_id, expires_at).await
+    {
         tracing::error!("sso_finish: failed to create auth session: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
@@ -535,19 +503,10 @@ pub async fn sso_finish(
         .into_response()
 }
 
-// ── /api/auth/me + logout (unchanged behavior) ──
+// ── /api/auth/me + logout ──
 
 /// GET /api/auth/me — Return current authenticated user.
-///
-/// `session_kind` ("github" | "dev") replaces the legacy `auth_enabled`
-/// flag (issue #193). Auth is always-on, so a successful response means
-/// the caller is authenticated; the field signals which path minted the
-/// session, which drives the dashboard's persistent dev-mode banner.
 pub async fn me(State(_state): State<AppState>, auth_user: AuthUser) -> impl IntoResponse {
-    let via = match auth_user.principal {
-        RequestPrincipal::Pat { .. } => "pat",
-        RequestPrincipal::Session => "session",
-    };
     Json(serde_json::json!({
         "user": {
             "id": auth_user.user_id,
@@ -556,7 +515,7 @@ pub async fn me(State(_state): State<AppState>, auth_user: AuthUser) -> impl Int
             "github_avatar_url": auth_user.github_avatar_url,
         },
         "session_kind": auth_user.session_kind,
-        "via": via,
+        "via": "session",
     }))
 }
 
@@ -568,7 +527,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> impl I
         .unwrap_or("");
 
     if let Some(session_id) = auth::parse_cookie(cookie_header, "stiglab_session") {
-        let _ = db::delete_auth_session(&state.db, session_id).await;
+        let _ = auth_db::delete_auth_session(&state.pool, session_id).await;
     }
 
     let sec = secure_attr(&state.config);
@@ -580,16 +539,24 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> impl I
     )
 }
 
-fn build_callback_url(config: &crate::server::config::ServerConfig) -> String {
+fn build_callback_url(config: &Config) -> String {
     if let Some(ref public_url) = config.public_url {
         format!("{public_url}/api/auth/github/callback")
     } else {
-        format!("http://localhost:{}/api/auth/github/callback", config.port)
+        // Best-effort dev fallback. `bind` is `host:port`; pull off the
+        // port for `http://localhost:<port>`.
+        let port = config
+            .bind
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(3002);
+        format!("http://localhost:{port}/api/auth/github/callback")
     }
 }
 
 /// Returns "; Secure" if the public URL uses HTTPS, empty string otherwise.
-fn secure_attr(config: &crate::server::config::ServerConfig) -> &'static str {
+fn secure_attr(config: &Config) -> &'static str {
     if config
         .public_url
         .as_deref()

@@ -7,12 +7,12 @@
 //!     `WWW-Authenticate` body and don't leak which arm failed,
 //!   * the destructive-credential guardrail (PUT-overwrite + DELETE) maps
 //!     to 403 `pat_destructive_blocked`,
-//!   * `GET /api/auth/me` reports `via: "pat" | "session"`,
 //!   * workspace-scoped PATs reject calls to a different workspace, and
 //!   * `last_used_at` advances on a successful PAT auth.
 //!
-//! Reuses the in-memory SQLite + `build_router` harness established by
-//! `tests/sso.rs`.
+//! `/api/auth/me` shape coverage moved to portal in spec #222 Slice 5;
+//! the tests here exercise stiglab's `AuthUser` extractor against
+//! `/api/pats` instead, which is stiglab-owned.
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -45,18 +45,9 @@ fn auth_enabled_config() -> ServerConfig {
         database_url: "sqlite::memory:".into(),
         static_dir: None,
         cors_origin: None,
-        // Set both client_id + client_secret so config.auth_enabled() == true
-        // — the PAT extractor only kicks in when auth is enabled.
-        github_client_id: Some("client-id".into()),
-        github_client_secret: Some("client-secret".into()),
         // Required for the credential set/get path used by the guardrail tests.
         credential_key: Some(stiglab::server::auth::generate_credential_key()),
         public_url: None,
-        github_app_webhook_secret: None,
-        sso_state_secret: None,
-        sso_exchange_secret: None,
-        sso_return_host_allowlist: Vec::new(),
-        sso_auth_domain: None,
         internal_dispatch_token: None,
     }
 }
@@ -239,58 +230,15 @@ async fn verify_pat_reports_expired_separately_from_unknown() {
 }
 
 // ── End-to-end PAT-authenticated requests ──
-
-#[tokio::test]
-async fn me_under_pat_reports_via_pat() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let (_, token) = mint_pat(&pool, &user.id, None, "ci", None).await;
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let resp = app(state)
-        .oneshot(
-            bearer(Request::builder().uri("/api/auth/me"), &token)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let v = read_json(resp).await;
-    assert_eq!(v["via"], "pat");
-    assert_eq!(v["user"]["github_login"], "patuser");
-}
-
-#[tokio::test]
-async fn me_under_session_reports_via_session_when_no_pat() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    // Mint a real session row.
-    let session_token = stiglab::server::auth::generate_session_token();
-    db::create_auth_session(
-        &pool,
-        &session_token,
-        &user.id,
-        Utc::now() + chrono::Duration::days(1),
-    )
-    .await
-    .unwrap();
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let resp = app(state)
-        .oneshot(
-            Request::builder()
-                .uri("/api/auth/me")
-                .header(header::COOKIE, format!("stiglab_session={session_token}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let v = read_json(resp).await;
-    assert_eq!(v["via"], "session");
-}
+//
+// Spec #222 Slice 5 moved `/api/auth/*` to portal, so the
+// `via: pat | session` shape assertions on `/api/auth/me` no longer
+// work against a stiglab-only `oneshot()` (the route is a proxy now —
+// portal isn't running in tests). The PAT auth path itself still lives
+// in stiglab's `AuthUser` extractor; the tests below exercise it
+// against `/api/pats`, which is stiglab-owned and `AuthUser`-gated.
+// Equivalent /api/auth/me coverage will follow on the portal side
+// when Slice 2 moves PAT validation to portal.
 
 #[tokio::test]
 async fn revoked_pat_returns_401_with_invalid_token_challenge() {
@@ -302,7 +250,7 @@ async fn revoked_pat_returns_401_with_invalid_token_challenge() {
 
     let resp = app(state)
         .oneshot(
-            bearer(Request::builder().uri("/api/auth/me"), &token)
+            bearer(Request::builder().uri("/api/pats"), &token)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -330,7 +278,7 @@ async fn expired_pat_returns_401_with_invalid_token_challenge() {
 
     let resp = app(state)
         .oneshot(
-            bearer(Request::builder().uri("/api/auth/me"), &token)
+            bearer(Request::builder().uri("/api/pats"), &token)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -350,7 +298,9 @@ async fn pat_bearer_takes_precedence_over_cookie() {
     // A request that carries BOTH a valid PAT and a valid session cookie
     // should be authenticated as the PAT user (so that smoke-testing from
     // a CLI doesn't silently fall through to the browser session that
-    // happens to be in scope).
+    // happens to be in scope). `/api/pats` returns the principal's PATs;
+    // the only token belongs to `pat_user`, so the response shape proves
+    // the PAT principal won.
     let pool = test_pool().await;
     let pat_user = seed_user(&pool).await;
     let cookie_user = User {
@@ -378,7 +328,7 @@ async fn pat_bearer_takes_precedence_over_cookie() {
     let resp = app(state)
         .oneshot(
             Request::builder()
-                .uri("/api/auth/me")
+                .uri("/api/pats")
                 .header(header::AUTHORIZATION, format!("Bearer {pat_token}"))
                 .header(header::COOKIE, format!("stiglab_session={session_token}"))
                 .body(Body::empty())
@@ -388,8 +338,9 @@ async fn pat_bearer_takes_precedence_over_cookie() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let v = read_json(resp).await;
-    assert_eq!(v["via"], "pat");
-    assert_eq!(v["user"]["github_login"], "patuser");
+    let pats = v["pats"].as_array().expect("pats array");
+    assert_eq!(pats.len(), 1);
+    assert_eq!(pats[0]["name"], "ci");
 }
 
 // ── PAT CRUD via /api/pats ──
@@ -653,7 +604,7 @@ async fn delete_pat_revokes_so_subsequent_use_401s() {
     let pre = app_
         .clone()
         .oneshot(
-            bearer(Request::builder().uri("/api/auth/me"), &token)
+            bearer(Request::builder().uri("/api/pats"), &token)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -679,7 +630,7 @@ async fn delete_pat_revokes_so_subsequent_use_401s() {
     // After revoke: same Bearer token now 401s with invalid_token.
     let post = app_
         .oneshot(
-            bearer(Request::builder().uri("/api/auth/me"), &token)
+            bearer(Request::builder().uri("/api/pats"), &token)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -823,7 +774,7 @@ async fn last_used_at_advances_after_pat_auth() {
         .oneshot(
             bearer(
                 Request::builder()
-                    .uri("/api/auth/me")
+                    .uri("/api/pats")
                     .header(header::USER_AGENT, "test-agent/1.0"),
                 &token,
             )

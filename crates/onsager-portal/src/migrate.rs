@@ -12,6 +12,10 @@
 //!   `migrations/` directory rather than inline DDL — the first portal-owned
 //!   table that lives in a versioned `.sql` file, setting the precedent for
 //!   the schema-split slices to follow.
+//! - `users`, `auth_sessions`, `sso_exchange_codes` — auth identity +
+//!   cookie sessions + cross-env SSO codes (#222 Slice 5). Stiglab still
+//!   reads from these tables for its `AuthUser` cookie extractor; portal
+//!   is the only writer.
 //!
 //! Tables managed elsewhere (workspaces / projects / installations / events /
 //! events_ext / artifacts / vertical_lineage) are not touched here.
@@ -23,10 +27,21 @@ use sqlx::postgres::PgPool;
 /// Inlined at compile time so the binary stays self-contained — no
 /// `include_str!`-of-disk path at runtime, no shipping the directory next to
 /// the binary. Order matches filename order and is the apply order.
-const MIGRATIONS: &[(&str, &str)] = &[(
-    "001_portal_webhook_secrets",
-    include_str!("../migrations/001_portal_webhook_secrets.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "001_portal_webhook_secrets",
+        include_str!("../migrations/001_portal_webhook_secrets.sql"),
+    ),
+    ("002_users", include_str!("../migrations/002_users.sql")),
+    (
+        "003_auth_sessions",
+        include_str!("../migrations/003_auth_sessions.sql"),
+    ),
+    (
+        "004_sso_exchange_codes",
+        include_str!("../migrations/004_sso_exchange_codes.sql"),
+    ),
+];
 
 /// Apply all portal-owned table migrations. Idempotent — safe to call on
 /// every startup.

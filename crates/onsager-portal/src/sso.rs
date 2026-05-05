@@ -21,9 +21,9 @@ use serde::{Deserialize, Serialize};
 /// How this process relates to the GitHub OAuth app.
 ///
 /// `Owner` and `Relying` are the two GitHub-OAuth shapes; the absence of
-/// either is represented as `None` from `ServerConfig::sso_mode()` (never
-/// a separate variant), since a process with no GitHub OAuth configured
-/// has no SSO state to classify.
+/// either is represented as `None` from `Config::sso_mode()` (never a
+/// separate variant), since a process with no GitHub OAuth configured has
+/// no SSO state to classify.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SsoMode {
     /// Owns the GitHub OAuth app; handles callbacks directly.
@@ -125,13 +125,9 @@ pub fn host_of(url: &str) -> Option<String> {
 }
 
 fn host_matches_allowlist(allowlist: &[String], host: &str) -> bool {
-    // Allowlist entries are already lowercased by `parse_host_allowlist`;
-    // lowercase the incoming host here so both branches compare uniformly
-    // (the wildcard branch uses raw `ends_with`, which is case-sensitive).
     let host = host.to_ascii_lowercase();
     for entry in allowlist {
         if let Some(suffix) = entry.strip_prefix("*.") {
-            // Strict subdomain match: `host` must be `<something>.suffix`.
             if host.len() > suffix.len() + 1
                 && host.ends_with(suffix)
                 && host.as_bytes()[host.len() - suffix.len() - 1] == b'.'
@@ -204,7 +200,6 @@ mod tests {
             e: 1_000,
         };
         let s = sign_state("k", &claims);
-        // `now` far beyond expiry + skew.
         assert!(verify_state("k", &s, 1_000 + STATE_SKEW_SECS + 1).is_none());
     }
 
@@ -227,11 +222,10 @@ mod tests {
             e: 9_999_999_999,
         };
         let s = sign_state("k", &claims);
-        // Swap a character in the body portion (before the dot).
         let dot = s.find('.').unwrap();
         let mut bytes = s.into_bytes();
         bytes[0] = if bytes[0] == b'a' { b'b' } else { b'a' };
-        let _ = dot; // (no-op to silence unused)
+        let _ = dot;
         let tampered = String::from_utf8(bytes).unwrap();
         assert!(verify_state("k", &tampered, 0).is_none());
     }
@@ -241,11 +235,8 @@ mod tests {
         let allow = vec!["*.preview.onsager.ai".into()];
         assert!(host_matches_allowlist(&allow, "pr-1.preview.onsager.ai"));
         assert!(host_matches_allowlist(&allow, "a.b.preview.onsager.ai"));
-        // Apex does not match `*.preview.onsager.ai`.
         assert!(!host_matches_allowlist(&allow, "preview.onsager.ai"));
-        // Suffix-only attack: `evilpreview.onsager.ai` must not match.
         assert!(!host_matches_allowlist(&allow, "evilpreview.onsager.ai"));
-        // Totally unrelated.
         assert!(!host_matches_allowlist(&allow, "attacker.com"));
     }
 
@@ -266,12 +257,9 @@ mod tests {
 
     #[test]
     fn allowlist_is_case_insensitive_for_both_branches() {
-        // `parse_host_allowlist` lowercases entries; matching lowercases
-        // the host. Exact-host and wildcard branches must behave the same.
         let allow = parse_host_allowlist("*.PREVIEW.onsager.ai,APP.onsager.ai");
         assert!(host_matches_allowlist(&allow, "Pr-1.Preview.Onsager.AI"));
         assert!(host_matches_allowlist(&allow, "app.ONSAGER.ai"));
-        // Still rejects the usual suffix attack regardless of casing.
         assert!(!host_matches_allowlist(&allow, "EvilPreview.Onsager.AI"));
     }
 

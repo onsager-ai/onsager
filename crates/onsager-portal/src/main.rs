@@ -35,6 +35,33 @@ enum Command {
         /// tokens when available.
         #[arg(long, env = "GITHUB_TOKEN")]
         github_token: Option<String>,
+        /// Public origin under which portal-served routes are reached
+        /// (e.g. `https://app.onsager.ai`). Used by the OAuth callback URL
+        /// and the cookie `Secure` attribute.
+        #[arg(long, env = "PORTAL_PUBLIC_URL")]
+        public_url: Option<String>,
+        /// GitHub OAuth client id (owner mode).
+        #[arg(long, env = "GITHUB_CLIENT_ID")]
+        github_client_id: Option<String>,
+        /// GitHub OAuth client secret (owner mode).
+        #[arg(long, env = "GITHUB_CLIENT_SECRET")]
+        github_client_secret: Option<String>,
+        /// Cross-environment SSO — owner-side state-envelope HMAC secret.
+        #[arg(long, env = "SSO_STATE_SECRET")]
+        sso_state_secret: Option<String>,
+        /// Cross-environment SSO — back-channel bearer secret shared
+        /// between owner and relying parties.
+        #[arg(long, env = "SSO_EXCHANGE_SECRET")]
+        sso_exchange_secret: Option<String>,
+        /// Comma-separated allowlist of hosts the owner will redirect
+        /// back to. Entries are `*.subdomain.example.com` (strict
+        /// subdomain match) or `host.example.com` (exact match).
+        #[arg(long, env = "SSO_RETURN_HOST_ALLOWLIST")]
+        sso_return_host_allowlist: Option<String>,
+        /// Cross-environment SSO — relying side. When set, `/api/auth/github`
+        /// redirects here instead of talking to GitHub directly.
+        #[arg(long, env = "SSO_AUTH_DOMAIN")]
+        sso_auth_domain: Option<String>,
     },
     /// Backfill issues + PRs for an existing project.
     Backfill {
@@ -72,13 +99,33 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             credential_key,
             synodic_url,
             github_token,
+            public_url,
+            github_client_id,
+            github_client_secret,
+            sso_state_secret,
+            sso_exchange_secret,
+            sso_return_host_allowlist,
+            sso_auth_domain,
         } => {
+            let allowlist = sso_return_host_allowlist
+                .as_deref()
+                .map(onsager_portal::sso::parse_host_allowlist)
+                .unwrap_or_default();
             let cfg = onsager_portal::config::Config {
                 bind: bind.clone(),
                 database_url,
                 credential_key,
                 synodic_url,
                 github_token,
+                public_url,
+                github_client_id: github_client_id.filter(|s| !s.is_empty()),
+                github_client_secret: github_client_secret.filter(|s| !s.is_empty()),
+                sso_state_secret: sso_state_secret.filter(|s| !s.is_empty()),
+                sso_exchange_secret: sso_exchange_secret.filter(|s| !s.is_empty()),
+                sso_return_host_allowlist: allowlist,
+                sso_auth_domain: sso_auth_domain
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.trim_end_matches('/').to_string()),
             };
             tracing::info!(%bind, "onsager-portal: starting webhook server");
             onsager_portal::server::run(cfg).await

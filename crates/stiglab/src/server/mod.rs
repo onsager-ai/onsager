@@ -1,15 +1,12 @@
 pub mod auth;
 pub mod config;
 pub mod db;
-#[cfg(debug_assertions)]
-pub mod dev_auth;
 pub mod github_app;
 pub mod handler;
 pub mod proxy_cache;
 pub mod routes;
 pub mod shaping_listener;
 pub mod spine;
-pub mod sso;
 pub mod state;
 pub mod workflow_activation;
 pub mod workflow_db;
@@ -49,26 +46,19 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             get(routes::sessions::session_logs),
         )
         .route("/agent/ws", get(ws::agent::agent_ws_handler))
-        // Auth routes
-        .route("/api/auth/github", get(routes::auth::github_login))
-        .route(
-            "/api/auth/github/callback",
-            get(routes::auth::github_callback),
-        )
-        .route("/api/auth/me", get(routes::auth::me))
-        .route("/api/auth/logout", post(routes::auth::logout))
-        // Cross-environment SSO delegation.
-        //
-        // * `/api/auth/sso/redeem` (POST, owner only): server-to-server
-        //   redemption of an opaque exchange code. Requires
-        //   `Authorization: Bearer $SSO_EXCHANGE_SECRET`. 404s when this
-        //   process is not an owner with delegation enabled.
-        // * `/api/auth/sso/finish` (GET, relying only): browser lands here
-        //   after the owner completes the OAuth dance; we redeem the code
-        //   and mint a local session. 404s when this process owns the
-        //   OAuth app directly.
-        .route("/api/auth/sso/redeem", post(routes::auth::sso_redeem))
-        .route("/api/auth/sso/finish", get(routes::auth::sso_finish))
+        // Auth routes (#222 Slice 5). Stiglab keeps the public `/api/auth/*`
+        // URLs but reverse-proxies them to portal so the OAuth dance, SSO
+        // delegation, `/api/auth/me`, and `/api/auth/logout` all run in
+        // portal. The proxy preserves Set-Cookie and Location so the
+        // dashboard / browser round-trip is byte-identical to direct calls.
+        // The dashboard's API_BASE cutover lands in Slice 6; until then,
+        // these legacy URLs stay live.
+        .route("/api/auth/github", any(routes::portal::proxy))
+        .route("/api/auth/github/callback", any(routes::portal::proxy))
+        .route("/api/auth/me", any(routes::portal::proxy))
+        .route("/api/auth/logout", any(routes::portal::proxy))
+        .route("/api/auth/sso/redeem", any(routes::portal::proxy))
+        .route("/api/auth/sso/finish", any(routes::portal::proxy))
         // Credential routes — per-workspace post-#164.  Each workspace
         // carries its own secret store; sessions launched in W1 will
         // never reach for a token registered in W2.
@@ -243,15 +233,12 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             post(routes::spine::override_gate),
         );
 
-    // Dev-login (issue #193). The route is only registered in debug
-    // builds — `cargo build --release` strips the symbol, so a release
-    // deploy physically cannot serve `/api/auth/dev-login` regardless of
-    // env-var configuration.
+    // Dev-login (issue #193) lives on portal post-#222 Slice 5; the
+    // stiglab-side URL stays a reverse-proxy entry so the dashboard's
+    // `LoginPage` button keeps working pre–API_BASE cutover. Debug-only
+    // on both ends — release builds of portal don't register the route.
     #[cfg(debug_assertions)]
-    let api_routes = api_routes.route(
-        "/api/auth/dev-login",
-        post(crate::server::dev_auth::dev_login),
-    );
+    let api_routes = api_routes.route("/api/auth/dev-login", any(routes::portal::proxy));
 
     // Configure CORS
     let cors = if let Some(ref origin) = config.cors_origin {

@@ -1,9 +1,8 @@
 # Stiglab
 
 Distributed AI agent session orchestration. Lives behind a public-ish
-HTTP surface on port 3000 (sessions, nodes, WebSocket, OAuth/SSO,
-GitHub webhooks) and listens on the spine for cross-subsystem
-coordination.
+HTTP surface on port 3000 (sessions, nodes, WebSocket) and listens on
+the spine for cross-subsystem coordination.
 
 ## The seam rule (canonical)
 
@@ -19,11 +18,17 @@ coordination.
 What this means for stiglab specifically:
 
 - **Allowed HTTP surfaces.** Routes under `src/server/routes/` that are
-  called by the dashboard. GitHub webhook ingestion has moved to portal
-  (spec #222) — stiglab keeps `/webhooks/github`, `/api/webhooks/github`,
-  and `/api/github-app/webhook` as backward-compat reverse proxies that
-  forward raw bytes to portal so existing GitHub App webhook URLs
-  continue to work without operator action.
+  called by the dashboard. Routes that have moved to portal (spec
+  #222) stay live as reverse proxies via `routes::portal::proxy` so
+  the dashboard's API_BASE cutover in Slice 6 can land independently:
+  - GitHub webhook ingestion (`/webhooks/github`,
+    `/api/webhooks/github`, `/api/github-app/webhook`) — Slice 1.
+  - Auth / OAuth / SSO (`/api/auth/github`,
+    `/api/auth/github/callback`, `/api/auth/me`, `/api/auth/logout`,
+    `/api/auth/sso/redeem`, `/api/auth/sso/finish`,
+    `/api/auth/dev-login` in debug builds) — Slice 5. Stiglab keeps
+    cookie validation (`AuthUser` extractor reads the shared
+    `auth_sessions` table) but no longer mints sessions.
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `synodic`,
   or `ising`. **Lever C status (#148): no remaining violation** —
   `HttpStiglabDispatcher` and the `POST /api/shaping` route it
@@ -66,7 +71,8 @@ src/
   server/
     routes/             <- dashboard-facing HTTP (allowed seam)
                             + reverse proxies to portal for GitHub webhook
-                            ingress (`routes::portal::proxy`)
+                            ingress and `/api/auth/*`
+                            (`routes::portal::proxy`)
     spine.rs            <- spine read/write helpers (preferred path
                             for cross-subsystem coordination)
     workflow_db.rs      <- workflow CRUD against the spine pool
