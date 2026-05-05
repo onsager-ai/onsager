@@ -9,6 +9,7 @@ members = [
     "crates/onsager",
     "crates/onsager-github",
     "crates/onsager-portal",
+    "crates/onsager-trigger",
     "crates/forge",
     "crates/ising",
     "crates/refract",
@@ -34,6 +35,8 @@ serde_json = "1"
 
 # Time and IDs
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+cron = "0.15"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # Error handling

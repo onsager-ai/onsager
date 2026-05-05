@@ -90,6 +90,17 @@ pub async fn insert_workflow_with_stages(
     if TRIGGERS.lookup(trigger_kind).is_none() {
         anyhow::bail!("trigger kind {trigger_kind} is not in the registry manifest");
     }
+    // Loop guard (#239): a `SpineEvent { event_kind: "trigger.fired" }`
+    // workflow self-amplifies — every fire produces another `trigger.fired`
+    // event that the same workflow listens to. Reject at create time;
+    // forge's event-trigger listener also has a runtime backstop.
+    if let TriggerKind::SpineEvent { event_kind, .. } = &workflow.trigger {
+        if event_kind == "trigger.fired" {
+            anyhow::bail!(
+                "spine_event workflow cannot listen for `trigger.fired` (would self-amplify)"
+            );
+        }
+    }
     let install_id_text = workflow.install_id.to_string();
 
     sqlx::query(
@@ -387,6 +398,10 @@ pub async fn get_workflow_install_target(
             })?;
             Ok(Some((install_id, owner.to_string(), name.to_string())))
         }
+        // Non-GitHub triggers don't have an install target — the
+        // activation hook only runs when the trigger needs a webhook
+        // wired up on a repo.
+        _ => Ok(None),
     }
 }
 

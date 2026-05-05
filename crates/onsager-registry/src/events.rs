@@ -573,12 +573,18 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "trigger.fired",
             schema_version: 1,
-            // Stiglab is the manual-replay producer; portal is the live
-            // GitHub-webhook producer (#222 Slice 1).
-            producers: &[Subsystem::Stiglab, Subsystem::Portal],
+            // Producers (all four trigger categories from #236):
+            // - Stiglab manual-replay route (`/api/projects/:id/issues/:n/replay-trigger`).
+            // - Forge scheduler (#238 — cron / delay / interval).
+            // - Forge event-trigger listeners (#239 — spine_event /
+            //   pg_notify / outbox_row).
+            // - Portal — live GitHub `issues.labeled` webhook receiver
+            //   (#222 Slice 1) plus the future `onsager trigger fire` CLI
+            //   / "Run now" UI button (#241).
+            producers: &[Subsystem::Stiglab, Subsystem::Forge, Subsystem::Portal],
             consumers: &[Subsystem::Forge],
             audit_only: false,
-            description: "A trigger (e.g. a GitHub issue webhook) fired.",
+            description: "A trigger fired (webhook / schedule / event / manual).",
         },
         EventDefinition {
             kind: "stage.entered",
