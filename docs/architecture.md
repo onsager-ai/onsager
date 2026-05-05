@@ -139,11 +139,13 @@ that owns the target state.
 > [#223](https://github.com/onsager-ai/onsager/issues/223) (feedback patterns)
 > · ADR 0004 amendment 2026-04-30
 
-**Now.** Portal exists and owns GitHub webhook ingest, the new
-`correlation_id` column, dispatch/await helpers, and the (foundational) edge
-posture. Stiglab still hosts most of the public HTTP — workflow CRUD,
-credential CRUD, OAuth callbacks, the preset registry — and is doing two
-jobs (agent-session execution *plus* edge).
+**Now.** Portal exists, hosts the legacy `/webhooks/github` receiver and
+the (foundational) edge posture, and has landed the new `correlation_id`
+column plus dispatch/await helpers (PR [#228](https://github.com/onsager-ai/onsager/pull/228)).
+Stiglab still hosts the bulk of the public HTTP — the workflow-runtime
+webhook receiver at `/api/webhooks/github`, workflow CRUD, credential CRUD,
+OAuth callbacks, the preset registry — and is doing two jobs
+(agent-session execution *plus* edge).
 
 **Target.** Portal is a first-class peer of forge / stiglab / synodic /
 ising. The full public-HTTP surface lives in portal:
@@ -193,14 +195,18 @@ Session kinds).
 > [#171](https://github.com/onsager-ai/onsager/issues/171) (Kind::PullRequest
 > migration)
 
-**Now.** External items (PRs, issues) are projected into Onsager's artifact
-tables with full state copies, which means Onsager's row drifts from
-GitHub's row whenever GitHub changes out-of-band — the
-*divergent-state-shapes-from-multiple-write-paths* drift pattern.
+**Now.** The mechanism is in: spine migration
+[`011_artifacts_external_ref_only.sql`](../crates/onsager-spine/migrations/011_artifacts_external_ref_only.sql)
+makes `name` / `owner` nullable and adds `last_observed_at`; portal's
+`upsert_pr_artifact_ref` / `upsert_issue_artifact_ref` write reference-only
+skeleton rows for PRs and issues, and provider-authored fields are
+hydrated live through the portal proxy instead of being denormalized into
+the spine.
 
-**Target.** A reference-only artifact kind that stores `(provider, ref)`
-and reads through to the source of truth on demand, eliminating the local
-shadow row. `Kind::PullRequest` becomes the first reference-only kind.
+**Target.** Close out the migration: drop any remaining call sites that
+still write the legacy denormalized shape, retire the best-effort cached
+display path for stale rows, and generalize the pattern beyond GitHub
+(Linear, Slack, etc.). `#170` and `#171` track the remaining work.
 
 ### Trigger taxonomy v2
 
@@ -256,9 +262,10 @@ modes those checks were designed against.
 6. **Compat aliases that ossify** (PR #107: `BundleId` → `ArtifactVersionId`
    "for one release"). Hard-failed by `lint-seams`.
 
-The seam rule and the six lints are operational projections of the
-*internal aesthetic* value stated in `CLAUDE.md`: care about the inside the
-same way you'd care about the outside.
+The seam rule and the three lints (`lint-seams`, `check-events`,
+`check-api-contract`) are operational projections of the *internal
+aesthetic* value stated in `CLAUDE.md`: care about the inside the same way
+you'd care about the outside.
 
 ## Process ↔ product isomorphism
 

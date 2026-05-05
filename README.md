@@ -21,16 +21,21 @@ direct calls.
 The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md)):
 
 1. **External boundary.** HTTP routes exist only at external boundaries —
-   the dashboard API and external webhooks (GitHub, etc.). The external
-   boundary is owned by `portal` (the edge subsystem).
+   the dashboard API and external webhooks (GitHub, etc.). The 2026-04-30
+   amendment names `portal` (the edge subsystem) as clause 1's owner;
+   stiglab still hosts the bulk of the public HTTP today, and the
+   migration is staged under [#220](https://github.com/onsager-ai/onsager/issues/220) /
+   [#222](https://github.com/onsager-ai/onsager/issues/222).
 2. **Internal coordination.** Factory subsystems (`forge`, `stiglab`,
    `synodic`, `ising`, `refract`) coordinate **exclusively** via the spine —
    no sibling-subsystem HTTP, no cross-subsystem Cargo deps. The `onsager`
    dispatcher has zero business deps and discovers subsystem binaries on
    `PATH`.
 
-Both clauses are mechanically enforced by `xtask lint-seams`,
-`xtask check-events`, and `xtask check-api-contract`.
+Clause 2 is mechanically enforced today by `xtask lint-seams`,
+`xtask check-events`, and `xtask check-api-contract`. Clause 1's lint
+already permits portal HTTP; the migration that consolidates external
+routes into portal is in flight.
 
 For the navigable map of how everything fits together, what's enforced,
 and what's still in flight, see [`docs/architecture.md`](docs/architecture.md)
