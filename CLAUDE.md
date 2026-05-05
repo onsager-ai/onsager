@@ -15,8 +15,8 @@ its production discipline.
 
 - **Event-bus factory, not service mesh.** Subsystems coordinate through
   the spine (events, pg_notify, shared tables), not through synchronous
-  calls. ADR 0001 is this commitment's first concretization. Scope:
-  factory only.
+  calls. [ADR 0001](docs/adr/0001-event-bus-coordination-model.md) is
+  this commitment's first concretization. Scope: factory only.
 - **Artifacts are the unit of meaning.** Every persistent, lifecycle-bearing
   object in the factory is an artifact — internal-authored ones (specs,
   designs) and external-referenced ones (PRs, Issues) alike. Factory
@@ -37,10 +37,12 @@ its production discipline.
 
 Changes to the four bullets above carry an `Identity impact: yes` flag
 in the modifying ADR and require explicit rationale. Changes to anything
-below in this file or in derived ADRs do not.
+below in this file are by default `Identity impact: no`. ADRs themselves
+may carry either value — the flag tracks whether the ADR touches the
+four bullets above, not where the change lives.
 
-See ADR 0005 for the meta-rule on how this S5 layer evolves with
-operational scale.
+See [ADR 0005](docs/adr/0005-s5-governance-scales-with-scale.md) for
+the meta-rule on how this S5 layer evolves with operational scale.
 
 ## Architecture
 

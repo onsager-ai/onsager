@@ -20,8 +20,18 @@ see [`../architecture.md`](../architecture.md).
 ## How to add an ADR
 
 1. Pick the next sequential number.
-2. Write `NNNN-short-slug.md` following the existing template:
-   Status / Date / **Identity impact** (per ADR 0005) / Tracking issues /
+2. Write `NNNN-short-slug.md` following the existing template. Header
+   metadata block (in this order):
+   - `Status` — `Accepted` / `Proposed` / `Superseded`.
+   - `Date` — ISO date.
+   - `Identity impact` — `yes` or `no` (per ADR 0005; required for
+     ADRs from 0005 onward).
+   - `Tracking issues` — links to the spec and any sub-issues.
+   - `Supersedes` — prior ADR number, or `none`.
+   - `Superseded by` — `none` at creation; updated if a later ADR
+     replaces this one.
+
+   Body sections (in this order):
    Context / Decision / Rejected alternatives / Consequences /
    **Dev-process counterpart** (per ADR 0002) / Adoption checklist /
    Out of scope.
@@ -34,7 +44,10 @@ see [`../architecture.md`](../architecture.md).
 
 Per [ADR 0005](0005-s5-governance-scales-with-scale.md), every new ADR
 declares whether it changes any of the four identity commitments named
-in root `CLAUDE.md` ("What makes Onsager Onsager"):
+in root `CLAUDE.md` ("What makes Onsager Onsager"). The value is exactly
+`yes` or `no` — keep it mechanically scannable. Any rationale belongs
+in Context / Decision (or a one-sentence note immediately below the
+metadata block), not inside the field value.
 
 - **`Identity impact: no`** (the common case) — the ADR records a
   decision that operates within the existing identity commitments. No

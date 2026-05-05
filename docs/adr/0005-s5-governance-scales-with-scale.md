@@ -2,10 +2,15 @@
 
 - **Status**: Accepted
 - **Date**: 2026-05-05
-- **Identity impact**: yes (establishes the meta-rule for governance evolution)
+- **Identity impact**: yes
 - **Tracking issues**: #249
 - **Supersedes**: none
 - **Superseded by**: none
+
+This ADR carries `Identity impact: yes` because it establishes the
+meta-rule for how the four identity commitments — and the governance
+around them — evolve. The rationale lives in Context and Decision
+below.
 
 ## Context
 
