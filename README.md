@@ -4,32 +4,58 @@ AI factory stack — monorepo for the Onsager event bus and its subsystems.
 
 ## Architecture
 
-Onsager is a **factory event bus** architecture. Subsystems are runtime-decoupled
+Onsager is an **AI factory event bus**. Subsystems are runtime-decoupled
 via a shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel.
 They coordinate through stigmergy (indirect signals via shared medium), not
 direct calls.
 
 ```
-         onsager-spine (event bus lib)
-        /       |        |        \
-   forge    stiglab   synodic    ising
+                       onsager-spine  (event bus library)
+                              │
+        ┌─────────┬───────────┼───────────┬──────────┬──────────┐
+        │         │           │           │          │          │
+     portal    forge       stiglab     synodic     ising     refract
+     (edge)                                                  (decomposer)
 ```
 
-Subsystems must NOT import each other and must NOT be statically linked into
-the same binary. The `onsager` dispatcher has zero business dependencies — it
-discovers subsystem binaries on `PATH`.
+The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md)):
+
+1. **External boundary.** HTTP routes exist only at external boundaries —
+   the dashboard API and external webhooks (GitHub, etc.). The 2026-04-30
+   amendment names `portal` (the edge subsystem) as clause 1's owner;
+   stiglab still hosts the bulk of the public HTTP today, and the
+   migration is staged under [#220](https://github.com/onsager-ai/onsager/issues/220) /
+   [#222](https://github.com/onsager-ai/onsager/issues/222).
+2. **Internal coordination.** Factory subsystems (`forge`, `stiglab`,
+   `synodic`, `ising`, `refract`) coordinate **exclusively** via the spine —
+   no sibling-subsystem HTTP, no cross-subsystem Cargo deps. The `onsager`
+   dispatcher has zero business deps and discovers subsystem binaries on
+   `PATH`.
+
+Clause 2 is mechanically enforced today by `xtask lint-seams`,
+`xtask check-events`, and `xtask check-api-contract`. Clause 1's lint
+already permits portal HTTP; the migration that consolidates external
+routes into portal is in flight.
+
+For the navigable map of how everything fits together, what's enforced,
+and what's still in flight, see [`docs/architecture.md`](docs/architecture.md)
+and the ADRs under [`docs/adr/`](docs/adr/).
 
 ## Subsystems
 
-| Crate           | Role                                                          |
-|-----------------|---------------------------------------------------------------|
-| `onsager-spine` | Shared event bus library (PostgreSQL + `pg_notify`)           |
-| `onsager`       | Unified CLI dispatcher (`onsager <subsystem> ...`)            |
-| `forge`         | Production line — drives artifacts through their lifecycle    |
-| `stiglab`       | Distributed AI agent session orchestration                    |
-| `synodic`       | AI agent governance (hooks + spine integration)               |
-| `ising`         | Continuous improvement engine — observes and surfaces insights|
-| `onsager-portal`| GitHub webhook ingress — verifies HMAC, materializes factory tasks, posts check-run verdicts |
+| Crate            | Role                                                                             |
+|------------------|----------------------------------------------------------------------------------|
+| `onsager-spine`  | Shared event bus library (PostgreSQL + `pg_notify`); SoT for shared workflow tables |
+| `onsager`        | Unified CLI dispatcher (`onsager <subsystem> ...`)                               |
+| `onsager-portal` | Edge subsystem — public HTTP, GitHub webhooks, OAuth, credentials                |
+| `forge`          | Production line — drives artifacts through their lifecycle                       |
+| `stiglab`        | Distributed AI agent session orchestration                                       |
+| `synodic`        | AI agent governance — gates, verdicts, escalations                               |
+| `ising`          | Continuous improvement — observes the spine and surfaces insights                |
+| `refract`        | Intent decomposer — expands a high-level intent into an artifact tree            |
+
+Library crates (`onsager-{artifact, warehouse, delivery, registry, github}`)
+are typed shared building blocks consumed by the subsystems above.
 
 A single React app at `apps/dashboard/` surfaces sessions, nodes, governance,
 and factory views.
@@ -114,12 +140,23 @@ Every open PR gets an ephemeral Railway deploy at
 See [`docs/preview-environments.md`](docs/preview-environments.md) for
 setup and troubleshooting.
 
-## Per-crate context
+## Documentation
+
+- [`docs/architecture.md`](docs/architecture.md) — top-level architecture
+  overview: subsystems, the seam rule, lever status, what's in flight.
+- [`docs/adr/`](docs/adr/) — architecture decision records (start with the
+  [index](docs/adr/README.md)).
+- [`docs/events.md`](docs/events.md) — event catalog (auto-generated from
+  `FactoryEventKind`; regenerate with `just gen-event-docs`).
+- [`docs/preview-environments.md`](docs/preview-environments.md) — per-PR
+  Railway previews.
 
 Each subsystem has its own `CLAUDE.md` or `.claude/` directory with
 subsystem-specific instructions:
 
 - `crates/onsager-spine/CLAUDE.md`
+- `crates/onsager-portal/CLAUDE.md`
+- `crates/onsager-registry/CLAUDE.md`
 - `crates/stiglab/.claude/`
 - `crates/synodic/.claude/`
 
