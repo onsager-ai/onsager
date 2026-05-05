@@ -60,17 +60,31 @@ first-class edge subsystem. The migration is staged:
   inline `CREATE TABLE` calls that haven't been migrated to `.sql`
   files yet); first table to land via the new path is
   `portal_webhook_secrets` (open question 3 of #222).
-- **Routes (follow-ups).** Move `/api/webhooks/github`,
-  `/api/workflows/*`, `/api/credentials/*`, `/api/installations/*`,
-  `/api/workspaces/*`, `/auth/github/*`, and the preset registry
-  out of stiglab into portal. Each route group lands atomically
-  (portal handler live + stiglab handler deleted in the same PR).
+- **Slice 1 — webhook ingestion (landed, PR #248).** Portal owns the
+  live `POST /webhooks/github` handler; stiglab keeps the legacy URLs
+  as reverse proxies via `routes::portal::proxy`.
+- **Slice 5 — auth / OAuth / SSO (landed).** Portal owns
+  `/api/auth/github`, `/api/auth/github/callback`, `/api/auth/me`,
+  `/api/auth/logout`, `/api/auth/sso/redeem`, `/api/auth/sso/finish`,
+  and (debug-only) `/api/auth/dev-login`. Three new portal-owned
+  tables — `users` / `auth_sessions` / `sso_exchange_codes` — live in
+  `crates/onsager-portal/migrations/{002,003,004}`. Stiglab proxies
+  the same URLs through `routes::portal::proxy` (which now forwards
+  `Set-Cookie` and `Location` so the OAuth dance round-trips
+  unchanged) and keeps a cookie-only read against the spine-shared
+  `auth_sessions` table for its own `AuthUser` extractor. PAT
+  validation still lives in stiglab — Slice 2 moves it.
+- **Routes (follow-ups).** Slices 2/3/4: move
+  `/api/credentials/*`, `/api/pats/*`, `/api/workspaces/*`,
+  `/api/installations/*`, `/api/workflows/*`, and the preset
+  registry into portal. Each route group lands atomically (portal
+  handler live + stiglab handler deleted in the same PR).
 - **Schema split (follow-ups).** `workspaces` /
   `workspace_members` / `projects` move into
   `crates/onsager-spine/migrations/`; `user_credentials`,
   `github_app_installations`, `user_pats` move into
-  `crates/onsager-portal/migrations/` next to the
-  `portal_webhook_secrets` migration. Atomic per-PR per Lever B.
+  `crates/onsager-portal/migrations/` next to the auth migrations.
+  Atomic per-PR per Lever B.
 
 While the migration is in flight, stiglab still hosts most of the
 external HTTP surface — that is the drift #222 closes, not a pattern

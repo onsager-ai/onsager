@@ -94,7 +94,16 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .await?;
 
     // ── Auth tables ──
-
+    //
+    // Portal owns writes to `users`, `auth_sessions`, and
+    // `sso_exchange_codes` post-#222 Slice 5
+    // (`crates/onsager-portal/migrations/002–004`). The DDL below stays
+    // idempotently here as a fallback so:
+    //   1. Stiglab's SQLite-backed unit tests build the schema without a
+    //      portal binary in the loop.
+    //   2. On a fresh deploy, whichever process migrates first wins —
+    //      same-shape `CREATE TABLE IF NOT EXISTS` makes the loser a
+    //      no-op. Mirrors the `pr_branch_links` pattern below.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
@@ -124,10 +133,6 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
-    // Short-lived opaque codes used by cross-environment SSO delegation.
-    // `redeemed_at` is NULL until a relying party successfully exchanges
-    // the code for the user identity; the UPDATE that flips it is the
-    // single-use gate (see `redeem_sso_exchange_code`).
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS sso_exchange_codes (
             code TEXT PRIMARY KEY,
@@ -883,7 +888,15 @@ impl From<LogChunkWithSeqRow> for LogChunkWithSeq {
     }
 }
 
-// ── User CRUD ──
+// ── Users + auth sessions ──
+//
+// Portal owns writes to `users` / `auth_sessions` / `sso_exchange_codes`
+// in production post-#222 Slice 5. Stiglab still reads these tables on
+// every authenticated request via the `AuthUser` cookie extractor (and
+// PAT path, which joins `users` for the principal's profile). The
+// `upsert_user` and `create_auth_session` writers that follow are now
+// only called from stiglab's integration tests — they seed authenticated
+// fixtures directly rather than running the OAuth dance through portal.
 
 pub async fn upsert_user(pool: &AnyPool, user: &User) -> anyhow::Result<()> {
     sqlx::query(
@@ -899,6 +912,24 @@ pub async fn upsert_user(pool: &AnyPool, user: &User) -> anyhow::Result<()> {
     .bind(&user.github_avatar_url)
     .bind(user.created_at.to_rfc3339())
     .bind(user.updated_at.to_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn create_auth_session(
+    pool: &AnyPool,
+    session_id: &str,
+    user_id: &str,
+    expires_at: chrono::DateTime<Utc>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO auth_sessions (id, user_id, expires_at, created_at) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .bind(expires_at.to_rfc3339())
+    .bind(Utc::now().to_rfc3339())
     .execute(pool)
     .await?;
     Ok(())
@@ -924,32 +955,12 @@ pub async fn get_user(pool: &AnyPool, user_id: &str) -> anyhow::Result<Option<Us
     row.map(|r| r.try_into()).transpose()
 }
 
-// ── Auth Session CRUD ──
-
 pub struct AuthSession {
     pub id: String,
     pub user_id: String,
     pub user: User,
     pub expires_at: chrono::DateTime<Utc>,
     pub created_at: chrono::DateTime<Utc>,
-}
-
-pub async fn create_auth_session(
-    pool: &AnyPool,
-    session_id: &str,
-    user_id: &str,
-    expires_at: chrono::DateTime<Utc>,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO auth_sessions (id, user_id, expires_at, created_at) VALUES ($1, $2, $3, $4)",
-    )
-    .bind(session_id)
-    .bind(user_id)
-    .bind(expires_at.to_rfc3339())
-    .bind(Utc::now().to_rfc3339())
-    .execute(pool)
-    .await?;
-    Ok(())
 }
 
 pub async fn get_auth_session(
@@ -971,8 +982,14 @@ pub async fn get_auth_session(
 
     let expires_at = chrono::DateTime::parse_from_rfc3339(&row.expires_at)?.with_timezone(&Utc);
     if expires_at < Utc::now() {
-        // Expired — clean up and return None
-        let _ = delete_auth_session(pool, session_id).await;
+        // Expired — best-effort cleanup. Portal also expires sessions on
+        // its own writes; the redundant DELETE here is cheap and avoids
+        // the row sticking around when stiglab is the only reader for a
+        // long-idle cookie.
+        let _ = sqlx::query("DELETE FROM auth_sessions WHERE id = $1")
+            .bind(session_id)
+            .execute(pool)
+            .await;
         return Ok(None);
     }
 
@@ -993,74 +1010,6 @@ pub async fn get_auth_session(
         expires_at,
         created_at: chrono::DateTime::parse_from_rfc3339(&row.created_at)?.with_timezone(&Utc),
     }))
-}
-
-pub async fn delete_auth_session(pool: &AnyPool, session_id: &str) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM auth_sessions WHERE id = $1")
-        .bind(session_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-// ── SSO Exchange Codes (cross-env delegation) ──
-
-pub async fn insert_sso_exchange_code(
-    pool: &AnyPool,
-    code: &str,
-    user_id: &str,
-    return_to_host: &str,
-    expires_at: chrono::DateTime<Utc>,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO sso_exchange_codes (code, user_id, return_to_host, expires_at, redeemed_at, created_at)
-         VALUES ($1, $2, $3, $4, NULL, $5)",
-    )
-    .bind(code)
-    .bind(user_id)
-    .bind(return_to_host)
-    .bind(expires_at.to_rfc3339())
-    .bind(Utc::now().to_rfc3339())
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-/// Atomically consume an exchange code. The UPDATE is the single-use gate —
-/// it succeeds for exactly one caller (the one who sees `rows_affected == 1`);
-/// concurrent or repeat calls get `None`. The return-to-host check runs in the
-/// UPDATE predicate so a code issued for host A can't be redeemed by host B
-/// even if both are in the owner's allowlist.
-pub async fn redeem_sso_exchange_code(
-    pool: &AnyPool,
-    code: &str,
-    return_to_host: &str,
-) -> anyhow::Result<Option<User>> {
-    let now = Utc::now().to_rfc3339();
-    let rows = sqlx::query(
-        "UPDATE sso_exchange_codes
-         SET redeemed_at = $1
-         WHERE code = $2
-           AND redeemed_at IS NULL
-           AND expires_at > $1
-           AND return_to_host = $3",
-    )
-    .bind(&now)
-    .bind(code)
-    .bind(return_to_host)
-    .execute(pool)
-    .await?;
-
-    if rows.rows_affected() == 0 {
-        return Ok(None);
-    }
-
-    let user_id: String =
-        sqlx::query_scalar("SELECT user_id FROM sso_exchange_codes WHERE code = $1")
-            .bind(code)
-            .fetch_one(pool)
-            .await?;
-    get_user(pool, &user_id).await
 }
 
 // ── User Credentials CRUD ──

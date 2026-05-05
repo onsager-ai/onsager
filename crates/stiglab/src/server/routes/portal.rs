@@ -1,21 +1,29 @@
-//! Reverse proxy for the onsager-portal webhook ingress.
+//! Reverse proxy for the onsager-portal subsystem.
 //!
-//! Forwards `/webhooks/github` to the portal running on an internal port so
-//! the Railway service exposes a single external origin. GitHub webhook
-//! signatures are computed over the raw request body, so this proxy must
-//! forward bytes untouched and preserve the `X-Hub-Signature-256`,
-//! `X-GitHub-Event`, and `X-GitHub-Delivery` headers.
+//! Forwards a stable set of stiglab URLs to the portal so the Railway service
+//! exposes a single external origin. Used today for:
+//!
+//! - GitHub webhooks (`/webhooks/github`, `/api/webhooks/github`,
+//!   `/api/github-app/webhook`) — payload is HMAC-signed over raw bytes,
+//!   so this proxy must forward bytes untouched and preserve the
+//!   `X-Hub-Signature-256`, `X-GitHub-Event`, and `X-GitHub-Delivery`
+//!   headers (#222 Slice 1).
+//! - Auth routes (`/api/auth/*`) — preserves `Set-Cookie` and the redirect
+//!   `Location` so the OAuth dance and SSO finish round-trip without the
+//!   browser noticing portal is upstream (#222 Slice 5).
 
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::Request;
-use axum::http::StatusCode;
+use axum::http::header::HeaderName;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 /// GitHub caps individual webhook payloads at 25 MiB; match that here so we
-/// don't reject legitimate deliveries at the proxy.
+/// don't reject legitimate deliveries at the proxy. Auth payloads are tiny
+/// in comparison, so this single ceiling covers both surfaces.
 const MAX_BODY_BYTES: usize = 25 * 1024 * 1024;
 
 /// Hop-by-hop headers per RFC 7230 §6.1 that must not be forwarded by a
@@ -42,22 +50,37 @@ fn shared_client() -> &'static reqwest::Client {
         reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
+            // 302/303 redirects (used by the OAuth callback and SSO
+            // finish flows) must reach the browser unchanged — disable
+            // automatic following.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("failed to build portal proxy client")
     })
 }
 
-/// Base URL for the portal webhook server (internal, not exposed by Railway).
+/// Base URL for the portal HTTP server (internal, not exposed by Railway).
+///
+/// Trailing `/` is stripped so concatenation with `uri.path()` (which
+/// already begins with `/`) doesn't produce `//api/...` paths — that
+/// changes routing behavior on some axum/matchit versions and breaks
+/// downstream OAuth/cookie expectations. Empty `PORTAL_URL` falls back
+/// to the localhost default.
 fn portal_base_url() -> String {
     if let Ok(url) = std::env::var("PORTAL_URL") {
-        return url;
+        let trimmed = url.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
     }
     let port = std::env::var("PORTAL_PORT").unwrap_or_else(|_| "3002".to_string());
     format!("http://127.0.0.1:{port}")
 }
 
-/// Proxy handler: forward `/webhooks/github` to the portal, preserving
-/// non-hop-by-hop headers and raw body bytes.
+/// Proxy handler: forward the request to portal, preserving non-hop-by-hop
+/// request headers and raw body bytes; on the response, preserve every
+/// non-hop-by-hop header (including the multiple `Set-Cookie` headers the
+/// auth flow emits and `Location` for redirects).
 pub async fn proxy(req: Request) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -77,8 +100,6 @@ pub async fn proxy(req: Request) -> Response {
 
     let mut upstream = shared_client().request(method, &target);
     // HeaderName is normalized to lowercase, so a direct `.contains` works.
-    // Signature verification depends on the GitHub headers falling through;
-    // event dispatch depends on `x-github-event`.
     for (name, value) in headers.iter() {
         if HOP_BY_HOP.contains(&name.as_str()) {
             continue;
@@ -93,23 +114,33 @@ pub async fn proxy(req: Request) -> Response {
         Ok(resp) => {
             let status =
                 StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let content_type = resp
-                .headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("application/json")
-                .to_string();
+            let upstream_headers = resp.headers().clone();
             let bytes = resp.bytes().await.unwrap_or_default();
 
-            Response::builder()
-                .status(status)
-                .header("content-type", content_type)
+            let mut builder = Response::builder().status(status);
+            // Forward every non-hop-by-hop response header. Multi-value
+            // headers like `set-cookie` (the OAuth callback emits two —
+            // session cookie + state-cookie cleanup) come through as
+            // separate entries on `HeaderMap::iter`, so this loop
+            // preserves them.
+            for (name, value) in upstream_headers.iter() {
+                if HOP_BY_HOP.contains(&name.as_str()) {
+                    continue;
+                }
+                if let (Ok(n), Ok(v)) = (
+                    HeaderName::from_bytes(name.as_str().as_bytes()),
+                    HeaderValue::from_bytes(value.as_bytes()),
+                ) {
+                    builder = builder.header(n, v);
+                }
+            }
+            builder
                 .body(Body::from(bytes))
                 .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
         Err(e) => {
-            // Keep upstream detail in logs only — the webhook endpoint is
-            // public, and error strings can reveal internal topology.
+            // Keep upstream detail in logs only — webhook + auth endpoints
+            // are public, and error strings can reveal internal topology.
             tracing::error!("portal proxy error: {e}");
             (StatusCode::BAD_GATEWAY, "portal service unavailable").into_response()
         }

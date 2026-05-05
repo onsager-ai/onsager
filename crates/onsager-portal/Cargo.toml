@@ -31,6 +31,8 @@ thiserror = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true }
 axum = { workspace = true }
+axum-extra = { workspace = true }
+tower-http = { workspace = true }
 reqwest = { workspace = true }
 sqlx = { workspace = true }
 ring = { workspace = true }

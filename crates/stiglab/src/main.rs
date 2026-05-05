@@ -115,15 +115,9 @@ async fn run_server(
         tracing::debug!("skipping github adapter registration on non-Postgres backend");
     }
 
-    // Dev-login seeding (issue #193). Debug builds always materialize a
-    // `${USER}@local` user + `dev` workspace + membership, idempotently,
-    // so the LoginPage's "Dev Login" button always has a real user to
-    // mint a session for. Release builds skip this entirely — the
-    // symbol is `cfg(debug_assertions)`-gated, not just no-op'd.
-    #[cfg(debug_assertions)]
-    if let Err(e) = stiglab::server::dev_auth::seed_dev_user_and_workspace(&pool).await {
-        tracing::warn!("dev-login: seeder failed (non-fatal): {e}");
-    }
+    // Dev-login seeding (issue #193) moved to portal in #222 Slice 5.
+    // Portal owns the `users` / `auth_sessions` schema and runs the
+    // seeder at boot in debug builds; stiglab no longer touches it.
 
     // Connect to Onsager event spine if configured
     let spine = if let Ok(url) = std::env::var("ONSAGER_DATABASE_URL") {
