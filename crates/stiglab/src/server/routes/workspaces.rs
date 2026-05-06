@@ -1,15 +1,16 @@
-//! Workspace, membership, GitHub App installation, and project CRUD
-//! routes (issue #59 — Phase 0; renamed from "tenant" → "workspace" in
-//! issue #163).
+//! GitHub App installation + install-flow routes (slice 3b of spec
+//! #222 still pending).
 //!
-//! All workspace-scoped endpoints go through
+//! Workspace, membership, and project CRUD moved to portal in Slice 3a
+//! (PR #222 Slice 3a) — see `crates/onsager-portal/src/handlers/{workspaces,projects}.rs`.
+//! Stiglab proxies the moved URLs through `routes::portal::proxy` until
+//! the dashboard's API_BASE cutover (Slice 6) lands.
+//!
+//! All workspace-scoped endpoints in this module go through
 //! [`super::require_workspace_access`] which returns **404 (not 403)** for
 //! non-members. Matching GitHub's private-resource behaviour means the
 //! workspace-enumeration surface stays private — no invite-acceptance UI
 //! needed for v1.
-//!
-//! Project deletion blocks with a clear error when live sessions reference
-//! the project; there is no cascade and no soft-delete in v1.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -20,17 +21,11 @@ use serde::Deserialize;
 use sqlx::AnyPool;
 use uuid::Uuid;
 
-use crate::core::{GitHubAccountType, GitHubAppInstallation, Project, Workspace, WorkspaceMember};
+use crate::core::{GitHubAccountType, GitHubAppInstallation};
 use crate::server::auth::{encrypt_credential, AuthUser};
 use crate::server::db;
 use crate::server::github_app;
 use crate::server::state::AppState;
-
-// ── Auth helper ──
-//
-// The shared workspace authorization gate lives at
-// `super::require_workspace_access` (see `routes/mod.rs`); every
-// workspace-scoped endpoint in this module funnels through it.
 
 use super::require_workspace_access;
 
@@ -45,148 +40,8 @@ fn not_found(msg: &str) -> Response {
 #[allow(clippy::result_large_err)]
 fn require_auth_user(auth_user: &AuthUser) -> Result<&str, Response> {
     // Auth is always-on as of #193; the `AuthUser` extractor 401s
-    // unauthenticated requests before they reach this helper. The
-    // wrapper stays as the canonical place to return the user-id —
-    // callers don't have to thread `auth_user.user_id.as_str()`
-    // by hand and the helper signature is stable for any future
-    // checks (suspension, etc.) that need to short-circuit here.
+    // unauthenticated requests before they reach this helper.
     Ok(auth_user.user_id.as_str())
-}
-
-// ── Workspace CRUD ──
-
-#[derive(Debug, Deserialize)]
-pub struct CreateWorkspaceBody {
-    pub slug: String,
-    pub name: String,
-}
-
-/// POST /api/workspaces — Create a workspace. Creator is auto-inserted as
-/// a member (no role column in v1).
-pub async fn create_workspace(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Json(body): Json<CreateWorkspaceBody>,
-) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id.to_string(),
-        Err(r) => return r,
-    };
-
-    let slug = body.slug.trim();
-    let name = body.name.trim();
-    if slug.is_empty() || name.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "slug and name are required" })),
-        )
-            .into_response();
-    }
-    if !slug
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "slug must be lowercase alphanumeric with hyphens"
-            })),
-        )
-            .into_response();
-    }
-
-    let now = Utc::now();
-    let workspace = Workspace {
-        id: Uuid::new_v4().to_string(),
-        slug: slug.to_string(),
-        name: name.to_string(),
-        created_by: user_id.clone(),
-        created_at: now,
-    };
-    let member = WorkspaceMember {
-        workspace_id: workspace.id.clone(),
-        user_id: user_id.clone(),
-        joined_at: now,
-    };
-
-    // Transactional so a failed member insert can't leave an orphan
-    // workspace row that permanently consumes the slug.
-    if let Err(e) = db::insert_workspace_with_creator(&state.db, &workspace, &member).await {
-        tracing::error!("failed to insert workspace + creator-member: {e}");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "failed to create workspace (slug may already exist)"
-            })),
-        )
-            .into_response();
-    }
-
-    (
-        StatusCode::CREATED,
-        Json(serde_json::json!({ "workspace": workspace })),
-    )
-        .into_response()
-}
-
-/// GET /api/workspaces — List workspaces the current user belongs to.
-pub async fn list_workspaces(State(state): State<AppState>, auth_user: AuthUser) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id,
-        Err(r) => return r,
-    };
-    match db::list_workspaces_for_user(&state.db, user_id).await {
-        Ok(workspaces) => Json(serde_json::json!({ "workspaces": workspaces })).into_response(),
-        Err(e) => {
-            tracing::error!("failed to list workspaces: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-        }
-    }
-}
-
-/// GET /api/workspaces/:id — Fetch a workspace. 404 for non-members.
-pub async fn get_workspace(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(workspace_id): Path<String>,
-) -> Response {
-    let _user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id,
-        Err(r) => return r,
-    };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
-        return r;
-    }
-    match db::get_workspace(&state.db, &workspace_id).await {
-        Ok(Some(w)) => Json(serde_json::json!({ "workspace": w })).into_response(),
-        Ok(None) => not_found("workspace not found"),
-        Err(e) => {
-            tracing::error!("failed to get workspace: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-        }
-    }
-}
-
-/// GET /api/workspaces/:id/members — List members (read-only in v1).
-pub async fn list_members(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(workspace_id): Path<String>,
-) -> Response {
-    let _user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id,
-        Err(r) => return r,
-    };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
-        return r;
-    }
-    match db::list_workspace_members_with_users(&state.db, &workspace_id).await {
-        Ok(members) => Json(serde_json::json!({ "members": members })).into_response(),
-        Err(e) => {
-            tracing::error!("failed to list members: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-        }
-    }
 }
 
 // ── GitHub App installations ──
@@ -361,246 +216,6 @@ pub async fn delete_installation(
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
     Json(serde_json::json!({ "ok": true })).into_response()
-}
-
-// ── Projects ──
-
-#[derive(Debug, Deserialize)]
-pub struct AddProjectBody {
-    pub github_app_installation_id: String,
-    pub repo_owner: String,
-    pub repo_name: String,
-    /// Optional. Inferring from GitHub at create-time requires an
-    /// installation access token the Phase 0 stub can't mint; callers may
-    /// supply a branch or let the server fall back to `"main"`.
-    pub default_branch: Option<String>,
-}
-
-/// POST /api/workspaces/:id/projects — Add a project (opt-in per repo;
-/// no auto-mirroring).
-pub async fn add_project(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(workspace_id): Path<String>,
-    Json(body): Json<AddProjectBody>,
-) -> Response {
-    let _user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id,
-        Err(r) => return r,
-    };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
-        return r;
-    }
-
-    // Validate the installation belongs to this workspace.
-    match db::get_github_app_installation(&state.db, &body.github_app_installation_id).await {
-        Ok(Some(inst)) if inst.workspace_id == workspace_id => {}
-        Ok(_) => return not_found("installation not found"),
-        Err(e) => {
-            tracing::error!("failed to get installation: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-        }
-    }
-
-    let repo_owner = body.repo_owner.trim();
-    let repo_name = body.repo_name.trim();
-    if repo_owner.is_empty() || repo_name.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "repo_owner and repo_name are required" })),
-        )
-            .into_response();
-    }
-
-    // If the caller supplied a branch, trust it. Otherwise try the GitHub
-    // API (when the App is configured), then fall back to "main" on any
-    // failure — onboarding must never block on a network hiccup.
-    let supplied = body
-        .default_branch
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
-    let default_branch = match supplied {
-        Some(b) => b,
-        None => match installation_token_for(&state.db, &body.github_app_installation_id).await {
-            Ok(Some(token)) => {
-                match github_app::get_repo_default_branch(&token, repo_owner, repo_name).await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        tracing::warn!(
-                            "default_branch inference failed for {repo_owner}/{repo_name}: {e}"
-                        );
-                        "main".to_string()
-                    }
-                }
-            }
-            Ok(None) => "main".to_string(),
-            Err(e) => {
-                tracing::warn!(
-                    "installation token lookup failed for default_branch inference on {repo_owner}/{repo_name}: {e}"
-                );
-                "main".to_string()
-            }
-        },
-    };
-
-    let project = Project {
-        id: Uuid::new_v4().to_string(),
-        workspace_id: workspace_id.clone(),
-        github_app_installation_id: body.github_app_installation_id.clone(),
-        repo_owner: repo_owner.to_string(),
-        repo_name: repo_name.to_string(),
-        default_branch,
-        created_at: Utc::now(),
-    };
-
-    if let Err(e) = db::insert_project(&state.db, &project).await {
-        tracing::error!("failed to insert project: {e}");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "failed to add project (repo may already be onboarded)"
-            })),
-        )
-            .into_response();
-    }
-
-    (
-        StatusCode::CREATED,
-        Json(serde_json::json!({ "project": project })),
-    )
-        .into_response()
-}
-
-/// GET /api/workspaces/:id/projects — List projects in a workspace.
-pub async fn list_projects(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(workspace_id): Path<String>,
-) -> Response {
-    let _user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id,
-        Err(r) => return r,
-    };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workspace_id).await {
-        return r;
-    }
-    match db::list_projects_for_workspace(&state.db, &workspace_id).await {
-        Ok(projects) => Json(serde_json::json!({ "projects": projects })).into_response(),
-        Err(e) => {
-            tracing::error!("failed to list projects: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-        }
-    }
-}
-
-/// GET /api/projects — List every project the current user can access,
-/// across all their workspaces. Powers the cross-workspace project
-/// selector in `CreateSessionSheet`.
-pub async fn list_all_projects_for_user(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-) -> Response {
-    let user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id,
-        Err(r) => return r,
-    };
-    match db::list_projects_for_user(&state.db, user_id).await {
-        Ok(projects) => Json(serde_json::json!({ "projects": projects })).into_response(),
-        Err(e) => {
-            tracing::error!("failed to list projects: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-        }
-    }
-}
-
-/// GET /api/projects/:id — Fetch a project by ID. 404 for users who are
-/// not members of the owning workspace.
-pub async fn get_project(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(project_id): Path<String>,
-) -> Response {
-    let _user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id,
-        Err(r) => return r,
-    };
-    let project = match db::get_project(&state.db, &project_id).await {
-        Ok(Some(p)) => p,
-        Ok(None) => return not_found("project not found"),
-        Err(e) => {
-            tracing::error!("failed to get project: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-        }
-    };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &project.workspace_id).await {
-        return r;
-    }
-    Json(serde_json::json!({ "project": project })).into_response()
-}
-
-/// DELETE /api/projects/:id — Delete a project. Blocks with a clear
-/// error when any attached session is not in a terminal state (no
-/// cascade, no soft-delete in v1).
-pub async fn delete_project(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(project_id): Path<String>,
-) -> Response {
-    let _user_id = match require_auth_user(&auth_user) {
-        Ok(id) => id,
-        Err(r) => return r,
-    };
-    let project = match db::get_project(&state.db, &project_id).await {
-        Ok(Some(p)) => p,
-        Ok(None) => return not_found("project not found"),
-        Err(e) => {
-            tracing::error!("failed to get project: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-        }
-    };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &project.workspace_id).await {
-        return r;
-    }
-
-    match db::count_live_sessions_for_project(&state.db, &project_id).await {
-        Ok(n) if n > 0 => {
-            return (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({
-                    "error": format!(
-                        "cannot delete project: {n} live session(s) still reference it. \
-                         Wait for them to finish or abort them first."
-                    )
-                })),
-            )
-                .into_response();
-        }
-        Ok(_) => {}
-        Err(e) => {
-            tracing::error!("failed to count live sessions: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-        }
-    }
-
-    if let Err(e) = db::delete_project(&state.db, &project_id).await {
-        tracing::error!("failed to delete project: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-    }
-    Json(serde_json::json!({ "ok": true })).into_response()
-}
-
-/// Public helper re-exported so `routes::tasks` can reuse the same 404
-/// semantics (and PAT scope check) when creating a session scoped to a
-/// project.
-#[allow(clippy::result_large_err)]
-pub async fn assert_workspace_member(
-    pool: &AnyPool,
-    auth_user: &AuthUser,
-    workspace_id: &str,
-) -> Result<(), Response> {
-    require_workspace_access(pool, auth_user, workspace_id).await
 }
 
 // ── Accessible-repos picker + GitHub App install flow ──

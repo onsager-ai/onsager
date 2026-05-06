@@ -140,7 +140,7 @@ pub async fn create_task(
                     .into_response();
             }
         }
-        if let Err(r) = crate::server::routes::workspaces::assert_workspace_member(
+        if let Err(r) = crate::server::routes::require_workspace_access(
             &state.db,
             &auth_user,
             &project.workspace_id,

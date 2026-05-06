@@ -42,6 +42,20 @@ What this means for stiglab specifically:
     stiglab still owns the in-process decrypt-and-launch path used
     when spawning agent sessions (`decrypt_credential` in
     `tasks.rs`/`workflows.rs`).
+  - Workspace + member + project CRUD (`GET/POST /api/workspaces`,
+    `GET /api/workspaces/:id`, `GET /api/workspaces/:id/members`,
+    `GET/POST /api/workspaces/:id/projects`, `GET /api/projects`,
+    `GET/DELETE /api/projects/:id`) — Slice 3a. Portal is the only
+    writer; the `workspaces` / `workspace_members` / `projects`
+    schema lives in `crates/onsager-spine/migrations/020_workspaces_to_spine.sql`
+    post-Slice 3a. Stiglab still reads the same Postgres tables for
+    the in-process session/task/workflow lookups (`db::is_workspace_member`,
+    `db::get_project`, `db::list_workspaces_for_user`, etc.) — same
+    database, separate connection pool.
+  - GitHub App install + per-workspace installation routes
+    (`/api/workspaces/:id/github-installations*`,
+    `/api/github-app/*`) — Slice 3b pending. Stiglab still owns
+    these and the `github_app_installations` table.
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `synodic`,
   or `ising`. **Lever C status (#148): no remaining violation** —
   `HttpStiglabDispatcher` and the `POST /api/shaping` route it

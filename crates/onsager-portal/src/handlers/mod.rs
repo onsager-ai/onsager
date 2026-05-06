@@ -5,6 +5,8 @@ pub mod auth;
 pub mod credentials;
 pub mod issues;
 pub mod pats;
+pub mod projects;
 pub mod pull_request;
 pub mod spec_link;
 pub mod webhook;
+pub mod workspaces;

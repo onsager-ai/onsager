@@ -8,7 +8,8 @@ use axum::Router;
 use crate::config::Config;
 use crate::gate::GateClient;
 use crate::handlers::{
-    auth as auth_handlers, credentials as credential_handlers, pats as pat_handlers, webhook,
+    auth as auth_handlers, credentials as credential_handlers, pats as pat_handlers,
+    projects as project_handlers, webhook, workspaces as workspace_handlers,
 };
 use crate::state::AppState;
 
@@ -90,6 +91,36 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route(
             "/api/workspaces/{workspace_id}/credentials/{name}",
             put(credential_handlers::set_credential).delete(credential_handlers::delete_credential),
+        )
+        // Workspace + member + project CRUD (#222 Slice 3a). Stiglab
+        // proxies these URLs through `routes::portal::proxy` so the
+        // dashboard's API_BASE cutover (Slice 6) can land independently.
+        // Auth (cookie or PAT bearer) is enforced by the `AuthUser`
+        // extractor; PAT-pinned principals are 403'd against
+        // mismatched workspace IDs by `require_workspace_access`.
+        .route(
+            "/api/workspaces",
+            get(workspace_handlers::list_workspaces).post(workspace_handlers::create_workspace),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}",
+            get(workspace_handlers::get_workspace),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/members",
+            get(workspace_handlers::list_members),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/projects",
+            get(project_handlers::list_projects).post(project_handlers::add_project),
+        )
+        .route(
+            "/api/projects",
+            get(project_handlers::list_all_projects_for_user),
+        )
+        .route(
+            "/api/projects/{project_id}",
+            get(project_handlers::get_project).delete(project_handlers::delete_project),
         );
 
     // Dev-login is debug-only — `cargo build --release` strips both the

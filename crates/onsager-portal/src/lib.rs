@@ -30,6 +30,7 @@ pub mod auth;
 pub mod auth_db;
 pub mod backfill;
 pub mod config;
+pub mod core;
 pub mod credential_db;
 pub mod db;
 #[cfg(debug_assertions)]
@@ -42,3 +43,4 @@ pub mod pat_db;
 pub mod server;
 pub mod sso;
 pub mod state;
+pub mod workspace_db;
