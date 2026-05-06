@@ -97,39 +97,34 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route("/api/workspaces/{id}/projects", any(routes::portal::proxy))
         .route("/api/projects", any(routes::portal::proxy))
         .route("/api/projects/{id}", any(routes::portal::proxy))
-        // GitHub App installation + install-flow routes (Slice 3b
-        // pending). Stiglab still owns these — they live alongside the
-        // workspace routes above and read/write `github_app_installations`
-        // which moves to portal in 3b.
+        // GitHub App installation + install-flow routes (#222 Slice 3b).
+        // Portal owns these; stiglab proxies them through
+        // `routes::portal::proxy` so dashboard fetches keep working
+        // pre–API_BASE cutover (Slice 6). The `github_app_installations`
+        // table moved into `crates/onsager-portal/migrations/`. Stiglab
+        // keeps its own `db::*` reads (`get_github_app_installation`,
+        // `get_install_webhook_secret_cipher`) for the in-process needs
+        // of `routes/projects.rs` live-data hydration — same database,
+        // separate connection pool, portal is the only writer.
         .route(
             "/api/workspaces/{id}/github-installations",
-            get(routes::workspaces::list_installations)
-                .post(routes::workspaces::register_installation),
+            any(routes::portal::proxy),
         )
         .route(
             "/api/workspaces/{id}/github-installations/{install_id}",
-            axum::routing::delete(routes::workspaces::delete_installation),
+            any(routes::portal::proxy),
         )
         .route(
             "/api/workspaces/{id}/github-installations/{install_id}/accessible-repos",
-            get(routes::workspaces::list_accessible_repos),
+            any(routes::portal::proxy),
         )
         .route(
             "/api/workspaces/{id}/github-installations/{install_id}/repos/{owner}/{repo}/labels",
-            get(routes::workspaces::list_repo_labels),
+            any(routes::portal::proxy),
         )
-        .route(
-            "/api/github-app/config",
-            get(routes::workspaces::github_app_config),
-        )
-        .route(
-            "/api/github-app/install-start",
-            get(routes::workspaces::github_app_install_start),
-        )
-        .route(
-            "/api/github-app/callback",
-            get(routes::workspaces::github_app_install_callback),
-        )
+        .route("/api/github-app/config", any(routes::portal::proxy))
+        .route("/api/github-app/install-start", any(routes::portal::proxy))
+        .route("/api/github-app/callback", any(routes::portal::proxy))
         // Live-data hydration for reference-only artifacts (#170 / #167 / #171).
         // The dashboard joins skeleton rows from `/api/spine/artifacts?kind=...`
         // with the hydrated payloads here on `external_ref`.
