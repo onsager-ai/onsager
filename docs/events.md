@@ -59,6 +59,7 @@ that requires a coordinated rollout.
 | `git` | onsager-portal (GitHub webhooks) | 7 |
 | `forge` | forge | 8 |
 | `stiglab` | stiglab | 11 |
+| `portal` | (unknown — update `stream_producer` in xtask) | 1 |
 | `synodic` | synodic | 12 |
 | `ising` | ising | 6 |
 | `refract` | refract | 3 |
@@ -575,6 +576,21 @@ A node missed its expected heartbeat.
 | Field | Type | Description |
 |---|---|---|
 | `node_id` | `String` |  |
+
+## `portal` events
+
+Producer subsystem: **(unknown — update `stream_producer` in xtask)**.
+
+### `portal.session_requested`
+
+- Variant: `FactoryEventKind::PortalSessionRequested`
+- Stream: `portal`
+
+Dashboard task request from portal. Stiglab's `session_requested_listener` dispatches the session to the correct agent node (spec #222 Follow-up 3).
+
+| Field | Type | Description |
+|---|---|---|
+| `session_id` | `String` |  |
 
 ## `synodic` events
 

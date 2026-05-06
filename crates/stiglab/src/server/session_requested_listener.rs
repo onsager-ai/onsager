@@ -7,15 +7,13 @@
 //! node — the same dispatch path `routes::tasks::create_task` used before
 //! it moved to portal.
 
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 use serde::Deserialize;
 
 use crate::core::{ServerMessage, SessionState, Task};
-use crate::server::auth::decrypt_credential;
 use crate::server::db;
+use crate::server::routes::shaping::fetch_workspace_credentials;
 use crate::server::state::AppState;
 
 /// Wire payload from `portal.session_requested`.
@@ -136,30 +134,54 @@ impl Dispatcher {
                 session_id: payload.session_id.clone(),
                 credentials,
             };
-            if let Ok(json) = serde_json::to_string(&msg) {
-                let _ = agent
+            let sent = match serde_json::to_string(&msg) {
+                Ok(json) => agent
                     .sender
-                    .send(axum::extract::ws::Message::Text(json.into()));
-            }
-            if let Err(e) =
-                db::update_session_state(&state.db, &payload.session_id, SessionState::Dispatched)
-                    .await
-            {
-                tracing::error!(
+                    .send(axum::extract::ws::Message::Text(json.into()))
+                    .is_ok(),
+                Err(e) => {
+                    tracing::error!(
+                        session_id = %payload.session_id,
+                        "stiglab: portal.session_requested — serialize failed: {e}"
+                    );
+                    false
+                }
+            };
+
+            if sent {
+                if let Err(e) = db::update_session_state(
+                    &state.db,
+                    &payload.session_id,
+                    SessionState::Dispatched,
+                )
+                .await
+                {
+                    tracing::error!(
+                        session_id = %payload.session_id,
+                        "stiglab: portal.session_requested — failed to update state: {e}"
+                    );
+                }
+                if let Some(ref spine) = state.spine {
+                    let _ = spine
+                        .emit_session_started(
+                            &payload.session_id,
+                            &payload.task_id,
+                            &payload.node_id,
+                        )
+                        .await;
+                }
+                tracing::info!(
                     session_id = %payload.session_id,
-                    "stiglab: portal.session_requested — failed to update state: {e}"
+                    node_id = %payload.node_id,
+                    "stiglab: dispatched session from portal.session_requested"
+                );
+            } else {
+                tracing::warn!(
+                    session_id = %payload.session_id,
+                    node_id = %payload.node_id,
+                    "stiglab: portal.session_requested — WS send failed, session stays pending"
                 );
             }
-            if let Some(ref spine) = state.spine {
-                let _ = spine
-                    .emit_session_started(&payload.session_id, "", &payload.node_id)
-                    .await;
-            }
-            tracing::info!(
-                session_id = %payload.session_id,
-                node_id = %payload.node_id,
-                "stiglab: dispatched session from portal.session_requested"
-            );
         } else {
             tracing::warn!(
                 session_id = %payload.session_id,
@@ -169,39 +191,5 @@ impl Dispatcher {
         }
 
         Ok(())
-    }
-}
-
-async fn fetch_workspace_credentials(
-    state: &AppState,
-    workspace_id: &str,
-    user_id: &str,
-) -> Option<HashMap<String, String>> {
-    let key = state.config.credential_key.as_deref()?;
-
-    let encrypted_creds = db::get_all_user_credential_values(&state.db, workspace_id, user_id)
-        .await
-        .ok()?;
-
-    if encrypted_creds.is_empty() {
-        return None;
-    }
-
-    let mut result = HashMap::new();
-    for (name, encrypted_value) in encrypted_creds {
-        match decrypt_credential(key, &encrypted_value) {
-            Ok(value) => {
-                result.insert(name, value);
-            }
-            Err(e) => {
-                tracing::error!("failed to decrypt credential {name} for user {user_id}: {e}");
-            }
-        }
-    }
-
-    if result.is_empty() {
-        None
-    } else {
-        Some(result)
     }
 }

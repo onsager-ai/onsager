@@ -272,12 +272,11 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/projects/{id}/issues/{number}/replay-trigger",
             post(live_data_handlers::replay_issue_trigger),
         )
-        // Sessions / nodes / tasks (spec #222 Follow-up 3). Moved from
-        // stiglab → portal. Portal creates sessions and emits
-        // `portal.session_requested`; stiglab's `session_requested_listener`
-        // picks up the event and dispatches to the agent WebSocket. Stiglab
-        // proxies the URLs through `routes::portal::proxy` so the
-        // dashboard's API_BASE cutover (#222 Slice 6) can land independently.
+        // Sessions / nodes / tasks (spec #222 Follow-up 3 + Slice 6). Portal
+        // creates sessions and emits `portal.session_requested`; stiglab's
+        // `session_requested_listener` dispatches to the agent WebSocket.
+        // Post-Slice 6 the edge proxy (Caddy / vite) routes `/api/*` here
+        // directly — no stiglab proxy layer.
         .route(
             "/api/sessions",
             get(session_handlers::list_sessions),

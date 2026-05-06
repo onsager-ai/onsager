@@ -10,7 +10,7 @@
 //! 1. Authenticates the user (`AuthUser` extractor — auth is always-on).
 //! 2. Resolves the project and asserts workspace membership.
 //! 3. Mints an installation token via the GitHub App config.
-//! 4. Fetches live data from GitHub through a per-process LRU+TTL cache
+//! 4. Fetches live data from GitHub through a per-process TTL cache
 //!    (`AppState::proxy_cache`). Cache hits skip the GitHub round-trip.
 //! 5. Returns a slim, dashboard-shaped JSON payload.
 //!
