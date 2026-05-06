@@ -11,8 +11,8 @@ use crate::handlers::{
     auth as auth_handlers, credentials as credential_handlers, github_app as github_app_handlers,
     installations as installation_handlers, pats as pat_handlers, projects as project_handlers,
     registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
-    webhook, workflow_kinds as workflow_kind_handlers, workflows as workflow_handlers,
-    workspaces as workspace_handlers,
+    spine as spine_handlers, webhook, workflow_kinds as workflow_kind_handlers,
+    workflows as workflow_handlers, workspaces as workspace_handlers,
 };
 use crate::state::AppState;
 
@@ -201,6 +201,33 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route(
             "/api/registry/triggers",
             get(registry_trigger_handlers::list_triggers),
+        )
+        // Spine API (#222 follow-up #259). Reads `events_ext` and
+        // `artifacts` directly; writes either insert into `artifacts`
+        // or emit a single event via `EventStore::append_ext`. Stiglab
+        // proxies the URLs through `routes::portal::proxy` so the
+        // dashboard's API_BASE cutover (#222 Slice 6) can land
+        // independently.
+        .route("/api/spine/events", get(spine_handlers::list_events))
+        .route(
+            "/api/spine/artifacts",
+            get(spine_handlers::list_artifacts).post(spine_handlers::register_artifact),
+        )
+        .route(
+            "/api/spine/artifacts/{id}",
+            get(spine_handlers::get_artifact),
+        )
+        .route(
+            "/api/spine/artifacts/{id}/retry",
+            post(spine_handlers::retry_artifact),
+        )
+        .route(
+            "/api/spine/artifacts/{id}/abort",
+            post(spine_handlers::abort_artifact),
+        )
+        .route(
+            "/api/spine/artifacts/{id}/override-gate",
+            post(spine_handlers::override_gate),
         );
 
     // Dev-login is debug-only — `cargo build --release` strips both the

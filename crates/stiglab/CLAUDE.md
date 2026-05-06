@@ -68,6 +68,17 @@ What this means for stiglab specifically:
     `TRIGGERS`); stiglab proxies the URLs through
     `routes::portal::proxy` so dashboard fetches keep working pre–
     API_BASE cutover. Stiglab no longer depends on `onsager-registry`.
+  - Spine reads + writes (`GET /api/spine/events`,
+    `GET/POST /api/spine/artifacts`, `GET /api/spine/artifacts/:id`,
+    `POST /api/spine/artifacts/:id/{retry,abort,override-gate}`) —
+    #222 follow-up #259. Portal owns the dashboard-facing reads
+    (against `events_ext` / `artifacts`) and the single-event emits
+    (via `EventStore::append_ext`). Stiglab still keeps
+    `SpineEmitter` for the agent-runtime emits
+    (`emit_session_started/completed/failed`,
+    `emit_shaping_result_ready`) — those are session-lifecycle, not
+    dashboard-facing — and still uses the spine pool for in-process
+    reads (`routes::projects::replay_issue_trigger`).
   - Workflow CRUD + GitHub side-effects
     (`GET/POST /api/workflows`, `GET/PATCH/DELETE /api/workflows/:id`,
     `GET /api/workflows/:id/runs`, `GET /api/workflow/kinds`) — Slice 4.

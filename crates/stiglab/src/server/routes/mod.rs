@@ -5,7 +5,6 @@ pub mod portal;
 pub mod projects;
 pub mod sessions;
 pub mod shaping;
-pub mod spine;
 pub mod tasks;
 
 use axum::http::StatusCode;
