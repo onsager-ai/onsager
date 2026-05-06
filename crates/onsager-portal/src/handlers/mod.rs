@@ -11,4 +11,6 @@ pub mod projects;
 pub mod pull_request;
 pub mod spec_link;
 pub mod webhook;
+pub mod workflow_kinds;
+pub mod workflows;
 pub mod workspaces;

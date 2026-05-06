@@ -115,6 +115,28 @@ pub async fn delete_installation(pool: &PgPool, install_row_id: &str) -> anyhow:
     Ok(())
 }
 
+/// Look up the webhook-secret cipher for a given numeric install id.
+///
+/// Outer `Option` distinguishes installation presence so callers can fail
+/// closed on genuinely unknown installations while still falling back to
+/// the global App secret for installs registered via the OAuth callback
+/// (which persist without a cipher):
+/// - `None` — no row for this `install_id` (unknown installation).
+/// - `Some(None)` — row exists, no per-install cipher stored.
+/// - `Some(Some(cipher))` — row exists with a per-install cipher.
+pub async fn get_install_webhook_secret_cipher(
+    pool: &PgPool,
+    install_id: i64,
+) -> anyhow::Result<Option<Option<String>>> {
+    let row: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT webhook_secret_cipher FROM github_app_installations WHERE install_id = $1",
+    )
+    .bind(install_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(c,)| c))
+}
+
 /// Count projects that still reference a given installation. Used by
 /// the delete-installation route for an app-layer referential-integrity
 /// check (the schema does not declare FK constraints, in keeping with

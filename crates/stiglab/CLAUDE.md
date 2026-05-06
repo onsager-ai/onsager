@@ -62,6 +62,18 @@ What this means for stiglab specifically:
     (`db::get_github_app_installation`,
     `db::get_install_webhook_secret_cipher`) — same database,
     separate connection pool.
+  - Workflow CRUD + GitHub side-effects
+    (`GET/POST /api/workflows`, `GET/PATCH/DELETE /api/workflows/:id`,
+    `GET /api/workflows/:id/runs`, `GET /api/workflow/kinds`) — Slice 4.
+    Portal is the only writer of `workflows` / `workflow_stages` and
+    the only process that talks to GitHub for label create + webhook
+    register/deregister. Stiglab keeps `src/server/workflow_db.rs`
+    slimmed to a single read function
+    (`find_active_github_workflows_for_workspace_repo`) used by
+    `routes/projects.rs` replay-trigger — same database, separate
+    connection pool, portal is the only writer. The
+    `core/preset.rs` and `core/workflow.rs` writer surface (and
+    `server/workflow_activation.rs`) moved to portal in the same PR.
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `synodic`,
   or `ising`. **Lever C status (#148): no remaining violation** —
   `HttpStiglabDispatcher` and the `POST /api/shaping` route it
@@ -81,13 +93,17 @@ What this means for stiglab specifically:
   `synodic`, or `ising`. CI will hard-fail this once Lever B's
   architecture lint lands.
 - **Spine as single source of truth.** Lever D (#149) is done. Stiglab
-  no longer keeps a private `workspace_workflows` schema —
-  `src/server/workflow_db.rs` writes the spine `workflows` /
-  `workflow_stages` tables directly, the `workflow_spine_mirror.rs`
-  translator is gone, and the source tables are dropped by the spine
-  migration. New code: write to spine tables directly via the spine
-  pool (`state.spine.as_ref().pool()`); do not introduce a
-  per-subsystem mirror table for spine-owned data.
+  no longer keeps a private `workspace_workflows` schema; the
+  `workflow_spine_mirror.rs` translator is gone and the source tables
+  are dropped by the spine migration. Spec #222 Slice 4 then moved
+  the writer surface (`server/workflow_activation.rs` and the full
+  `server/workflow_db.rs` CRUD) to portal — the slim
+  `server/workflow_db.rs` that remains in stiglab is read-only,
+  serving the `routes/projects.rs` replay-trigger. New code that
+  reads spine tables uses the spine pool
+  (`state.spine.as_ref().pool()`); new writes go through the
+  appropriate edge subsystem (portal owns workflow writes), not a
+  per-subsystem mirror table.
 - **In-memory caches.** State the spine owns is read from the spine.
   Cache only with an explicit invalidation path tied to a spine event
   (the PR #123 drift pattern is what happens otherwise).
@@ -108,8 +124,9 @@ src/
                             (`routes::portal::proxy`)
     spine.rs            <- spine read/write helpers (preferred path
                             for cross-subsystem coordination)
-    workflow_db.rs      <- workflow CRUD against the spine pool
-                            (post-Lever D)
+    workflow_db.rs      <- read-only workflow lookup against the
+                            spine pool (writer surface moved to
+                            portal in #222 Slice 4)
     ws/                 <- agent WebSocket (allowed seam)
 ```
 

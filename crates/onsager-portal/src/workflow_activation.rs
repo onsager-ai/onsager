@@ -1,7 +1,14 @@
 //! Workflow activation and deactivation hooks (issue #81).
 //!
+//! Spec #222 Slice 4 moved this module from stiglab to portal — portal
+//! owns the GitHub side-effects of activation (label create / webhook
+//! register) since it owns the credentials and the `/api/webhooks/github`
+//! receiver. The workflow row's `active` flag is flipped through portal's
+//! `workflow_db` writer, which targets the spine schema directly.
+//!
 //! Activation:
-//! 1. Resolve workspace install token (via `github_app::mint_installation_token`).
+//! 1. Resolve workspace install token (via
+//!    `onsager_github::api::app::mint_installation_token`).
 //! 2. Validate target repo is within the install scope.
 //! 3. Ensure the configured trigger label exists on the repo; create if missing.
 //! 4. Register the repo webhook for the required event types idempotently
@@ -17,10 +24,9 @@
 
 use std::time::Duration;
 
+use onsager_github::api::app::{list_installation_repos, InstallationToken};
 use serde::Serialize;
 use thiserror::Error;
-
-use crate::server::github_app::{list_installation_repos, InstallationToken};
 
 /// Typed errors from the activation path. The CRUD route uses these to map
 /// install-scope rejections to 400 while bubbling everything else to 500.

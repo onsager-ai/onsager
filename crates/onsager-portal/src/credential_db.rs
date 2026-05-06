@@ -142,3 +142,40 @@ pub async fn is_workspace_member(
     .await?;
     Ok(row.is_some())
 }
+
+/// True if the user has at least one credential row in `workspace_id`
+/// matching one of `names`. Used by the workflow-activate gate (issue
+/// #156) to refuse activation when the owner has no Claude auth
+/// credential — without this check, the workflow would be active but
+/// every session would fail with "stdout closed without result event".
+///
+/// Checks by exact name match because the Claude CLI keys on specific
+/// env var names (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`).
+/// A user with only custom-named credentials would silently activate
+/// into a doomed workflow without the name filter.
+pub async fn user_has_credential_in(
+    pool: &PgPool,
+    workspace_id: &str,
+    user_id: &str,
+    names: &[&str],
+) -> anyhow::Result<bool> {
+    if names.is_empty() {
+        return Ok(false);
+    }
+    // Build `name IN ($3, $4, ...)` with placeholders matched to the
+    // sqlx binding count.
+    let placeholders: Vec<String> = (3..=names.len() + 2).map(|i| format!("${i}")).collect();
+    let sql = format!(
+        "SELECT name FROM user_credentials \
+         WHERE workspace_id = $1 AND user_id = $2 AND name IN ({}) LIMIT 1",
+        placeholders.join(", ")
+    );
+    let mut q = sqlx::query_scalar::<_, String>(&sql)
+        .bind(workspace_id)
+        .bind(user_id);
+    for n in names {
+        q = q.bind(*n);
+    }
+    let row = q.fetch_optional(pool).await?;
+    Ok(row.is_some())
+}

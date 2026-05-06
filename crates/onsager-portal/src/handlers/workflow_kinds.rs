@@ -1,5 +1,7 @@
 //! Workflow artifact-kind listing (issue #102).
 //!
+//! Spec #222 Slice 4 moved this route from stiglab to portal.
+//!
 //! Serves the registry's built-in workflow kinds to the dashboard so the
 //! workflow builder can render the kind picker from runtime data instead of
 //! a hardcoded TypeScript union. V1 returns only the registry's builtin

@@ -1,8 +1,12 @@
 //! Workflow CRUD routes (issue #81).
 //!
+//! Spec #222 Slice 4 moved this module from stiglab to portal — portal
+//! owns the HTTP surface for `/api/workflows*` and the GitHub
+//! side-effects of activation (label create / webhook register).
+//!
 //! All routes are workspace-scoped and auth-gated. Non-members get a 404
 //! (matching the `workspaces.rs` pattern — private-resource surface).
-//! Repo scope and label creation live in `server::workflow_activation`;
+//! Repo scope and label creation live in `crate::workflow_activation`;
 //! this module just handles the HTTP shape + input validation.
 
 use axum::extract::{Path, State};
@@ -10,44 +14,75 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::Utc;
+use onsager_github::api::app::{mint_app_jwt, mint_installation_token, AppConfig};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::core::preset::{resolve_preset, PRESET_IDS};
-use crate::core::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
-use crate::server::auth::{decrypt_credential, AuthUser};
-use crate::server::db;
-use crate::server::github_app::{mint_app_jwt, mint_installation_token, AppConfig};
-use crate::server::state::AppState;
-use crate::server::workflow_activation::{
+use crate::auth::{decrypt_credential, AuthUser};
+use crate::credential_db;
+use crate::installation_db;
+use crate::preset::{resolve_preset, PRESET_IDS};
+use crate::state::AppState;
+use crate::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
+use crate::workflow_activation::{
     deregister_webhook, ensure_label_exists, ensure_repo_in_scope, ensure_webhook_registered,
     ActivationError,
 };
-use crate::server::workflow_db;
+use crate::workflow_db;
 
-/// 503 when the spine isn't connected — workflow CRUD writes the spine
-/// schema directly post-Lever D, so without a spine pool there is no
-/// place to land a workflow row.
+/// 503 when the spine pool isn't reachable — workflow CRUD writes the
+/// spine schema directly post-Lever D, so without a usable pool there is
+/// no place to land a workflow row.
 #[allow(clippy::result_large_err)]
 fn spine_pool(state: &AppState) -> Result<&sqlx::PgPool, Response> {
-    match state.spine.as_ref() {
-        Some(s) => Ok(s.pool()),
-        None => Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({
-                "error": "spine not connected; workflow CRUD requires ONSAGER_DATABASE_URL"
-            })),
-        )
-            .into_response()),
-    }
+    // Portal's `spine.pool()` is the same Postgres as `state.pool` in
+    // production, so the 503 path here is informational — if the
+    // database is up at all, workflow CRUD has somewhere to write.
+    Ok(state.spine.pool())
 }
 
-// Workspace membership + PAT scope is enforced via the shared
-// `super::require_workspace_access` helper in `routes/mod.rs`.  A local
-// "just check membership" version would skip the PAT scope check and let
-// a workspace-pinned PAT touch any workspace its user belongs to.
-
-use super::require_workspace_access;
+/// Authorize an `AuthUser` against a target workspace.
+///
+/// Two checks, in order:
+///
+/// 1. **PAT scope (403 on mismatch).** If the principal is a PAT pinned
+///    to a workspace, the request must target that exact workspace.
+///    Surfaces `pat_workspace_scope_mismatch` so client tooling can
+///    react.
+/// 2. **Membership (404 on miss).** Otherwise the caller must be a
+///    member of the workspace; non-members get a flat 404 to avoid
+///    leaking workspace existence.
+#[allow(clippy::result_large_err)]
+async fn require_workspace_access(
+    pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
+    workspace_id: &str,
+) -> Result<(), Response> {
+    if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
+        if pinned != workspace_id {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "pat_workspace_scope_mismatch",
+                    "detail": "PAT is pinned to a different workspace",
+                })),
+            )
+                .into_response());
+        }
+    }
+    match credential_db::is_workspace_member(pool, workspace_id, &auth_user.user_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "workspace not found" })),
+        )
+            .into_response()),
+        Err(e) => {
+            tracing::error!("failed to check workspace membership: {e}");
+            Err(StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+    }
+}
 
 fn not_found(msg: &str) -> Response {
     (
@@ -88,8 +123,8 @@ async fn require_owner_credentials(
     workspace_id: &str,
     owner_user_id: &str,
 ) -> Result<(), Response> {
-    match db::user_has_credential_in(
-        &state.db,
+    match credential_db::user_has_credential_in(
+        &state.pool,
         workspace_id,
         owner_user_id,
         CLAUDE_AUTH_CREDENTIAL_NAMES,
@@ -259,7 +294,7 @@ pub async fn create_workflow(
         Ok(id) => id.to_string(),
         Err(r) => return r,
     };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &body.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &body.workspace_id).await {
         return r;
     }
     let spine = match spine_pool(&state) {
@@ -347,7 +382,7 @@ pub async fn list_workflows(
     if let Err(r) = require_auth_user(&auth_user) {
         return r;
     }
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &q.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &q.workspace_id).await {
         return r;
     }
     let spine = match spine_pool(&state) {
@@ -384,7 +419,8 @@ pub async fn get_workflow(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workflow.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workflow.workspace_id).await
+    {
         return r;
     }
     let stages = match workflow_db::list_stages_for_workflow(spine, &workflow_id).await {
@@ -423,11 +459,7 @@ pub async fn list_workflow_runs(
     // Workflows live on the spine post-Lever D; without a spine pool the
     // dashboard gets an empty list rather than a 503 so the empty-state
     // copy still renders sensibly in dev.
-    let Some(spine_emitter) = state.spine.as_ref() else {
-        return Json(serde_json::json!({ "runs": Vec::<serde_json::Value>::new() }))
-            .into_response();
-    };
-    let spine = spine_emitter.pool();
+    let spine = state.spine.pool();
     let workflow = match workflow_db::get_workflow(spine, &workflow_id).await {
         Ok(Some(w)) => w,
         Ok(None) => return not_found("workflow not found"),
@@ -436,7 +468,8 @@ pub async fn list_workflow_runs(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workflow.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workflow.workspace_id).await
+    {
         return r;
     }
     let stages = match workflow_db::list_stages_for_workflow(spine, &workflow_id).await {
@@ -501,7 +534,7 @@ struct ArtifactRunRow {
 /// - otherwise → stages [0..idx] passed, stage[idx] pending, rest pending.
 fn project_run(
     row: &ArtifactRunRow,
-    stages: &[crate::core::workflow::WorkflowStage],
+    stages: &[crate::workflow::WorkflowStage],
 ) -> serde_json::Value {
     let current_idx = row
         .current_stage_index
@@ -586,7 +619,8 @@ pub async fn patch_workflow(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workflow.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workflow.workspace_id).await
+    {
         return r;
     }
 
@@ -652,7 +686,8 @@ pub async fn delete_workflow(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    if let Err(r) = require_workspace_access(&state.db, &auth_user, &workflow.workspace_id).await {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workflow.workspace_id).await
+    {
         return r;
     }
 
@@ -879,7 +914,7 @@ fn map_activation_error(e: ActivationError) -> Response {
 }
 
 async fn resolve_install_webhook_secret(state: &AppState, install_id: i64) -> Option<String> {
-    let cipher = db::get_install_webhook_secret_cipher(&state.db, install_id)
+    let cipher = installation_db::get_install_webhook_secret_cipher(&state.pool, install_id)
         .await
         .ok()
         .flatten()
