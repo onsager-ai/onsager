@@ -25,41 +25,45 @@ pub struct UserPat {
 }
 
 /// Column projection used by every SELECT below. Shared so the read path
-/// and the prefix-lookup path can't drift in column order.
+/// and the prefix-lookup path can't drift in column order — and the
+/// projection lines up with the field order on [`UserPatRow`] /
+/// [`UserPatWithHashRow`] so `query_as` populates by name, not by index.
 const PAT_FIELDS: &str = "id, user_id, workspace_id, name, token_prefix, expires_at, \
                           last_used_at, last_used_ip, last_used_user_agent, created_at, revoked_at";
 
-type PatRow = (
-    String,         // id
-    String,         // user_id
-    String,         // workspace_id
-    String,         // name
-    String,         // token_prefix
-    Option<String>, // expires_at
-    Option<String>, // last_used_at
-    Option<String>, // last_used_ip
-    Option<String>, // last_used_user_agent
-    String,         // created_at
-    Option<String>, // revoked_at
-);
+#[derive(sqlx::FromRow)]
+struct UserPatRow {
+    id: String,
+    user_id: String,
+    workspace_id: String,
+    name: String,
+    token_prefix: String,
+    expires_at: Option<String>,
+    last_used_at: Option<String>,
+    last_used_ip: Option<String>,
+    last_used_user_agent: Option<String>,
+    created_at: String,
+    revoked_at: Option<String>,
+}
 
-/// Same shape as [`PatRow`] with `token_hash` appended; the prefix-lookup
-/// path returns the hash alongside the row so the caller can constant-time
-/// compare without re-querying.
-type PatRowWithHash = (
-    String,
-    String,
-    String,
-    String,
-    String,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    String,
-    Option<String>,
-    String, // token_hash
-);
+/// Same shape as [`UserPatRow`] with `token_hash` appended — the
+/// prefix-lookup path returns the hash alongside the row so the caller
+/// can constant-time compare without re-querying.
+#[derive(sqlx::FromRow)]
+struct UserPatWithHashRow {
+    id: String,
+    user_id: String,
+    workspace_id: String,
+    name: String,
+    token_prefix: String,
+    expires_at: Option<String>,
+    last_used_at: Option<String>,
+    last_used_ip: Option<String>,
+    last_used_user_agent: Option<String>,
+    created_at: String,
+    revoked_at: Option<String>,
+    token_hash: String,
+}
 
 fn parse_optional_ts(v: Option<String>) -> anyhow::Result<Option<DateTime<Utc>>> {
     match v {
@@ -68,33 +72,24 @@ fn parse_optional_ts(v: Option<String>) -> anyhow::Result<Option<DateTime<Utc>>>
     }
 }
 
-fn row_to_pat(row: PatRow) -> anyhow::Result<UserPat> {
-    let (
-        id,
-        user_id,
-        workspace_id,
-        name,
-        token_prefix,
-        expires_at,
-        last_used_at,
-        last_used_ip,
-        last_used_user_agent,
-        created_at,
-        revoked_at,
-    ) = row;
-    Ok(UserPat {
-        id,
-        user_id,
-        workspace_id,
-        name,
-        token_prefix,
-        expires_at: parse_optional_ts(expires_at)?,
-        last_used_at: parse_optional_ts(last_used_at)?,
-        last_used_ip,
-        last_used_user_agent,
-        created_at: DateTime::parse_from_rfc3339(&created_at)?.with_timezone(&Utc),
-        revoked_at: parse_optional_ts(revoked_at)?,
-    })
+impl TryFrom<UserPatRow> for UserPat {
+    type Error = anyhow::Error;
+
+    fn try_from(row: UserPatRow) -> anyhow::Result<Self> {
+        Ok(UserPat {
+            id: row.id,
+            user_id: row.user_id,
+            workspace_id: row.workspace_id,
+            name: row.name,
+            token_prefix: row.token_prefix,
+            expires_at: parse_optional_ts(row.expires_at)?,
+            last_used_at: parse_optional_ts(row.last_used_at)?,
+            last_used_ip: row.last_used_ip,
+            last_used_user_agent: row.last_used_user_agent,
+            created_at: DateTime::parse_from_rfc3339(&row.created_at)?.with_timezone(&Utc),
+            revoked_at: parse_optional_ts(row.revoked_at)?,
+        })
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -130,8 +125,11 @@ pub async fn insert_user_pat(
 pub async fn list_user_pats(pool: &PgPool, user_id: &str) -> anyhow::Result<Vec<UserPat>> {
     let q =
         format!("SELECT {PAT_FIELDS} FROM user_pats WHERE user_id = $1 ORDER BY created_at DESC");
-    let rows: Vec<PatRow> = sqlx::query_as(&q).bind(user_id).fetch_all(pool).await?;
-    rows.into_iter().map(row_to_pat).collect()
+    let rows = sqlx::query_as::<_, UserPatRow>(&q)
+        .bind(user_id)
+        .fetch_all(pool)
+        .await?;
+    rows.into_iter().map(|r| r.try_into()).collect()
 }
 
 /// Look up candidate PATs by token prefix. The caller must verify the
@@ -142,14 +140,27 @@ pub async fn find_pats_by_prefix(
     token_prefix: &str,
 ) -> anyhow::Result<Vec<(UserPat, String)>> {
     let q = format!("SELECT {PAT_FIELDS}, token_hash FROM user_pats WHERE token_prefix = $1");
-    let rows: Vec<PatRowWithHash> = sqlx::query_as(&q)
+    let rows = sqlx::query_as::<_, UserPatWithHashRow>(&q)
         .bind(token_prefix)
         .fetch_all(pool)
         .await?;
     rows.into_iter()
         .map(|r| {
-            let hash = r.11.clone();
-            let pat = row_to_pat((r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, r.9, r.10))?;
+            let hash = r.token_hash.clone();
+            let pat: UserPat = UserPatRow {
+                id: r.id,
+                user_id: r.user_id,
+                workspace_id: r.workspace_id,
+                name: r.name,
+                token_prefix: r.token_prefix,
+                expires_at: r.expires_at,
+                last_used_at: r.last_used_at,
+                last_used_ip: r.last_used_ip,
+                last_used_user_agent: r.last_used_user_agent,
+                created_at: r.created_at,
+                revoked_at: r.revoked_at,
+            }
+            .try_into()?;
             Ok((pat, hash))
         })
         .collect()
