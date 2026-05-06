@@ -39,6 +39,7 @@ lint-rust:
     cargo run -p xtask --quiet -- gen-event-docs --check
     cargo run -p xtask --quiet -- lint-seams
     cargo run -p xtask --quiet -- check-api-contract
+    cargo run -p xtask --quiet -- check-file-budget --mode=warn
 
 lint-ui:
     pnpm --filter dashboard lint
@@ -49,6 +50,48 @@ lint-ui:
 # crates/onsager-spine/src/factory_event.rs. CI runs `--check`.
 gen-event-docs:
     cargo run -p xtask --quiet -- gen-event-docs
+
+# Source-of-truth token count for one file via Anthropic's count_tokens
+# API, printed alongside the offline tiktoken `o200k_base` count that
+# `xtask check-file-budget` uses in CI. Used to validate / recalibrate
+# the budget. Spec #261 Move 4c.
+#
+# Requires ANTHROPIC_API_KEY in the environment. Override the model
+# with ANTHROPIC_TOKEN_MODEL (defaults to claude-sonnet-4-5).
+measure-tokens FILE:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        echo "error: ANTHROPIC_API_KEY is not set" >&2
+        exit 2
+    fi
+    if [ ! -f "{{FILE}}" ]; then
+        echo "error: {{FILE}} is not a regular file" >&2
+        exit 2
+    fi
+    model="${ANTHROPIC_TOKEN_MODEL:-claude-sonnet-4-5}"
+    payload=$(jq -Rs --arg model "$model" '{
+        model: $model,
+        messages: [{role: "user", content: .}]
+    }' < "{{FILE}}")
+    response=$(curl -fsS https://api.anthropic.com/v1/messages/count_tokens \
+        -H "x-api-key: $ANTHROPIC_API_KEY" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "content-type: application/json" \
+        --data "$payload")
+    api_tokens=$(echo "$response" | jq -r '.input_tokens // empty')
+    if [ -z "$api_tokens" ]; then
+        echo "error: count_tokens returned no input_tokens" >&2
+        echo "$response" >&2
+        exit 1
+    fi
+    tt_tokens=$(cargo run -p xtask --quiet -- count-tokens "{{FILE}}")
+    drift=$(awk -v a="$api_tokens" -v t="$tt_tokens" \
+        'BEGIN { if (a == 0) print "n/a"; else printf "%+.1f%%", (t - a) / a * 100 }')
+    printf 'file:        %s\n' "{{FILE}}"
+    printf 'api tokens:  %s  (model: %s)\n' "$api_tokens" "$model"
+    printf 'tiktoken:    %s  (o200k_base, prod-content only)\n' "$tt_tokens"
+    printf 'drift:       %s  (spec #261 expects within ~15%%)\n' "$drift"
 
 # ── Dev (full stack) ─────────────────────────────────────────────────
 
