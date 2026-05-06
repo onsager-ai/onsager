@@ -8,6 +8,10 @@
 //!
 //! Public by design (matches `registry_events`): the manifest is part of
 //! the architecture documentation, not user data.
+//!
+//! Spec #257 (sub-issue of #222) moved this route from stiglab to
+//! portal so the dashboard's `API_BASE` cutover (#222 Slice 6) can
+//! eventually drop the `routes::portal::proxy` shim.
 
 use axum::response::{IntoResponse, Response};
 use axum::Json;

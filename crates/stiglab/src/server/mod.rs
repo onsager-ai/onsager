@@ -181,21 +181,17 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         // Workflow artifact-kind catalog (issue #102 / #222 Slice 4) —
         // public registry pass-through; portal owns the route now.
         .route("/api/workflow/kinds", any(routes::portal::proxy))
-        // Event-type registry manifest (spec #131 Lever E / #150).
-        // Static, human-reviewed manifest of every FactoryEventKind
-        // variant — which subsystems produce it and which consume it.
-        .route(
-            "/api/registry/events",
-            get(routes::registry_events::list_events),
-        )
-        // Trigger-kind registry manifest (spec #237 / parent #236).
-        // Static, human-reviewed manifest of every TriggerKind variant —
-        // its producer subsystem, category, and UI form shape. Read by
-        // the dashboard's `<TriggerKindPicker>`.
-        .route(
-            "/api/registry/triggers",
-            get(routes::registry_triggers::list_triggers),
-        )
+        // Event-type registry manifest (#222 follow-up #257). Portal
+        // owns this; stiglab proxies the URL through `routes::portal::proxy`
+        // so dashboard fetches keep working pre–API_BASE cutover (#222
+        // Slice 6). Static, human-reviewed manifest of every
+        // `FactoryEventKind` variant — which subsystems produce/consume it.
+        .route("/api/registry/events", any(routes::portal::proxy))
+        // Trigger-kind registry manifest (#222 follow-up #257). Same
+        // proxy shape as `/api/registry/events`. Static, human-reviewed
+        // manifest of every `TriggerKind` variant — read by the
+        // dashboard's `<TriggerKindPicker>`.
+        .route("/api/registry/triggers", any(routes::portal::proxy))
         // Spine API — exposes shared event spine data to the dashboard
         .route("/api/spine/events", get(routes::spine::list_events))
         .route(

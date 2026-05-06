@@ -62,6 +62,12 @@ What this means for stiglab specifically:
     (`db::get_github_app_installation`,
     `db::get_install_webhook_secret_cipher`) — same database,
     separate connection pool.
+  - Registry manifests (`GET /api/registry/events`,
+    `GET /api/registry/triggers`) — #222 follow-up #257. Portal owns
+    the static manifest reads (`onsager_registry::EVENTS` /
+    `TRIGGERS`); stiglab proxies the URLs through
+    `routes::portal::proxy` so dashboard fetches keep working pre–
+    API_BASE cutover. Stiglab no longer depends on `onsager-registry`.
   - Workflow CRUD + GitHub side-effects
     (`GET/POST /api/workflows`, `GET/PATCH/DELETE /api/workflows/:id`,
     `GET /api/workflows/:id/runs`, `GET /api/workflow/kinds`) — Slice 4.

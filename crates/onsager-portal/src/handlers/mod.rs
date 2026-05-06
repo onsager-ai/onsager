@@ -9,6 +9,8 @@ pub mod issues;
 pub mod pats;
 pub mod projects;
 pub mod pull_request;
+pub mod registry_events;
+pub mod registry_triggers;
 pub mod spec_link;
 pub mod webhook;
 pub mod workflow_kinds;

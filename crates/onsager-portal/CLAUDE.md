@@ -156,9 +156,20 @@ first-class edge subsystem. The migration is staged:
   database, separate connection pool. The activation hooks still
   read `installation_db::get_install_webhook_secret_cipher` for
   per-install webhook signature secrets.
+- **Registry manifests — #222 follow-up #257 (landed).**
+  Portal owns `GET /api/registry/events` and
+  `GET /api/registry/triggers`. Pure static reads of
+  `onsager_registry::EVENTS` / `TRIGGERS`; no auth, no DB, no spine
+  writes. Stiglab proxies the URLs through `routes::portal::proxy`
+  and no longer depends on `onsager-registry`. First of the
+  follow-up sub-issues that move the remaining stiglab dashboard
+  surface to portal so #222 Slice 6 can drop the proxy.
 - **Routes (follow-ups).** Slice 6: dashboard `API_BASE` cutover
   to portal directly + delete the `routes::portal::proxy` entries
-  in stiglab.
+  in stiglab. Blocked on the remaining stiglab dashboard routes
+  (`/api/sessions/*`, `/api/spine/*`, `/api/governance/*`,
+  `/api/projects/{id}/issues|pulls|backfill|replay-trigger`)
+  moving to portal — each one its own sub-issue under #222.
 
 While the migration is in flight, stiglab still hosts most of the
 external HTTP surface — that is the drift #222 closes, not a pattern

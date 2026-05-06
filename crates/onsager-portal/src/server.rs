@@ -10,6 +10,7 @@ use crate::gate::GateClient;
 use crate::handlers::{
     auth as auth_handlers, credentials as credential_handlers, github_app as github_app_handlers,
     installations as installation_handlers, pats as pat_handlers, projects as project_handlers,
+    registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
     webhook, workflow_kinds as workflow_kind_handlers, workflows as workflow_handlers,
     workspaces as workspace_handlers,
 };
@@ -183,6 +184,23 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route(
             "/api/workflow/kinds",
             get(workflow_kind_handlers::list_workflow_kinds),
+        )
+        // Event-type registry manifest (#222 follow-up #257). Static,
+        // human-reviewed manifest of every `FactoryEventKind` variant —
+        // which subsystems produce/consume it. Stiglab proxies the URL
+        // through `routes::portal::proxy` so the dashboard's API_BASE
+        // cutover (#222 Slice 6) can land independently.
+        .route(
+            "/api/registry/events",
+            get(registry_event_handlers::list_events),
+        )
+        // Trigger-kind registry manifest (#222 follow-up #257). Static,
+        // human-reviewed manifest of every `TriggerKind` variant — read
+        // by the dashboard's `<TriggerKindPicker>`. Same proxy shape
+        // as `/api/registry/events` above.
+        .route(
+            "/api/registry/triggers",
+            get(registry_trigger_handlers::list_triggers),
         );
 
     // Dev-login is debug-only — `cargo build --release` strips both the
