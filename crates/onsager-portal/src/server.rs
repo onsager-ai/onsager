@@ -2,12 +2,14 @@
 
 use std::sync::Arc;
 
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 
 use crate::config::Config;
 use crate::gate::GateClient;
-use crate::handlers::{auth as auth_handlers, pats as pat_handlers, webhook};
+use crate::handlers::{
+    auth as auth_handlers, credentials as credential_handlers, pats as pat_handlers, webhook,
+};
 use crate::state::AppState;
 
 /// Boot the webhook server. Blocks until the listener exits.
@@ -74,7 +76,21 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/pats",
             get(pat_handlers::list_pats).post(pat_handlers::create_pat),
         )
-        .route("/api/pats/{id}", delete(pat_handlers::delete_pat));
+        .route("/api/pats/{id}", delete(pat_handlers::delete_pat))
+        // Per-workspace credential CRUD (#222 Slice 2a). Stiglab proxies
+        // `/api/workspaces/{id}/credentials*` here so dashboard fetches
+        // keep working pre–API_BASE cutover. Auth (cookie or PAT bearer
+        // — PATs are gated by the `pat_destructive_blocked` guardrail
+        // for overwrites/deletes) is enforced by the `AuthUser`
+        // extractor in each handler.
+        .route(
+            "/api/workspaces/{workspace_id}/credentials",
+            get(credential_handlers::list_credentials),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/credentials/{name}",
+            put(credential_handlers::set_credential).delete(credential_handlers::delete_credential),
+        );
 
     // Dev-login is debug-only — `cargo build --release` strips both the
     // route handler symbol and this registration so production deploys

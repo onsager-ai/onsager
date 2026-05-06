@@ -33,8 +33,15 @@ What this means for stiglab specifically:
   - Personal Access Tokens (`GET/POST /api/pats`,
     `DELETE /api/pats/{id}`) — Slice 2b. Portal mints/lists/revokes;
     stiglab still verifies presented PATs in its own `AuthUser`
-    extractor for the credentials/workspaces/projects/workflows
-    routes that haven't moved yet.
+    extractor for the workspaces/projects/workflows routes that
+    haven't moved yet.
+  - Per-workspace credentials
+    (`GET /api/workspaces/:id/credentials`,
+    `PUT/DELETE /api/workspaces/:id/credentials/:name`) — Slice 2a.
+    Portal owns the read/write surface and the AES-256-GCM helpers;
+    stiglab still owns the in-process decrypt-and-launch path used
+    when spawning agent sessions (`decrypt_credential` in
+    `tasks.rs`/`workflows.rs`).
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `synodic`,
   or `ising`. **Lever C status (#148): no remaining violation** —
   `HttpStiglabDispatcher` and the `POST /api/shaping` route it

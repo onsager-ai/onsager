@@ -294,85 +294,15 @@ async fn pat_pinned_to_w1_cannot_list_w2_sessions() {
 }
 
 // ── per-workspace credentials live under /api/workspaces/:workspace/credentials ──
-
-#[tokio::test]
-async fn credentials_are_scoped_per_workspace() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool, "u", 1).await;
-    let w1 = seed_workspace(&pool, &user.id, "w1").await;
-    let w2 = seed_workspace(&pool, &user.id, "w2").await;
-    let session_token = seed_session_cookie(&pool, &user.id).await;
-    let state = AppState::new(pool, auth_enabled_config(), None);
-    let app_ = app(state);
-
-    // PUT a credential in W1.
-    let put = Request::builder()
-        .method("PUT")
-        .uri(format!(
-            "/api/workspaces/{}/credentials/CLAUDE_CODE_OAUTH_TOKEN",
-            w1.id
-        ))
-        .header(header::COOKIE, cookie(&session_token))
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            serde_json::json!({ "value": "w1-secret" }).to_string(),
-        ))
-        .unwrap();
-    let resp = app_.clone().oneshot(put).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    // GET in W1 sees it.
-    let list_w1 = Request::builder()
-        .uri(format!("/api/workspaces/{}/credentials", w1.id))
-        .header(header::COOKIE, cookie(&session_token))
-        .body(Body::empty())
-        .unwrap();
-    let resp = app_.clone().oneshot(list_w1).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = read_json(resp).await;
-    let names: Vec<&str> = body["credentials"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|c| c["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(names, vec!["CLAUDE_CODE_OAUTH_TOKEN"]);
-
-    // GET in W2 — same user, different workspace — sees nothing.
-    let list_w2 = Request::builder()
-        .uri(format!("/api/workspaces/{}/credentials", w2.id))
-        .header(header::COOKIE, cookie(&session_token))
-        .body(Body::empty())
-        .unwrap();
-    let resp = app_.oneshot(list_w2).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = read_json(resp).await;
-    assert!(body["credentials"].as_array().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn credentials_in_other_workspace_404_for_non_member() {
-    let pool = test_pool().await;
-    let owner = seed_user(&pool, "owner", 1).await;
-    let outsider = seed_user(&pool, "outsider", 2).await;
-    let w1 = seed_workspace(&pool, &owner.id, "w1").await;
-    // outsider has no membership in w1.
-    let outsider_token = seed_session_cookie(&pool, &outsider.id).await;
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let resp = app(state)
-        .oneshot(
-            Request::builder()
-                .uri(format!("/api/workspaces/{}/credentials", w1.id))
-                .header(header::COOKIE, cookie(&outsider_token))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    // Outsider must see workspace-not-found, not the credential surface.
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-}
+//
+// Spec #222 Slice 2a moved the route group to portal. The route-level
+// `credentials_are_scoped_per_workspace` and
+// `credentials_in_other_workspace_404_for_non_member` tests retire on
+// the stiglab side (the route is now a proxy and portal isn't running
+// in this harness) pending a Postgres-backed portal integration-test
+// harness — same status as the Slice 2b `/api/pats` CRUD tests. The
+// DB-level partition test below stays — it asserts the in-process
+// session-launch credential lookup contract that stiglab still owns.
 
 // ── credential lookup at session-launch time ──
 

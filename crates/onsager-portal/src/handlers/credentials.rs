@@ -1,0 +1,213 @@
+//! Per-workspace credential CRUD (spec #222 Slice 2a — moved from
+//! stiglab).
+//!
+//! Credentials live under `/api/workspaces/:workspace/credentials` so
+//! a user holding two workspaces gets two independent secret stores —
+//! launching a session in W1 will never reach for a token registered
+//! in W2. Every route funnels through `require_workspace_access` for
+//! the 404-not-403 membership check + PAT scope guardrail.
+
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde::Deserialize;
+
+use crate::auth::{encrypt_credential, AuthUser, RequestPrincipal};
+use crate::credential_db;
+use crate::state::AppState;
+
+/// Authorize an `AuthUser` against a target workspace. Two checks, in
+/// order:
+///
+/// 1. **PAT scope (403 on mismatch).** If the principal is a PAT
+///    pinned to a workspace, the request must target that exact
+///    workspace.
+/// 2. **Membership (404 on miss).** Otherwise the caller must be a
+///    member of the workspace; non-members get a flat 404 to avoid
+///    leaking workspace existence.
+async fn require_workspace_access(
+    pool: &sqlx::postgres::PgPool,
+    auth_user: &AuthUser,
+    workspace_id: &str,
+) -> Result<(), Response> {
+    if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
+        if pinned != workspace_id {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "pat_workspace_scope_mismatch",
+                    "detail": "PAT is pinned to a different workspace",
+                })),
+            )
+                .into_response());
+        }
+    }
+    match credential_db::is_workspace_member(pool, workspace_id, &auth_user.user_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "workspace not found" })),
+        )
+            .into_response()),
+        Err(e) => {
+            tracing::error!("failed to check workspace membership: {e}");
+            Err(StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+    }
+}
+
+/// Standard 403 body for the PAT destructive-credential guardrail
+/// (issue #143). PATs may read and create credentials, but deleting
+/// an existing credential or overwriting one requires a real browser
+/// session.
+fn pat_destructive_blocked() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({
+            "error": "pat_destructive_blocked",
+            "detail": "Use the dashboard to delete or overwrite credentials",
+        })),
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct SetCredentialBody {
+    pub value: String,
+}
+
+/// `GET /api/workspaces/:workspace/credentials` — list credential names
+/// for the current user in this workspace (no values).
+pub async fn list_credentials(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(workspace_id): Path<String>,
+) -> Response {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workspace_id).await {
+        return r;
+    }
+    match credential_db::get_user_credentials(&state.pool, &workspace_id, &auth_user.user_id).await
+    {
+        Ok(creds) => {
+            let items: Vec<_> = creds
+                .into_iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "name": c.name,
+                        "created_at": c.created_at,
+                        "updated_at": c.updated_at,
+                    })
+                })
+                .collect();
+            Json(serde_json::json!({ "credentials": items })).into_response()
+        }
+        Err(e) => {
+            tracing::error!("failed to list credentials: {e}");
+            // Portal serves the public edge — opaque message to the
+            // client, full detail in logs. Don't echo the underlying
+            // sqlx error (could leak schema/topology).
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+/// `PUT /api/workspaces/:workspace/credentials/{name}` — set or update
+/// a credential.
+pub async fn set_credential(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path((workspace_id, name)): Path<(String, String)>,
+    Json(body): Json<SetCredentialBody>,
+) -> Response {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workspace_id).await {
+        return r;
+    }
+
+    let Some(ref key) = state.config.credential_key else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "credential storage not configured (set ONSAGER_CREDENTIAL_KEY)"
+            })),
+        )
+            .into_response();
+    };
+
+    let encrypted = match encrypt_credential(key, &body.value) {
+        Ok(enc) => enc,
+        Err(e) => {
+            tracing::error!("failed to encrypt credential: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "encryption failed").into_response();
+        }
+    };
+
+    // PAT principals can create new credentials but not overwrite
+    // existing ones. The `insert_..._if_absent` path makes the
+    // create-only contract atomic at the DB layer — two concurrent
+    // PAT PUTs for the same new name resolve as one insert + one
+    // `pat_destructive_blocked`, never as a silent overwrite.
+    if matches!(auth_user.principal, RequestPrincipal::Pat { .. }) {
+        return match credential_db::insert_user_credential_if_absent(
+            &state.pool,
+            &workspace_id,
+            &auth_user.user_id,
+            &name,
+            &encrypted,
+        )
+        .await
+        {
+            Ok(true) => Json(serde_json::json!({ "ok": true })).into_response(),
+            Ok(false) => pat_destructive_blocked(),
+            Err(e) => {
+                tracing::error!("failed to set credential (PAT path): {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+            }
+        };
+    }
+
+    match credential_db::set_user_credential(
+        &state.pool,
+        &workspace_id,
+        &auth_user.user_id,
+        &name,
+        &encrypted,
+    )
+    .await
+    {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => {
+            tracing::error!("failed to set credential: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+/// `DELETE /api/workspaces/:workspace/credentials/{name}` — delete a
+/// credential.
+pub async fn delete_credential(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path((workspace_id, name)): Path<(String, String)>,
+) -> Response {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workspace_id).await {
+        return r;
+    }
+    if matches!(auth_user.principal, RequestPrincipal::Pat { .. }) {
+        return pat_destructive_blocked();
+    }
+    match credential_db::delete_user_credential(
+        &state.pool,
+        &workspace_id,
+        &auth_user.user_id,
+        &name,
+    )
+    .await
+    {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => {
+            tracing::error!("failed to delete credential: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
