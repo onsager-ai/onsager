@@ -150,25 +150,57 @@ async fn run_server(
     // Warm-start at `max_event_id` so a fresh boot doesn't replay every
     // historical request. Phase 6 will persist a per-process cursor.
     if let Some(spine) = state.spine.as_ref() {
-        let listener_store = spine.store_clone();
-        let listener_state = state.clone();
-        tokio::spawn(async move {
-            let since = match listener_store.max_event_id().await {
-                Ok(cursor) => cursor,
-                Err(e) => {
-                    tracing::warn!(
-                        "stiglab: max_event_id lookup failed ({e}); starting \
-                         shaping_dispatched listener from the beginning"
-                    );
-                    None
+        // forge.shaping_dispatched listener (spec #131 / ADR 0004 Lever C).
+        {
+            let listener_store = spine.store_clone();
+            let listener_state = state.clone();
+            tokio::spawn(async move {
+                let since = match listener_store.max_event_id().await {
+                    Ok(cursor) => cursor,
+                    Err(e) => {
+                        tracing::warn!(
+                            "stiglab: max_event_id lookup failed ({e}); starting \
+                             shaping_dispatched listener from the beginning"
+                        );
+                        None
+                    }
+                };
+                if let Err(e) =
+                    stiglab::server::shaping_listener::run(listener_store, listener_state, since)
+                        .await
+                {
+                    tracing::error!("stiglab: shaping_dispatched listener exited: {e}");
                 }
-            };
-            if let Err(e) =
-                stiglab::server::shaping_listener::run(listener_store, listener_state, since).await
-            {
-                tracing::error!("stiglab: shaping_dispatched listener exited: {e}");
-            }
-        });
+            });
+        }
+        // portal.session_requested listener (spec #222 Follow-up 3).
+        // Portal creates sessions and emits this event; stiglab dispatches
+        // to the agent WebSocket.
+        {
+            let listener_store = spine.store_clone();
+            let listener_state = state.clone();
+            tokio::spawn(async move {
+                let since = match listener_store.max_event_id().await {
+                    Ok(cursor) => cursor,
+                    Err(e) => {
+                        tracing::warn!(
+                            "stiglab: max_event_id lookup failed ({e}); starting \
+                             session_requested listener from the beginning"
+                        );
+                        None
+                    }
+                };
+                if let Err(e) = stiglab::server::session_requested_listener::run(
+                    listener_store,
+                    listener_state,
+                    since,
+                )
+                .await
+                {
+                    tracing::error!("stiglab: session_requested listener exited: {e}");
+                }
+            });
+        }
     }
 
     // Start built-in runner if enabled

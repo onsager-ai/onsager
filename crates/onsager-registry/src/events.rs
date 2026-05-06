@@ -398,6 +398,15 @@ pub const EVENTS: EventManifest = EventManifest {
             audit_only: true,
             description: "A node missed its expected heartbeat.",
         },
+        // -- Portal intents (dashboard → agent dispatch) ---------------
+        EventDefinition {
+            kind: "portal.session_requested",
+            schema_version: 1,
+            producers: &[Subsystem::Portal],
+            consumers: &[Subsystem::Stiglab],
+            audit_only: false,
+            description: "Dashboard task request from portal; stiglab dispatches the session to an agent node.",
+        },
         // -- Synodic events --------------------------------------------
         EventDefinition {
             kind: "synodic.gate_evaluated",
