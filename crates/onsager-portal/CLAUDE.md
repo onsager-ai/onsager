@@ -164,11 +164,21 @@ first-class edge subsystem. The migration is staged:
   and no longer depends on `onsager-registry`. First of the
   follow-up sub-issues that move the remaining stiglab dashboard
   surface to portal so #222 Slice 6 can drop the proxy.
+- **Spine API — #222 follow-up #259 (landed).** Portal owns the
+  seven dashboard-facing spine routes
+  (`GET /api/spine/events`, `GET/POST /api/spine/artifacts`,
+  `GET /api/spine/artifacts/:id`,
+  `POST /api/spine/artifacts/:id/{retry,abort,override-gate}`).
+  Reads run against `events_ext` / `artifacts`; writes either
+  `INSERT` an artifact row or `EventStore::append_ext` a single
+  event — no synodic side-effects, no GitHub side-effects. Stiglab
+  proxies the URLs through `routes::portal::proxy` and keeps
+  `SpineEmitter` for its own session-lifecycle emits.
 - **Routes (follow-ups).** Slice 6: dashboard `API_BASE` cutover
   to portal directly + delete the `routes::portal::proxy` entries
   in stiglab. Blocked on the remaining stiglab dashboard routes
-  (`/api/sessions/*`, `/api/spine/*`, `/api/governance/*`,
-  `/api/projects/{id}/issues|pulls|backfill|replay-trigger`)
+  (`/api/sessions/*` + `/api/tasks` + `/api/nodes`,
+  `/api/governance/*`, `/api/projects/{id}/issues|pulls|backfill|replay-trigger`)
   moving to portal — each one its own sub-issue under #222.
 
 While the migration is in flight, stiglab still hosts most of the

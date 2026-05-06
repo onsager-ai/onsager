@@ -192,27 +192,30 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         // manifest of every `TriggerKind` variant — read by the
         // dashboard's `<TriggerKindPicker>`.
         .route("/api/registry/triggers", any(routes::portal::proxy))
-        // Spine API — exposes shared event spine data to the dashboard
-        .route("/api/spine/events", get(routes::spine::list_events))
-        .route(
-            "/api/spine/artifacts",
-            get(routes::spine::list_artifacts).post(routes::spine::register_artifact),
-        )
-        .route(
-            "/api/spine/artifacts/{id}",
-            get(routes::spine::get_artifact),
-        )
+        // Spine API (#222 follow-up #259). Portal owns the seven
+        // `/api/spine/*` routes; stiglab proxies them through
+        // `routes::portal::proxy` so dashboard fetches keep working
+        // pre–API_BASE cutover (#222 Slice 6). Reads land directly
+        // against `events_ext` / `artifacts`; writes emit via
+        // `EventStore::append_ext`. Stiglab still uses the spine pool
+        // for its own in-process needs (`SpineEmitter` for session
+        // lifecycle emits, `routes::projects::replay_issue_trigger`
+        // reads) — same database, separate connection pool, portal is
+        // the only HTTP writer.
+        .route("/api/spine/events", any(routes::portal::proxy))
+        .route("/api/spine/artifacts", any(routes::portal::proxy))
+        .route("/api/spine/artifacts/{id}", any(routes::portal::proxy))
         .route(
             "/api/spine/artifacts/{id}/retry",
-            post(routes::spine::retry_artifact),
+            any(routes::portal::proxy),
         )
         .route(
             "/api/spine/artifacts/{id}/abort",
-            post(routes::spine::abort_artifact),
+            any(routes::portal::proxy),
         )
         .route(
             "/api/spine/artifacts/{id}/override-gate",
-            post(routes::spine::override_gate),
+            any(routes::portal::proxy),
         );
 
     // Dev-login (issue #193) lives on portal post-#222 Slice 5; the

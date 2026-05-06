@@ -12,6 +12,7 @@ pub mod pull_request;
 pub mod registry_events;
 pub mod registry_triggers;
 pub mod spec_link;
+pub mod spine;
 pub mod webhook;
 pub mod workflow_kinds;
 pub mod workflows;
