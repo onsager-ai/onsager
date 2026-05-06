@@ -1,12 +1,14 @@
 -- Onsager #222 Slice 3b: github_app_installations moves into portal.
 --
 -- The table holds the (workspace, GitHub App install) link that webhook
--- ingestion, OAuth callback, and project onboarding all key on. Slice 3a
--- (PR #254) moved workspaces / workspace_members / projects into the
--- spine; per-installation state stays edge-shaped — only portal needs to
--- decrypt the stored webhook secret cipher and mint installation tokens
--- for the App flow — so it lives in the portal migrations directory next
--- to user_credentials / user_pats / portal_webhook_secrets.
+-- ingestion, OAuth callback, and project onboarding all key on.
+-- Per-installation state is edge-shaped — only portal needs to decrypt
+-- the stored webhook secret cipher and mint installation tokens for the
+-- App flow — so it lives in the portal migrations directory next to
+-- user_credentials / user_pats / portal_webhook_secrets. The
+-- workspaces / workspace_members / projects schema moves into the spine
+-- migrations directory under Slice 3a (in-flight as PR #254); this slice
+-- is independent of 3a and may land before or after.
 --
 -- Portal becomes the sole writer (the install-flow + manual-register
 -- routes move with this migration). Stiglab keeps idempotent

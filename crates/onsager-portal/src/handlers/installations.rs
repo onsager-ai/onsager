@@ -30,9 +30,9 @@ use crate::state::AppState;
 
 /// Authorize an `AuthUser` against a target workspace. Mirrors the
 /// helper in `handlers/credentials.rs` — duplicated here intentionally
-/// while Slice 3a's portal-side `require_workspace_access` lives in a
-/// sibling handler module; a follow-up will lift this into a shared
-/// portal access helper.
+/// because each slice landed its own copy. A follow-up will lift the
+/// shared shape into a portal-wide access helper once the route
+/// migrations under #222 settle.
 pub(crate) async fn require_workspace_access(
     pool: &PgPool,
     auth_user: &AuthUser,

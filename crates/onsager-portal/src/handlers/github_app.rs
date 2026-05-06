@@ -28,6 +28,13 @@ use crate::installation::GitHubAppInstallation;
 use crate::installation_db;
 use crate::state::AppState;
 
+/// OAuth `state`-CSRF cookie name. Kept as the legacy `stiglab_*`
+/// value byte-for-byte so any install flow already in progress when
+/// this slice deploys (cookie set by the stiglab handler before the
+/// switch, callback hitting the portal handler after) round-trips
+/// without a 400. The cookie has a 10-minute `Max-Age` so the legacy
+/// name retires naturally; a follow-up can rename to
+/// `onsager_github_app_state` once an operational window passes.
 const STATE_COOKIE: &str = "stiglab_github_app_state";
 
 /// GET /api/github-app/config — Tiny discovery endpoint so the
