@@ -15,7 +15,7 @@ pub mod ws;
 pub use sqlx::AnyPool;
 
 use axum::http::{header, HeaderValue};
-use axum::routing::{any, get, post, put};
+use axum::routing::{any, get, post};
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
@@ -59,16 +59,21 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route("/api/auth/logout", any(routes::portal::proxy))
         .route("/api/auth/sso/redeem", any(routes::portal::proxy))
         .route("/api/auth/sso/finish", any(routes::portal::proxy))
-        // Credential routes — per-workspace post-#164.  Each workspace
-        // carries its own secret store; sessions launched in W1 will
-        // never reach for a token registered in W2.
+        // Credential routes (#222 Slice 2a). Portal owns
+        // `/api/workspaces/:id/credentials*`; stiglab proxies them so
+        // dashboard fetches keep working pre–API_BASE cutover. PAT
+        // bearer auth + the destructive-credential guardrail
+        // (`pat_destructive_blocked`) live on portal now. Stiglab
+        // still decrypts these rows in-process at session-launch time
+        // (`session_credentials.rs`) — same database, separate
+        // connection pool, portal is the only writer.
         .route(
             "/api/workspaces/{workspace_id}/credentials",
-            get(routes::credentials::list_credentials),
+            any(routes::portal::proxy),
         )
         .route(
             "/api/workspaces/{workspace_id}/credentials/{name}",
-            put(routes::credentials::set_credential).delete(routes::credentials::delete_credential),
+            any(routes::portal::proxy),
         )
         // Personal Access Tokens (issue #143). Spec #222 Slice 2b moved
         // `/api/pats*` to portal; stiglab keeps the URLs as reverse

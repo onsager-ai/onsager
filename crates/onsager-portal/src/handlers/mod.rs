@@ -2,6 +2,7 @@
 //! the user-facing `/api/auth/*` routes portal owns post-#222 Slice 5.
 
 pub mod auth;
+pub mod credentials;
 pub mod issues;
 pub mod pats;
 pub mod pull_request;

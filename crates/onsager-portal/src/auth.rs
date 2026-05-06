@@ -14,12 +14,77 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use ring::aead;
 use ring::digest;
 use ring::rand::{SecureRandom, SystemRandom};
 
 use crate::auth_db;
 use crate::pat_db;
 use crate::state::AppState;
+
+// ── Credential Encryption (AES-256-GCM) ──
+//
+// Spec #222 Slice 2a — portal owns `/api/workspaces/:id/credentials*`,
+// so the AES-GCM helpers live here. The format (12-byte nonce
+// prepended to GCM-sealed ciphertext, hex-encoded) is byte-for-byte
+// the legacy stiglab format — migrations are read-compatible.
+
+/// Encrypt a plaintext string using AES-256-GCM. Returns a hex-encoded
+/// string of `nonce (12B) || ciphertext || tag`.
+pub fn encrypt_credential(key_hex: &str, plaintext: &str) -> anyhow::Result<String> {
+    let key_bytes = hex::decode(key_hex)?;
+    let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, &key_bytes)
+        .map_err(|_| anyhow::anyhow!("invalid encryption key"))?;
+    let sealing_key = aead::LessSafeKey::new(unbound_key);
+
+    let rng = SystemRandom::new();
+    let mut nonce_bytes = [0u8; 12];
+    rng.fill(&mut nonce_bytes)
+        .map_err(|_| anyhow::anyhow!("failed to generate nonce"))?;
+    let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+
+    let mut in_out = plaintext.as_bytes().to_vec();
+    sealing_key
+        .seal_in_place_append_tag(nonce, aead::Aad::empty(), &mut in_out)
+        .map_err(|_| anyhow::anyhow!("encryption failed"))?;
+
+    let mut result = nonce_bytes.to_vec();
+    result.extend_from_slice(&in_out);
+    Ok(hex::encode(result))
+}
+
+/// Decrypt a hex-encoded `nonce || ciphertext || tag` string using
+/// AES-256-GCM.
+pub fn decrypt_credential(key_hex: &str, encrypted_hex: &str) -> anyhow::Result<String> {
+    let key_bytes = hex::decode(key_hex)?;
+    let data = hex::decode(encrypted_hex)?;
+    if data.len() < 12 {
+        anyhow::bail!("invalid encrypted data");
+    }
+
+    let (nonce_bytes, ciphertext) = data.split_at(12);
+    let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, &key_bytes)
+        .map_err(|_| anyhow::anyhow!("invalid encryption key"))?;
+    let opening_key = aead::LessSafeKey::new(unbound_key);
+    let nonce = aead::Nonce::try_assume_unique_for_key(nonce_bytes)
+        .map_err(|_| anyhow::anyhow!("invalid nonce"))?;
+
+    let mut in_out = ciphertext.to_vec();
+    let plaintext = opening_key
+        .open_in_place(nonce, aead::Aad::empty(), &mut in_out)
+        .map_err(|_| anyhow::anyhow!("decryption failed"))?;
+    Ok(String::from_utf8(plaintext.to_vec())?)
+}
+
+/// Generate a random 32-byte hex-encoded key for AES-256-GCM. Operator
+/// helper: `cargo run -p onsager-portal -- generate-credential-key`
+/// would call this if we ever wire it up.
+pub fn generate_credential_key() -> String {
+    let rng = SystemRandom::new();
+    let mut key = [0u8; 32];
+    rng.fill(&mut key).expect("failed to generate random key");
+    hex::encode(key)
+}
 
 // ── GitHub OAuth (re-exports) ──
 //

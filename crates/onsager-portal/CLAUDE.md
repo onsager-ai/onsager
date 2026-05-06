@@ -84,20 +84,32 @@ first-class edge subsystem. The migration is staged:
   `crates/onsager-portal/migrations/005_user_pats.sql`. Stiglab
   proxies `/api/pats*` through `routes::portal::proxy` and keeps
   its own PAT machinery in `auth.rs` for the routes that still
-  accept PAT bearer auth (credentials in 2a, workspaces/projects
-  in 3, workflows in 4) — same database, separate connection
-  pool, portal is the only writer.
-- **Routes (follow-ups).** Slices 2a/3/4: move
-  `/api/credentials/*`, `/api/workspaces/*`,
+  accept PAT bearer auth (workspaces/projects in 3, workflows in
+  4) — same database, separate connection pool, portal is the
+  only writer.
+- **Slice 2a — credentials (landed).** Portal owns
+  `GET /api/workspaces/:id/credentials`,
+  `PUT/DELETE /api/workspaces/:id/credentials/:name`. The
+  AES-256-GCM helpers (`encrypt_credential`,
+  `decrypt_credential`, `generate_credential_key`) moved from
+  `stiglab/src/server/auth.rs` to `onsager-portal/src/auth.rs`;
+  CRUD lives in `onsager-portal/src/credential_db.rs`. The
+  `user_credentials` schema lives in
+  `crates/onsager-portal/migrations/006_user_credentials.sql`.
+  Stiglab proxies the URLs through `routes::portal::proxy` and
+  keeps its own `decrypt_credential` for the in-process
+  decrypt-and-launch path used by `tasks.rs`/`workflows.rs` —
+  same database, separate connection pool, portal is the only
+  writer.
+- **Routes (follow-ups).** Slices 3/4: move `/api/workspaces/*`,
   `/api/installations/*`, `/api/workflows/*`, and the preset
   registry into portal. Each route group lands atomically (portal
   handler live + stiglab handler deleted in the same PR).
 - **Schema split (follow-ups).** `workspaces` /
   `workspace_members` / `projects` move into
-  `crates/onsager-spine/migrations/`; `user_credentials`,
-  `github_app_installations` move into
-  `crates/onsager-portal/migrations/` next to the auth migrations.
-  Atomic per-PR per Lever B.
+  `crates/onsager-spine/migrations/`; `github_app_installations`
+  move into `crates/onsager-portal/migrations/` next to the auth
+  migrations. Atomic per-PR per Lever B.
 
 While the migration is in flight, stiglab still hosts most of the
 external HTTP surface — that is the drift #222 closes, not a pattern
