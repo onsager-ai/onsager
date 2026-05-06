@@ -11,7 +11,6 @@ pub mod spine;
 pub mod tasks;
 pub mod workflow_kinds;
 pub mod workflows;
-pub mod workspaces;
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

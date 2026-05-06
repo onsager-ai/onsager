@@ -52,10 +52,16 @@ What this means for stiglab specifically:
     the in-process session/task/workflow lookups (`db::is_workspace_member`,
     `db::get_project`, `db::list_workspaces_for_user`, etc.) — same
     database, separate connection pool.
-  - GitHub App install + per-workspace installation routes
-    (`/api/workspaces/:id/github-installations*`,
-    `/api/github-app/*`) — Slice 3b pending. Stiglab still owns
-    these and the `github_app_installations` table.
+  - GitHub App installation routes
+    (`GET/POST /api/workspaces/:id/github-installations*`,
+    `GET /api/github-app/{config,install-start,callback}`) — Slice 3b.
+    Portal is the only writer; the `github_app_installations` schema
+    lives in `crates/onsager-portal/migrations/007_github_app_installations.sql`
+    post-Slice 3b. Stiglab still reads the same Postgres table for
+    the in-process session/task/project lookups
+    (`db::get_github_app_installation`,
+    `db::get_install_webhook_secret_cipher`) — same database,
+    separate connection pool.
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `synodic`,
   or `ising`. **Lever C status (#148): no remaining violation** —
   `HttpStiglabDispatcher` and the `POST /api/shaping` route it

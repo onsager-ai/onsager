@@ -8,8 +8,9 @@ use axum::Router;
 use crate::config::Config;
 use crate::gate::GateClient;
 use crate::handlers::{
-    auth as auth_handlers, credentials as credential_handlers, pats as pat_handlers,
-    projects as project_handlers, webhook, workspaces as workspace_handlers,
+    auth as auth_handlers, credentials as credential_handlers, github_app as github_app_handlers,
+    installations as installation_handlers, pats as pat_handlers, projects as project_handlers,
+    webhook, workspaces as workspace_handlers,
 };
 use crate::state::AppState;
 
@@ -121,6 +122,36 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route(
             "/api/projects/{project_id}",
             get(project_handlers::get_project).delete(project_handlers::delete_project),
+        )
+        // GitHub App installation routes (#222 Slice 3b). Same proxy
+        // shape as Slice 3a above; the `github_app_installations`
+        // schema lives in `crates/onsager-portal/migrations/007_github_app_installations.sql`.
+        .route(
+            "/api/workspaces/{workspace_id}/github-installations",
+            get(installation_handlers::list_installations)
+                .post(installation_handlers::register_installation),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/github-installations/{install_row_id}",
+            delete(installation_handlers::delete_installation),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/github-installations/{install_row_id}/accessible-repos",
+            get(installation_handlers::list_accessible_repos),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/github-installations/{install_row_id}/repos/{owner}/{repo}/labels",
+            get(installation_handlers::list_repo_labels),
+        )
+        // GitHub App install-flow + discovery (#222 Slice 3b).
+        .route("/api/github-app/config", get(github_app_handlers::config))
+        .route(
+            "/api/github-app/install-start",
+            get(github_app_handlers::install_start),
+        )
+        .route(
+            "/api/github-app/callback",
+            get(github_app_handlers::install_callback),
         );
 
     // Dev-login is debug-only — `cargo build --release` strips both the

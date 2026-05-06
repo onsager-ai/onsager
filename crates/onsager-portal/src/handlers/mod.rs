@@ -3,6 +3,8 @@
 
 pub mod auth;
 pub mod credentials;
+pub mod github_app;
+pub mod installations;
 pub mod issues;
 pub mod pats;
 pub mod projects;

@@ -122,14 +122,27 @@ first-class edge subsystem. The migration is staged:
   the workflow runtime — same database, separate connection pool,
   portal is the only writer. The PAT-pinned-workspace 403 guardrail
   follows the routes.
-- **Routes (follow-ups).** Slices 3b/4: move
-  `/api/workspaces/:id/github-installations*`,
-  `/api/github-app/*`, `/api/workflows/*`, and the preset registry
+- **Slice 3b — GitHub App install (landed).** Portal owns
+  `GET/POST /api/workspaces/:id/github-installations`,
+  `DELETE /api/workspaces/:id/github-installations/:install_row_id`,
+  `GET /api/workspaces/:id/github-installations/:install_row_id/accessible-repos`,
+  `GET /api/workspaces/:id/github-installations/:install_row_id/repos/:owner/:repo/labels`,
+  `GET /api/github-app/{config,install-start,callback}`. Domain
+  types live in `onsager-portal/src/installation.rs`; CRUD in
+  `onsager-portal/src/installation_db.rs`; routes in
+  `onsager-portal/src/handlers/{installations,github_app}.rs`. The
+  `github_app_installations` schema moved into
+  `crates/onsager-portal/migrations/007_github_app_installations.sql`.
+  Stiglab proxies the URLs through `routes::portal::proxy` and
+  keeps its own `db::*` reads (`get_github_app_installation`,
+  `get_install_webhook_secret_cipher`) for the in-process needs of
+  `routes/projects.rs` live-data hydration — same database,
+  separate connection pool, portal is the only writer.
+- **Routes (follow-ups).** Slice 4: move `/api/workflows/*` and
+  the `workflow_activation` decomposition (GitHub side-effects →
+  portal; state transition → spine intent + stiglab listener)
   into portal. Each route group lands atomically (portal handler
   live + stiglab handler deleted in the same PR).
-- **Schema split (follow-ups).** `github_app_installations` moves
-  into `crates/onsager-portal/migrations/` (Slice 3b) next to the
-  auth migrations. Atomic per-PR per Lever B.
 
 While the migration is in flight, stiglab still hosts most of the
 external HTTP surface — that is the drift #222 closes, not a pattern
