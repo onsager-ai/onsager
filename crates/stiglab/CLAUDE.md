@@ -27,8 +27,14 @@ What this means for stiglab specifically:
     `/api/auth/github/callback`, `/api/auth/me`, `/api/auth/logout`,
     `/api/auth/sso/redeem`, `/api/auth/sso/finish`,
     `/api/auth/dev-login` in debug builds) — Slice 5. Stiglab keeps
-    cookie validation (`AuthUser` extractor reads the shared
-    `auth_sessions` table) but no longer mints sessions.
+    cookie + PAT validation (`AuthUser` extractor reads the shared
+    `auth_sessions` and `user_pats` tables) but no longer mints
+    sessions or PATs.
+  - Personal Access Tokens (`GET/POST /api/pats`,
+    `DELETE /api/pats/{id}`) — Slice 2b. Portal mints/lists/revokes;
+    stiglab still verifies presented PATs in its own `AuthUser`
+    extractor for the credentials/workspaces/projects/workflows
+    routes that haven't moved yet.
 - **Forbidden HTTP surfaces.** Anything called from `forge`, `synodic`,
   or `ising`. **Lever C status (#148): no remaining violation** —
   `HttpStiglabDispatcher` and the `POST /api/shaping` route it

@@ -1,18 +1,23 @@
-//! Integration tests for Personal Access Tokens (issue #143).
+//! Integration tests for stiglab's PAT-aware `AuthUser` extractor and the
+//! credential / workspace-scope routes that still consume PAT bearer auth.
 //!
-//! Covers the contract surface most likely to break:
-//!   * the PAT extractor accepts the Bearer header end-to-end and prefers
-//!     it over the session cookie,
-//!   * revoked / expired PATs return 401 with the documented
-//!     `WWW-Authenticate` body and don't leak which arm failed,
-//!   * the destructive-credential guardrail (PUT-overwrite + DELETE) maps
-//!     to 403 `pat_destructive_blocked`,
+//! Spec #222 Slice 2b moved `/api/pats*` CRUD to portal — minting, listing,
+//! and revoking PATs is exercised on the portal side. The tests here cover
+//! the bits that remain stiglab-owned for the duration of Slices 2a / 3 / 4:
+//!
+//!   * stiglab's `verify_pat` DB primitive and `AuthUser` Bearer-vs-cookie
+//!     precedence (still hot because credentials/workspaces/projects/
+//!     workflows accept PAT bearer auth on stiglab),
+//!   * the destructive-credential guardrail (PUT-overwrite + DELETE) maps to
+//!     403 `pat_destructive_blocked`,
 //!   * workspace-scoped PATs reject calls to a different workspace, and
 //!   * `last_used_at` advances on a successful PAT auth.
 //!
-//! `/api/auth/me` shape coverage moved to portal in spec #222 Slice 5;
-//! the tests here exercise stiglab's `AuthUser` extractor against
-//! `/api/pats` instead, which is stiglab-owned.
+//! The auth-extractor tests pivot onto stiglab routes that survive the
+//! Slice 2b move: `/api/projects` (cross-workspace project listing,
+//! `AuthUser`-gated) and `/api/workspaces/{id}` (workspace get,
+//! `require_workspace_access`-gated). When credentials/workspaces move in
+//! later slices, these tests will follow them to portal-side coverage.
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -86,12 +91,13 @@ async fn seed_workspace_with_member(pool: &AnyPool, user_id: &str, slug: &str) -
     workspace
 }
 
-/// Mint a PAT directly via the DB layer, bypassing `POST /api/pats`. Used
-/// to set up auth state before exercising other endpoints.
+/// Mint a PAT directly via the DB layer, bypassing `POST /api/pats` (which
+/// now lives on portal). Used to set up auth state before exercising other
+/// endpoints.
 ///
-/// PATs are workspace-scoped post-#163; when the caller doesn't already
-/// have a workspace in scope, pass `None` and `mint_pat` seeds a throwaway
-/// one for the user just so the row satisfies the NOT NULL constraint.
+/// PATs are workspace-scoped post-#163; when the caller doesn't already have
+/// a workspace in scope, pass `None` and `mint_pat` seeds a throwaway one
+/// for the user just so the row satisfies the NOT NULL constraint.
 async fn mint_pat(
     pool: &AnyPool,
     user_id: &str,
@@ -231,14 +237,12 @@ async fn verify_pat_reports_expired_separately_from_unknown() {
 
 // ── End-to-end PAT-authenticated requests ──
 //
-// Spec #222 Slice 5 moved `/api/auth/*` to portal, so the
-// `via: pat | session` shape assertions on `/api/auth/me` no longer
-// work against a stiglab-only `oneshot()` (the route is a proxy now —
-// portal isn't running in tests). The PAT auth path itself still lives
-// in stiglab's `AuthUser` extractor; the tests below exercise it
-// against `/api/pats`, which is stiglab-owned and `AuthUser`-gated.
-// Equivalent /api/auth/me coverage will follow on the portal side
-// when Slice 2 moves PAT validation to portal.
+// The PAT auth path lives in stiglab's `AuthUser` extractor as long as
+// non-portal routes (credentials, workspaces, projects, workflows) accept
+// PAT bearer auth. The tests below pivot onto `/api/projects` — a
+// cross-workspace, AuthUser-gated route stiglab still owns — to exercise
+// the extractor end-to-end without depending on `/api/pats` (now a portal
+// proxy).
 
 #[tokio::test]
 async fn revoked_pat_returns_401_with_invalid_token_challenge() {
@@ -250,7 +254,7 @@ async fn revoked_pat_returns_401_with_invalid_token_challenge() {
 
     let resp = app(state)
         .oneshot(
-            bearer(Request::builder().uri("/api/pats"), &token)
+            bearer(Request::builder().uri("/api/projects"), &token)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -278,7 +282,7 @@ async fn expired_pat_returns_401_with_invalid_token_challenge() {
 
     let resp = app(state)
         .oneshot(
-            bearer(Request::builder().uri("/api/pats"), &token)
+            bearer(Request::builder().uri("/api/projects"), &token)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -298,11 +302,17 @@ async fn pat_bearer_takes_precedence_over_cookie() {
     // A request that carries BOTH a valid PAT and a valid session cookie
     // should be authenticated as the PAT user (so that smoke-testing from
     // a CLI doesn't silently fall through to the browser session that
-    // happens to be in scope). `/api/pats` returns the principal's PATs;
-    // the only token belongs to `pat_user`, so the response shape proves
-    // the PAT principal won.
+    // happens to be in scope). The proof works because the PAT is pinned
+    // to `pat_workspace`; sending both auths to a different workspace's
+    // GET route must 403 with `pat_workspace_scope_mismatch`. If the
+    // cookie principal had won, the cookie user is a member of
+    // `cookie_workspace` so the same request would 200.
     let pool = test_pool().await;
+
     let pat_user = seed_user(&pool).await;
+    let pat_workspace = seed_workspace_with_member(&pool, &pat_user.id, "pat-ws").await;
+    let (_, pat_token) = mint_pat(&pool, &pat_user.id, Some(&pat_workspace.id), "ci", None).await;
+
     let cookie_user = User {
         id: Uuid::new_v4().to_string(),
         github_id: 999,
@@ -313,6 +323,7 @@ async fn pat_bearer_takes_precedence_over_cookie() {
         updated_at: Utc::now(),
     };
     db::upsert_user(&pool, &cookie_user).await.unwrap();
+    let cookie_workspace = seed_workspace_with_member(&pool, &cookie_user.id, "cookie-ws").await;
     let session_token = stiglab::server::auth::generate_session_token();
     db::create_auth_session(
         &pool,
@@ -322,13 +333,16 @@ async fn pat_bearer_takes_precedence_over_cookie() {
     )
     .await
     .unwrap();
-    let (_, pat_token) = mint_pat(&pool, &pat_user.id, None, "ci", None).await;
+
     let state = AppState::new(pool, auth_enabled_config(), None);
 
+    // Hit cookie_user's workspace with both auths. PAT precedence ⇒ 403
+    // (PAT is pinned to pat_workspace, request hits cookie_workspace).
+    // Cookie precedence would have been 200 (cookie_user is a member).
     let resp = app(state)
         .oneshot(
             Request::builder()
-                .uri("/api/pats")
+                .uri(format!("/api/workspaces/{}", cookie_workspace.id))
                 .header(header::AUTHORIZATION, format!("Bearer {pat_token}"))
                 .header(header::COOKIE, format!("stiglab_session={session_token}"))
                 .body(Body::empty())
@@ -336,307 +350,9 @@ async fn pat_bearer_takes_precedence_over_cookie() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     let v = read_json(resp).await;
-    let pats = v["pats"].as_array().expect("pats array");
-    assert_eq!(pats.len(), 1);
-    assert_eq!(pats[0]["name"], "ci");
-}
-
-// ── PAT CRUD via /api/pats ──
-
-#[tokio::test]
-async fn create_pat_returns_token_once_then_listing_hides_it() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-create").await;
-    // Bootstrap auth via a session cookie so we can create a PAT.
-    let session_token = stiglab::server::auth::generate_session_token();
-    db::create_auth_session(
-        &pool,
-        &session_token,
-        &user.id,
-        Utc::now() + chrono::Duration::days(1),
-    )
-    .await
-    .unwrap();
-    let state = AppState::new(pool, auth_enabled_config(), None);
-    let app_ = app(state);
-
-    let exp = (Utc::now() + chrono::Duration::days(30)).to_rfc3339();
-    let create = Request::builder()
-        .method("POST")
-        .uri("/api/pats")
-        .header(header::COOKIE, format!("stiglab_session={session_token}"))
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            serde_json::json!({
-                "name": "ci",
-                "workspace_id": workspace.id,
-                "expires_at": exp,
-            })
-            .to_string(),
-        ))
-        .unwrap();
-    let resp = app_.clone().oneshot(create).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = read_json(resp).await;
-    let token = body["token"].as_str().unwrap().to_string();
-    assert!(token.starts_with("ons_pat_"));
-    let prefix = body["pat"]["token_prefix"].as_str().unwrap();
-    assert_eq!(prefix.len(), PAT_PREFIX_LEN);
-
-    // List — must NOT echo the secret token, only metadata + prefix.
-    let list = Request::builder()
-        .uri("/api/pats")
-        .header(header::COOKIE, format!("stiglab_session={session_token}"))
-        .body(Body::empty())
-        .unwrap();
-    let resp = app_.oneshot(list).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = read_json(resp).await;
-    let pats = body["pats"].as_array().unwrap();
-    assert_eq!(pats.len(), 1);
-    assert_eq!(pats[0]["token_prefix"].as_str().unwrap(), prefix);
-    assert!(pats[0].get("token").is_none());
-    assert!(pats[0].get("token_hash").is_none());
-}
-
-#[tokio::test]
-async fn create_pat_409s_on_duplicate_name() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-dup").await;
-    let session_token = stiglab::server::auth::generate_session_token();
-    db::create_auth_session(
-        &pool,
-        &session_token,
-        &user.id,
-        Utc::now() + chrono::Duration::days(1),
-    )
-    .await
-    .unwrap();
-    let state = AppState::new(pool, auth_enabled_config(), None);
-    let app_ = app(state);
-
-    let exp = (Utc::now() + chrono::Duration::days(30)).to_rfc3339();
-    let workspace_id = workspace.id.clone();
-    let make = || {
-        Request::builder()
-            .method("POST")
-            .uri("/api/pats")
-            .header(header::COOKIE, format!("stiglab_session={session_token}"))
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                serde_json::json!({
-                    "name": "ci",
-                    "workspace_id": workspace_id,
-                    "expires_at": exp,
-                })
-                .to_string(),
-            ))
-            .unwrap()
-    };
-    assert_eq!(
-        app_.clone().oneshot(make()).await.unwrap().status(),
-        StatusCode::OK
-    );
-    assert_eq!(
-        app_.oneshot(make()).await.unwrap().status(),
-        StatusCode::CONFLICT
-    );
-}
-
-#[tokio::test]
-async fn create_pat_rejects_empty_name() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-empty").await;
-    let session_token = stiglab::server::auth::generate_session_token();
-    db::create_auth_session(
-        &pool,
-        &session_token,
-        &user.id,
-        Utc::now() + chrono::Duration::days(1),
-    )
-    .await
-    .unwrap();
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let exp = (Utc::now() + chrono::Duration::days(7)).to_rfc3339();
-    let resp = app(state)
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/pats")
-                .header(header::COOKIE, format!("stiglab_session={session_token}"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "name": "  ",
-                        "workspace_id": workspace.id,
-                        "expires_at": exp,
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn create_pat_rejects_missing_expires_at() {
-    // v1 contract: an explicit expiry is required. `null` is reserved for
-    // a future "never expires" affordance and must not silently mint a
-    // long-lived token today.
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-noexp").await;
-    let session_token = stiglab::server::auth::generate_session_token();
-    db::create_auth_session(
-        &pool,
-        &session_token,
-        &user.id,
-        Utc::now() + chrono::Duration::days(1),
-    )
-    .await
-    .unwrap();
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    for body in [
-        serde_json::json!({
-            "name": "ci",
-            "workspace_id": workspace.id,
-            "expires_at": null,
-        }),
-        serde_json::json!({
-            "name": "ci",
-            "workspace_id": workspace.id,
-        }),
-    ] {
-        let resp = app(state.clone())
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/pats")
-                    .header(header::COOKIE, format!("stiglab_session={session_token}"))
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(body.to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-    }
-}
-
-#[tokio::test]
-async fn create_pat_response_carries_no_store_cache_headers() {
-    // The body holds the only copy of the secret token — every
-    // intermediary must be told not to cache it.
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "ws-headers").await;
-    let session_token = stiglab::server::auth::generate_session_token();
-    db::create_auth_session(
-        &pool,
-        &session_token,
-        &user.id,
-        Utc::now() + chrono::Duration::days(1),
-    )
-    .await
-    .unwrap();
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let exp = (Utc::now() + chrono::Duration::days(30)).to_rfc3339();
-    let resp = app(state)
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/pats")
-                .header(header::COOKIE, format!("stiglab_session={session_token}"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "name": "ci",
-                        "workspace_id": workspace.id,
-                        "expires_at": exp,
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(
-        resp.headers()
-            .get(header::CACHE_CONTROL)
-            .and_then(|v| v.to_str().ok()),
-        Some("no-store")
-    );
-    assert_eq!(
-        resp.headers().get("pragma").and_then(|v| v.to_str().ok()),
-        Some("no-cache")
-    );
-}
-
-#[tokio::test]
-async fn delete_pat_revokes_so_subsequent_use_401s() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let session_token = stiglab::server::auth::generate_session_token();
-    db::create_auth_session(
-        &pool,
-        &session_token,
-        &user.id,
-        Utc::now() + chrono::Duration::days(1),
-    )
-    .await
-    .unwrap();
-    let (pat_id, token) = mint_pat(&pool, &user.id, None, "ci", None).await;
-    let state = AppState::new(pool, auth_enabled_config(), None);
-    let app_ = app(state);
-
-    // Sanity: PAT works before revoke.
-    let pre = app_
-        .clone()
-        .oneshot(
-            bearer(Request::builder().uri("/api/pats"), &token)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(pre.status(), StatusCode::OK);
-
-    // Revoke via the API.
-    let revoke = app_
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri(format!("/api/pats/{pat_id}"))
-                .header(header::COOKIE, format!("stiglab_session={session_token}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(revoke.status(), StatusCode::OK);
-
-    // After revoke: same Bearer token now 401s with invalid_token.
-    let post = app_
-        .oneshot(
-            bearer(Request::builder().uri("/api/pats"), &token)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(post.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(v["error"], "pat_workspace_scope_mismatch");
 }
 
 // ── Destructive-credential guardrail ──
@@ -774,7 +490,7 @@ async fn last_used_at_advances_after_pat_auth() {
         .oneshot(
             bearer(
                 Request::builder()
-                    .uri("/api/pats")
+                    .uri("/api/projects")
                     .header(header::USER_AGENT, "test-agent/1.0"),
                 &token,
             )

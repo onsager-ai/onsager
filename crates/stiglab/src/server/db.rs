@@ -179,6 +179,16 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     // issue #163 (renamed from the legacy `tenant_id`).  Cross-workspace
     // calls 403.  `revoked_at` is a soft-delete: revoked rows stay for audit
     // but fail verification.
+    //
+    // Spec #222 Slice 2b moved PAT mint/list/revoke to portal
+    // (`crates/onsager-portal/migrations/005_user_pats.sql`). Portal is the
+    // only writer; stiglab still reads this table from its `AuthUser`
+    // extractor for the credentials/workspaces/projects/workflows routes
+    // that haven't moved yet (Slices 2a/3/4). The DDL below stays
+    // idempotently here as a fallback so SQLite-backed unit tests build
+    // the schema without a portal binary in the loop, and on a fresh
+    // deploy whichever process migrates first wins (same-shape
+    // `CREATE TABLE IF NOT EXISTS` makes the loser a no-op).
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS user_pats (
             id TEXT PRIMARY KEY,

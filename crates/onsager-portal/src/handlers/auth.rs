@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::auth::{
     self, exchange_code, generate_session_token, generate_state, get_github_user,
-    github_authorize_url, AuthUser,
+    github_authorize_url, AuthUser, RequestPrincipal,
 };
 use crate::auth_db::{self, User};
 use crate::config::Config;
@@ -506,7 +506,16 @@ pub async fn sso_finish(
 // ── /api/auth/me + logout ──
 
 /// GET /api/auth/me — Return current authenticated user.
+///
+/// `via` distinguishes a cookie-authenticated browser session from a PAT
+/// bearer call so dashboards can render a "you are signed in via PAT"
+/// affordance and CLI smoke tests can confirm their token is the
+/// principal in scope (not a stray browser cookie).
 pub async fn me(State(_state): State<AppState>, auth_user: AuthUser) -> impl IntoResponse {
+    let via = match auth_user.principal {
+        RequestPrincipal::Pat { .. } => "pat",
+        RequestPrincipal::Session => "session",
+    };
     Json(serde_json::json!({
         "user": {
             "id": auth_user.user_id,
@@ -515,7 +524,7 @@ pub async fn me(State(_state): State<AppState>, auth_user: AuthUser) -> impl Int
             "github_avatar_url": auth_user.github_avatar_url,
         },
         "session_kind": auth_user.session_kind,
-        "via": "session",
+        "via": via,
     }))
 }
 

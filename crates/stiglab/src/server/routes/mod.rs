@@ -2,7 +2,6 @@ pub mod credentials;
 pub mod governance;
 pub mod health;
 pub mod nodes;
-pub mod pats;
 pub mod portal;
 pub mod projects;
 pub mod registry_events;

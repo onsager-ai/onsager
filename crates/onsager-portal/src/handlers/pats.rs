@@ -1,9 +1,16 @@
-//! Personal Access Token CRUD (issue #143).
+//! `/api/pats*` route handlers.
 //!
-//! Tokens are user-owned bearer credentials minted server-side, stored only
-//! as a SHA-256 hash, and revealed to the user exactly once on creation.
-//! Listing returns prefix-only metadata; the full token is unrecoverable
-//! after the create call returns.
+//! Personal Access Token CRUD (issue #143). Tokens are user-owned bearer
+//! credentials minted server-side, stored only as a SHA-256 hash, and
+//! revealed to the user exactly once on creation. Listing returns
+//! prefix-only metadata; the full token is unrecoverable after the create
+//! call returns.
+//!
+//! Spec #222 Slice 2b moved this surface from stiglab to portal so the
+//! external HTTP boundary is owned by the edge subsystem (clause 1 of the
+//! seam rule). Stiglab proxies `/api/pats*` to portal via
+//! `routes::portal::proxy` so the dashboard's API_BASE cutover (Slice 6)
+//! can land independently.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -13,14 +20,14 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::server::auth::{generate_pat_token, AuthUser};
-use crate::server::db;
-use crate::server::state::AppState;
+use crate::auth::{generate_pat_token, AuthUser};
+use crate::pat_db::{self, UserPat};
+use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct CreatePatBody {
     pub name: String,
-    /// Workspace the PAT is scoped to.  Every PAT is workspace-pinned
+    /// Workspace the PAT is scoped to. Every PAT is workspace-pinned
     /// post-#163; requests touching another workspace 403.
     pub workspace_id: String,
     /// Required by the API surface; the dashboard always sends one of the
@@ -29,14 +36,7 @@ pub struct CreatePatBody {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
-#[allow(clippy::result_large_err)]
-fn require_authenticated(auth_user: &AuthUser) -> Result<&str, Response> {
-    // Auth is always-on as of #193; the `AuthUser` extractor 401s
-    // unauthenticated requests before they reach this helper.
-    Ok(auth_user.user_id.as_str())
-}
-
-fn pat_summary(pat: &db::UserPat) -> serde_json::Value {
+fn pat_summary(pat: &UserPat) -> serde_json::Value {
     serde_json::json!({
         "id": pat.id,
         "name": pat.name,
@@ -51,13 +51,9 @@ fn pat_summary(pat: &db::UserPat) -> serde_json::Value {
     })
 }
 
-/// GET /api/pats — List the caller's PATs (no token material).
+/// GET /api/pats — list the caller's PATs (no token material).
 pub async fn list_pats(State(state): State<AppState>, auth_user: AuthUser) -> Response {
-    let user_id = match require_authenticated(&auth_user) {
-        Ok(id) => id.to_string(),
-        Err(r) => return r,
-    };
-    match db::list_user_pats(&state.db, &user_id).await {
+    match pat_db::list_user_pats(&state.pool, &auth_user.user_id).await {
         Ok(pats) => {
             let items: Vec<_> = pats.iter().map(pat_summary).collect();
             Json(serde_json::json!({ "pats": items })).into_response()
@@ -69,17 +65,14 @@ pub async fn list_pats(State(state): State<AppState>, auth_user: AuthUser) -> Re
     }
 }
 
-/// POST /api/pats — Mint a new PAT. The full token is returned exactly
+/// POST /api/pats — mint a new PAT. The full token is returned exactly
 /// once; subsequent reads show only the prefix.
 pub async fn create_pat(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Json(body): Json<CreatePatBody>,
 ) -> Response {
-    let user_id = match require_authenticated(&auth_user) {
-        Ok(id) => id.to_string(),
-        Err(r) => return r,
-    };
+    let user_id = auth_user.user_id.clone();
 
     let name = body.name.trim();
     if name.is_empty() {
@@ -127,7 +120,7 @@ pub async fn create_pat(
         )
             .into_response();
     }
-    match db::is_workspace_member(&state.db, workspace_id, &user_id).await {
+    match pat_db::is_workspace_member(&state.pool, workspace_id, &user_id).await {
         Ok(true) => {}
         Ok(false) => {
             return (
@@ -147,8 +140,8 @@ pub async fn create_pat(
     let generated = generate_pat_token();
     let id = Uuid::new_v4().to_string();
 
-    if let Err(e) = db::insert_user_pat(
-        &state.db,
+    if let Err(e) = pat_db::insert_user_pat(
+        &state.pool,
         &id,
         &user_id,
         workspace_id,
@@ -175,7 +168,7 @@ pub async fn create_pat(
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
 
-    let pat = db::UserPat {
+    let pat = UserPat {
         id: id.clone(),
         user_id: user_id.clone(),
         workspace_id: workspace_id.to_string(),
@@ -209,17 +202,13 @@ pub async fn create_pat(
     response
 }
 
-/// DELETE /api/pats/{id} — Soft-delete (revoke) a PAT.
+/// DELETE /api/pats/{id} — soft-delete (revoke) a PAT.
 pub async fn delete_pat(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Path(pat_id): Path<String>,
 ) -> Response {
-    let user_id = match require_authenticated(&auth_user) {
-        Ok(id) => id.to_string(),
-        Err(r) => return r,
-    };
-    match db::revoke_user_pat(&state.db, &user_id, &pat_id).await {
+    match pat_db::revoke_user_pat(&state.pool, &auth_user.user_id, &pat_id).await {
         Ok(true) => Json(serde_json::json!({ "ok": true })).into_response(),
         Ok(false) => (
             StatusCode::NOT_FOUND,
