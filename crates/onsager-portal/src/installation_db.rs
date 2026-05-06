@@ -117,13 +117,19 @@ pub async fn delete_installation(pool: &PgPool, install_row_id: &str) -> anyhow:
 
 /// Look up the webhook-secret cipher for a given numeric install id.
 ///
-/// Outer `Option` distinguishes installation presence so callers can fail
-/// closed on genuinely unknown installations while still falling back to
-/// the global App secret for installs registered via the OAuth callback
-/// (which persist without a cipher):
+/// Outer `Option` distinguishes installation presence from cipher
+/// presence:
 /// - `None` — no row for this `install_id` (unknown installation).
 /// - `Some(None)` — row exists, no per-install cipher stored.
 /// - `Some(Some(cipher))` — row exists with a per-install cipher.
+///
+/// Portal's webhook receiver fails closed on a NULL cipher (401 — see
+/// `handlers/webhook.rs`). Workflow activation feeds the returned value
+/// straight into `ensure_webhook_registered`'s `secret` parameter, so a
+/// `Some(None)` install today produces a webhook with no signing secret
+/// whose deliveries the receiver will then reject. Surfacing that as an
+/// activation-time error is tracked separately — callers should treat
+/// `Some(None)` as "not safe to activate."
 pub async fn get_install_webhook_secret_cipher(
     pool: &PgPool,
     install_id: i64,

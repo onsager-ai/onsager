@@ -30,14 +30,14 @@ use crate::workflow_activation::{
 };
 use crate::workflow_db;
 
-/// 503 when the spine pool isn't reachable — workflow CRUD writes the
-/// spine schema directly post-Lever D, so without a usable pool there is
-/// no place to land a workflow row.
+/// Spine pool used for workflow CRUD. Portal's `EventStore` is
+/// non-optional and already validated at boot, so this just hands back
+/// the underlying `PgPool`. The `Result` shape is kept so call sites
+/// stay aligned with the stiglab-era helper signature; rewiring every
+/// caller for an infallible return is a follow-up cleanup, not Slice 4
+/// scope.
 #[allow(clippy::result_large_err)]
 fn spine_pool(state: &AppState) -> Result<&sqlx::PgPool, Response> {
-    // Portal's `spine.pool()` is the same Postgres as `state.pool` in
-    // production, so the 503 path here is informational — if the
-    // database is up at all, workflow CRUD has somewhere to write.
     Ok(state.spine.pool())
 }
 
@@ -456,9 +456,9 @@ pub async fn list_workflow_runs(
     if let Err(r) = require_auth_user(&auth_user) {
         return r;
     }
-    // Workflows live on the spine post-Lever D; without a spine pool the
-    // dashboard gets an empty list rather than a 503 so the empty-state
-    // copy still renders sensibly in dev.
+    // Workflows live on the spine post-Lever D. Portal's `EventStore`
+    // is non-optional, so the lookup is unconditional — DB-level
+    // failures bubble up as 500 below.
     let spine = state.spine.pool();
     let workflow = match workflow_db::get_workflow(spine, &workflow_id).await {
         Ok(Some(w)) => w,
