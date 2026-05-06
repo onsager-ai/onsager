@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 
 use crate::config::Config;
 use crate::gate::GateClient;
-use crate::handlers::{auth as auth_handlers, webhook};
+use crate::handlers::{auth as auth_handlers, pats as pat_handlers, webhook};
 use crate::state::AppState;
 
 /// Boot the webhook server. Blocks until the listener exits.
@@ -65,7 +65,16 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route("/api/auth/me", get(auth_handlers::me))
         .route("/api/auth/logout", post(auth_handlers::logout))
         .route("/api/auth/sso/redeem", post(auth_handlers::sso_redeem))
-        .route("/api/auth/sso/finish", get(auth_handlers::sso_finish));
+        .route("/api/auth/sso/finish", get(auth_handlers::sso_finish))
+        // Personal Access Tokens (#222 Slice 2b). Stiglab proxies
+        // `/api/pats*` here so dashboard fetches keep working pre–API_BASE
+        // cutover. Auth (cookie or PAT bearer) is enforced by the
+        // `AuthUser` extractor in each handler.
+        .route(
+            "/api/pats",
+            get(pat_handlers::list_pats).post(pat_handlers::create_pat),
+        )
+        .route("/api/pats/{id}", delete(pat_handlers::delete_pat));
 
     // Dev-login is debug-only — `cargo build --release` strips both the
     // route handler symbol and this registration so production deploys

@@ -15,7 +15,7 @@ pub mod ws;
 pub use sqlx::AnyPool;
 
 use axum::http::{header, HeaderValue};
-use axum::routing::{any, delete, get, post, put};
+use axum::routing::{any, get, post, put};
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
@@ -70,12 +70,13 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
             "/api/workspaces/{workspace_id}/credentials/{name}",
             put(routes::credentials::set_credential).delete(routes::credentials::delete_credential),
         )
-        // Personal Access Tokens (issue #143)
-        .route(
-            "/api/pats",
-            get(routes::pats::list_pats).post(routes::pats::create_pat),
-        )
-        .route("/api/pats/{id}", delete(routes::pats::delete_pat))
+        // Personal Access Tokens (issue #143). Spec #222 Slice 2b moved
+        // `/api/pats*` to portal; stiglab keeps the URLs as reverse
+        // proxies so the dashboard's API_BASE cutover (Slice 6) can land
+        // independently. Portal's `AuthUser` extractor honors both cookie
+        // and PAT bearer auth, so the proxy preserves full behavior.
+        .route("/api/pats", any(routes::portal::proxy))
+        .route("/api/pats/{id}", any(routes::portal::proxy))
         // Workspace routes (issue #59 — Phase 0; renamed from "tenant" →
         // "workspace" in issue #163).
         .route(

@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod issues;
+pub mod pats;
 pub mod pull_request;
 pub mod spec_link;
 pub mod webhook;

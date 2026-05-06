@@ -16,6 +16,11 @@
 //!   cookie sessions + cross-env SSO codes (#222 Slice 5). Stiglab still
 //!   reads from these tables for its `AuthUser` cookie extractor; portal
 //!   is the only writer.
+//! - `user_pats` — server-issued Personal Access Tokens (#143). Portal
+//!   owns mint/list/revoke via `/api/pats*` and verifies presented PATs
+//!   in its own `AuthUser` extractor (#222 Slice 2b). Stiglab still reads
+//!   this table for its `AuthUser` PAT path while non-portal routes
+//!   (credentials, workspaces, projects, workflows) accept PATs.
 //!
 //! Tables managed elsewhere (workspaces / projects / installations / events /
 //! events_ext / artifacts / vertical_lineage) are not touched here.
@@ -40,6 +45,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "004_sso_exchange_codes",
         include_str!("../migrations/004_sso_exchange_codes.sql"),
+    ),
+    (
+        "005_user_pats",
+        include_str!("../migrations/005_user_pats.sql"),
     ),
 ];
 

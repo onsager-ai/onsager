@@ -72,17 +72,30 @@ first-class edge subsystem. The migration is staged:
   the same URLs through `routes::portal::proxy` (which now forwards
   `Set-Cookie` and `Location` so the OAuth dance round-trips
   unchanged) and keeps a cookie-only read against the spine-shared
-  `auth_sessions` table for its own `AuthUser` extractor. PAT
-  validation still lives in stiglab — Slice 2 moves it.
-- **Routes (follow-ups).** Slices 2/3/4: move
-  `/api/credentials/*`, `/api/pats/*`, `/api/workspaces/*`,
+  `auth_sessions` table for its own `AuthUser` extractor.
+- **Slice 2b — Personal Access Tokens (landed).** Portal owns
+  `GET/POST /api/pats` and `DELETE /api/pats/{id}`. The PAT
+  primitives — `PAT_TOKEN_NAMESPACE`, `generate_pat_token`,
+  `hash_pat_token`, `verify_pat`, `RequestPrincipal`, the
+  PAT-aware `AuthUser` Bearer-vs-cookie precedence — moved from
+  `stiglab/src/server/auth.rs` to `onsager-portal/src/auth.rs`.
+  `/api/auth/me` now reports `via: "pat" | "session"` based on the
+  request principal. The `user_pats` schema lives in
+  `crates/onsager-portal/migrations/005_user_pats.sql`. Stiglab
+  proxies `/api/pats*` through `routes::portal::proxy` and keeps
+  its own PAT machinery in `auth.rs` for the routes that still
+  accept PAT bearer auth (credentials in 2a, workspaces/projects
+  in 3, workflows in 4) — same database, separate connection
+  pool, portal is the only writer.
+- **Routes (follow-ups).** Slices 2a/3/4: move
+  `/api/credentials/*`, `/api/workspaces/*`,
   `/api/installations/*`, `/api/workflows/*`, and the preset
   registry into portal. Each route group lands atomically (portal
   handler live + stiglab handler deleted in the same PR).
 - **Schema split (follow-ups).** `workspaces` /
   `workspace_members` / `projects` move into
   `crates/onsager-spine/migrations/`; `user_credentials`,
-  `github_app_installations`, `user_pats` move into
+  `github_app_installations` move into
   `crates/onsager-portal/migrations/` next to the auth migrations.
   Atomic per-PR per Lever B.
 

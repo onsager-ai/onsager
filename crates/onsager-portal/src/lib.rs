@@ -37,6 +37,7 @@ pub mod feedback;
 pub mod gate;
 pub mod handlers;
 pub mod migrate;
+pub mod pat_db;
 pub mod server;
 pub mod sso;
 pub mod state;
