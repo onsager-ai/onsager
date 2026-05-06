@@ -8,12 +8,15 @@
 //! and the spine event feed). What's left here is the shared
 //! dispatch core called by the spine listener.
 
+use std::collections::HashMap;
+
 use chrono::Utc;
 use uuid::Uuid;
 
 use crate::core::adapter;
 use crate::core::{ServerMessage, Session, SessionState};
 
+use crate::server::auth::decrypt_credential;
 use crate::server::db;
 use crate::server::state::AppState;
 
@@ -141,7 +144,7 @@ pub async fn dispatch_shaping_inner(
     // state via forge's signal listener rather than dispatching with the
     // wrong workspace's secrets.
     let credentials = match (req.created_by.as_deref(), workspace_id.as_deref()) {
-        (Some(uid), Some(ws)) => super::tasks::fetch_workspace_credentials(state, ws, uid).await,
+        (Some(uid), Some(ws)) => fetch_workspace_credentials(state, ws, uid).await,
         _ => None,
     };
 
@@ -231,4 +234,41 @@ async fn insert_session_with_idempotency_and_workspace(
     .await?
     .rows_affected();
     Ok(affected > 0)
+}
+
+/// Fetch the credentials a user holds in a specific workspace, decrypt
+/// them, and return as a HashMap of env-var name → plaintext value.
+/// Returns `None` when the credential key is unset or there are no creds.
+pub(crate) async fn fetch_workspace_credentials(
+    state: &AppState,
+    workspace_id: &str,
+    user_id: &str,
+) -> Option<HashMap<String, String>> {
+    let key = state.config.credential_key.as_deref()?;
+
+    let encrypted_creds = db::get_all_user_credential_values(&state.db, workspace_id, user_id)
+        .await
+        .ok()?;
+
+    if encrypted_creds.is_empty() {
+        return None;
+    }
+
+    let mut result = HashMap::new();
+    for (name, encrypted_value) in encrypted_creds {
+        match decrypt_credential(key, &encrypted_value) {
+            Ok(value) => {
+                result.insert(name, value);
+            }
+            Err(e) => {
+                tracing::error!("failed to decrypt credential {name} for user {user_id}: {e}");
+            }
+        }
+    }
+
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
 }

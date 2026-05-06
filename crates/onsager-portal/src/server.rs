@@ -2,18 +2,22 @@
 
 use std::sync::Arc;
 
-use axum::routing::{delete, get, post, put};
+use axum::routing::{any, delete, get, post, put};
 use axum::Router;
 
 use crate::config::Config;
 use crate::gate::GateClient;
 use crate::handlers::{
     auth as auth_handlers, credentials as credential_handlers, github_app as github_app_handlers,
-    installations as installation_handlers, pats as pat_handlers, projects as project_handlers,
-    registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
-    spine as spine_handlers, webhook, workflow_kinds as workflow_kind_handlers,
-    workflows as workflow_handlers, workspaces as workspace_handlers,
+    governance as governance_handlers, installations as installation_handlers,
+    live_data as live_data_handlers, nodes as node_handlers, pats as pat_handlers,
+    projects as project_handlers, registry_events as registry_event_handlers,
+    registry_triggers as registry_trigger_handlers, sessions as session_handlers,
+    spine as spine_handlers, tasks as task_handlers, webhook,
+    workflow_kinds as workflow_kind_handlers, workflows as workflow_handlers,
+    workspaces as workspace_handlers,
 };
+use crate::proxy_cache::ProxyCache;
 use crate::state::AppState;
 
 /// Boot the webhook server. Blocks until the listener exits.
@@ -49,6 +53,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         spine,
         config: Arc::new(config.clone()),
         gate,
+        proxy_cache: Arc::new(ProxyCache::from_env()),
     };
 
     // The stiglab reverse proxy preserves the request path, so portal
@@ -58,6 +63,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     // (#222 Slice 1).
     let app = Router::new()
         .route("/healthz", get(healthz))
+        .route("/api/health", get(api_health))
         .route("/webhooks/github", post(webhook::handle))
         .route("/api/webhooks/github", post(webhook::handle))
         .route("/api/github-app/webhook", post(webhook::handle))
@@ -228,7 +234,63 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route(
             "/api/spine/artifacts/{id}/override-gate",
             post(spine_handlers::override_gate),
-        );
+        )
+        // Governance API proxy (#222 follow-up — governance → portal).
+        // Portal forwards `/api/governance/{*path}` to synodic's `/api/{path}`
+        // so synodic's dashboard-facing endpoints (events, rules, rule-proposals,
+        // stats) are reachable through the single external boundary portal owns.
+        // Stiglab proxied these via a `seam-allow` exemption on `SYNODIC_URL` /
+        // `SYNODIC_PORT`; those exemptions are stripped now that portal is the
+        // correct place for the pass-through.
+        .route(
+            "/api/governance/{*path}",
+            any(governance_handlers::proxy),
+        )
+        // Live-data hydration for reference-only artifacts (#222 follow-up 2).
+        // Moved from stiglab → portal. The dashboard joins skeleton rows from
+        // `/api/spine/artifacts` with the hydrated payloads here on `external_ref`.
+        // Auth + workspace-membership enforced by `require_project_for_user`
+        // inside each handler; the per-install GitHub token is minted fresh
+        // (TTL-cached) for each uncached request.
+        .route(
+            "/api/projects/{id}/issues",
+            get(live_data_handlers::list_project_issues),
+        )
+        .route(
+            "/api/projects/{id}/issues/{number}",
+            get(live_data_handlers::get_project_issue),
+        )
+        .route(
+            "/api/projects/{id}/pulls",
+            get(live_data_handlers::list_project_pulls),
+        )
+        .route(
+            "/api/projects/{id}/backfill",
+            post(live_data_handlers::backfill_project),
+        )
+        .route(
+            "/api/projects/{id}/issues/{number}/replay-trigger",
+            post(live_data_handlers::replay_issue_trigger),
+        )
+        // Sessions / nodes / tasks (spec #222 Follow-up 3 + Slice 6). Portal
+        // creates sessions and emits `portal.session_requested`; stiglab's
+        // `session_requested_listener` dispatches to the agent WebSocket.
+        // Post-Slice 6 the edge proxy (Caddy / vite) routes `/api/*` here
+        // directly — no stiglab proxy layer.
+        .route(
+            "/api/sessions",
+            get(session_handlers::list_sessions),
+        )
+        .route(
+            "/api/sessions/{id}",
+            get(session_handlers::get_session),
+        )
+        .route(
+            "/api/sessions/{id}/logs",
+            get(session_handlers::session_logs),
+        )
+        .route("/api/nodes", get(node_handlers::list_nodes))
+        .route("/api/tasks", post(task_handlers::create_task));
 
     // Dev-login is debug-only — `cargo build --release` strips both the
     // route handler symbol and this registration so production deploys
@@ -246,4 +308,11 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+async fn api_health() -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
 }

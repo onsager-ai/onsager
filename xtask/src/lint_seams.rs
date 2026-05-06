@@ -593,8 +593,8 @@ const GITHUB_HTTP_WALL_ALLOWED_CRATES: &[&str] = &["onsager-github"];
 /// entry when its migration PR lands.
 const GITHUB_HTTP_WALL_PENDING_FILES: &[(&str, &str)] = &[
     (
-        "crates/stiglab/src/server/routes/projects.rs",
-        "list_recent_issues / list_recent_pulls / get_issue / get_pull-style reads — fold into onsager-github::api::{issues,pulls} with the workspace ↔ portal split (#220 Sub-issue B)",
+        "crates/onsager-portal/src/handlers/live_data.rs",
+        "list_project_issues / get_project_issue / list_project_pulls / fetch_issue_for_replay — fold into onsager-github::api::{issues,pulls} once the portal live-data layer is decoupled from reqwest directly (#220 Sub-issue B). Moved from stiglab routes/projects.rs to portal in #222 Follow-up 2.",
     ),
     (
         "crates/onsager-portal/src/workflow_activation.rs",

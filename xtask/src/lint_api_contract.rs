@@ -396,6 +396,10 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "agent worker WebSocket — agent binaries connect, not the dashboard",
     ),
     (
+        "/healthz",
+        "portal internal liveness probe — ops-only, not a dashboard surface",
+    ),
+    (
         "/api/auth/github",
         "OAuth start — entered via `<a href>` from LoginPage, not request<T>",
     ),
@@ -421,15 +425,15 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
     ),
     (
         "/api/github-app/webhook",
-        "backward-compat alias for the GitHub webhook receiver — proxies to portal",
+        "backward-compat alias for the GitHub webhook receiver — called by GitHub, not the dashboard",
     ),
     (
         "/api/webhooks/github",
-        "backward-compat alias for the GitHub webhook receiver — proxies to portal",
+        "backward-compat alias for the GitHub webhook receiver — called by GitHub, not the dashboard",
     ),
     (
         "/webhooks/github",
-        "GitHub webhook receiver — proxies to portal which owns the live handler",
+        "GitHub webhook receiver — called by GitHub, not the dashboard",
     ),
     (
         "/api/governance/{*path}",
@@ -537,6 +541,7 @@ pub fn analyse(backend: &[BackendRoute], dashboard: &[DashboardCall]) -> Analysi
 // ---------------------------------------------------------------------------
 
 const STIGLAB_SRC: &str = "crates/stiglab/src/server/mod.rs";
+const PORTAL_SRC: &str = "crates/onsager-portal/src/server.rs";
 const SYNODIC_SRC: &str = "crates/synodic/src/cmd/serve.rs";
 const DASHBOARD_API_SRC: &str = "apps/dashboard/src/lib/api.ts";
 const DASHBOARD_SSE_SRC: &str = "apps/dashboard/src/lib/sse.ts";
@@ -546,6 +551,7 @@ pub fn run() -> Result<()> {
 
     let mut backend = Vec::new();
     backend.extend(parse_rust_routes(&root.join(STIGLAB_SRC), "stiglab")?);
+    backend.extend(parse_rust_routes(&root.join(PORTAL_SRC), "portal")?);
     backend.extend(parse_rust_routes(&root.join(SYNODIC_SRC), "synodic")?);
 
     let mut dashboard = Vec::new();
@@ -670,10 +676,18 @@ mod tests {
         let root = workspace_root();
         let stiglab =
             parse_rust_routes(&root.join("crates/stiglab/src/server/mod.rs"), "stiglab").unwrap();
-        assert!(stiglab.len() > 20, "stiglab routes: {}", stiglab.len());
+        // Post-#222 Slice 6 stiglab owns only /api/health + /agent/ws.
+        assert!(stiglab.len() >= 2, "stiglab routes: {}", stiglab.len());
         let stiglab_paths: Vec<_> = stiglab.iter().map(|r| r.path.as_str()).collect();
         assert!(stiglab_paths.contains(&"/api/health"));
-        assert!(stiglab_paths.contains(&"/api/workspaces"));
+
+        let portal =
+            parse_rust_routes(&root.join("crates/onsager-portal/src/server.rs"), "portal").unwrap();
+        assert!(portal.len() > 20, "portal routes: {}", portal.len());
+        let portal_paths: Vec<_> = portal.iter().map(|r| r.path.as_str()).collect();
+        assert!(portal_paths.contains(&"/api/workspaces"));
+        assert!(portal_paths.contains(&"/api/sessions"));
+        assert!(portal_paths.contains(&"/api/tasks"));
 
         let synodic =
             parse_rust_routes(&root.join("crates/synodic/src/cmd/serve.rs"), "synodic").unwrap();
@@ -966,6 +980,9 @@ mod tests {
         let mut backend = Vec::new();
         backend.extend(
             parse_rust_routes(&root.join("crates/stiglab/src/server/mod.rs"), "stiglab").unwrap(),
+        );
+        backend.extend(
+            parse_rust_routes(&root.join("crates/onsager-portal/src/server.rs"), "portal").unwrap(),
         );
         backend.extend(
             parse_rust_routes(&root.join("crates/synodic/src/cmd/serve.rs"), "synodic").unwrap(),

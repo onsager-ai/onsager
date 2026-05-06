@@ -3,8 +3,8 @@ pub mod config;
 pub mod db;
 pub mod github_app;
 pub mod handler;
-pub mod proxy_cache;
 pub mod routes;
+pub mod session_requested_listener;
 pub mod shaping_listener;
 pub mod spine;
 pub mod state;
@@ -14,7 +14,7 @@ pub mod ws;
 pub use sqlx::AnyPool;
 
 use axum::http::{header, HeaderValue};
-use axum::routing::{any, get, post};
+use axum::routing::get;
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
@@ -26,204 +26,15 @@ use tower_http::trace::TraceLayer;
 use config::ServerConfig;
 use state::AppState;
 
-/// Build the Axum router with all API routes, CORS, and optional static file serving.
+/// Build the Axum router. Post-#222 Slice 6, stiglab owns only two routes:
+/// `/api/health` (liveness probe) and `/agent/ws` (agent WebSocket).
+/// All `/api/*` traffic is routed to portal by the edge proxy (Caddy in
+/// dev, nginx in prod) so the dashboard's same-origin fetches land on
+/// portal without any per-environment URL configuration.
 pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
     let api_routes = Router::new()
         .route("/api/health", get(routes::health::health))
-        .route("/api/nodes", get(routes::nodes::list_nodes))
-        .route("/api/tasks", post(routes::tasks::create_task))
-        // The legacy `POST /api/shaping` (forge → stiglab dispatch)
-        // and the `GET /api/shaping/{session_id}` long-poll status
-        // endpoint are both gone. Forge dispatch flows through the
-        // spine via `forge.shaping_dispatched` (consumed by
-        // `shaping_listener`); the dashboard reads session state via
-        // `GET /api/sessions/{id}` and the spine event feed.
-        .route("/api/sessions", get(routes::sessions::list_sessions))
-        .route("/api/sessions/{id}", get(routes::sessions::get_session))
-        .route(
-            "/api/sessions/{id}/logs",
-            get(routes::sessions::session_logs),
-        )
-        .route("/agent/ws", get(ws::agent::agent_ws_handler))
-        // Auth routes (#222 Slice 5). Stiglab keeps the public `/api/auth/*`
-        // URLs but reverse-proxies them to portal so the OAuth dance, SSO
-        // delegation, `/api/auth/me`, and `/api/auth/logout` all run in
-        // portal. The proxy preserves Set-Cookie and Location so the
-        // dashboard / browser round-trip is byte-identical to direct calls.
-        // The dashboard's API_BASE cutover lands in Slice 6; until then,
-        // these legacy URLs stay live.
-        .route("/api/auth/github", any(routes::portal::proxy))
-        .route("/api/auth/github/callback", any(routes::portal::proxy))
-        .route("/api/auth/me", any(routes::portal::proxy))
-        .route("/api/auth/logout", any(routes::portal::proxy))
-        .route("/api/auth/sso/redeem", any(routes::portal::proxy))
-        .route("/api/auth/sso/finish", any(routes::portal::proxy))
-        // Credential routes (#222 Slice 2a). Portal owns
-        // `/api/workspaces/:id/credentials*`; stiglab proxies them so
-        // dashboard fetches keep working pre–API_BASE cutover. PAT
-        // bearer auth + the destructive-credential guardrail
-        // (`pat_destructive_blocked`) live on portal now. Stiglab
-        // still decrypts these rows in-process at session-launch time
-        // (`session_credentials.rs`) — same database, separate
-        // connection pool, portal is the only writer.
-        .route(
-            "/api/workspaces/{workspace_id}/credentials",
-            any(routes::portal::proxy),
-        )
-        .route(
-            "/api/workspaces/{workspace_id}/credentials/{name}",
-            any(routes::portal::proxy),
-        )
-        // Personal Access Tokens (issue #143). Spec #222 Slice 2b moved
-        // `/api/pats*` to portal; stiglab keeps the URLs as reverse
-        // proxies so the dashboard's API_BASE cutover (Slice 6) can land
-        // independently. Portal's `AuthUser` extractor honors both cookie
-        // and PAT bearer auth, so the proxy preserves full behavior.
-        .route("/api/pats", any(routes::portal::proxy))
-        .route("/api/pats/{id}", any(routes::portal::proxy))
-        // Workspace + member + project CRUD (#222 Slice 3a). Portal owns
-        // these routes; stiglab proxies them so dashboard fetches keep
-        // working pre–API_BASE cutover (Slice 6). Schema for
-        // `workspaces` / `workspace_members` / `projects` lives in the
-        // spine migration (`020_workspaces_to_spine.sql`); stiglab
-        // still reads the same Postgres tables for the in-process
-        // session/task lookups (`db::is_workspace_member`,
-        // `db::get_project`, etc.) — same database, separate
-        // connection pool, portal is the only writer.
-        .route("/api/workspaces", any(routes::portal::proxy))
-        .route("/api/workspaces/{id}", any(routes::portal::proxy))
-        .route("/api/workspaces/{id}/members", any(routes::portal::proxy))
-        .route("/api/workspaces/{id}/projects", any(routes::portal::proxy))
-        .route("/api/projects", any(routes::portal::proxy))
-        .route("/api/projects/{id}", any(routes::portal::proxy))
-        // GitHub App installation + install-flow routes (#222 Slice 3b).
-        // Portal owns these; stiglab proxies them through
-        // `routes::portal::proxy` so dashboard fetches keep working
-        // pre–API_BASE cutover (Slice 6). The `github_app_installations`
-        // table moved into `crates/onsager-portal/migrations/`. Stiglab
-        // keeps its own `db::*` reads (`get_github_app_installation`,
-        // `get_install_webhook_secret_cipher`) for the in-process needs
-        // of `routes/projects.rs` live-data hydration — same database,
-        // separate connection pool, portal is the only writer.
-        .route(
-            "/api/workspaces/{id}/github-installations",
-            any(routes::portal::proxy),
-        )
-        .route(
-            "/api/workspaces/{id}/github-installations/{install_id}",
-            any(routes::portal::proxy),
-        )
-        .route(
-            "/api/workspaces/{id}/github-installations/{install_id}/accessible-repos",
-            any(routes::portal::proxy),
-        )
-        .route(
-            "/api/workspaces/{id}/github-installations/{install_id}/repos/{owner}/{repo}/labels",
-            any(routes::portal::proxy),
-        )
-        .route("/api/github-app/config", any(routes::portal::proxy))
-        .route("/api/github-app/install-start", any(routes::portal::proxy))
-        .route("/api/github-app/callback", any(routes::portal::proxy))
-        // Live-data hydration for reference-only artifacts (#170 / #167 / #171).
-        // The dashboard joins skeleton rows from `/api/spine/artifacts?kind=...`
-        // with the hydrated payloads here on `external_ref`.
-        .route(
-            "/api/projects/{id}/issues",
-            get(routes::projects::list_project_issues),
-        )
-        .route(
-            "/api/projects/{id}/issues/{number}",
-            get(routes::projects::get_project_issue),
-        )
-        .route(
-            "/api/projects/{id}/pulls",
-            get(routes::projects::list_project_pulls),
-        )
-        .route(
-            "/api/projects/{id}/backfill",
-            post(routes::projects::backfill_project),
-        )
-        // Manual replay of `workflow.trigger_fired` for a single issue —
-        // active counterpart to the passive `issues.labeled` webhook
-        // path (#203). Useful when debugging an end-to-end workflow run
-        // that didn't fire.
-        .route(
-            "/api/projects/{id}/issues/{number}/replay-trigger",
-            post(routes::projects::replay_issue_trigger),
-        )
-        // Governance proxy — forwards to synodic on internal port
-        .route("/api/governance/{*path}", any(routes::governance::proxy))
-        // Portal webhook proxy — every GitHub delivery (PR lineage,
-        // workflow trigger fire, gate signals) is handled by the
-        // onsager-portal binary. The proxy preserves raw body bytes
-        // and forwards `X-Hub-Signature-256` / `X-GitHub-Event` so
-        // the signature check on the portal side still verifies.
-        // `/api/webhooks/github` and `/api/github-app/webhook` are
-        // backward-compat aliases — older GitHub Apps configured
-        // against the workflow-runtime path or the install-flow path
-        // continue to work without touching their webhook URL.
-        .route("/webhooks/github", any(routes::portal::proxy))
-        .route("/api/webhooks/github", any(routes::portal::proxy))
-        .route("/api/github-app/webhook", any(routes::portal::proxy))
-        // Workflow CRUD + GitHub side-effects (#222 Slice 4). Portal
-        // owns `/api/workflows*` and the activation pipeline (label
-        // create / webhook register via `onsager-github`); stiglab
-        // proxies the URLs through `routes::portal::proxy` so the
-        // dashboard's API_BASE cutover (Slice 6) can land
-        // independently. Workflow rows live on the spine `workflows` /
-        // `workflow_stages` tables (Lever D #149); portal is now the
-        // only writer. Stiglab still reads the workflow rows for the
-        // `routes/projects.rs` replay-trigger handler — same database,
-        // separate connection pool.
-        .route("/api/workflows", any(routes::portal::proxy))
-        .route("/api/workflows/{id}", any(routes::portal::proxy))
-        .route("/api/workflows/{id}/runs", any(routes::portal::proxy))
-        // Workflow artifact-kind catalog (issue #102 / #222 Slice 4) —
-        // public registry pass-through; portal owns the route now.
-        .route("/api/workflow/kinds", any(routes::portal::proxy))
-        // Event-type registry manifest (#222 follow-up #257). Portal
-        // owns this; stiglab proxies the URL through `routes::portal::proxy`
-        // so dashboard fetches keep working pre–API_BASE cutover (#222
-        // Slice 6). Static, human-reviewed manifest of every
-        // `FactoryEventKind` variant — which subsystems produce/consume it.
-        .route("/api/registry/events", any(routes::portal::proxy))
-        // Trigger-kind registry manifest (#222 follow-up #257). Same
-        // proxy shape as `/api/registry/events`. Static, human-reviewed
-        // manifest of every `TriggerKind` variant — read by the
-        // dashboard's `<TriggerKindPicker>`.
-        .route("/api/registry/triggers", any(routes::portal::proxy))
-        // Spine API (#222 follow-up #259). Portal owns the seven
-        // `/api/spine/*` routes; stiglab proxies them through
-        // `routes::portal::proxy` so dashboard fetches keep working
-        // pre–API_BASE cutover (#222 Slice 6). Reads land directly
-        // against `events_ext` / `artifacts`; writes emit via
-        // `EventStore::append_ext`. Stiglab still uses the spine pool
-        // for its own in-process needs (`SpineEmitter` for session
-        // lifecycle emits, `routes::projects::replay_issue_trigger`
-        // reads) — same database, separate connection pool, portal is
-        // the only HTTP writer.
-        .route("/api/spine/events", any(routes::portal::proxy))
-        .route("/api/spine/artifacts", any(routes::portal::proxy))
-        .route("/api/spine/artifacts/{id}", any(routes::portal::proxy))
-        .route(
-            "/api/spine/artifacts/{id}/retry",
-            any(routes::portal::proxy),
-        )
-        .route(
-            "/api/spine/artifacts/{id}/abort",
-            any(routes::portal::proxy),
-        )
-        .route(
-            "/api/spine/artifacts/{id}/override-gate",
-            any(routes::portal::proxy),
-        );
-
-    // Dev-login (issue #193) lives on portal post-#222 Slice 5; the
-    // stiglab-side URL stays a reverse-proxy entry so the dashboard's
-    // `LoginPage` button keeps working pre–API_BASE cutover. Debug-only
-    // on both ends — release builds of portal don't register the route.
-    #[cfg(debug_assertions)]
-    let api_routes = api_routes.route("/api/auth/dev-login", any(routes::portal::proxy));
+        .route("/agent/ws", get(ws::agent::agent_ws_handler));
 
     // Configure CORS
     let cors = if let Some(ref origin) = config.cors_origin {

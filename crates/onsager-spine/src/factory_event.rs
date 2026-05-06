@@ -368,6 +368,12 @@ pub enum FactoryEventKind {
     /// A node missed its expected heartbeat.
     StiglabNodeHeartbeatMissed { node_id: String },
 
+    // -- Portal intents (dashboard → agent dispatch) -------------------------
+    /// Dashboard task request from portal. Stiglab's
+    /// `session_requested_listener` dispatches the session to the correct
+    /// agent node (spec #222 Follow-up 3).
+    PortalSessionRequested { session_id: String },
+
     // -- Synodic events (governance) ----------------------------------------
     /// A gate request was evaluated and a verdict issued.
     SynodicGateEvaluated {
@@ -741,6 +747,7 @@ impl FactoryEventKind {
             Self::StiglabNodeRegistered { .. } => "stiglab.node_registered",
             Self::StiglabNodeDeregistered { .. } => "stiglab.node_deregistered",
             Self::StiglabNodeHeartbeatMissed { .. } => "stiglab.node_heartbeat_missed",
+            Self::PortalSessionRequested { .. } => "portal.session_requested",
             Self::SynodicGateEvaluated { .. } => "synodic.gate_evaluated",
             Self::SynodicGateDenied { .. } => "synodic.gate_denied",
             Self::SynodicGateModified { .. } => "synodic.gate_modified",
@@ -820,6 +827,7 @@ impl FactoryEventKind {
             | Self::StiglabNodeRegistered { .. }
             | Self::StiglabNodeDeregistered { .. }
             | Self::StiglabNodeHeartbeatMissed { .. } => "stiglab",
+            Self::PortalSessionRequested { .. } => "portal",
             Self::SynodicGateEvaluated { .. }
             | Self::SynodicGateDenied { .. }
             | Self::SynodicGateModified { .. }
@@ -901,6 +909,7 @@ impl FactoryEventKind {
             Self::StiglabNodeRegistered { node_id, .. }
             | Self::StiglabNodeDeregistered { node_id, .. }
             | Self::StiglabNodeHeartbeatMissed { node_id, .. } => node_id.clone(),
+            Self::PortalSessionRequested { session_id, .. } => session_id.clone(),
             Self::SynodicGateEvaluated { gate_id, .. } => gate_id.clone(),
             Self::SynodicGateDenied { gate_id, .. } => gate_id.clone(),
             Self::SynodicGateModified { gate_id, .. } => gate_id.clone(),

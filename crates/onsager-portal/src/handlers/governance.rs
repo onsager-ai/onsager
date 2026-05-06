@@ -1,43 +1,53 @@
-//! Reverse proxy for the synodic governance API.
+//! Governance API proxy.
 //!
-//! Forwards `/api/governance/{path}` to synodic running on an internal port.
-//! This lets the unified dashboard access governance data through a single
-//! origin without CORS or multi-port configuration.
+//! Forwards `/api/governance/{path}` to synodic's `/api/{path}`, making
+//! portal the single external HTTP boundary for the dashboard. Portal is
+//! the edge subsystem — no `seam-allow` annotation needed here; the lint
+//! only checks factory subsystems (forge / stiglab / synodic / ising).
+//!
+//! The proxy is intentionally transparent: status codes, content-type,
+//! and body bytes pass through unchanged so synodic's error shapes reach
+//! the dashboard unmodified.
 
 use axum::body::Body;
-use axum::extract::Request;
+use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
-/// Base URL for the synodic governance API (internal, not exposed by Railway).
-fn synodic_base_url() -> String {
-    // seam-allow: dashboard governance proxy; Railway only exposes stiglab. Tracked separately from spec #131; revisit once governance UI moves under Lever F.
-    let port = std::env::var("SYNODIC_PORT").unwrap_or_else(|_| "3001".to_string());
-    // seam-allow: dashboard governance proxy; Railway only exposes stiglab. Tracked separately from spec #131; revisit once governance UI moves under Lever F.
-    std::env::var("SYNODIC_URL").unwrap_or_else(|_| format!("http://localhost:{port}"))
-}
+use crate::state::AppState;
 
-/// Proxy handler: forward `/api/governance/{path}` to synodic's `/api/{path}`.
-pub async fn proxy(req: Request) -> Response {
+/// Forward `/api/governance/{path}` to synodic's `/api/{path}`.
+///
+/// Returns `503 Service Unavailable` when `SYNODIC_URL` is not configured
+/// (dev setups without synodic running) so the dashboard can surface a
+/// graceful "governance unavailable" state instead of a generic proxy error.
+pub async fn proxy(State(state): State<AppState>, req: Request) -> Response {
+    let Some(ref synodic_base) = state.config.synodic_url else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "governance service not configured",
+        )
+            .into_response();
+    };
+    let base = synodic_base.trim_end_matches('/');
+
     let method = req.method().clone();
     let uri = req.uri().clone();
 
-    // Strip the /api/governance prefix to get the synodic-relative path.
     let path = uri.path().strip_prefix("/api/governance").unwrap_or("");
     let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
-    let target = format!("{}/api{path}{query}", synodic_base_url());
+    let target = format!("{base}/api{path}{query}");
 
-    // Forward content-type header if present.
     let content_type = req
         .headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        .map(str::to_string);
 
     let body_bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
         Ok(b) => b,
         Err(e) => {
-            tracing::error!("failed to read proxy request body: {e}");
+            tracing::error!("governance proxy: failed to read request body: {e}");
             return (StatusCode::BAD_REQUEST, "bad request body").into_response();
         }
     };
@@ -55,17 +65,16 @@ pub async fn proxy(req: Request) -> Response {
         Ok(resp) => {
             let status =
                 StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let content_type = resp
+            let ct = resp
                 .headers()
                 .get("content-type")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("application/json")
                 .to_string();
             let bytes = resp.bytes().await.unwrap_or_default();
-
             Response::builder()
                 .status(status)
-                .header("content-type", content_type)
+                .header("content-type", ct)
                 .body(Body::from(bytes))
                 .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }

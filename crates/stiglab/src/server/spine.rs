@@ -298,6 +298,7 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::ProfileRegistered { .. }
         | FactoryEventKind::ProfileDeprecated { .. }
         | FactoryEventKind::GateCheckUpdated { .. }
-        | FactoryEventKind::GateManualApprovalSignal { .. } => None,
+        | FactoryEventKind::GateManualApprovalSignal { .. }
+        | FactoryEventKind::PortalSessionRequested { .. } => None,
     }
 }

@@ -1,11 +1,5 @@
-pub mod governance;
 pub mod health;
-pub mod nodes;
-pub mod portal;
-pub mod projects;
-pub mod sessions;
 pub mod shaping;
-pub mod tasks;
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

@@ -24,7 +24,9 @@ export default defineConfig({
       ? { clientPort: hmrClientPort }
       : undefined,
     proxy: {
-      '/api': 'http://localhost:3000',
+      // After #222 Slice 6, portal (3002) owns all /api/* routes;
+      // stiglab (3000) keeps only /agent/ws for agent binary connections.
+      '/api': 'http://localhost:3002',
       '/agent': {
         target: 'ws://localhost:3000',
         ws: true,

@@ -34,7 +34,7 @@ fn not_found(msg: &str) -> Response {
 /// Mint a per-installation token from the row UUID. Returns `None` when
 /// the App is not configured or the installation row is missing — the
 /// caller falls back to a default.
-async fn installation_token_for(
+pub(crate) async fn installation_token_for(
     pool: &PgPool,
     install_row_id: &str,
 ) -> anyhow::Result<Option<gh_app::InstallationToken>> {

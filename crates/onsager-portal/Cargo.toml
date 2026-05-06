@@ -26,6 +26,7 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 ulid = { version = "1", features = ["serde"] }
 tokio = { workspace = true }
+futures-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }

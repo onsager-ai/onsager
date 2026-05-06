@@ -57,3 +57,140 @@ pub struct Project {
     pub default_branch: String,
     pub created_at: DateTime<Utc>,
 }
+
+// ── Session / Node / Task types (spec #222 Follow-up 3) ──────────────────────
+//
+// Portal takes ownership of /api/sessions/*, /api/tasks, /api/nodes.
+// These types are portal-local copies of the equivalent types in
+// `crates/stiglab/src/core/{session,node,task}.rs`; the wire shape is
+// identical so the dashboard's existing payload contract is preserved.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: String,
+    pub task_id: String,
+    pub node_id: String,
+    pub state: SessionState,
+    pub prompt: String,
+    pub output: Option<String>,
+    pub working_dir: Option<String>,
+    #[serde(default)]
+    pub artifact_id: Option<String>,
+    #[serde(default)]
+    pub artifact_version: Option<i32>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionState {
+    Pending,
+    Dispatched,
+    Running,
+    WaitingInput,
+    Done,
+    Failed,
+}
+
+impl std::fmt::Display for SessionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "pending"),
+            Self::Dispatched => write!(f, "dispatched"),
+            Self::Running => write!(f, "running"),
+            Self::WaitingInput => write!(f, "waiting_input"),
+            Self::Done => write!(f, "done"),
+            Self::Failed => write!(f, "failed"),
+        }
+    }
+}
+
+impl std::str::FromStr for SessionState {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(Self::Pending),
+            "dispatched" => Ok(Self::Dispatched),
+            "running" => Ok(Self::Running),
+            "waiting_input" => Ok(Self::WaitingInput),
+            "done" => Ok(Self::Done),
+            "failed" => Ok(Self::Failed),
+            _ => Err(anyhow::anyhow!("invalid session state: {s}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Node {
+    pub id: String,
+    pub name: String,
+    pub hostname: String,
+    pub status: NodeStatus,
+    pub max_sessions: u32,
+    pub active_sessions: u32,
+    pub last_heartbeat: DateTime<Utc>,
+    pub registered_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeStatus {
+    Online,
+    Offline,
+    Draining,
+}
+
+impl std::fmt::Display for NodeStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Online => write!(f, "online"),
+            Self::Offline => write!(f, "offline"),
+            Self::Draining => write!(f, "draining"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Task {
+    pub id: String,
+    pub prompt: String,
+    pub node_id: Option<String>,
+    pub working_dir: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+    pub max_turns: Option<u32>,
+    pub model: Option<String>,
+    pub system_prompt: Option<String>,
+    pub permission_mode: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskRequest {
+    pub prompt: String,
+    pub node_id: Option<String>,
+    pub working_dir: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+    pub max_turns: Option<u32>,
+    pub model: Option<String>,
+    pub system_prompt: Option<String>,
+    pub permission_mode: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+}
+
+/// A single chunk of session log output (rendered in order of `seq`).
+pub struct LogChunk {
+    pub chunk: String,
+    pub stream: String,
+    pub created_at: String,
+}
+
+/// Log chunk with its sequence number (for cursor-based SSE streaming).
+pub struct LogChunkWithSeq {
+    pub seq: i64,
+    pub chunk: String,
+    pub stream: String,
+}

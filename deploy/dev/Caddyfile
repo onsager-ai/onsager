@@ -41,11 +41,12 @@
         reverse_proxy forge:3003
     }
 
-    # Stiglab catch-all under /api/* and the agent WS. This matches the
-    # dev-time behavior of vite.config.ts so the dashboard needs no
-    # per-environment URL changes.
+    # Portal owns all /api/* routes post-#222 Slice 6; stiglab keeps
+    # only the agent WebSocket (/agent/ws). This matches the dev-time
+    # behavior of vite.config.ts so the dashboard needs no per-environment
+    # URL changes.
     handle /api/* {
-        reverse_proxy stiglab:3000
+        reverse_proxy portal:3002
     }
     handle /agent* {
         reverse_proxy stiglab:3000
