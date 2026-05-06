@@ -597,8 +597,8 @@ const GITHUB_HTTP_WALL_PENDING_FILES: &[(&str, &str)] = &[
         "list_recent_issues / list_recent_pulls / get_issue / get_pull-style reads — fold into onsager-github::api::{issues,pulls} with the workspace ↔ portal split (#220 Sub-issue B)",
     ),
     (
-        "crates/stiglab/src/server/workflow_activation.rs",
-        "ensure_label / register_webhook / deregister_webhook — fold into onsager-github::api::{labels,webhooks} once the workflow URL-resolution + ActivationError shape is decoupled (follow-up to #221)",
+        "crates/onsager-portal/src/workflow_activation.rs",
+        "ensure_label / register_webhook / deregister_webhook — fold into onsager-github::api::{labels,webhooks} once the workflow URL-resolution + ActivationError shape is decoupled (follow-up to #221). Moved from stiglab to portal in #222 Slice 4.",
     ),
 ];
 

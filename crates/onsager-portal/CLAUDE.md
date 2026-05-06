@@ -138,11 +138,27 @@ first-class edge subsystem. The migration is staged:
   `get_install_webhook_secret_cipher`) for the in-process needs of
   `routes/projects.rs` live-data hydration — same database,
   separate connection pool, portal is the only writer.
-- **Routes (follow-ups).** Slice 4: move `/api/workflows/*` and
-  the `workflow_activation` decomposition (GitHub side-effects →
-  portal; state transition → spine intent + stiglab listener)
-  into portal. Each route group lands atomically (portal handler
-  live + stiglab handler deleted in the same PR).
+- **Slice 4 — workflow CRUD + GitHub side-effects (landed).**
+  Portal owns `GET/POST /api/workflows`,
+  `GET/PATCH/DELETE /api/workflows/:id`,
+  `GET /api/workflows/:id/runs`, and `GET /api/workflow/kinds`.
+  The activation pipeline (`workflow_activation`: scope check,
+  label create, repo webhook register/deregister) and workflow
+  CRUD (`workflow_db`) moved with them; the workflow domain types
+  (`Workflow`, `WorkflowStage`, `GateKind`, `TriggerKind`) live
+  at `onsager-portal/src/workflow.rs` and the preset registry at
+  `onsager-portal/src/preset.rs`. Workflow rows live on the spine
+  `workflows` / `workflow_stages` tables (Lever D #149); portal
+  is the only writer. Stiglab proxies the URLs through
+  `routes::portal::proxy` and keeps a slim read-only
+  `workflow_db::find_active_github_workflows_for_workspace_repo`
+  for the `routes/projects.rs` replay-trigger handler — same
+  database, separate connection pool. The activation hooks still
+  read `installation_db::get_install_webhook_secret_cipher` for
+  per-install webhook signature secrets.
+- **Routes (follow-ups).** Slice 6: dashboard `API_BASE` cutover
+  to portal directly + delete the `routes::portal::proxy` entries
+  in stiglab.
 
 While the migration is in flight, stiglab still hosts most of the
 external HTTP surface — that is the drift #222 closes, not a pattern

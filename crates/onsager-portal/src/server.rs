@@ -10,7 +10,8 @@ use crate::gate::GateClient;
 use crate::handlers::{
     auth as auth_handlers, credentials as credential_handlers, github_app as github_app_handlers,
     installations as installation_handlers, pats as pat_handlers, projects as project_handlers,
-    webhook, workspaces as workspace_handlers,
+    webhook, workflow_kinds as workflow_kind_handlers, workflows as workflow_handlers,
+    workspaces as workspace_handlers,
 };
 use crate::state::AppState;
 
@@ -152,6 +153,36 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route(
             "/api/github-app/callback",
             get(github_app_handlers::install_callback),
+        )
+        // Workflow CRUD + GitHub side-effects (#222 Slice 4). Stiglab
+        // proxies these URLs through `routes::portal::proxy` so the
+        // dashboard's API_BASE cutover (Slice 6) can land independently.
+        // Auth (cookie or PAT bearer) is enforced by the `AuthUser`
+        // extractor; PAT-pinned principals are 403'd against
+        // mismatched workspace IDs by `require_workspace_access`.
+        // Workflow rows live on the spine `workflows` /
+        // `workflow_stages` tables (Lever D #149); portal is now the
+        // only writer.
+        .route(
+            "/api/workflows",
+            get(workflow_handlers::list_workflows).post(workflow_handlers::create_workflow),
+        )
+        .route(
+            "/api/workflows/{id}",
+            get(workflow_handlers::get_workflow)
+                .patch(workflow_handlers::patch_workflow)
+                .delete(workflow_handlers::delete_workflow),
+        )
+        .route(
+            "/api/workflows/{id}/runs",
+            get(workflow_handlers::list_workflow_runs),
+        )
+        // Workflow artifact-kind catalog (issue #102 / #222 Slice 4) —
+        // public registry pass-through; the dashboard fetches this
+        // without a session to render the workflow-builder's kind picker.
+        .route(
+            "/api/workflow/kinds",
+            get(workflow_kind_handlers::list_workflow_kinds),
         );
 
     // Dev-login is debug-only — `cargo build --release` strips both the

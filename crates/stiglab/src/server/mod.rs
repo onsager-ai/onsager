@@ -8,7 +8,6 @@ pub mod routes;
 pub mod shaping_listener;
 pub mod spine;
 pub mod state;
-pub mod workflow_activation;
 pub mod workflow_db;
 pub mod ws;
 
@@ -166,29 +165,22 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route("/webhooks/github", any(routes::portal::proxy))
         .route("/api/webhooks/github", any(routes::portal::proxy))
         .route("/api/github-app/webhook", any(routes::portal::proxy))
-        // Workflow CRUD (issue #81).
-        .route(
-            "/api/workflows",
-            get(routes::workflows::list_workflows).post(routes::workflows::create_workflow),
-        )
-        .route(
-            "/api/workflows/{id}",
-            get(routes::workflows::get_workflow)
-                .patch(routes::workflows::patch_workflow)
-                .delete(routes::workflows::delete_workflow),
-        )
-        // Live runs (artifacts flowing through this workflow).
-        .route(
-            "/api/workflows/{id}/runs",
-            get(routes::workflows::list_workflow_runs),
-        )
-        // Workflow artifact-kind catalog (issue #102). Runtime surface of
-        // the registry's `workflow_builtin_types()` — lets the dashboard
-        // render the kind picker without hardcoding the union.
-        .route(
-            "/api/workflow/kinds",
-            get(routes::workflow_kinds::list_workflow_kinds),
-        )
+        // Workflow CRUD + GitHub side-effects (#222 Slice 4). Portal
+        // owns `/api/workflows*` and the activation pipeline (label
+        // create / webhook register via `onsager-github`); stiglab
+        // proxies the URLs through `routes::portal::proxy` so the
+        // dashboard's API_BASE cutover (Slice 6) can land
+        // independently. Workflow rows live on the spine `workflows` /
+        // `workflow_stages` tables (Lever D #149); portal is now the
+        // only writer. Stiglab still reads the workflow rows for the
+        // `routes/projects.rs` replay-trigger handler — same database,
+        // separate connection pool.
+        .route("/api/workflows", any(routes::portal::proxy))
+        .route("/api/workflows/{id}", any(routes::portal::proxy))
+        .route("/api/workflows/{id}/runs", any(routes::portal::proxy))
+        // Workflow artifact-kind catalog (issue #102 / #222 Slice 4) —
+        // public registry pass-through; portal owns the route now.
+        .route("/api/workflow/kinds", any(routes::portal::proxy))
         // Event-type registry manifest (spec #131 Lever E / #150).
         // Static, human-reviewed manifest of every FactoryEventKind
         // variant — which subsystems produce it and which consume it.

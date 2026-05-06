@@ -8,7 +8,7 @@
 
 use serde_json::json;
 
-use crate::core::workflow::GateKind;
+use crate::workflow::GateKind;
 
 /// Stage spec from a preset, before being persisted with `workflow_id` + `seq`.
 #[derive(Debug, Clone, PartialEq, Eq)]

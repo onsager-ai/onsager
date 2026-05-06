@@ -12,10 +12,9 @@
 //! lives on the spine, which only the Postgres-backed harness exercises.
 
 use chrono::Utc;
+use onsager_portal::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
+use onsager_portal::workflow_db;
 use sqlx::{PgPool, Row};
-use stiglab::core::workflow::{TriggerKind, Workflow, WorkflowStage};
-use stiglab::core::GateKind;
-use stiglab::server::workflow_db;
 use uuid::Uuid;
 
 async fn try_pool() -> Option<PgPool> {

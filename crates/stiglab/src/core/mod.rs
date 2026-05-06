@@ -3,7 +3,6 @@ pub mod error;
 pub mod event;
 pub mod github_app_installation;
 pub mod node;
-pub mod preset;
 pub mod project;
 pub mod protocol;
 pub mod session;
