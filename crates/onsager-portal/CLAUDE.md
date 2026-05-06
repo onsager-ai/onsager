@@ -101,15 +101,35 @@ first-class edge subsystem. The migration is staged:
   decrypt-and-launch path used by `tasks.rs`/`workflows.rs` —
   same database, separate connection pool, portal is the only
   writer.
-- **Routes (follow-ups).** Slices 3/4: move `/api/workspaces/*`,
-  `/api/installations/*`, `/api/workflows/*`, and the preset
-  registry into portal. Each route group lands atomically (portal
-  handler live + stiglab handler deleted in the same PR).
-- **Schema split (follow-ups).** `workspaces` /
-  `workspace_members` / `projects` move into
-  `crates/onsager-spine/migrations/`; `github_app_installations`
-  move into `crates/onsager-portal/migrations/` next to the auth
-  migrations. Atomic per-PR per Lever B.
+- **Slice 3a — workspace/member/project CRUD (landed).** Portal
+  owns `GET/POST /api/workspaces`, `GET /api/workspaces/:id`,
+  `GET /api/workspaces/:id/members`,
+  `GET/POST /api/workspaces/:id/projects`, `GET /api/projects`,
+  and `GET/DELETE /api/projects/:id`. Domain types
+  (`Workspace`, `WorkspaceMember`, `WorkspaceMemberWithUser`,
+  `Project`) live in `onsager-portal/src/core.rs`; CRUD in
+  `onsager-portal/src/workspace_db.rs`; routes in
+  `onsager-portal/src/handlers/{workspaces,projects}.rs`. The
+  `workspaces` / `workspace_members` / `projects` schema moved
+  into `crates/onsager-spine/migrations/020_workspaces_to_spine.sql`
+  (cross-cutting — `artifacts.workspace_id` joins back to
+  `workspaces.id` at the app layer; no FK constraint declared, in
+  keeping with the rest of the stiglab/spine schema). Stiglab
+  proxies the URLs through
+  `routes::portal::proxy` and keeps its own `db::*` reads
+  (`is_workspace_member`, `get_project`, `list_workspaces_for_user`,
+  etc.) for the in-process needs of `tasks.rs` / `sessions.rs` and
+  the workflow runtime — same database, separate connection pool,
+  portal is the only writer. The PAT-pinned-workspace 403 guardrail
+  follows the routes.
+- **Routes (follow-ups).** Slices 3b/4: move
+  `/api/workspaces/:id/github-installations*`,
+  `/api/github-app/*`, `/api/workflows/*`, and the preset registry
+  into portal. Each route group lands atomically (portal handler
+  live + stiglab handler deleted in the same PR).
+- **Schema split (follow-ups).** `github_app_installations` moves
+  into `crates/onsager-portal/migrations/` (Slice 3b) next to the
+  auth migrations. Atomic per-PR per Lever B.
 
 While the migration is in flight, stiglab still hosts most of the
 external HTTP surface — that is the drift #222 closes, not a pattern

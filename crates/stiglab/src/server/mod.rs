@@ -82,20 +82,25 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         // and PAT bearer auth, so the proxy preserves full behavior.
         .route("/api/pats", any(routes::portal::proxy))
         .route("/api/pats/{id}", any(routes::portal::proxy))
-        // Workspace routes (issue #59 — Phase 0; renamed from "tenant" →
-        // "workspace" in issue #163).
-        .route(
-            "/api/workspaces",
-            get(routes::workspaces::list_workspaces).post(routes::workspaces::create_workspace),
-        )
-        .route(
-            "/api/workspaces/{id}",
-            get(routes::workspaces::get_workspace),
-        )
-        .route(
-            "/api/workspaces/{id}/members",
-            get(routes::workspaces::list_members),
-        )
+        // Workspace + member + project CRUD (#222 Slice 3a). Portal owns
+        // these routes; stiglab proxies them so dashboard fetches keep
+        // working pre–API_BASE cutover (Slice 6). Schema for
+        // `workspaces` / `workspace_members` / `projects` lives in the
+        // spine migration (`020_workspaces_to_spine.sql`); stiglab
+        // still reads the same Postgres tables for the in-process
+        // session/task lookups (`db::is_workspace_member`,
+        // `db::get_project`, etc.) — same database, separate
+        // connection pool, portal is the only writer.
+        .route("/api/workspaces", any(routes::portal::proxy))
+        .route("/api/workspaces/{id}", any(routes::portal::proxy))
+        .route("/api/workspaces/{id}/members", any(routes::portal::proxy))
+        .route("/api/workspaces/{id}/projects", any(routes::portal::proxy))
+        .route("/api/projects", any(routes::portal::proxy))
+        .route("/api/projects/{id}", any(routes::portal::proxy))
+        // GitHub App installation + install-flow routes (Slice 3b
+        // pending). Stiglab still owns these — they live alongside the
+        // workspace routes above and read/write `github_app_installations`
+        // which moves to portal in 3b.
         .route(
             "/api/workspaces/{id}/github-installations",
             get(routes::workspaces::list_installations)
@@ -124,18 +129,6 @@ pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
         .route(
             "/api/github-app/callback",
             get(routes::workspaces::github_app_install_callback),
-        )
-        .route(
-            "/api/workspaces/{id}/projects",
-            get(routes::workspaces::list_projects).post(routes::workspaces::add_project),
-        )
-        .route(
-            "/api/projects",
-            get(routes::workspaces::list_all_projects_for_user),
-        )
-        .route(
-            "/api/projects/{id}",
-            get(routes::workspaces::get_project).delete(routes::workspaces::delete_project),
         )
         // Live-data hydration for reference-only artifacts (#170 / #167 / #171).
         // The dashboard joins skeleton rows from `/api/spine/artifacts?kind=...`
