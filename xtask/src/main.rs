@@ -5,6 +5,7 @@
 //!     cargo run -p xtask -- lint-seams               # check the seam rule
 //!     cargo run -p xtask -- check-api-contract       # check dashboard ↔ backend surface
 //!     cargo run -p xtask -- check-events             # check event-type registry manifest (#150)
+//!     cargo run -p xtask -- check-file-budget        # bound per-file token cost (#261)
 //!     cargo run -p xtask -- slot <subcommand>        # per-worktree dev slot allocator (#194)
 //!
 //! The event catalog is derived from `crates/onsager-spine/src/factory_event.rs`
@@ -21,10 +22,17 @@
 //! dashboard call points at a real backend route. See
 //! [`lint_api_contract`].
 //!
+//! `check-file-budget` enforces spec #261 — every `.rs` / `.ts` / `.tsx`
+//! file must stay under a per-file prod-token budget (default 8000), with
+//! `#[cfg(test)]` blocks and conventional test files excluded. The vocab
+//! is `tiktoken o200k_base`, vendored at `xtask/assets/o200k_base.tiktoken`
+//! for offline determinism. See [`check_file_budget`].
+//!
 //! `slot` allocates and manages per-worktree dev slots backed by docker-compose
 //! projects on disjoint ports. See [`slot`] for the full surface.
 
 mod check_events;
+mod check_file_budget;
 mod check_triggers;
 mod lint_api_contract;
 mod lint_seams;
@@ -74,10 +82,12 @@ fn main() -> ExitCode {
                 check_triggers::run()
             }
         }
+        Some("check-file-budget") => check_file_budget::run(args.collect()),
+        Some("count-tokens") => check_file_budget::run_count(args.collect()),
         Some("slot") => slot::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
+            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
         )),
     };
 

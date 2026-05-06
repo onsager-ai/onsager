@@ -11,10 +11,14 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+base64 = "0.22"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+rustc-hash = "1"
 serde.workspace = true
 serde_json.workspace = true
 syn = { version = "2", features = ["full", "extra-traits", "visit"] }
 quote = "1"
+tiktoken-rs = "0.11"
 toml = "0.8"
 onsager-registry = { path = "../crates/onsager-registry" }
 
