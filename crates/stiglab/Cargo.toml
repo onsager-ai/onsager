@@ -16,7 +16,6 @@ path = "src/main.rs"
 [dependencies]
 onsager-artifact = { path = "../onsager-artifact" }
 onsager-github = { path = "../onsager-github" }
-onsager-registry = { path = "../onsager-registry" }
 onsager-spine = { path = "../onsager-spine" }
 
 # From stiglab-core
