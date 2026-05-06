@@ -49,6 +49,40 @@ pub async fn set_user_credential(
     Ok(())
 }
 
+/// Insert a fresh credential row but never overwrite an existing one.
+/// Used by the PAT path to make the destructive-credential guardrail
+/// race-safe — a pre-check + upsert lets two concurrent PAT `PUT`s for
+/// the same new name both pass the existence check and silently
+/// overwrite. With this helper the second PUT becomes a no-op at the
+/// DB and the handler returns `pat_destructive_blocked`.
+///
+/// Returns `true` when a new row was inserted, `false` when a row
+/// with the same `(workspace_id, user_id, name)` already existed.
+pub async fn insert_user_credential_if_absent(
+    pool: &PgPool,
+    workspace_id: &str,
+    user_id: &str,
+    name: &str,
+    encrypted_value: &str,
+) -> anyhow::Result<bool> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let res = sqlx::query(
+        "INSERT INTO user_credentials (id, user_id, workspace_id, name, encrypted_value, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $6) \
+         ON CONFLICT(workspace_id, user_id, name) DO NOTHING",
+    )
+    .bind(&id)
+    .bind(user_id)
+    .bind(workspace_id)
+    .bind(name)
+    .bind(encrypted_value)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
 pub async fn get_user_credentials(
     pool: &PgPool,
     workspace_id: &str,
@@ -88,24 +122,6 @@ pub async fn delete_user_credential(
     .execute(pool)
     .await?;
     Ok(())
-}
-
-pub async fn user_credential_exists(
-    pool: &PgPool,
-    workspace_id: &str,
-    user_id: &str,
-    name: &str,
-) -> anyhow::Result<bool> {
-    let row = sqlx::query_scalar::<_, String>(
-        "SELECT name FROM user_credentials \
-         WHERE workspace_id = $1 AND user_id = $2 AND name = $3",
-    )
-    .bind(workspace_id)
-    .bind(user_id)
-    .bind(name)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row.is_some())
 }
 
 /// Membership check — used by the credentials route's

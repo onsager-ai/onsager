@@ -33,8 +33,8 @@ CREATE TABLE IF NOT EXISTS user_credentials (
     UNIQUE (workspace_id, user_id, name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_user_credentials_workspace_user_name
-    ON user_credentials (workspace_id, user_id, name);
-
+-- The `UNIQUE (workspace_id, user_id, name)` constraint above already
+-- backs the `(workspace_id, user_id, name)` lookup with a unique index;
+-- only the workspace-scoped scan needs its own index.
 CREATE INDEX IF NOT EXISTS idx_user_credentials_workspace
     ON user_credentials (workspace_id);

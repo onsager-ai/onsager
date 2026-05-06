@@ -356,119 +356,13 @@ async fn pat_bearer_takes_precedence_over_cookie() {
 }
 
 // ── Destructive-credential guardrail ──
-
-#[tokio::test]
-async fn pat_can_create_credential_but_not_overwrite() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "creds").await;
-    // Workspace-scoped PAT (#164) — credentials live under
-    // /api/workspaces/:workspace/credentials, so the PAT must address
-    // that workspace.
-    let (_, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "ci", None).await;
-    let state = AppState::new(pool, auth_enabled_config(), None);
-    let app_ = app(state);
-
-    let url = format!("/api/workspaces/{}/credentials/CI_TOKEN", workspace.id);
-
-    // PUT to a brand-new credential name succeeds.
-    let create = bearer(
-        Request::builder()
-            .method("PUT")
-            .uri(&url)
-            .header(header::CONTENT_TYPE, "application/json"),
-        &token,
-    )
-    .body(Body::from(
-        serde_json::json!({ "value": "abc" }).to_string(),
-    ))
-    .unwrap();
-    let resp = app_.clone().oneshot(create).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    // PUT to the same name now must 403 with the documented body.
-    let overwrite = bearer(
-        Request::builder()
-            .method("PUT")
-            .uri(&url)
-            .header(header::CONTENT_TYPE, "application/json"),
-        &token,
-    )
-    .body(Body::from(
-        serde_json::json!({ "value": "xyz" }).to_string(),
-    ))
-    .unwrap();
-    let resp = app_.oneshot(overwrite).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    let v = read_json(resp).await;
-    assert_eq!(v["error"], "pat_destructive_blocked");
-}
-
-#[tokio::test]
-async fn pat_cannot_delete_credential() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "creds-del").await;
-    // Pre-create a credential via the DB so the DELETE actually has
-    // something to refer to.
-    let key = stiglab::server::auth::generate_credential_key();
-    let enc = stiglab::server::auth::encrypt_credential(&key, "abc").unwrap();
-    db::set_user_credential(&pool, &workspace.id, &user.id, "CI_TOKEN", &enc)
-        .await
-        .unwrap();
-    let (_, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "ci", None).await;
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let url = format!("/api/workspaces/{}/credentials/CI_TOKEN", workspace.id);
-    let resp = app(state)
-        .oneshot(
-            bearer(Request::builder().method("DELETE").uri(&url), &token)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    let v = read_json(resp).await;
-    assert_eq!(v["error"], "pat_destructive_blocked");
-}
-
-#[tokio::test]
-async fn session_can_still_delete_credential_after_guardrail_added() {
-    // Regression guard: the destructive guardrail must only fire for PATs.
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "creds-sess").await;
-    let key = stiglab::server::auth::generate_credential_key();
-    let enc = stiglab::server::auth::encrypt_credential(&key, "abc").unwrap();
-    db::set_user_credential(&pool, &workspace.id, &user.id, "CI_TOKEN", &enc)
-        .await
-        .unwrap();
-    let session_token = stiglab::server::auth::generate_session_token();
-    db::create_auth_session(
-        &pool,
-        &session_token,
-        &user.id,
-        Utc::now() + chrono::Duration::days(1),
-    )
-    .await
-    .unwrap();
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let url = format!("/api/workspaces/{}/credentials/CI_TOKEN", workspace.id);
-    let resp = app(state)
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri(&url)
-                .header(header::COOKIE, format!("stiglab_session={session_token}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-}
+//
+// Spec #222 Slice 2a moved `/api/workspaces/:id/credentials*` to portal,
+// taking the `pat_destructive_blocked` guardrail with it. The
+// route-level tests retire here (the stiglab path is now a proxy and
+// portal isn't running in this harness) pending a Postgres-backed
+// portal integration-test harness — same status as the Slice 2b
+// `/api/pats` CRUD tests.
 
 // ── last_used_at ──
 

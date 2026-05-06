@@ -104,7 +104,10 @@ pub async fn list_credentials(
         }
         Err(e) => {
             tracing::error!("failed to list credentials: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            // Portal serves the public edge — opaque message to the
+            // client, full detail in logs. Don't echo the underlying
+            // sqlx error (could leak schema/topology).
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
         }
     }
 }
@@ -119,26 +122,6 @@ pub async fn set_credential(
 ) -> Response {
     if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workspace_id).await {
         return r;
-    }
-
-    // PAT principals can create new credentials but not overwrite
-    // existing ones.
-    if matches!(auth_user.principal, RequestPrincipal::Pat { .. }) {
-        match credential_db::user_credential_exists(
-            &state.pool,
-            &workspace_id,
-            &auth_user.user_id,
-            &name,
-        )
-        .await
-        {
-            Ok(true) => return pat_destructive_blocked(),
-            Ok(false) => {}
-            Err(e) => {
-                tracing::error!("failed to check credential existence: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-            }
-        }
     }
 
     let Some(ref key) = state.config.credential_key else {
@@ -159,6 +142,30 @@ pub async fn set_credential(
         }
     };
 
+    // PAT principals can create new credentials but not overwrite
+    // existing ones. The `insert_..._if_absent` path makes the
+    // create-only contract atomic at the DB layer — two concurrent
+    // PAT PUTs for the same new name resolve as one insert + one
+    // `pat_destructive_blocked`, never as a silent overwrite.
+    if matches!(auth_user.principal, RequestPrincipal::Pat { .. }) {
+        return match credential_db::insert_user_credential_if_absent(
+            &state.pool,
+            &workspace_id,
+            &auth_user.user_id,
+            &name,
+            &encrypted,
+        )
+        .await
+        {
+            Ok(true) => Json(serde_json::json!({ "ok": true })).into_response(),
+            Ok(false) => pat_destructive_blocked(),
+            Err(e) => {
+                tracing::error!("failed to set credential (PAT path): {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+            }
+        };
+    }
+
     match credential_db::set_user_credential(
         &state.pool,
         &workspace_id,
@@ -171,7 +178,7 @@ pub async fn set_credential(
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => {
             tracing::error!("failed to set credential: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
         }
     }
 }
@@ -200,7 +207,7 @@ pub async fn delete_credential(
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => {
             tracing::error!("failed to delete credential: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
         }
     }
 }
