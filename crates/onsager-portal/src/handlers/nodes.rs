@@ -8,8 +8,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 
 use crate::auth::AuthUser;
-use crate::handlers::sessions::WorkspaceQuery;
 use crate::handlers::sessions::missing_workspace;
+use crate::handlers::sessions::WorkspaceQuery;
 use crate::handlers::workspaces::require_workspace_access;
 use crate::session_db;
 use crate::state::AppState;

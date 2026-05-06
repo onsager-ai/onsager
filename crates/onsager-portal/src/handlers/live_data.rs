@@ -627,8 +627,7 @@ pub async fn backfill_project(
         }
     };
 
-    match crate::backfill::run(&state.pool, &state.spine, &project_id, strategy, cap, token).await
-    {
+    match crate::backfill::run(&state.pool, &state.spine, &project_id, strategy, cap, token).await {
         Ok(report) => {
             // Evict cached list responses so the next read repopulates from GitHub.
             state
@@ -688,25 +687,25 @@ pub async fn replay_issue_trigger(
     };
     let dry_run = body.dry_run.unwrap_or(true);
 
-    let token =
-        match installation_token_for(&state.pool, &project.github_app_installation_id).await {
-            Ok(Some(t)) => t,
-            Ok(None) => {
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(serde_json::json!({ "error": "GitHub App not configured" })),
-                )
-                    .into_response()
-            }
-            Err(e) => {
-                tracing::error!("installation_token_for failed: {e}");
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(serde_json::json!({ "error": "GitHub auth failed" })),
-                )
-                    .into_response();
-            }
-        };
+    let token = match installation_token_for(&state.pool, &project.github_app_installation_id).await
+    {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "GitHub App not configured" })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!("installation_token_for failed: {e}");
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": "GitHub auth failed" })),
+            )
+                .into_response();
+        }
+    };
 
     let issue = match fetch_single_issue(
         &token.token,

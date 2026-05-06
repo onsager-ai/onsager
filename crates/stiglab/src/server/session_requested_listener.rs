@@ -199,5 +199,9 @@ async fn fetch_workspace_credentials(
         }
     }
 
-    if result.is_empty() { None } else { Some(result) }
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
 }

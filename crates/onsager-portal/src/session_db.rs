@@ -132,10 +132,7 @@ pub async fn get_session(pool: &PgPool, session_id: &str) -> anyhow::Result<Opti
     row.map(|r| r.try_into()).transpose()
 }
 
-pub async fn get_session_owner(
-    pool: &PgPool,
-    session_id: &str,
-) -> anyhow::Result<Option<String>> {
+pub async fn get_session_owner(pool: &PgPool, session_id: &str) -> anyhow::Result<Option<String>> {
     let row = sqlx::query_scalar::<_, String>(
         "SELECT user_id FROM sessions WHERE id = $1 AND user_id IS NOT NULL",
     )
@@ -149,19 +146,15 @@ pub async fn get_session_workspace(
     pool: &PgPool,
     session_id: &str,
 ) -> anyhow::Result<Option<String>> {
-    let row = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT workspace_id FROM sessions WHERE id = $1",
-    )
-    .bind(session_id)
-    .fetch_optional(pool)
-    .await?;
+    let row =
+        sqlx::query_scalar::<_, Option<String>>("SELECT workspace_id FROM sessions WHERE id = $1")
+            .bind(session_id)
+            .fetch_optional(pool)
+            .await?;
     Ok(row.flatten())
 }
 
-pub async fn get_session_logs(
-    pool: &PgPool,
-    session_id: &str,
-) -> anyhow::Result<Vec<LogChunk>> {
+pub async fn get_session_logs(pool: &PgPool, session_id: &str) -> anyhow::Result<Vec<LogChunk>> {
     let rows = sqlx::query_as::<_, LogChunkRow>(
         "SELECT chunk, stream, created_at FROM session_logs \
          WHERE session_id = $1 ORDER BY seq ASC",

@@ -682,8 +682,7 @@ mod tests {
         assert!(stiglab_paths.contains(&"/api/health"));
 
         let portal =
-            parse_rust_routes(&root.join("crates/onsager-portal/src/server.rs"), "portal")
-                .unwrap();
+            parse_rust_routes(&root.join("crates/onsager-portal/src/server.rs"), "portal").unwrap();
         assert!(portal.len() > 20, "portal routes: {}", portal.len());
         let portal_paths: Vec<_> = portal.iter().map(|r| r.path.as_str()).collect();
         assert!(portal_paths.contains(&"/api/workspaces"));
@@ -983,11 +982,7 @@ mod tests {
             parse_rust_routes(&root.join("crates/stiglab/src/server/mod.rs"), "stiglab").unwrap(),
         );
         backend.extend(
-            parse_rust_routes(
-                &root.join("crates/onsager-portal/src/server.rs"),
-                "portal",
-            )
-            .unwrap(),
+            parse_rust_routes(&root.join("crates/onsager-portal/src/server.rs"), "portal").unwrap(),
         );
         backend.extend(
             parse_rust_routes(&root.join("crates/synodic/src/cmd/serve.rs"), "synodic").unwrap(),

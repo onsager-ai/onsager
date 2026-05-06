@@ -180,7 +180,9 @@ pub async fn session_logs(
     let sse_stream = stream::unfold(initial, |(state, session_id, last_seq)| async move {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        let session = session_db::get_session(&state.pool, &session_id).await.ok()??;
+        let session = session_db::get_session(&state.pool, &session_id)
+            .await
+            .ok()??;
         let new_chunks = session_db::get_session_logs_after(&state.pool, &session_id, last_seq)
             .await
             .ok()?;

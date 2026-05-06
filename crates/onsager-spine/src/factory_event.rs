@@ -372,9 +372,7 @@ pub enum FactoryEventKind {
     /// Dashboard task request from portal. Stiglab's
     /// `session_requested_listener` dispatches the session to the correct
     /// agent node (spec #222 Follow-up 3).
-    PortalSessionRequested {
-        session_id: String,
-    },
+    PortalSessionRequested { session_id: String },
 
     // -- Synodic events (governance) ----------------------------------------
     /// A gate request was evaluated and a verdict issued.
