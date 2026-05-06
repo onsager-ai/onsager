@@ -1,36 +1,23 @@
-//! Integration tests for stiglab's PAT-aware `AuthUser` extractor and the
-//! credential / workspace-scope routes that still consume PAT bearer auth.
+//! Integration tests for stiglab's PAT-aware `AuthUser` extractor.
 //!
-//! Spec #222 Slice 2b moved `/api/pats*` CRUD to portal — minting, listing,
-//! and revoking PATs is exercised on the portal side. The tests here cover
-//! the bits that remain stiglab-owned for the duration of Slices 2a / 3 / 4:
+//! Spec #222 Slice 2b moved `/api/pats*` CRUD to portal. Slices 3–4 moved
+//! workspaces, projects, workflows. Follow-up 3 + Slice 6 moved sessions,
+//! nodes, tasks and completed the cutover so stiglab owns no auth-gated HTTP
+//! routes at all (only `/api/health` and `/agent/ws`).
 //!
-//!   * stiglab's `verify_pat` DB primitive and `AuthUser` Bearer-vs-cookie
-//!     precedence (still hot because credentials/workspaces/projects/
-//!     workflows accept PAT bearer auth on stiglab),
-//!   * the destructive-credential guardrail (PUT-overwrite + DELETE) maps to
-//!     403 `pat_destructive_blocked`,
-//!   * workspace-scoped PATs reject calls to a different workspace, and
-//!   * `last_used_at` advances on a successful PAT auth.
-//!
-//! The auth-extractor tests pivot onto stiglab routes that survive the
-//! Slice 3a move: `/api/sessions?workspace={id}` (workspace-scoped list,
-//! `AuthUser`-gated and `require_workspace_access`-gated). Earlier slices
-//! used `/api/projects` and `/api/workspaces/{id}`; those are reverse
-//! proxies to portal as of #222 Slice 3a, so route-level tests against
-//! them require a Postgres-backed portal harness that doesn't exist yet.
+//! The end-to-end HTTP-level PAT auth tests that pivoted onto
+//! `/api/sessions?workspace={id}` were retired here after that route moved
+//! to portal in Follow-up 3 — there is no longer a suitable stiglab-owned
+//! route to exercise the `AuthUser` extractor over HTTP without a running
+//! portal + Postgres harness. The tests below cover the DB primitives that
+//! remain stiglab-local: `verify_pat`, hash invariants, and token format.
 
-use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
 use chrono::Utc;
 use sqlx::pool::PoolOptions;
 use sqlx::AnyPool;
 use stiglab::core::{User, Workspace, WorkspaceMember};
 use stiglab::server::auth::{generate_pat_token, hash_pat_token, PAT_PREFIX_LEN};
-use stiglab::server::config::ServerConfig;
 use stiglab::server::db;
-use stiglab::server::state::AppState;
-use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn test_pool() -> AnyPool {
@@ -42,20 +29,6 @@ async fn test_pool() -> AnyPool {
         .expect("sqlite connect");
     db::run_migrations(&pool).await.expect("migrations");
     pool
-}
-
-fn auth_enabled_config() -> ServerConfig {
-    ServerConfig {
-        host: "0.0.0.0".into(),
-        port: 3000,
-        database_url: "sqlite::memory:".into(),
-        static_dir: None,
-        cors_origin: None,
-        // Required for the credential set/get path used by the guardrail tests.
-        credential_key: Some(stiglab::server::auth::generate_credential_key()),
-        public_url: None,
-        internal_dispatch_token: None,
-    }
 }
 
 async fn seed_user(pool: &AnyPool) -> User {
@@ -135,21 +108,6 @@ async fn mint_pat(
     .await
     .unwrap();
     (id, generated.token)
-}
-
-fn app(state: AppState) -> axum::Router {
-    stiglab::server::build_router(state.clone(), &state.config)
-}
-
-fn bearer(req: axum::http::request::Builder, token: &str) -> axum::http::request::Builder {
-    req.header(header::AUTHORIZATION, format!("Bearer {token}"))
-}
-
-async fn read_json(resp: axum::response::Response) -> serde_json::Value {
-    let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
-        .await
-        .unwrap();
-    serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
 }
 
 // ── Token format + hash invariants ──
@@ -234,240 +192,4 @@ async fn verify_pat_reports_expired_separately_from_unknown() {
         outcome,
         stiglab::server::auth::PatVerifyOutcome::Expired
     ));
-}
-
-// ── End-to-end PAT-authenticated requests ──
-//
-// The PAT auth path lives in stiglab's `AuthUser` extractor as long as
-// non-portal routes (workflows, sessions, nodes) accept PAT bearer auth.
-// The tests below pivot onto `/api/sessions?workspace={id}` — a
-// workspace-scoped list endpoint stiglab still owns post-Slice 3a — to
-// exercise the extractor end-to-end without depending on `/api/projects`
-// or `/api/workspaces/{id}` (both now portal proxies).
-
-#[tokio::test]
-async fn revoked_pat_returns_401_with_invalid_token_challenge() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "rvk").await;
-    let (pat_id, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "ci", None).await;
-    db::revoke_user_pat(&pool, &user.id, &pat_id).await.unwrap();
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let resp = app(state)
-        .oneshot(
-            bearer(
-                Request::builder().uri(format!("/api/sessions?workspace={}", workspace.id)),
-                &token,
-            )
-            .body(Body::empty())
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    let www = resp
-        .headers()
-        .get(header::WWW_AUTHENTICATE)
-        .map(|v| v.to_str().unwrap().to_string());
-    assert_eq!(
-        www.as_deref(),
-        Some("Bearer error=\"invalid_token\""),
-        "WWW-Authenticate must report invalid_token"
-    );
-}
-
-#[tokio::test]
-async fn expired_pat_returns_401_with_invalid_token_challenge() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "exp").await;
-    let past = Utc::now() - chrono::Duration::seconds(60);
-    let (_, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "ci", Some(past)).await;
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let resp = app(state)
-        .oneshot(
-            bearer(
-                Request::builder().uri(format!("/api/sessions?workspace={}", workspace.id)),
-                &token,
-            )
-            .body(Body::empty())
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        resp.headers()
-            .get(header::WWW_AUTHENTICATE)
-            .and_then(|v| v.to_str().ok()),
-        Some("Bearer error=\"invalid_token\"")
-    );
-}
-
-#[tokio::test]
-async fn pat_bearer_takes_precedence_over_cookie() {
-    // A request that carries BOTH a valid PAT and a valid session cookie
-    // should be authenticated as the PAT user (so that smoke-testing from
-    // a CLI doesn't silently fall through to the browser session that
-    // happens to be in scope). The proof works because the PAT is pinned
-    // to `pat_workspace`; sending both auths to a different workspace's
-    // GET route must 403 with `pat_workspace_scope_mismatch`. If the
-    // cookie principal had won, the cookie user is a member of
-    // `cookie_workspace` so the same request would 200.
-    let pool = test_pool().await;
-
-    let pat_user = seed_user(&pool).await;
-    let pat_workspace = seed_workspace_with_member(&pool, &pat_user.id, "pat-ws").await;
-    let (_, pat_token) = mint_pat(&pool, &pat_user.id, Some(&pat_workspace.id), "ci", None).await;
-
-    let cookie_user = User {
-        id: Uuid::new_v4().to_string(),
-        github_id: 999,
-        github_login: "cookieuser".into(),
-        github_name: None,
-        github_avatar_url: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-    };
-    db::upsert_user(&pool, &cookie_user).await.unwrap();
-    let cookie_workspace = seed_workspace_with_member(&pool, &cookie_user.id, "cookie-ws").await;
-    let session_token = stiglab::server::auth::generate_session_token();
-    db::create_auth_session(
-        &pool,
-        &session_token,
-        &cookie_user.id,
-        Utc::now() + chrono::Duration::days(1),
-    )
-    .await
-    .unwrap();
-
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    // Hit cookie_user's workspace with both auths. PAT precedence ⇒ 403
-    // (PAT is pinned to pat_workspace, request hits cookie_workspace).
-    // Cookie precedence would have been 200 (cookie_user is a member).
-    let resp = app(state)
-        .oneshot(
-            Request::builder()
-                .uri(format!("/api/sessions?workspace={}", cookie_workspace.id))
-                .header(header::AUTHORIZATION, format!("Bearer {pat_token}"))
-                .header(header::COOKIE, format!("stiglab_session={session_token}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    let v = read_json(resp).await;
-    assert_eq!(v["error"], "pat_workspace_scope_mismatch");
-}
-
-// ── Destructive-credential guardrail ──
-//
-// Spec #222 Slice 2a moved `/api/workspaces/:id/credentials*` to portal,
-// taking the `pat_destructive_blocked` guardrail with it. The
-// route-level tests retire here (the stiglab path is now a proxy and
-// portal isn't running in this harness) pending a Postgres-backed
-// portal integration-test harness — same status as the Slice 2b
-// `/api/pats` CRUD tests.
-
-// ── last_used_at ──
-
-#[tokio::test]
-async fn last_used_at_advances_after_pat_auth() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "lua").await;
-    let (pat_id, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "ci", None).await;
-    // Sanity: brand-new PAT has no last_used_at.
-    {
-        let pats = db::list_user_pats(&pool, &user.id).await.unwrap();
-        assert!(pats
-            .iter()
-            .any(|p| p.id == pat_id && p.last_used_at.is_none()));
-    }
-
-    let state = AppState::new(pool.clone(), auth_enabled_config(), None);
-    let resp = app(state)
-        .oneshot(
-            bearer(
-                Request::builder()
-                    .uri(format!("/api/sessions?workspace={}", workspace.id))
-                    .header(header::USER_AGENT, "test-agent/1.0"),
-                &token,
-            )
-            .body(Body::empty())
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    // The touch is best-effort + spawned, so poll briefly for the update.
-    let mut populated = false;
-    for _ in 0..40 {
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        let pats = db::list_user_pats(&pool, &user.id).await.unwrap();
-        if let Some(p) = pats.iter().find(|p| p.id == pat_id) {
-            if p.last_used_at.is_some() {
-                populated = true;
-                assert_eq!(p.last_used_user_agent.as_deref(), Some("test-agent/1.0"));
-                break;
-            }
-        }
-    }
-    assert!(populated, "last_used_at should be set after a PAT auth");
-}
-
-// ── Workspace scope ──
-
-#[tokio::test]
-async fn workspace_scoped_pat_can_read_its_own_workspace() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace = seed_workspace_with_member(&pool, &user.id, "wsa").await;
-    let (_, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "wsa-ci", None).await;
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let resp = app(state)
-        .oneshot(
-            bearer(
-                Request::builder().uri(format!("/api/sessions?workspace={}", workspace.id)),
-                &token,
-            )
-            .body(Body::empty())
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let v = read_json(resp).await;
-    assert!(v["sessions"].is_array(), "expected sessions array");
-}
-
-#[tokio::test]
-async fn workspace_scoped_pat_rejects_other_workspace() {
-    let pool = test_pool().await;
-    let user = seed_user(&pool).await;
-    let workspace_a = seed_workspace_with_member(&pool, &user.id, "wsa").await;
-    let workspace_b = seed_workspace_with_member(&pool, &user.id, "wsb").await;
-    let (_, token) = mint_pat(&pool, &user.id, Some(&workspace_a.id), "wsa-ci", None).await;
-    let state = AppState::new(pool, auth_enabled_config(), None);
-
-    let resp = app(state)
-        .oneshot(
-            bearer(
-                Request::builder().uri(format!("/api/sessions?workspace={}", workspace_b.id)),
-                &token,
-            )
-            .body(Body::empty())
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    let v = read_json(resp).await;
-    assert_eq!(v["error"], "pat_workspace_scope_mismatch");
 }
