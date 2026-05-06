@@ -105,21 +105,17 @@ pub async fn add_project(
     let default_branch = match supplied {
         Some(b) => b,
         None => match installation_token_for(&state.pool, &body.github_app_installation_id).await {
-            Ok(Some(token)) => match gh_app::get_repo_default_branch(
-                &token,
-                repo_owner,
-                repo_name,
-            )
-            .await
-            {
-                Ok(b) => b,
-                Err(e) => {
-                    tracing::warn!(
-                        "default_branch inference failed for {repo_owner}/{repo_name}: {e}"
-                    );
-                    "main".to_string()
+            Ok(Some(token)) => {
+                match gh_app::get_repo_default_branch(&token, repo_owner, repo_name).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(
+                            "default_branch inference failed for {repo_owner}/{repo_name}: {e}"
+                        );
+                        "main".to_string()
+                    }
                 }
-            },
+            }
             Ok(None) => "main".to_string(),
             Err(e) => {
                 tracing::warn!(
