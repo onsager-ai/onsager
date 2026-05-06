@@ -174,13 +174,20 @@ pub async fn list_projects(
 
 /// GET /api/projects — List every project the current user can access,
 /// across all their workspaces. Powers the cross-workspace project
-/// selector in `CreateSessionSheet`.
+/// selector in `CreateSessionSheet`. PAT-pinned principals see only
+/// projects in their pinned workspace.
 pub async fn list_all_projects_for_user(
     State(state): State<AppState>,
     auth_user: AuthUser,
 ) -> Response {
+    let pinned = auth_user.principal.pinned_workspace_id();
     match workspace_db::list_projects_for_user(&state.pool, &auth_user.user_id).await {
-        Ok(projects) => Json(serde_json::json!({ "projects": projects })).into_response(),
+        Ok(mut projects) => {
+            if let Some(p) = pinned {
+                projects.retain(|proj| proj.workspace_id == p);
+            }
+            Json(serde_json::json!({ "projects": projects })).into_response()
+        }
         Err(e) => {
             tracing::error!("failed to list projects: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
@@ -189,7 +196,9 @@ pub async fn list_all_projects_for_user(
 }
 
 /// GET /api/projects/:id — Fetch a project by ID. 404 for users who are
-/// not members of the owning workspace.
+/// not members of the owning workspace, and **404 (not 403) for PATs
+/// pinned to a different workspace** — the existence-vs-scope leak
+/// would otherwise let a PAT enumerate project IDs across workspaces.
 pub async fn get_project(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -203,6 +212,11 @@ pub async fn get_project(
             return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
         }
     };
+    if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
+        if pinned != project.workspace_id {
+            return not_found("project not found");
+        }
+    }
     if let Err(r) = require_workspace_access(&state.pool, &auth_user, &project.workspace_id).await {
         return r;
     }
@@ -211,7 +225,8 @@ pub async fn get_project(
 
 /// DELETE /api/projects/:id — Delete a project. Blocks with a clear
 /// error when any attached session is not in a terminal state (no
-/// cascade, no soft-delete in v1).
+/// cascade, no soft-delete in v1). Same 404-not-403 PAT scope policy
+/// as `get_project`.
 pub async fn delete_project(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -225,6 +240,11 @@ pub async fn delete_project(
             return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
         }
     };
+    if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
+        if pinned != project.workspace_id {
+            return not_found("project not found");
+        }
+    }
     if let Err(r) = require_workspace_access(&state.pool, &auth_user, &project.workspace_id).await {
         return r;
     }

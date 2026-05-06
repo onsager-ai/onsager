@@ -1,13 +1,15 @@
 -- Onsager #222 Slice 3a: workspaces / workspace_members / projects move
 -- into the spine.
 --
--- These three tables are cross-cutting — `artifacts.workspace_id` already
--- FKs into `workspaces`, every subsystem that joins agent-session work to
--- a tenant boundary needs `workspace_members` for membership checks, and
--- `projects` is the (workspace, repo) pair that webhook ingestion and
--- workflow CRUD both index on. Per Lever B, the schema lives where the
--- data is canonical — in the spine — rather than in the subsystem that
--- happens to own a CRUD route over it.
+-- These three tables are cross-cutting — `artifacts.workspace_id` joins
+-- to `workspaces.id` (no FK constraint declared, in keeping with the
+-- rest of stiglab/spine schema; app-layer enforcement only), every
+-- subsystem that joins agent-session work to a tenant boundary needs
+-- `workspace_members` for membership checks, and `projects` is the
+-- (workspace, repo) pair that webhook ingestion and workflow CRUD both
+-- index on. Per Lever B, the schema lives where the data is canonical
+-- — in the spine — rather than in the subsystem that happens to own a
+-- CRUD route over it.
 --
 -- Slice 2a's pattern: portal becomes the only writer to these tables;
 -- stiglab keeps its own `db::*` reads (same database, separate connection

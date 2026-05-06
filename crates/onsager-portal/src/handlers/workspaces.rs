@@ -138,9 +138,20 @@ pub async fn create_workspace(
 }
 
 /// GET /api/workspaces — List workspaces the current user belongs to.
+///
+/// PATs are workspace-scoped post-#163: a PAT pinned to a workspace
+/// must not enumerate other workspaces its user happens to belong to.
+/// When the principal is a pinned PAT, the response is filtered to the
+/// pinned workspace (returning `[]` if the user is not a member).
 pub async fn list_workspaces(State(state): State<AppState>, auth_user: AuthUser) -> Response {
+    let pinned = auth_user.principal.pinned_workspace_id();
     match workspace_db::list_workspaces_for_user(&state.pool, &auth_user.user_id).await {
-        Ok(workspaces) => Json(serde_json::json!({ "workspaces": workspaces })).into_response(),
+        Ok(mut workspaces) => {
+            if let Some(p) = pinned {
+                workspaces.retain(|w| w.id == p);
+            }
+            Json(serde_json::json!({ "workspaces": workspaces })).into_response()
+        }
         Err(e) => {
             tracing::error!("failed to list workspaces: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()

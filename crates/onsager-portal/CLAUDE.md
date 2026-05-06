@@ -112,8 +112,10 @@ first-class edge subsystem. The migration is staged:
   `onsager-portal/src/handlers/{workspaces,projects}.rs`. The
   `workspaces` / `workspace_members` / `projects` schema moved
   into `crates/onsager-spine/migrations/020_workspaces_to_spine.sql`
-  (cross-cutting — `artifacts.workspace_id` already FKs into
-  `workspaces`). Stiglab proxies the URLs through
+  (cross-cutting — `artifacts.workspace_id` joins back to
+  `workspaces.id` at the app layer; no FK constraint declared, in
+  keeping with the rest of the stiglab/spine schema). Stiglab
+  proxies the URLs through
   `routes::portal::proxy` and keeps its own `db::*` reads
   (`is_workspace_member`, `get_project`, `list_workspaces_for_user`,
   etc.) for the in-process needs of `tasks.rs` / `sessions.rs` and

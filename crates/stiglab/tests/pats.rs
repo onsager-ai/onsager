@@ -14,10 +14,11 @@
 //!   * `last_used_at` advances on a successful PAT auth.
 //!
 //! The auth-extractor tests pivot onto stiglab routes that survive the
-//! Slice 2b move: `/api/projects` (cross-workspace project listing,
-//! `AuthUser`-gated) and `/api/workspaces/{id}` (workspace get,
-//! `require_workspace_access`-gated). When credentials/workspaces move in
-//! later slices, these tests will follow them to portal-side coverage.
+//! Slice 3a move: `/api/sessions?workspace={id}` (workspace-scoped list,
+//! `AuthUser`-gated and `require_workspace_access`-gated). Earlier slices
+//! used `/api/projects` and `/api/workspaces/{id}`; those are reverse
+//! proxies to portal as of #222 Slice 3a, so route-level tests against
+//! them require a Postgres-backed portal harness that doesn't exist yet.
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -238,25 +239,29 @@ async fn verify_pat_reports_expired_separately_from_unknown() {
 // ── End-to-end PAT-authenticated requests ──
 //
 // The PAT auth path lives in stiglab's `AuthUser` extractor as long as
-// non-portal routes (credentials, workspaces, projects, workflows) accept
-// PAT bearer auth. The tests below pivot onto `/api/projects` — a
-// cross-workspace, AuthUser-gated route stiglab still owns — to exercise
-// the extractor end-to-end without depending on `/api/pats` (now a portal
-// proxy).
+// non-portal routes (workflows, sessions, nodes) accept PAT bearer auth.
+// The tests below pivot onto `/api/sessions?workspace={id}` — a
+// workspace-scoped list endpoint stiglab still owns post-Slice 3a — to
+// exercise the extractor end-to-end without depending on `/api/projects`
+// or `/api/workspaces/{id}` (both now portal proxies).
 
 #[tokio::test]
 async fn revoked_pat_returns_401_with_invalid_token_challenge() {
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
-    let (pat_id, token) = mint_pat(&pool, &user.id, None, "ci", None).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "rvk").await;
+    let (pat_id, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "ci", None).await;
     db::revoke_user_pat(&pool, &user.id, &pat_id).await.unwrap();
     let state = AppState::new(pool, auth_enabled_config(), None);
 
     let resp = app(state)
         .oneshot(
-            bearer(Request::builder().uri("/api/projects"), &token)
-                .body(Body::empty())
-                .unwrap(),
+            bearer(
+                Request::builder().uri(format!("/api/sessions?workspace={}", workspace.id)),
+                &token,
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -276,15 +281,19 @@ async fn revoked_pat_returns_401_with_invalid_token_challenge() {
 async fn expired_pat_returns_401_with_invalid_token_challenge() {
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "exp").await;
     let past = Utc::now() - chrono::Duration::seconds(60);
-    let (_, token) = mint_pat(&pool, &user.id, None, "ci", Some(past)).await;
+    let (_, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "ci", Some(past)).await;
     let state = AppState::new(pool, auth_enabled_config(), None);
 
     let resp = app(state)
         .oneshot(
-            bearer(Request::builder().uri("/api/projects"), &token)
-                .body(Body::empty())
-                .unwrap(),
+            bearer(
+                Request::builder().uri(format!("/api/sessions?workspace={}", workspace.id)),
+                &token,
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -342,7 +351,7 @@ async fn pat_bearer_takes_precedence_over_cookie() {
     let resp = app(state)
         .oneshot(
             Request::builder()
-                .uri(format!("/api/workspaces/{}", cookie_workspace.id))
+                .uri(format!("/api/sessions?workspace={}", cookie_workspace.id))
                 .header(header::AUTHORIZATION, format!("Bearer {pat_token}"))
                 .header(header::COOKIE, format!("stiglab_session={session_token}"))
                 .body(Body::empty())
@@ -370,7 +379,8 @@ async fn pat_bearer_takes_precedence_over_cookie() {
 async fn last_used_at_advances_after_pat_auth() {
     let pool = test_pool().await;
     let user = seed_user(&pool).await;
-    let (pat_id, token) = mint_pat(&pool, &user.id, None, "ci", None).await;
+    let workspace = seed_workspace_with_member(&pool, &user.id, "lua").await;
+    let (pat_id, token) = mint_pat(&pool, &user.id, Some(&workspace.id), "ci", None).await;
     // Sanity: brand-new PAT has no last_used_at.
     {
         let pats = db::list_user_pats(&pool, &user.id).await.unwrap();
@@ -384,7 +394,7 @@ async fn last_used_at_advances_after_pat_auth() {
         .oneshot(
             bearer(
                 Request::builder()
-                    .uri("/api/projects")
+                    .uri(format!("/api/sessions?workspace={}", workspace.id))
                     .header(header::USER_AGENT, "test-agent/1.0"),
                 &token,
             )
@@ -424,7 +434,7 @@ async fn workspace_scoped_pat_can_read_its_own_workspace() {
     let resp = app(state)
         .oneshot(
             bearer(
-                Request::builder().uri(format!("/api/workspaces/{}", workspace.id)),
+                Request::builder().uri(format!("/api/sessions?workspace={}", workspace.id)),
                 &token,
             )
             .body(Body::empty())
@@ -434,7 +444,7 @@ async fn workspace_scoped_pat_can_read_its_own_workspace() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let v = read_json(resp).await;
-    assert_eq!(v["workspace"]["id"], workspace.id);
+    assert!(v["sessions"].is_array(), "expected sessions array");
 }
 
 #[tokio::test]
@@ -449,7 +459,7 @@ async fn workspace_scoped_pat_rejects_other_workspace() {
     let resp = app(state)
         .oneshot(
             bearer(
-                Request::builder().uri(format!("/api/workspaces/{}", workspace_b.id)),
+                Request::builder().uri(format!("/api/sessions?workspace={}", workspace_b.id)),
                 &token,
             )
             .body(Body::empty())
