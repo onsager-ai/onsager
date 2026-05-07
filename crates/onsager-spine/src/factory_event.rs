@@ -1,3 +1,4 @@
+// budget-allow: 75-variant event enum; macro/derive compression deferred to follow-up spec per #261
 //! Factory events — the authoritative event types emitted to the factory event
 //! spine by each subsystem.
 //!

@@ -1,3 +1,4 @@
+// budget-allow: binary entrypoint; sprawl deferred to follow-up spec per #261
 //! `forge serve` — start the Forge scheduling loop with HTTP API.
 
 use std::sync::Arc;

@@ -1,3 +1,4 @@
+// budget-allow: check-runner + state machine; not targeted by #261 Moves 1–3, follow-up spec pending
 //! Pipeline configuration, check runner, and Build→Inspect→Route state machine.
 //!
 //! Parses `.harness/pipeline.yml` — the single source of truth for a

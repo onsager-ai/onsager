@@ -162,6 +162,33 @@ This is a value, not a checklist. Three operating principles fall out of it:
   boundary — these aren't style preferences, they're a tax on every future
   reader. Splitting and unifying them is real work, worth scheduling.
 
+### File budget
+
+`xtask check-file-budget` (wired into `just lint` and CI) enforces a
+**8000 prod-token ceiling** per `.rs` / `.ts` / `.tsx` file. "Prod" means:
+test blocks stripped for Rust (`#[cfg(test)]` items); test files skipped
+for TypeScript (`*.test.ts`, `__tests__/`).
+
+Tokens are counted with `tiktoken-rs` against the `o200k_base` encoding,
+vendored at `xtask/assets/o200k_base.tiktoken` for offline determinism.
+Within ~10% of Claude's actual tokenizer; stable across machines.
+
+To **exempt** a file that legitimately exceeds the ceiling (out-of-scope
+for an active spec, binary entrypoint, generated file):
+
+```rust
+// budget-allow: <non-empty reason explaining why this file is exempt>
+```
+
+Place the comment anywhere in the file. Reason text is mandatory and
+grep-able. Mirrors the `// seam-allow:` shape.
+
+**Ratchet plan.** The stated value (~500 LOC ≈ ~5000 tokens) is tighter
+than the current 8000 ceiling. Once all exempted files are either split or
+justified, a follow-up spec tightens the ceiling to 5000–6000 to align
+with the stated value. (Spec #261 established 8000 as the initial floor;
+ratcheting is a separate spec.)
+
 The seam rule above and the "Architectural drift patterns to watch" list
 below are both operational projections of this value onto the seams between
 subsystems. Internal-quality work that doesn't fit those projections —
