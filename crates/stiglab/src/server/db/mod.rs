@@ -24,10 +24,9 @@ pub use credentials::{
 };
 
 pub use github_installations::{
-    count_projects_for_installation, delete_github_app_installation,
-    get_github_app_installation, get_github_app_installation_by_install_id,
-    get_install_webhook_secret_cipher, insert_github_app_installation,
-    list_github_app_installations_for_workspace,
+    count_projects_for_installation, delete_github_app_installation, get_github_app_installation,
+    get_github_app_installation_by_install_id, get_install_webhook_secret_cipher,
+    insert_github_app_installation, list_github_app_installations_for_workspace,
 };
 
 pub use nodes::{
@@ -36,8 +35,7 @@ pub use nodes::{
 };
 
 pub use pats::{
-    find_pats_by_prefix, insert_user_pat, list_user_pats, revoke_user_pat, touch_user_pat,
-    UserPat,
+    find_pats_by_prefix, insert_user_pat, list_user_pats, revoke_user_pat, touch_user_pat, UserPat,
 };
 
 pub use projects::{
@@ -593,4 +591,3 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
 
     Ok(())
 }
-

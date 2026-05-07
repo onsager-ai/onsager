@@ -705,4 +705,3 @@ fn summarize(verdict: &GateVerdict) -> VerdictSummary {
 #[path = "pipeline_tests.rs"]
 #[cfg(test)]
 mod tests;
-

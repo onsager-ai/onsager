@@ -8,8 +8,8 @@ mod tests {
     //! resume logic surfaces as a wrong event sequence rather than a
     //! silent missed advance.
 
-    use crate::core::pipeline::*;
     use crate::core::kernel::BaselineKernel;
+    use crate::core::pipeline::*;
     use onsager_artifact::{ContentRef, Kind};
     use onsager_spine::factory_event::ShapingOutcome;
 

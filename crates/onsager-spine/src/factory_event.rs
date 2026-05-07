@@ -1117,4 +1117,3 @@ pub enum RuleProposalClass {
 #[path = "factory_event_tests.rs"]
 #[cfg(test)]
 mod tests;
-
