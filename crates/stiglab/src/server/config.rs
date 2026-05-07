@@ -25,6 +25,11 @@ pub struct ServerConfig {
     /// Goes away with the seam (Lever C, spec #131 / #148) once
     /// shaping moves to spine events.
     pub internal_dispatch_token: Option<String>,
+    /// URL of the onsager-portal process (e.g. `http://127.0.0.1:3002`).
+    /// All `/api/*` traffic not handled by stiglab itself is reverse-proxied
+    /// here. Reads `PORTAL_URL`; falls back to `http://127.0.0.1:$PORTAL_PORT`
+    /// (default port 3002).
+    pub portal_url: String,
 }
 
 impl ServerConfig {
@@ -44,6 +49,13 @@ impl ServerConfig {
         let internal_dispatch_token = env::var("STIGLAB_INTERNAL_DISPATCH_TOKEN")
             .ok()
             .filter(|s| !s.is_empty());
+        let portal_url = env::var("PORTAL_URL")
+            .unwrap_or_else(|_| {
+                let portal_port = env::var("PORTAL_PORT").unwrap_or_else(|_| "3002".to_string());
+                format!("http://127.0.0.1:{portal_port}")
+            })
+            .trim_end_matches('/')
+            .to_string();
 
         ServerConfig {
             host,
@@ -54,6 +66,7 @@ impl ServerConfig {
             credential_key,
             public_url,
             internal_dispatch_token,
+            portal_url,
         }
     }
 }

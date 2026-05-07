@@ -10,11 +10,9 @@
 #   forge           | Workflow orchestrator (spine consumer)    | 3003 (internal)
 #   PostgreSQL      | Shared event spine (Railway plugin)       | 5432
 #
-# Stiglab is the front door — it serves the dashboard, its own API, and
-# reverse-proxies /api/governance/* to synodic on localhost:3001 and
-# /webhooks/github to onsager-portal on localhost:3002. The portal runs its
-# own migrations (factory_tasks, pr_gate_verdicts, pr_branch_links) at
-# startup.
+# Stiglab is the front door — it serves the dashboard, owns /api/health
+# and /agent/ws, and reverse-proxies all other /api/* traffic to portal
+# on localhost:3002. Portal runs its own migrations at startup.
 #
 # Quick start:
 #   1. Create a Railway project and connect this repo

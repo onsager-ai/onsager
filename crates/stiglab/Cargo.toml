@@ -42,6 +42,7 @@ ring = { workspace = true }
 hex = { workspace = true }
 axum-extra = { workspace = true }
 jsonwebtoken = { workspace = true }
+reqwest = { workspace = true }
 
 # From stiglab-agent
 tokio-tungstenite = { workspace = true }

@@ -1,4 +1,5 @@
 pub mod health;
+pub mod portal;
 pub mod shaping;
 
 use axum::http::StatusCode;

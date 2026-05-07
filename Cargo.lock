@@ -2741,6 +2741,7 @@ dependencies = [
  "onsager-github",
  "onsager-spine",
  "rand 0.8.5",
+ "reqwest",
  "ring",
  "serde",
  "serde_json",

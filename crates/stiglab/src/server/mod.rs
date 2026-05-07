@@ -14,7 +14,7 @@ pub mod ws;
 pub use sqlx::AnyPool;
 
 use axum::http::{header, HeaderValue};
-use axum::routing::get;
+use axum::routing::{any, get};
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
@@ -32,9 +32,15 @@ use state::AppState;
 /// dev, nginx in prod) so the dashboard's same-origin fetches land on
 /// portal without any per-environment URL configuration.
 pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
+    // `/api/health` and `/agent/ws` are the two routes stiglab owns
+    // post-#222 Slice 6. The catch-all forwards everything else under
+    // `/api/` to onsager-portal (loopback:PORTAL_PORT). Exact routes
+    // take priority over the wildcard in axum, so `/api/health` is
+    // never forwarded.
     let api_routes = Router::new()
         .route("/api/health", get(routes::health::health))
-        .route("/agent/ws", get(ws::agent::agent_ws_handler));
+        .route("/agent/ws", get(ws::agent::agent_ws_handler))
+        .route("/api/{*path}", any(routes::portal::proxy));
 
     // Configure CORS
     let cors = if let Some(ref origin) = config.cors_origin {
