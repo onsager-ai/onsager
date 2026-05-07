@@ -9,7 +9,7 @@
 //!    dev-login, the governance proxy catchall, and bridge-debt
 //!    redirects.
 //! 2. Every backend path the dashboard calls (from
-//!    `apps/dashboard/src/lib/api.ts` and `apps/dashboard/src/lib/sse.ts`)
+//!    `apps/dashboard/src/lib/api/*.ts` and `apps/dashboard/src/lib/sse.ts`)
 //!    matches a route registered on a backend subsystem.
 //!
 //! Backed by static parsing — `syn` for the Rust route chains, a small
@@ -102,6 +102,23 @@ pub fn parse_ts_calls(file: &Path) -> Result<Vec<DashboardCall>> {
     let source =
         std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
     Ok(scan_ts_calls(&source, file))
+}
+
+/// Walk a flat directory of `.ts` files and collect all dashboard call sites.
+/// Used for `apps/dashboard/src/lib/api/` which was split from a single file.
+pub fn parse_ts_calls_dir(dir: &Path) -> Result<Vec<DashboardCall>> {
+    let mut out = Vec::new();
+    let entries = std::fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))?;
+    let mut paths: Vec<_> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("ts"))
+        .collect();
+    paths.sort();
+    for path in paths {
+        out.extend(parse_ts_calls(&path)?);
+    }
+    Ok(out)
 }
 
 fn scan_ts_calls(source: &str, file: &Path) -> Vec<DashboardCall> {
@@ -543,7 +560,7 @@ pub fn analyse(backend: &[BackendRoute], dashboard: &[DashboardCall]) -> Analysi
 const STIGLAB_SRC: &str = "crates/stiglab/src/server/mod.rs";
 const PORTAL_SRC: &str = "crates/onsager-portal/src/server.rs";
 const SYNODIC_SRC: &str = "crates/synodic/src/cmd/serve.rs";
-const DASHBOARD_API_SRC: &str = "apps/dashboard/src/lib/api.ts";
+const DASHBOARD_API_DIR: &str = "apps/dashboard/src/lib/api";
 const DASHBOARD_SSE_SRC: &str = "apps/dashboard/src/lib/sse.ts";
 
 pub fn run() -> Result<()> {
@@ -555,7 +572,7 @@ pub fn run() -> Result<()> {
     backend.extend(parse_rust_routes(&root.join(SYNODIC_SRC), "synodic")?);
 
     let mut dashboard = Vec::new();
-    dashboard.extend(parse_ts_calls(&root.join(DASHBOARD_API_SRC))?);
+    dashboard.extend(parse_ts_calls_dir(&root.join(DASHBOARD_API_DIR))?);
     dashboard.extend(parse_ts_calls(&root.join(DASHBOARD_SSE_SRC))?);
 
     let report = analyse(&backend, &dashboard);
@@ -779,8 +796,8 @@ mod tests {
     #[test]
     fn parses_real_dashboard_api_ts() {
         let root = workspace_root();
-        let calls = parse_ts_calls(&root.join("apps/dashboard/src/lib/api.ts")).unwrap();
-        assert!(calls.len() > 30, "api.ts calls: {}", calls.len());
+        let calls = parse_ts_calls_dir(&root.join("apps/dashboard/src/lib/api")).unwrap();
+        assert!(calls.len() > 30, "api/ calls: {}", calls.len());
         let paths: Vec<_> = calls.iter().map(|c| c.path.as_str()).collect();
         assert!(paths.contains(&"/health"));
         assert!(paths.contains(&"/workspaces"));
@@ -988,7 +1005,7 @@ mod tests {
             parse_rust_routes(&root.join("crates/synodic/src/cmd/serve.rs"), "synodic").unwrap(),
         );
         let mut dashboard = Vec::new();
-        dashboard.extend(parse_ts_calls(&root.join("apps/dashboard/src/lib/api.ts")).unwrap());
+        dashboard.extend(parse_ts_calls_dir(&root.join("apps/dashboard/src/lib/api")).unwrap());
         dashboard.extend(parse_ts_calls(&root.join("apps/dashboard/src/lib/sse.ts")).unwrap());
 
         let report = analyse(&backend, &dashboard);

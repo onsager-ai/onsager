@@ -30,12 +30,11 @@
 //!
 //! ## Modes
 //!
-//! - `--mode=warn` (default): print every over-budget file and exit 0.
-//! - `--mode=fail`: exit non-zero on any over-budget file.
+//! - `--mode=fail` (default): exit non-zero on any over-budget file.
+//! - `--mode=warn`: print every over-budget file and exit 0.
 //!
-//! Spec #261's warn-first sequencing means this lands in `warn` mode
-//! first; the per-Move splits (1a-d, 2, 3) each show their drop in CI
-//! logs; Move 4d flips the default to `fail`.
+//! The default is `fail` (Move 4d). Files that genuinely exceed the budget
+//! for out-of-scope reasons use `// budget-allow: <reason>` to opt out.
 
 use std::path::{Path, PathBuf};
 
@@ -204,7 +203,7 @@ struct Report {
 }
 
 fn parse_args(args: Vec<String>) -> Result<(Mode, usize, Vec<PathBuf>)> {
-    let mut mode = Mode::Warn;
+    let mut mode = Mode::Fail;
     let mut budget: usize = DEFAULT_BUDGET;
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut iter = args.into_iter();

@@ -39,7 +39,7 @@ lint-rust:
     cargo run -p xtask --quiet -- gen-event-docs --check
     cargo run -p xtask --quiet -- lint-seams
     cargo run -p xtask --quiet -- check-api-contract
-    cargo run -p xtask --quiet -- check-file-budget --mode=warn
+    cargo run -p xtask --quiet -- check-file-budget --mode=fail
 
 lint-ui:
     pnpm --filter dashboard lint
