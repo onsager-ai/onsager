@@ -33,7 +33,10 @@ impl AppState {
             agents: Arc::new(RwLock::new(HashMap::new())),
             config,
             spine,
-            http_client: reqwest::Client::new(),
+            http_client: reqwest::ClientBuilder::new()
+                .timeout(std::time::Duration::from_secs(60))
+                .build()
+                .expect("failed to build reqwest client"),
         }
     }
 }

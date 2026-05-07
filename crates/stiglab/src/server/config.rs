@@ -49,10 +49,13 @@ impl ServerConfig {
         let internal_dispatch_token = env::var("STIGLAB_INTERNAL_DISPATCH_TOKEN")
             .ok()
             .filter(|s| !s.is_empty());
-        let portal_url = env::var("PORTAL_URL").unwrap_or_else(|_| {
-            let portal_port = env::var("PORTAL_PORT").unwrap_or_else(|_| "3002".to_string());
-            format!("http://127.0.0.1:{portal_port}")
-        });
+        let portal_url = env::var("PORTAL_URL")
+            .unwrap_or_else(|_| {
+                let portal_port = env::var("PORTAL_PORT").unwrap_or_else(|_| "3002".to_string());
+                format!("http://127.0.0.1:{portal_port}")
+            })
+            .trim_end_matches('/')
+            .to_string();
 
         ServerConfig {
             host,

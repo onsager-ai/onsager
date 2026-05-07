@@ -15,11 +15,7 @@ use axum::response::{IntoResponse, Response};
 use crate::server::state::AppState;
 
 pub async fn proxy(State(state): State<AppState>, req: Request) -> Response {
-    let path_and_query = req
-        .uri()
-        .path_and_query()
-        .map(|p| p.as_str())
-        .unwrap_or("");
+    let path_and_query = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("");
     let target = format!("{}{}", state.config.portal_url, path_and_query);
 
     let method = match req.method().as_str().parse::<reqwest::Method>() {
@@ -32,9 +28,19 @@ pub async fn proxy(State(state): State<AppState>, req: Request) -> Response {
     let mut builder = state.http_client.request(method, &target);
 
     for (name, value) in req.headers() {
-        // Drop hop-by-hop headers that must not be forwarded.
+        // Drop hop-by-hop headers (RFC 7230 §6.1) that must not be forwarded.
         let n = name.as_str();
-        if n == "host" || n == "connection" || n == "transfer-encoding" || n == "te" {
+        if matches!(
+            n,
+            "host"
+                | "connection"
+                | "keep-alive"
+                | "proxy-connection"
+                | "transfer-encoding"
+                | "te"
+                | "trailer"
+                | "upgrade"
+        ) {
             continue;
         }
         builder = builder.header(name, value);
@@ -61,7 +67,13 @@ pub async fn proxy(State(state): State<AppState>, req: Request) -> Response {
                 }
                 response_builder = response_builder.header(name, value.as_bytes());
             }
-            let body_bytes = resp.bytes().await.unwrap_or_default();
+            let body_bytes = match resp.bytes().await {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(error = %e, %target, "portal proxy: failed to read response body");
+                    return StatusCode::BAD_GATEWAY.into_response();
+                }
+            };
             response_builder
                 .body(Body::from(body_bytes))
                 .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
