@@ -23,6 +23,7 @@ pub struct AppState {
     pub agents: Arc<RwLock<HashMap<String, AgentConnection>>>,
     pub config: ServerConfig,
     pub spine: Option<SpineEmitter>,
+    pub http_client: reqwest::Client,
 }
 
 impl AppState {
@@ -32,6 +33,7 @@ impl AppState {
             agents: Arc::new(RwLock::new(HashMap::new())),
             config,
             spine,
+            http_client: reqwest::Client::new(),
         }
     }
 }
