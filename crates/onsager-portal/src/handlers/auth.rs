@@ -528,6 +528,24 @@ pub async fn me(State(_state): State<AppState>, auth_user: AuthUser) -> impl Int
     }))
 }
 
+/// GET /api/auth/providers — Which login methods are available.
+///
+/// Returns `{"github": bool, "dev": bool}`. Used by the LoginPage to decide
+/// which buttons to render. GitHub is suppressed on Railway preview
+/// environments (where dev-login is the intended path) so the login screen
+/// stays simple for reviewers. Specifically: GitHub is disabled when
+/// dev-login is explicitly enabled in a release build (i.e. not a local
+/// debug session) — production never sets dev_login_enabled so its GitHub
+/// button always appears.
+pub async fn providers(State(state): State<AppState>) -> impl IntoResponse {
+    let cfg = &state.config;
+    let dev = cfg!(debug_assertions) || cfg.dev_login_enabled;
+    // Suppress GitHub on release builds with dev-login enabled (Railway preview).
+    // Debug builds keep GitHub available so local OAuth testing still works.
+    let github = cfg.sso_mode().is_some() && !(cfg.dev_login_enabled && !cfg!(debug_assertions));
+    Json(serde_json::json!({ "github": github, "dev": dev }))
+}
+
 /// POST /api/auth/logout — Delete auth session and clear cookie
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
     let cookie_header = headers

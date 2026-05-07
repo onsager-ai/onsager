@@ -76,6 +76,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             get(auth_handlers::github_callback),
         )
         .route("/api/auth/me", get(auth_handlers::me))
+        .route("/api/auth/providers", get(auth_handlers::providers))
         .route("/api/auth/logout", post(auth_handlers::logout))
         .route("/api/auth/sso/redeem", post(auth_handlers::sso_redeem))
         .route("/api/auth/sso/finish", get(auth_handlers::sso_finish))
