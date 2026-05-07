@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     //! Tests are written around the parked-state-machine event flow that
     //! phase 4 introduced. Tick semantics are now: emit a request event +

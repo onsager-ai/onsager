@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::core::stage_runner::*;
     use crate::core::workflow::{StageSpec, TriggerKind};
