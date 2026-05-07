@@ -542,7 +542,7 @@ pub async fn providers(State(state): State<AppState>) -> impl IntoResponse {
     let dev = cfg!(debug_assertions) || cfg.dev_login_enabled;
     // Suppress GitHub on release builds with dev-login enabled (Railway preview).
     // Debug builds keep GitHub available so local OAuth testing still works.
-    let github = cfg.sso_mode().is_some() && !(cfg.dev_login_enabled && !cfg!(debug_assertions));
+    let github = cfg.sso_mode().is_some() && (!cfg.dev_login_enabled || cfg!(debug_assertions));
     Json(serde_json::json!({ "github": github, "dev": dev }))
 }
 
