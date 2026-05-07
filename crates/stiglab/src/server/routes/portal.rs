@@ -1,6 +1,6 @@
 //! Catch-all reverse proxy: forwards `/api/*` to onsager-portal.
 //!
-//! Post-#222 Slice 6 stiglab owns only `/api/health` and `/agent/ws`.
+//! Post-#222 Slice 6 stiglab owns only `/agent/ws`.
 //! Everything else under `/api/` is handled by portal. In dev, Caddy
 //! routes those requests directly to portal; in the Railway single-
 //! container deployment stiglab is the only process reachable from
