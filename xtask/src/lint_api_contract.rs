@@ -108,8 +108,7 @@ pub fn parse_ts_calls(file: &Path) -> Result<Vec<DashboardCall>> {
 /// Used for `apps/dashboard/src/lib/api/` which was split from a single file.
 pub fn parse_ts_calls_dir(dir: &Path) -> Result<Vec<DashboardCall>> {
     let mut out = Vec::new();
-    let entries = std::fs::read_dir(dir)
-        .with_context(|| format!("read_dir {}", dir.display()))?;
+    let entries = std::fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))?;
     let mut paths: Vec<_> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
