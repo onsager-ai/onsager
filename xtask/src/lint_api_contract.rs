@@ -694,7 +694,7 @@ mod tests {
         let stiglab =
             parse_rust_routes(&root.join("crates/stiglab/src/server/mod.rs"), "stiglab").unwrap();
         // Post-#222 Slice 6 stiglab owns only /agent/ws; /api/* goes to portal.
-        assert!(stiglab.len() >= 1, "stiglab routes: {}", stiglab.len());
+        assert!(!stiglab.is_empty(), "stiglab routes: {}", stiglab.len());
         let stiglab_paths: Vec<_> = stiglab.iter().map(|r| r.path.as_str()).collect();
         assert!(stiglab_paths.contains(&"/agent/ws"));
 
