@@ -1,10 +1,9 @@
-//! Dev-login mode (issue #193). Local-dev-only replacement for the
-//! removed anonymous-mode branch.
+//! Dev-login mode (issue #193). Replaces the removed anonymous-mode branch.
 //!
-//! The whole module is `#[cfg(debug_assertions)]`-gated. Release builds
-//! (`cargo build --release`) physically do not contain the seeder or the
-//! `/api/auth/dev-login` route, so a misconfigured production deploy
-//! cannot serve dev-login regardless of env-var manipulation.
+//! Enabled in two ways:
+//! - **Debug builds** (`cargo build`): always available.
+//! - **Release builds** with `DEV_LOGIN_ENABLED=true`: opt-in for Railway
+//!   preview environments that need a login path without GitHub OAuth.
 //!
 //! Two pieces:
 //! - [`seed_dev_user_and_workspace`] is called once at server boot. It
@@ -25,8 +24,6 @@
 //! runtime migrations until Slice 3 of spec #222 moves them into the
 //! spine. Portal writes to those tables via raw SQL — same DB, same
 //! shape, no shared crate needed.
-
-#![cfg(debug_assertions)]
 
 use axum::extract::State;
 use axum::http::{header, StatusCode};

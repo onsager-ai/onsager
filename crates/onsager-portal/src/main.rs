@@ -62,6 +62,10 @@ enum Command {
         /// redirects here instead of talking to GitHub directly.
         #[arg(long, env = "SSO_AUTH_DOMAIN")]
         sso_auth_domain: Option<String>,
+        /// Enable dev-login in release builds. Set `DEV_LOGIN_ENABLED=true`
+        /// on Railway preview environments that need login without GitHub OAuth.
+        #[arg(long, env = "DEV_LOGIN_ENABLED", default_value_t = false)]
+        dev_login_enabled: bool,
     },
     /// Backfill issues + PRs for an existing project.
     Backfill {
@@ -106,6 +110,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             sso_exchange_secret,
             sso_return_host_allowlist,
             sso_auth_domain,
+            dev_login_enabled,
         } => {
             let allowlist = sso_return_host_allowlist
                 .as_deref()
@@ -128,6 +133,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 sso_auth_domain: sso_auth_domain
                     .filter(|s| !s.is_empty())
                     .map(|s| s.trim_end_matches('/').to_string()),
+                dev_login_enabled,
             };
             tracing::info!(%bind, "onsager-portal: starting webhook server");
             onsager_portal::server::run(cfg).await

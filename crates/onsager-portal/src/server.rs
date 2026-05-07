@@ -34,16 +34,17 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         tracing::warn!(error = %e, "github adapter registration skipped");
     }
 
-    // Seed the dev user / workspace in debug builds so the dev-login
-    // button works on a fresh DB. Stiglab's `workspaces` /
-    // `workspace_members` tables must already exist; in `just dev` the
-    // boot order is portal→stiglab so portal doesn't see them on a cold
-    // start. Best-effort: if the tables aren't there yet, log and
-    // continue — stiglab's first migration run will create them, and
-    // the next portal start will seed.
-    #[cfg(debug_assertions)]
-    if let Err(e) = crate::dev_auth::seed_dev_user_and_workspace(&pool).await {
-        tracing::warn!(error = %e, "portal dev-login seeder skipped (workspaces table missing?)");
+    // Seed the dev user / workspace when dev-login is active (always in
+    // debug builds, or release builds with DEV_LOGIN_ENABLED=true).
+    // Stiglab's `workspaces` / `workspace_members` tables must already
+    // exist; in `just dev` the boot order is portal→stiglab so portal
+    // doesn't see them on a cold start. Best-effort: if the tables
+    // aren't there yet, log and continue — stiglab's first migration run
+    // will create them, and the next portal start will seed.
+    if cfg!(debug_assertions) || config.dev_login_enabled {
+        if let Err(e) = crate::dev_auth::seed_dev_user_and_workspace(&pool).await {
+            tracing::warn!(error = %e, "portal dev-login seeder skipped (workspaces table missing?)");
+        }
     }
 
     let gate = Arc::new(GateClient::new(config.synodic_url.clone()));
@@ -292,11 +293,14 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route("/api/nodes", get(node_handlers::list_nodes))
         .route("/api/tasks", post(task_handlers::create_task));
 
-    // Dev-login is debug-only — `cargo build --release` strips both the
-    // route handler symbol and this registration so production deploys
-    // physically cannot serve it regardless of env-var manipulation.
-    #[cfg(debug_assertions)]
-    let app = app.route("/api/auth/dev-login", post(crate::dev_auth::dev_login));
+    // Dev-login: always in debug builds; in release only when
+    // DEV_LOGIN_ENABLED=true (Railway preview environments).
+    // Production omits the env var so the route is never registered.
+    let app = if cfg!(debug_assertions) || config.dev_login_enabled {
+        app.route("/api/auth/dev-login", post(crate::dev_auth::dev_login))
+    } else {
+        app
+    };
 
     let app = app.with_state(state);
 

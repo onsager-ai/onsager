@@ -41,12 +41,16 @@ pub struct Config {
     /// Cross-environment SSO — relying side. When set, `/api/auth/github`
     /// redirects here instead of talking to GitHub directly.
     pub sso_auth_domain: Option<String>,
+    /// Enable the `/api/auth/dev-login` route in release builds. Always
+    /// enabled in debug builds. Set `DEV_LOGIN_ENABLED=true` on Railway
+    /// preview environments that need a login path without GitHub OAuth.
+    pub dev_login_enabled: bool,
 }
 
 impl Config {
     /// Classify the process's role in the SSO flow. `None` means no GitHub
     /// OAuth is configured — the only path to authentication is dev-login
-    /// (debug builds only).
+    /// (debug builds, or release builds with `DEV_LOGIN_ENABLED=true`).
     pub fn sso_mode(&self) -> Option<crate::sso::SsoMode> {
         let has_github = self.github_client_id.is_some() && self.github_client_secret.is_some();
         let has_owner_secrets =
@@ -117,6 +121,7 @@ mod tests {
             sso_exchange_secret: None,
             sso_return_host_allowlist: Vec::new(),
             sso_auth_domain: None,
+            dev_login_enabled: false,
         }
     }
 
