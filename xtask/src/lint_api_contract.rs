@@ -796,8 +796,8 @@ mod tests {
     #[test]
     fn parses_real_dashboard_api_ts() {
         let root = workspace_root();
-        let calls = parse_ts_calls(&root.join("apps/dashboard/src/lib/api.ts")).unwrap();
-        assert!(calls.len() > 30, "api.ts calls: {}", calls.len());
+        let calls = parse_ts_calls_dir(&root.join("apps/dashboard/src/lib/api")).unwrap();
+        assert!(calls.len() > 30, "api/ calls: {}", calls.len());
         let paths: Vec<_> = calls.iter().map(|c| c.path.as_str()).collect();
         assert!(paths.contains(&"/health"));
         assert!(paths.contains(&"/workspaces"));
