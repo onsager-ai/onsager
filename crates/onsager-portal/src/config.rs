@@ -101,14 +101,6 @@ impl Config {
                  not — the relying party cannot authenticate to the owner"
             );
         }
-
-        if self.dev_login_enabled && has_github {
-            panic!(
-                "invalid config: DEV_LOGIN_ENABLED is set but GITHUB_CLIENT_ID/SECRET \
-                 are also configured — dev-login is redundant when real OAuth is available \
-                 and enabling both is likely a misconfiguration"
-            );
-        }
     }
 }
 
@@ -242,24 +234,4 @@ mod tests {
         c.assert_sso_consistent();
     }
 
-    #[test]
-    #[should_panic(expected = "DEV_LOGIN_ENABLED")]
-    fn assert_panics_when_dev_login_and_github_oauth_both_set() {
-        let c = Config {
-            github_client_id: Some("id".into()),
-            github_client_secret: Some("secret".into()),
-            dev_login_enabled: true,
-            ..base_config()
-        };
-        c.assert_sso_consistent();
-    }
-
-    #[test]
-    fn dev_login_without_github_oauth_is_valid() {
-        let c = Config {
-            dev_login_enabled: true,
-            ..base_config()
-        };
-        c.assert_sso_consistent(); // must not panic
-    }
 }
