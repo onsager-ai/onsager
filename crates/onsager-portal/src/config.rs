@@ -233,5 +233,4 @@ mod tests {
         };
         c.assert_sso_consistent();
     }
-
 }
