@@ -73,6 +73,10 @@ numReplicas = 1
 #                               split, etc.).
 #   GITHUB_CLIENT_ID          — GitHub OAuth app client ID
 #   GITHUB_CLIENT_SECRET      — GitHub OAuth app client secret
+#   DEV_LOGIN_ENABLED         — explicit opt-in for dev-login in release builds.
+#                               Not needed on preview environments — those are
+#                               detected automatically via ONSAGER_PREVIEW=true.
+#                               Must NOT be set on production (app.onsager.ai).
 #
 # Cross-environment SSO (owner side — prod only):
 #   The preview environments piggy-back off prod's GitHub OAuth app via a

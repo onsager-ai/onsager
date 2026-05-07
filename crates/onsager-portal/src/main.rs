@@ -62,6 +62,11 @@ enum Command {
         /// redirects here instead of talking to GitHub directly.
         #[arg(long, env = "SSO_AUTH_DOMAIN")]
         sso_auth_domain: Option<String>,
+        /// Enable dev-login in release builds. Automatically true on Railway
+        /// preview environments (detected via RAILWAY_ENVIRONMENT_NAME).
+        /// Use this flag for explicit opt-in outside Railway.
+        #[arg(long, env = "DEV_LOGIN_ENABLED", default_value_t = false)]
+        dev_login_enabled: bool,
     },
     /// Backfill issues + PRs for an existing project.
     Backfill {
@@ -106,11 +111,23 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             sso_exchange_secret,
             sso_return_host_allowlist,
             sso_auth_domain,
+            dev_login_enabled,
         } => {
             let allowlist = sso_return_host_allowlist
                 .as_deref()
                 .map(onsager_portal::sso::parse_host_allowlist)
                 .unwrap_or_default();
+            // Auto-detect Railway preview environments from the always-injected
+            // RAILWAY_ENVIRONMENT_NAME (e.g. "onsager-pr-267"). Railway only
+            // seeds [environments.preview.variables] at creation time, so we
+            // can't rely on ONSAGER_PREVIEW being present on existing envs.
+            // Fall back to ONSAGER_PREVIEW for safety, and DEV_LOGIN_ENABLED
+            // for explicit opt-in outside Railway.
+            let is_railway_preview = std::env::var("RAILWAY_ENVIRONMENT_NAME")
+                .ok()
+                .map(|n| n.to_lowercase().contains("pr-"))
+                .unwrap_or(false)
+                || std::env::var("ONSAGER_PREVIEW").as_deref() == Ok("true");
             let cfg = onsager_portal::config::Config {
                 bind: bind.clone(),
                 database_url,
@@ -128,6 +145,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 sso_auth_domain: sso_auth_domain
                     .filter(|s| !s.is_empty())
                     .map(|s| s.trim_end_matches('/').to_string()),
+                dev_login_enabled: dev_login_enabled || is_railway_preview,
             };
             tracing::info!(%bind, "onsager-portal: starting webhook server");
             onsager_portal::server::run(cfg).await

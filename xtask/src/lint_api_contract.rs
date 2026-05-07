@@ -693,10 +693,10 @@ mod tests {
         let root = workspace_root();
         let stiglab =
             parse_rust_routes(&root.join("crates/stiglab/src/server/mod.rs"), "stiglab").unwrap();
-        // Post-#222 Slice 6 stiglab owns only /api/health + /agent/ws.
-        assert!(stiglab.len() >= 2, "stiglab routes: {}", stiglab.len());
+        // Post-#222 Slice 6 stiglab owns only /agent/ws; /api/* goes to portal.
+        assert!(!stiglab.is_empty(), "stiglab routes: {}", stiglab.len());
         let stiglab_paths: Vec<_> = stiglab.iter().map(|r| r.path.as_str()).collect();
-        assert!(stiglab_paths.contains(&"/api/health"));
+        assert!(stiglab_paths.contains(&"/agent/ws"));
 
         let portal =
             parse_rust_routes(&root.join("crates/onsager-portal/src/server.rs"), "portal").unwrap();

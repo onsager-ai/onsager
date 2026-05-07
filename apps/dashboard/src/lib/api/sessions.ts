@@ -31,6 +31,8 @@ export const sessions = {
       '/auth/dev-login',
       { method: 'POST' },
     ),
+  authProviders: () =>
+    request<{ github: boolean; dev: boolean }>('/auth/providers'),
   // Session spend view (issue #39). Reads recent `stiglab.session_completed`
   // events and unpacks the typed `token_usage` payload client-side so we
   // don't have to spin up a dedicated pricing/accounting endpoint just to

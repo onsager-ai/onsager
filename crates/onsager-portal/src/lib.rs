@@ -33,7 +33,6 @@ pub mod config;
 pub mod core;
 pub mod credential_db;
 pub mod db;
-#[cfg(debug_assertions)]
 pub mod dev_auth;
 pub mod feedback;
 pub mod gate;

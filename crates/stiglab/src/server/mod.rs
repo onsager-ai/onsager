@@ -26,19 +26,11 @@ use tower_http::trace::TraceLayer;
 use config::ServerConfig;
 use state::AppState;
 
-/// Build the Axum router. Post-#222 Slice 6, stiglab owns only two routes:
-/// `/api/health` (liveness probe) and `/agent/ws` (agent WebSocket).
-/// All `/api/*` traffic is routed to portal by the edge proxy (Caddy in
-/// dev, nginx in prod) so the dashboard's same-origin fetches land on
-/// portal without any per-environment URL configuration.
+/// Build the Axum router. Post-#222 Slice 6, stiglab owns only one route:
+/// `/agent/ws` (agent WebSocket). All `/api/*` traffic is forwarded to
+/// portal by the catch-all proxy (including `/api/health`).
 pub fn build_router(state: AppState, config: &ServerConfig) -> Router {
-    // `/api/health` and `/agent/ws` are the two routes stiglab owns
-    // post-#222 Slice 6. The catch-all forwards everything else under
-    // `/api/` to onsager-portal (loopback:PORTAL_PORT). Exact routes
-    // take priority over the wildcard in axum, so `/api/health` is
-    // never forwarded.
     let api_routes = Router::new()
-        .route("/api/health", get(routes::health::health))
         .route("/agent/ws", get(ws::agent::agent_ws_handler))
         .route("/api/{*path}", any(routes::portal::proxy));
 
