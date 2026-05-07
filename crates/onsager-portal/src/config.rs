@@ -49,8 +49,9 @@ pub struct Config {
 
 impl Config {
     /// Classify the process's role in the SSO flow. `None` means no GitHub
-    /// OAuth is configured — the only path to authentication is dev-login
-    /// (debug builds, or release builds with `DEV_LOGIN_ENABLED=true`).
+    /// OAuth is configured. The only remaining login path is then dev-login
+    /// (debug builds, or release builds with `DEV_LOGIN_ENABLED=true`); if
+    /// neither applies, there is no login path at all.
     pub fn sso_mode(&self) -> Option<crate::sso::SsoMode> {
         let has_github = self.github_client_id.is_some() && self.github_client_secret.is_some();
         let has_owner_secrets =
@@ -98,6 +99,14 @@ impl Config {
             panic!(
                 "invalid SSO config: SSO_AUTH_DOMAIN is set but SSO_EXCHANGE_SECRET is \
                  not — the relying party cannot authenticate to the owner"
+            );
+        }
+
+        if self.dev_login_enabled && has_github {
+            panic!(
+                "invalid config: DEV_LOGIN_ENABLED is set but GITHUB_CLIENT_ID/SECRET \
+                 are also configured — dev-login is redundant when real OAuth is available \
+                 and enabling both is likely a misconfiguration"
             );
         }
     }
@@ -231,5 +240,26 @@ mod tests {
             ..base_config()
         };
         c.assert_sso_consistent();
+    }
+
+    #[test]
+    #[should_panic(expected = "DEV_LOGIN_ENABLED")]
+    fn assert_panics_when_dev_login_and_github_oauth_both_set() {
+        let c = Config {
+            github_client_id: Some("id".into()),
+            github_client_secret: Some("secret".into()),
+            dev_login_enabled: true,
+            ..base_config()
+        };
+        c.assert_sso_consistent();
+    }
+
+    #[test]
+    fn dev_login_without_github_oauth_is_valid() {
+        let c = Config {
+            dev_login_enabled: true,
+            ..base_config()
+        };
+        c.assert_sso_consistent(); // must not panic
     }
 }
