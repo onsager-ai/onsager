@@ -180,3 +180,6 @@ STIGLAB_TRUST_FORWARDED_HEADERS = "1"
 # present, to catch config confusion early.
 SSO_AUTH_DOMAIN = "${{SSO_AUTH_DOMAIN}}"
 SSO_EXCHANGE_SECRET = "${{SSO_EXCHANGE_SECRET}}"
+# Preview envs have no GitHub OAuth creds, so dev-login is the only
+# login path. Automatically enabled here; must NOT be added to prod.
+DEV_LOGIN_ENABLED = "true"
