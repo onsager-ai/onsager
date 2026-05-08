@@ -96,7 +96,7 @@ If a related spec issue already exists, reference it — don't duplicate.
 
 Read [references/spec-format.md](references/spec-format.md) for the section-by-section format guide.
 
-**Don't hard-wrap prose paragraphs.** GitHub renders issue and comment bodies with `breaks: true` — every newline inside a paragraph becomes a `<br>`, producing visible mid-sentence line breaks. Source files in this repo wrap at ~70 columns; **issue bodies must not**. Each prose paragraph is one long line, separated from the next by a blank line. Lists, tables, fenced code blocks, blockquotes, and heading lines are unaffected — wrap those normally.
+**Don't hard-wrap prose paragraphs.** GitHub renders issue and comment bodies with `breaks: true` — every newline inside a paragraph becomes a `<br>`, producing visible mid-sentence line breaks. Source files in this repo wrap at ~70 columns; **issue bodies must not**. Each prose paragraph is one long line, separated from the next by a blank line. Lists, tables, fenced code blocks, and blockquotes are unaffected — wrap those normally. Headings are always a single line (markdown requires it).
 
 Draft the issue body using the lean-spec structure:
 
