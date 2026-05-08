@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use sqlx::pool::PoolOptions;
 use sqlx::AnyPool;
+use sqlx::pool::PoolOptions;
 
 mod credentials;
 mod github_installations;
@@ -18,9 +18,9 @@ mod tests;
 // ── Re-exports ──
 
 pub use credentials::{
-    delete_user_credential, get_all_user_credential_values, get_user_credential_value,
-    get_user_credentials, set_user_credential, user_credential_exists, user_has_credential_in,
-    UserCredential,
+    UserCredential, delete_user_credential, get_all_user_credential_values,
+    get_user_credential_value, get_user_credentials, set_user_credential, user_credential_exists,
+    user_has_credential_in,
 };
 
 pub use github_installations::{
@@ -35,7 +35,7 @@ pub use nodes::{
 };
 
 pub use pats::{
-    find_pats_by_prefix, insert_user_pat, list_user_pats, revoke_user_pat, touch_user_pat, UserPat,
+    UserPat, find_pats_by_prefix, insert_user_pat, list_user_pats, revoke_user_pat, touch_user_pat,
 };
 
 pub use projects::{
@@ -44,23 +44,23 @@ pub use projects::{
 };
 
 pub use sessions::{
-    append_session_log, claim_pending_session, find_session_by_idempotency_key, get_session,
-    get_session_logs, get_session_logs_after, get_session_owner, get_session_workspace,
-    insert_session, insert_session_with_idempotency_key, insert_session_with_user,
-    insert_session_with_user_and_project, insert_session_with_user_project_workspace,
-    list_pending_sessions_for_node, list_sessions, list_sessions_for_user_in_workspace,
-    update_session_state, LogChunk, LogChunkWithSeq,
+    LogChunk, LogChunkWithSeq, append_session_log, claim_pending_session,
+    find_session_by_idempotency_key, get_session, get_session_logs, get_session_logs_after,
+    get_session_owner, get_session_workspace, insert_session, insert_session_with_idempotency_key,
+    insert_session_with_user, insert_session_with_user_and_project,
+    insert_session_with_user_project_workspace, list_pending_sessions_for_node, list_sessions,
+    list_sessions_for_user_in_workspace, update_session_state,
 };
 
 pub use users::{
-    create_auth_session, get_auth_session, get_user, get_user_by_github_id, upsert_user,
-    AuthSession,
+    AuthSession, create_auth_session, get_auth_session, get_user, get_user_by_github_id,
+    upsert_user,
 };
 
 pub use workspaces::{
-    get_workspace, get_workspace_by_slug, insert_workspace, insert_workspace_member,
-    insert_workspace_with_creator, is_workspace_member, list_workspace_members,
-    list_workspace_members_with_users, list_workspaces_for_user, WorkspaceMemberWithUser,
+    WorkspaceMemberWithUser, get_workspace, get_workspace_by_slug, insert_workspace,
+    insert_workspace_member, insert_workspace_with_creator, is_workspace_member,
+    list_workspace_members, list_workspace_members_with_users, list_workspaces_for_user,
 };
 
 // ── Pool initialisation ──
@@ -69,10 +69,10 @@ pub async fn init_pool(database_url: &str) -> anyhow::Result<AnyPool> {
     // For SQLite: ensure parent directory exists and enable create-if-missing
     let connect_url = if database_url.starts_with("sqlite://") {
         let path = database_url.trim_start_matches("sqlite://");
-        if let Some(parent) = std::path::Path::new(path).parent() {
-            if !parent.as_os_str().is_empty() {
-                tokio::fs::create_dir_all(parent).await?;
-            }
+        if let Some(parent) = std::path::Path::new(path).parent()
+            && !parent.as_os_str().is_empty()
+        {
+            tokio::fs::create_dir_all(parent).await?;
         }
         // Append mode=rwc so SQLx creates the file if it doesn't exist
         if database_url.contains('?') {

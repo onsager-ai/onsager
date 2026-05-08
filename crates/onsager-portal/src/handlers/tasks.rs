@@ -10,10 +10,10 @@
 //! 4. Returns immediately. Stiglab's `session_requested_listener` picks up
 //!    the event, fetches credentials, and dispatches to the agent WebSocket.
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::Json;
 use chrono::Utc;
 use onsager_spine::EventMetadata;
 use serde::Serialize;
@@ -136,16 +136,16 @@ pub async fn create_task(
                 return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
             }
         };
-        if let Some(ref explicit) = request.workspace_id {
-            if explicit != &project.workspace_id {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({
-                        "error": "workspace_id does not match the project's workspace",
-                    })),
-                )
-                    .into_response();
-            }
+        if let Some(ref explicit) = request.workspace_id
+            && explicit != &project.workspace_id
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "workspace_id does not match the project's workspace",
+                })),
+            )
+                .into_response();
         }
         if let Err(r) =
             require_workspace_access(&state.pool, &auth_user, &project.workspace_id).await

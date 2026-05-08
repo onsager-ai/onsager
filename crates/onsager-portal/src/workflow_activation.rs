@@ -24,7 +24,7 @@
 
 use std::time::Duration;
 
-use onsager_github::api::app::{list_installation_repos, InstallationToken};
+use onsager_github::api::app::{InstallationToken, list_installation_repos};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -166,10 +166,10 @@ fn resolve_webhook_base(headers: &axum::http::HeaderMap) -> Option<String> {
             return Some(format!("https://{trimmed}"));
         }
     }
-    if trust_forwarded_headers() {
-        if let Some(origin) = origin_from_headers(headers) {
-            return Some(origin);
-        }
+    if trust_forwarded_headers()
+        && let Some(origin) = origin_from_headers(headers)
+    {
+        return Some(origin);
     }
     None
 }
@@ -426,7 +426,7 @@ pub async fn ensure_webhook_registered(
         Ok(()) => {}
         Err(WebhookUrlReject::Invalid) => return Err(ActivationError::WebhookUrlInvalid { url }),
         Err(WebhookUrlReject::NotReachable) => {
-            return Err(ActivationError::WebhookUrlNotReachable { url })
+            return Err(ActivationError::WebhookUrlNotReachable { url });
         }
     }
     let list_url = format!("https://api.github.com/repos/{owner}/{repo}/hooks");
@@ -653,7 +653,11 @@ mod tests {
     impl ScopedEnvVar {
         fn set(key: &'static str, value: &str) -> Self {
             let previous = std::env::var(key).ok();
-            std::env::set_var(key, value);
+            // SAFETY: edition 2024 marks env mutation as `unsafe`. Each
+            // test in this module acquires `env_lock()` before
+            // constructing any `ScopedEnvVar`, so no other thread reads
+            // or writes env concurrently.
+            unsafe { std::env::set_var(key, value) };
             Self { key, previous }
         }
 
@@ -662,17 +666,19 @@ mod tests {
         /// earlier layers don't resolve from ambient env.
         fn unset(key: &'static str) -> Self {
             let previous = std::env::var(key).ok();
-            std::env::remove_var(key);
+            // SAFETY: see `set` above; same `env_lock()` discipline.
+            unsafe { std::env::remove_var(key) };
             Self { key, previous }
         }
     }
 
     impl Drop for ScopedEnvVar {
         fn drop(&mut self) {
+            // SAFETY: see `ScopedEnvVar::set`; same `env_lock()` discipline.
             if let Some(previous) = &self.previous {
-                std::env::set_var(self.key, previous);
+                unsafe { std::env::set_var(self.key, previous) };
             } else {
-                std::env::remove_var(self.key);
+                unsafe { std::env::remove_var(self.key) };
             }
         }
     }

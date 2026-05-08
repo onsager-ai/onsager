@@ -300,10 +300,11 @@ mod tests {
         pending_shapings.insert(&req_id, shaping_failed(&req_id));
         let out = pipeline.tick(&BaselineKernel::new());
 
-        assert!(out
-            .events
-            .iter()
-            .any(|e| matches!(e, PipelineEvent::Error(_))));
+        assert!(
+            out.events
+                .iter()
+                .any(|e| matches!(e, PipelineEvent::Error(_)))
+        );
         assert!(!pipeline.is_parked());
         let art = pipeline.store.get(&id).unwrap();
         assert_eq!(
@@ -338,10 +339,11 @@ mod tests {
             },
         );
         let out = pipeline.tick(&BaselineKernel::new());
-        assert!(out
-            .events
-            .iter()
-            .any(|e| matches!(e, PipelineEvent::Error(_))));
+        assert!(
+            out.events
+                .iter()
+                .any(|e| matches!(e, PipelineEvent::Error(_)))
+        );
         assert!(!pipeline.is_parked());
         let art = pipeline.store.get(&id).unwrap();
         assert_eq!(art.state, ArtifactState::Draft);
@@ -351,10 +353,12 @@ mod tests {
     fn tick_idles_when_no_work() {
         let mut pipeline = fresh_pipeline();
         let output = pipeline.tick(&BaselineKernel::new());
-        assert!(output
-            .events
-            .iter()
-            .any(|e| matches!(e, PipelineEvent::IdleTick)));
+        assert!(
+            output
+                .events
+                .iter()
+                .any(|e| matches!(e, PipelineEvent::IdleTick))
+        );
     }
 
     #[test]
@@ -367,10 +371,12 @@ mod tests {
             .unwrap();
 
         let output = pipeline.tick(&BaselineKernel::new());
-        assert!(output
-            .events
-            .iter()
-            .any(|e| matches!(e, PipelineEvent::IdleTick)));
+        assert!(
+            output
+                .events
+                .iter()
+                .any(|e| matches!(e, PipelineEvent::IdleTick))
+        );
         assert!(!pipeline.is_parked(), "paused tick must not park anything");
     }
 
@@ -579,10 +585,11 @@ mod tests {
             !has_advance,
             "sealing failure must abort the release transition"
         );
-        assert!(!out
-            .events
-            .iter()
-            .any(|e| matches!(e, PipelineEvent::BundleSealed { .. })));
+        assert!(
+            !out.events
+                .iter()
+                .any(|e| matches!(e, PipelineEvent::BundleSealed { .. }))
+        );
         let art = pipeline.store.get(&id).unwrap();
         assert_eq!(art.state, ArtifactState::UnderReview);
         assert!(art.current_version_id.is_none());

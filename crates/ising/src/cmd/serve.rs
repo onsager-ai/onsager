@@ -24,7 +24,7 @@ use onsager_spine::{EventMetadata, EventStore};
 use crate::analyzers::register_defaults;
 use crate::core::emitter::{EmitResult, EmitterConfig, InsightEmitter};
 use crate::core::{
-    insight_to_emitted_event, insight_to_rule_proposal, AnalyzerRegistry, FactoryModel,
+    AnalyzerRegistry, FactoryModel, insight_to_emitted_event, insight_to_rule_proposal,
 };
 
 /// How far back to look for forge events when rebuilding the factory model.
@@ -110,10 +110,13 @@ async fn run_tick(
                     // backing `insight_emitted` via `insight_id` so Synodic
                     // can audit the evidence without a second query.
                     if let Some(proposal) = insight_to_rule_proposal(&analyzer_name, &insight) {
-                        if let Err(e) = append_rule_proposed(spine, &proposal).await {
-                            tracing::warn!("ising: failed to append rule_proposed event: {e}");
-                        } else {
-                            proposals += 1;
+                        match append_rule_proposed(spine, &proposal).await {
+                            Err(e) => {
+                                tracing::warn!("ising: failed to append rule_proposed event: {e}");
+                            }
+                            _ => {
+                                proposals += 1;
+                            }
                         }
                     }
                 }

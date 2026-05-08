@@ -150,10 +150,12 @@ mod tests {
         let insights = PrChurnAnalyzer::default().run(&model);
         assert_eq!(insights.len(), 1);
         assert_eq!(insights[0].evidence.len(), 3);
-        assert!(insights[0]
-            .evidence
-            .iter()
-            .all(|e| e.event_type == "git.pr_opened"));
+        assert!(
+            insights[0]
+                .evidence
+                .iter()
+                .all(|e| e.event_type == "git.pr_opened")
+        );
     }
 
     #[test]

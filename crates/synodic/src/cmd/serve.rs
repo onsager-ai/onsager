@@ -250,13 +250,13 @@ async fn create_event(
     State(store): State<Arc<dyn Storage>>,
     Json(body): Json<CreateGovernanceEvent>,
 ) -> Result<(StatusCode, Json<GovernanceEvent>), AppError> {
-    if let Some(ref sev) = body.severity {
-        if !VALID_SEVERITIES.contains(&sev.as_str()) {
-            return Err(AppError::BadRequest(format!(
-                "invalid severity '{sev}', must be one of: {}",
-                VALID_SEVERITIES.join(", ")
-            )));
-        }
+    if let Some(ref sev) = body.severity
+        && !VALID_SEVERITIES.contains(&sev.as_str())
+    {
+        return Err(AppError::BadRequest(format!(
+            "invalid severity '{sev}', must be one of: {}",
+            VALID_SEVERITIES.join(", ")
+        )));
     }
     let event = store.create_governance_event(body).await?;
     Ok((StatusCode::CREATED, Json(event)))

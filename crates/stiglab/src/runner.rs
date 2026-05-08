@@ -13,10 +13,10 @@ use uuid::Uuid;
 
 use stiglab::agent::session::manager::SessionManager;
 use stiglab::core::{AgentMessage, Node, NodeStatus, ServerMessage};
+use stiglab::server::AnyPool;
 use stiglab::server::db;
 use stiglab::server::handler;
 use stiglab::server::state::{AgentConnection, AppState};
-use stiglab::server::AnyPool;
 
 pub async fn start_built_in_runner(
     state: &AppState,

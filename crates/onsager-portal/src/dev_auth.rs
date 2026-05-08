@@ -25,15 +25,15 @@
 //! spine. Portal writes to those tables via raw SQL — same DB, same
 //! shape, no shared crate needed.
 
-use axum::extract::State;
-use axum::http::{header, StatusCode};
-use axum::response::{IntoResponse, Response};
 use axum::Json;
+use axum::extract::State;
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use sqlx::postgres::PgPool;
 use uuid::Uuid;
 
-use crate::auth::{generate_session_token, SessionKind};
+use crate::auth::{SessionKind, generate_session_token};
 use crate::auth_db::{self, User};
 use crate::state::AppState;
 
@@ -53,9 +53,12 @@ pub const DEV_WORKSPACE_SLUG: &str = "dev";
 /// back to `dev` so the build works in CI and rootless containers where
 /// `$USER` may be unset.
 pub fn dev_username() -> String {
-    std::env::var("USER")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
+    dev_username_from(std::env::var("USER").ok())
+}
+
+/// Pure variant of [`dev_username`] used for testing without env mutation.
+fn dev_username_from(user: Option<String>) -> String {
+    user.filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "dev".to_string())
 }
 
@@ -225,12 +228,13 @@ mod tests {
 
     #[test]
     fn dev_username_falls_back_to_dev() {
-        let prev = std::env::var("USER").ok();
-        std::env::remove_var("USER");
-        assert_eq!(dev_username(), "dev");
-        if let Some(v) = prev {
-            std::env::set_var("USER", v);
-        }
+        // Test the pure variant so we don't have to mutate the
+        // process-wide env (which races with parallel tests under
+        // edition 2024's unsafe env API).
+        assert_eq!(dev_username_from(None), "dev");
+        assert_eq!(dev_username_from(Some(String::new())), "dev");
+        assert_eq!(dev_username_from(Some("   ".into())), "dev");
+        assert_eq!(dev_username_from(Some("alice".into())), "alice");
     }
 
     #[test]

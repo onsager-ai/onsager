@@ -72,10 +72,10 @@ pub async fn run_probes(
         let reports = probing::run_all_probes(rule);
 
         for report in &reports {
-            if let Some(filter) = strategy_filter {
-                if report.strategy != filter {
-                    continue;
-                }
+            if let Some(filter) = strategy_filter
+                && report.strategy != filter
+            {
+                continue;
             }
 
             println!("  Strategy: {}", report.strategy);

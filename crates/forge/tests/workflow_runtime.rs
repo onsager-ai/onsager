@@ -12,10 +12,10 @@ use forge::core::artifact_store::ArtifactStore;
 use forge::core::pending::PendingVerdicts;
 use forge::core::signal_cache::{Signal, SignalCache, SignalOutcome};
 use forge::core::stage_runner::advance_workflow_artifacts;
-use forge::core::trigger_subscriber::{register_artifact_from_trigger, TriggerFired};
+use forge::core::trigger_subscriber::{TriggerFired, register_artifact_from_trigger};
 use forge::core::workflow::{GateSpec, StageSpec, TriggerKind, Workflow};
 use forge::core::workflow_gates::{
-    external_check_signal_kind, GateEmitter, LiveGateEvaluator, AGENT_SESSION_SIGNAL,
+    AGENT_SESSION_SIGNAL, GateEmitter, LiveGateEvaluator, external_check_signal_kind,
 };
 use forge::core::workflow_signal_listener::classify_signal;
 use onsager_artifact::ArtifactState;

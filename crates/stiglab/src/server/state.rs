@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use axum::extract::ws::Message;
 use sqlx::AnyPool;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 use crate::server::config::ServerConfig;
 use crate::server::spine::SpineEmitter;

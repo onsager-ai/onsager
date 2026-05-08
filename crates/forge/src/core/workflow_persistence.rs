@@ -35,24 +35,27 @@ async fn load_workflows_filtered(
     pool: &PgPool,
     only_id: Option<&str>,
 ) -> Result<HashMap<String, Workflow>, sqlx::Error> {
-    let wf_rows =
-        match only_id {
-            Some(id) => sqlx::query(
+    let wf_rows = match only_id {
+        Some(id) => {
+            sqlx::query(
                 "SELECT workflow_id, name, trigger_kind, trigger_config, active, workspace_id, \
                         preset_id, install_id, created_by \
                    FROM workflows WHERE workflow_id = $1",
             )
             .bind(id)
             .fetch_all(pool)
-            .await?,
-            None => sqlx::query(
+            .await?
+        }
+        None => {
+            sqlx::query(
                 "SELECT workflow_id, name, trigger_kind, trigger_config, active, workspace_id, \
                         preset_id, install_id, created_by \
                    FROM workflows",
             )
             .fetch_all(pool)
-            .await?,
-        };
+            .await?
+        }
+    };
 
     let mut workflows = HashMap::new();
     for row in wf_rows {

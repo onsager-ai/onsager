@@ -25,7 +25,7 @@ use crate::core::shaping_result_listener;
 use crate::core::signal_cache::SignalCache;
 use crate::core::stage_runner::{self, StageEvent};
 use crate::core::trigger_subscriber::{
-    self, register_artifact_from_trigger, trigger_external_ref, TriggerFired, TriggerHandler,
+    self, TriggerFired, TriggerHandler, register_artifact_from_trigger, trigger_external_ref,
 };
 use crate::core::workflow::Workflow;
 use crate::core::workflow_gates::{LiveGateEvaluator, SpineGateEmitter};
@@ -858,8 +858,8 @@ async fn register_artifact(
         state.spine.clone()
     };
 
-    if let Some(spine) = spine.as_ref() {
-        if let Err(e) = persistence::insert_artifact_row(
+    if let Some(spine) = spine.as_ref()
+        && let Err(e) = persistence::insert_artifact_row(
             spine.pool(),
             id.as_str(),
             &req.kind,
@@ -868,21 +868,20 @@ async fn register_artifact(
             None,
         )
         .await
-        {
-            // Full sqlx::Error goes to the server log (which may carry
-            // constraint names, column types, etc.); the HTTP client
-            // only sees a stable, opaque error tag plus the artifact ID
-            // it submitted for correlation.
-            tracing::error!(artifact_id = %id, "forge: failed to register artifact in spine: {e}");
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(serde_json::json!({
-                    "error": "failed to persist artifact",
-                    "artifact_id": id.as_str(),
-                })),
-            )
-                .into_response();
-        }
+    {
+        // Full sqlx::Error goes to the server log (which may carry
+        // constraint names, column types, etc.); the HTTP client
+        // only sees a stable, opaque error tag plus the artifact ID
+        // it submitted for correlation.
+        tracing::error!(artifact_id = %id, "forge: failed to register artifact in spine: {e}");
+        return (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(serde_json::json!({
+                "error": "failed to persist artifact",
+                "artifact_id": id.as_str(),
+            })),
+        )
+            .into_response();
     }
 
     {

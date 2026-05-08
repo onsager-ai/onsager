@@ -12,13 +12,13 @@
 
 use chrono::Utc;
 use onsager_spine::{
-    append_factory_event_tx, EventMetadata, EventStore, FactoryEvent, FactoryEventKind,
+    EventMetadata, EventStore, FactoryEvent, FactoryEventKind, append_factory_event_tx,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Transaction};
 
 use crate::registry::{
-    AgentProfile, RegistryStatus, TypeDefinition, DEFAULT_WORKSPACE, SEED_ACTOR,
+    AgentProfile, DEFAULT_WORKSPACE, RegistryStatus, SEED_ACTOR, TypeDefinition,
 };
 
 /// An adapter catalog entry as it appears in a seed file.
@@ -295,14 +295,16 @@ mod tests {
         assert!(type_ids.contains(&"GateEvaluator"));
         assert!(type_ids.contains(&"AgentProfile"));
 
-        assert!(seed
-            .evaluators
-            .iter()
-            .any(|e| e.evaluator_id == "HumanApproval"));
-        assert!(seed
-            .profiles
-            .iter()
-            .any(|p| p.profile_id.as_str() == "Human"));
+        assert!(
+            seed.evaluators
+                .iter()
+                .any(|e| e.evaluator_id == "HumanApproval")
+        );
+        assert!(
+            seed.profiles
+                .iter()
+                .any(|p| p.profile_id.as_str() == "Human")
+        );
     }
 
     #[test]

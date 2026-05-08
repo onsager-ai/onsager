@@ -173,10 +173,12 @@ mod tests {
         let insights = GateDenyRateAnalyzer::default().run(&model);
         assert_eq!(insights.len(), 1);
         assert_eq!(insights[0].evidence.len(), 5);
-        assert!(insights[0]
-            .evidence
-            .iter()
-            .all(|e| e.event_type == "forge.gate_verdict"));
+        assert!(
+            insights[0]
+                .evidence
+                .iter()
+                .all(|e| e.event_type == "forge.gate_verdict")
+        );
     }
 
     #[test]

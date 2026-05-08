@@ -144,24 +144,21 @@ pub const TRIGGERS: TriggerManifest = TriggerManifest {
             producer: Subsystem::Portal,
             category: TriggerCategory::Request,
             ui_kind: TriggerUiKind::GithubPullRequestClosed,
-            description:
-                "Fires when a GitHub pull request closes; optional `merged` predicate.",
+            description: "Fires when a GitHub pull request closes; optional `merged` predicate.",
         },
         TriggerDefinition {
             kind_tag: "github_workflow_run_completed",
             producer: Subsystem::Portal,
             category: TriggerCategory::Request,
             ui_kind: TriggerUiKind::GithubWorkflowRunCompleted,
-            description:
-                "Fires when a GitHub Actions workflow run completes; filter by name / event / branch / conclusion.",
+            description: "Fires when a GitHub Actions workflow run completes; filter by name / event / branch / conclusion.",
         },
         TriggerDefinition {
             kind_tag: "telegram_webhook",
             producer: Subsystem::Portal,
             category: TriggerCategory::Request,
             ui_kind: TriggerUiKind::TelegramWebhook,
-            description:
-                "Fires on a Telegram bot webhook; optional chat-id allowlist + command prefix.",
+            description: "Fires on a Telegram bot webhook; optional chat-id allowlist + command prefix.",
         },
         // -- Schedule (#238) -----------------------------------------------
         TriggerDefinition {

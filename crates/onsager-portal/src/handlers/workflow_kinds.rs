@@ -10,9 +10,9 @@
 //! here (matches the `BUILTIN_WORKFLOW_KINDS` filter in
 //! `onsager-registry::catalog`).
 
-use axum::response::{IntoResponse, Response};
 use axum::Json;
-use onsager_registry::catalog::{workflow_builtin_types, BUILTIN_WORKFLOW_KINDS};
+use axum::response::{IntoResponse, Response};
+use onsager_registry::catalog::{BUILTIN_WORKFLOW_KINDS, workflow_builtin_types};
 use onsager_registry::registry::MergeRule;
 use serde::Serialize;
 

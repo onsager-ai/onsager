@@ -5,22 +5,22 @@
 //! URLs through `routes::portal::proxy` so existing dashboard fetches
 //! land here without an API_BASE cutover (Slice 6 of spec #222).
 
-use axum::extract::{Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Redirect, Response};
 use axum::Json;
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Redirect, Response};
 use chrono::Utc;
 use uuid::Uuid;
 
 use crate::auth::{
-    self, exchange_code, generate_session_token, generate_state, get_github_user,
-    github_authorize_url, AuthUser, RequestPrincipal,
+    self, AuthUser, RequestPrincipal, exchange_code, generate_session_token, generate_state,
+    get_github_user, github_authorize_url,
 };
 use crate::auth_db::{self, User};
 use crate::config::Config;
 use crate::sso::{
-    self, generate_exchange_code, return_to_allowed, secrets_equal, sign_state, verify_state,
-    SsoMode, StateClaims, EXCHANGE_CODE_LIFETIME_SECS, STATE_LIFETIME_SECS,
+    self, EXCHANGE_CODE_LIFETIME_SECS, STATE_LIFETIME_SECS, SsoMode, StateClaims,
+    generate_exchange_code, return_to_allowed, secrets_equal, sign_state, verify_state,
 };
 use crate::state::AppState;
 
@@ -174,11 +174,11 @@ pub async fn github_callback(
             if cookie_csrf != Some(c.c.as_str()) {
                 return (StatusCode::BAD_REQUEST, "invalid OAuth state").into_response();
             }
-            if let Some(ref rt) = c.r {
-                if !return_to_allowed(&config.sso_return_host_allowlist, rt) {
-                    tracing::warn!(return_to = %rt, "callback rejected delegated SSO: return_to no longer allowed");
-                    return (StatusCode::FORBIDDEN, "return_to not allowed").into_response();
-                }
+            if let Some(ref rt) = c.r
+                && !return_to_allowed(&config.sso_return_host_allowlist, rt)
+            {
+                tracing::warn!(return_to = %rt, "callback rejected delegated SSO: return_to no longer allowed");
+                return (StatusCode::FORBIDDEN, "return_to not allowed").into_response();
             }
             c.r.clone()
         }

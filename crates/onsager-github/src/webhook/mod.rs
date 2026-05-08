@@ -9,5 +9,5 @@
 pub mod event;
 pub mod signature;
 
-pub use event::{to_spine_events, WebhookEvent};
-pub use signature::{verify_signature, SignatureCheck};
+pub use event::{WebhookEvent, to_spine_events};
+pub use signature::{SignatureCheck, verify_signature};

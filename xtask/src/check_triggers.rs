@@ -22,8 +22,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
-use onsager_registry::{Subsystem, TriggerCategory, TRIGGERS};
+use anyhow::{Context, Result, anyhow, bail};
+use onsager_registry::{Subsystem, TRIGGERS, TriggerCategory};
 use syn::{Expr, ExprLit, ImplItem, Item, Lit, Pat, Stmt, Type, Visibility};
 
 const TRIGGER_SRC: &str = "crates/onsager-spine/src/trigger.rs";

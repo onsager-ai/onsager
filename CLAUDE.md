@@ -328,7 +328,7 @@ cargo fmt --all -- --check
 
 ## Conventions
 
-- Rust edition 2021, rustfmt formatting, clippy with warnings-as-errors
+- Rust edition 2024, rustfmt formatting, clippy with warnings-as-errors
 - thiserror for library errors, anyhow for application errors
 - Small focused commits, imperative mood, under 72 characters
 - Unit tests co-located in `#[cfg(test)]` modules

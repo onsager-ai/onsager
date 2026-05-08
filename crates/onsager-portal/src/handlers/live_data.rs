@@ -26,15 +26,15 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use onsager_spine::webhook_routing::{
-    build_trigger_fired_events, spine_namespace, trigger_source, IssueTriggerContext, RoutedEvent,
-    WorkflowMatch,
+    IssueTriggerContext, RoutedEvent, WorkflowMatch, build_trigger_fired_events, spine_namespace,
+    trigger_source,
 };
 
 use crate::auth::AuthUser;
@@ -257,7 +257,7 @@ pub async fn list_project_issues(
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({ "error": "GitHub App not configured" })),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             tracing::error!("installation_token_for failed: {e}");
@@ -363,7 +363,7 @@ pub async fn get_project_issue(
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({ "error": "GitHub App not configured" })),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             tracing::error!("installation_token_for failed: {e}");
@@ -492,7 +492,7 @@ pub async fn list_project_pulls(
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({ "error": "GitHub App not configured" })),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             tracing::error!("installation_token_for failed: {e}");
@@ -609,7 +609,7 @@ pub async fn backfill_project(
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({ "error": format!("invalid strategy: {e}") })),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -695,7 +695,7 @@ pub async fn replay_issue_trigger(
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({ "error": "GitHub App not configured" })),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             tracing::error!("installation_token_for failed: {e}");

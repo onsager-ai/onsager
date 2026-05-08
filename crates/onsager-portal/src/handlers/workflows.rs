@@ -9,24 +9,24 @@
 //! Repo scope and label creation live in `crate::workflow_activation`;
 //! this module just handles the HTTP shape + input validation.
 
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use chrono::Utc;
-use onsager_github::api::app::{mint_app_jwt, mint_installation_token, AppConfig};
+use onsager_github::api::app::{AppConfig, mint_app_jwt, mint_installation_token};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::auth::{decrypt_credential, AuthUser};
+use crate::auth::{AuthUser, decrypt_credential};
 use crate::credential_db;
 use crate::installation_db;
-use crate::preset::{resolve_preset, PRESET_IDS};
+use crate::preset::{PRESET_IDS, resolve_preset};
 use crate::state::AppState;
 use crate::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
 use crate::workflow_activation::{
-    deregister_webhook, ensure_label_exists, ensure_repo_in_scope, ensure_webhook_registered,
-    ActivationError,
+    ActivationError, deregister_webhook, ensure_label_exists, ensure_repo_in_scope,
+    ensure_webhook_registered,
 };
 use crate::workflow_db;
 
@@ -58,17 +58,17 @@ async fn require_workspace_access(
     auth_user: &AuthUser,
     workspace_id: &str,
 ) -> Result<(), Response> {
-    if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
-        if pinned != workspace_id {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "error": "pat_workspace_scope_mismatch",
-                    "detail": "PAT is pinned to a different workspace",
-                })),
-            )
-                .into_response());
-        }
+    if let Some(pinned) = auth_user.principal.pinned_workspace_id()
+        && pinned != workspace_id
+    {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "pat_workspace_scope_mismatch",
+                "detail": "PAT is pinned to a different workspace",
+            })),
+        )
+            .into_response());
     }
     match credential_db::is_workspace_member(pool, workspace_id, &auth_user.user_id).await {
         Ok(true) => Ok(()),
@@ -649,8 +649,10 @@ pub async fn patch_workflow(
         if let Err(r) = activate_workflow(&state, &workflow_id, &headers).await {
             return r;
         }
-    } else if let Err(r) = deactivate_workflow(&state, &workflow_id).await {
-        return r;
+    } else {
+        if let Err(r) = deactivate_workflow(&state, &workflow_id).await {
+            return r;
+        }
     }
 
     let updated = workflow_db::get_workflow(spine, &workflow_id)
@@ -691,10 +693,10 @@ pub async fn delete_workflow(
         return r;
     }
 
-    if workflow.active {
-        if let Err(r) = deactivate_workflow(&state, &workflow_id).await {
-            return r;
-        }
+    if workflow.active
+        && let Err(r) = deactivate_workflow(&state, &workflow_id).await
+    {
+        return r;
     }
 
     if let Err(e) = workflow_db::delete_workflow(spine, &workflow_id).await {

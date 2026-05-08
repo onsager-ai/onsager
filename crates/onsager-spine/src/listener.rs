@@ -273,7 +273,7 @@ mod tests {
     #[tokio::test]
     async fn listener_backfill_and_live() {
         use crate::factory_event::{FactoryEvent, FactoryEventKind};
-        use crate::store::{append_factory_event_tx, EventMetadata, EventStore};
+        use crate::store::{EventMetadata, EventStore, append_factory_event_tx};
         use chrono::Utc;
         use onsager_artifact::{ArtifactId, Kind};
         use std::sync::atomic::{AtomicI64, Ordering};

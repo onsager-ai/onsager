@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::http::{client, GITHUB_API};
+use crate::api::http::{GITHUB_API, client};
 use crate::error::GithubError;
 
 /// An issue as returned by `GET /repos/{owner}/{repo}/issues`. GitHub's

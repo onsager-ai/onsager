@@ -299,10 +299,11 @@ fn clear_parked_reason(store: &mut ArtifactStore, id: &ArtifactId) {
 }
 
 fn apply_state_change(store: &mut ArtifactStore, id: &ArtifactId, target: ArtifactState) {
-    if let Some(artifact) = store.get_mut(id) {
-        if artifact.state != target && artifact.state.can_transition_to(target) {
-            artifact.state = target;
-        }
+    if let Some(artifact) = store.get_mut(id)
+        && artifact.state != target
+        && artifact.state.can_transition_to(target)
+    {
+        artifact.state = target;
     }
 }
 
@@ -325,10 +326,11 @@ pub fn enter_workflow(
         artifact.workflow_id = Some(workflow.workflow_id.clone());
         artifact.current_stage_index = Some(0);
         artifact.workflow_parked_reason = None;
-        if let Some(target) = first_stage.target_state {
-            if artifact.state != target && artifact.state.can_transition_to(target) {
-                artifact.state = target;
-            }
+        if let Some(target) = first_stage.target_state
+            && artifact.state != target
+            && artifact.state.can_transition_to(target)
+        {
+            artifact.state = target;
         }
     }
 

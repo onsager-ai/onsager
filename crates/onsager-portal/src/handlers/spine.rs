@@ -11,10 +11,10 @@
 //! stays in stiglab for the agent-runtime emits; portal calls
 //! `state.spine.append_ext` directly.
 
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use onsager_spine::EventMetadata;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -440,7 +440,7 @@ pub async fn get_artifact(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({ "error": "artifact not found" })),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             tracing::error!("spine artifact query failed: {e}");

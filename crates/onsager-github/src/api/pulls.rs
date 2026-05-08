@@ -4,7 +4,7 @@
 
 use serde::Deserialize;
 
-use crate::api::http::{client, GITHUB_API};
+use crate::api::http::{GITHUB_API, client};
 use crate::error::GithubError;
 
 /// A pull request as returned by `GET /repos/{owner}/{repo}/pulls`.

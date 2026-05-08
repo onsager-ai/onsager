@@ -181,15 +181,13 @@ impl SchedulingKernel for BaselineKernel {
             insight_kind,
             scope,
         } = &event.event
+            && *insight_kind == onsager_spine::factory_event::InsightKind::Failure
+            && let onsager_spine::factory_event::InsightScope::SpecificArtifact(id) = scope
         {
-            if *insight_kind == onsager_spine::factory_event::InsightKind::Failure {
-                if let onsager_spine::factory_event::InsightScope::SpecificArtifact(id) = scope {
-                    *self
-                        .failure_counts
-                        .entry(id.as_str().to_owned())
-                        .or_default() += 1;
-                }
-            }
+            *self
+                .failure_counts
+                .entry(id.as_str().to_owned())
+                .or_default() += 1;
         }
     }
 }

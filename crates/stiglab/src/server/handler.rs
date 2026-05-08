@@ -1,7 +1,7 @@
 //! Shared logic for processing AgentMessage events (used by both the WebSocket
 //! handler and the built-in runner).
 
-use crate::core::{adapter, AgentMessage, SessionState};
+use crate::core::{AgentMessage, SessionState, adapter};
 use sqlx::AnyPool;
 
 use crate::server::db;
@@ -35,12 +35,12 @@ pub async fn handle_agent_message(
                 tracing::error!("failed to update session state: {e}");
             }
             // Emit spine event when session transitions to Running
-            if *state == SessionState::Running {
-                if let Some(spine) = spine {
-                    // We don't have request_id here, use task_id from the session as correlation
-                    if let Err(e) = spine.emit_session_started(&session_id, "", node_id).await {
-                        tracing::warn!("failed to emit session_started spine event: {e}");
-                    }
+            if *state == SessionState::Running
+                && let Some(spine) = spine
+            {
+                // We don't have request_id here, use task_id from the session as correlation
+                if let Err(e) = spine.emit_session_started(&session_id, "", node_id).await {
+                    tracing::warn!("failed to emit session_started spine event: {e}");
                 }
             }
         }
@@ -70,12 +70,11 @@ pub async fn handle_agent_message(
                     .await
                     .map(|logs| !logs.is_empty())
                     .unwrap_or(false);
-                if !already_streamed {
-                    if let Err(e) =
+                if !already_streamed
+                    && let Err(e) =
                         db::append_session_log(pool, &session_id, &output, "stdout").await
-                    {
-                        tracing::error!("failed to append final session output: {e}");
-                    }
+                {
+                    tracing::error!("failed to append final session output: {e}");
                 }
             }
             // Emit spine event for session completion. Best-effort branch
@@ -127,12 +126,11 @@ pub async fn handle_agent_message(
                 // without an artifact link are direct task POSTs that
                 // never produced a shaping request — skip them so we
                 // don't fabricate result events with empty fields.
-                if let Some(artifact_id) = artifact_id.as_deref() {
-                    if let Err(e) =
+                if let Some(artifact_id) = artifact_id.as_deref()
+                    && let Err(e) =
                         emit_shaping_result_for_session(pool, spine, &session_id, artifact_id).await
-                    {
-                        tracing::warn!("failed to emit shaping_result_ready spine event: {e}");
-                    }
+                {
+                    tracing::warn!("failed to emit shaping_result_ready spine event: {e}");
                 }
             }
         }

@@ -22,8 +22,8 @@
 //! exclusively.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use onsager_artifact::Artifact;
 use onsager_spine::factory_event::{FactoryEventKind, GatePoint};
@@ -77,7 +77,7 @@ pub trait GateEmitter: Send + Sync {
     /// Emit `forge.gate_requested` keyed on `gate_id`. Same return
     /// semantics as [`Self::emit_shaping_dispatched`].
     fn emit_gate_requested(&self, workspace_id: &str, gate_id: &str, request: &GateRequest)
-        -> bool;
+    -> bool;
 }
 
 /// Production [`GateEmitter`] backed by an [`EventStore`]. Calls into
@@ -852,14 +852,18 @@ mod tests {
                 outcome: SignalOutcome::Success,
             },
         );
-        assert!(cache
-            .get(artifact.artifact_id.as_str(), AGENT_SESSION_SIGNAL)
-            .is_some());
+        assert!(
+            cache
+                .get(artifact.artifact_id.as_str(), AGENT_SESSION_SIGNAL)
+                .is_some()
+        );
 
         evaluator.on_stage_advanced(&artifact.artifact_id, 0);
-        assert!(cache
-            .get(artifact.artifact_id.as_str(), AGENT_SESSION_SIGNAL)
-            .is_none());
+        assert!(
+            cache
+                .get(artifact.artifact_id.as_str(), AGENT_SESSION_SIGNAL)
+                .is_none()
+        );
     }
 
     #[test]
@@ -878,18 +882,22 @@ mod tests {
 
         // Emit + park.
         evaluator.evaluate(&artifact, &wf, 0, &gate);
-        assert!(evaluator
-            .governance_in_flight
-            .lock()
-            .unwrap()
-            .contains_key(&(artifact.artifact_id.as_str().to_string(), 0)));
+        assert!(
+            evaluator
+                .governance_in_flight
+                .lock()
+                .unwrap()
+                .contains_key(&(artifact.artifact_id.as_str().to_string(), 0))
+        );
 
         evaluator.on_stage_advanced(&artifact.artifact_id, 0);
-        assert!(!evaluator
-            .governance_in_flight
-            .lock()
-            .unwrap()
-            .contains_key(&(artifact.artifact_id.as_str().to_string(), 0)));
+        assert!(
+            !evaluator
+                .governance_in_flight
+                .lock()
+                .unwrap()
+                .contains_key(&(artifact.artifact_id.as_str().to_string(), 0))
+        );
     }
 
     #[test]

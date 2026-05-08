@@ -3,11 +3,11 @@
 //! Moved from `crates/stiglab/src/server/routes/sessions.rs`. All DB
 //! access goes through `crate::session_db` (PgPool).
 
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use futures_util::stream;
 use serde::Deserialize;
 use std::convert::Infallible;

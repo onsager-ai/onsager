@@ -94,12 +94,12 @@ pub async fn insert_workflow_with_stages(
     // workflow self-amplifies — every fire produces another `trigger.fired`
     // event that the same workflow listens to. Reject at create time;
     // forge's event-trigger listener also has a runtime backstop.
-    if let TriggerKind::SpineEvent { event_kind, .. } = &workflow.trigger {
-        if event_kind == "trigger.fired" {
-            anyhow::bail!(
-                "spine_event workflow cannot listen for `trigger.fired` (would self-amplify)"
-            );
-        }
+    if let TriggerKind::SpineEvent { event_kind, .. } = &workflow.trigger
+        && event_kind == "trigger.fired"
+    {
+        anyhow::bail!(
+            "spine_event workflow cannot listen for `trigger.fired` (would self-amplify)"
+        );
     }
     let install_id_text = workflow.install_id.to_string();
 

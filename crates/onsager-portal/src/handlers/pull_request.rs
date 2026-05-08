@@ -8,8 +8,8 @@
 //! - synodic gate evaluation per `(pr_artifact_id, head_sha)` (Phase 2)
 
 use onsager_artifact::ArtifactId;
-use onsager_spine::factory_event::FactoryEventKind;
 use onsager_spine::EventMetadata;
+use onsager_spine::factory_event::FactoryEventKind;
 use serde_json::Value;
 
 use onsager_github::api::pulls::CheckConclusion;
@@ -188,18 +188,18 @@ pub async fn handle(
 
     // Session↔PR correlation: on `opened`, attach a vertical_lineage row if a
     // recent session pushed `head.ref` against this project (Phase 1).
-    if matches!(act, PrAction::Opened) && !head_ref.is_empty() {
-        if let Some(session_id) =
+    if matches!(act, PrAction::Opened)
+        && !head_ref.is_empty()
+        && let Some(session_id) =
             db::find_session_for_branch(&state.pool, &project.id, &head_ref).await?
-        {
-            db::link_session_to_pr_artifact(
-                &state.pool,
-                &artifact.artifact_id,
-                &session_id,
-                artifact.current_version,
-            )
-            .await?;
-        }
+    {
+        db::link_session_to_pr_artifact(
+            &state.pool,
+            &artifact.artifact_id,
+            &session_id,
+            artifact.current_version,
+        )
+        .await?;
     }
 
     // Phase 2: gate the commit and post a check run.
@@ -336,50 +336,37 @@ pub async fn handle(
     // Phase 2 label-sync migration (`.github/workflows/pr-spec-sync.yml`).
     // Best-effort: only attempted when a github_token is configured. Failures
     // are logged so the workflow can stay live as a safety net during rollout.
-    if let Some(tok) = state.config.github_token.as_deref() {
-        if !body.is_empty() {
-            let linked = crate::handlers::spec_link::linked_issues(&body);
-            if !linked.is_empty() {
-                use onsager_github::api::issues::set_label;
-                for issue_number in linked {
-                    let result = match (act, merged) {
-                        (PrAction::Opened, _) => {
-                            set_label(Some(tok), owner, name, issue_number, "in-progress", true)
-                                .await
-                        }
-                        (PrAction::Closed, true) => {
-                            // PR merged — move spec from `in-progress` to `done`
-                            // to mirror the human-driven label progression.
-                            let _ = set_label(
-                                Some(tok),
-                                owner,
-                                name,
-                                issue_number,
-                                "in-progress",
-                                false,
-                            )
-                            .await;
-                            set_label(Some(tok), owner, name, issue_number, "done", true).await
-                        }
-                        (PrAction::Closed, false) => {
-                            // Closed without merge — revert to `planned` so the
-                            // spec re-enters the queue cleanly.
-                            let _ = set_label(
-                                Some(tok),
-                                owner,
-                                name,
-                                issue_number,
-                                "in-progress",
-                                false,
-                            )
-                            .await;
-                            set_label(Some(tok), owner, name, issue_number, "planned", true).await
-                        }
-                        (PrAction::Synchronize, _) => Ok(()),
-                    };
-                    if let Err(e) = result {
-                        tracing::warn!(error = %e, issue = issue_number, "spec label sync failed");
+    if let Some(tok) = state.config.github_token.as_deref()
+        && !body.is_empty()
+    {
+        let linked = crate::handlers::spec_link::linked_issues(&body);
+        if !linked.is_empty() {
+            use onsager_github::api::issues::set_label;
+            for issue_number in linked {
+                let result = match (act, merged) {
+                    (PrAction::Opened, _) => {
+                        set_label(Some(tok), owner, name, issue_number, "in-progress", true).await
                     }
+                    (PrAction::Closed, true) => {
+                        // PR merged — move spec from `in-progress` to `done`
+                        // to mirror the human-driven label progression.
+                        let _ =
+                            set_label(Some(tok), owner, name, issue_number, "in-progress", false)
+                                .await;
+                        set_label(Some(tok), owner, name, issue_number, "done", true).await
+                    }
+                    (PrAction::Closed, false) => {
+                        // Closed without merge — revert to `planned` so the
+                        // spec re-enters the queue cleanly.
+                        let _ =
+                            set_label(Some(tok), owner, name, issue_number, "in-progress", false)
+                                .await;
+                        set_label(Some(tok), owner, name, issue_number, "planned", true).await
+                    }
+                    (PrAction::Synchronize, _) => Ok(()),
+                };
+                if let Err(e) = result {
+                    tracing::warn!(error = %e, issue = issue_number, "spec label sync failed");
                 }
             }
         }

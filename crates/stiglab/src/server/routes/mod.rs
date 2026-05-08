@@ -1,9 +1,9 @@
 pub mod portal;
 pub mod shaping;
 
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use sqlx::AnyPool;
 
 use crate::server::auth::AuthUser;
@@ -32,17 +32,17 @@ pub async fn require_workspace_access(
     auth_user: &AuthUser,
     workspace_id: &str,
 ) -> Result<(), Response> {
-    if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
-        if pinned != workspace_id {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "error": "pat_workspace_scope_mismatch",
-                    "detail": "PAT is pinned to a different workspace",
-                })),
-            )
-                .into_response());
-        }
+    if let Some(pinned) = auth_user.principal.pinned_workspace_id()
+        && pinned != workspace_id
+    {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "pat_workspace_scope_mismatch",
+                "detail": "PAT is pinned to a different workspace",
+            })),
+        )
+            .into_response());
     }
     match db::is_workspace_member(pool, workspace_id, &auth_user.user_id).await {
         Ok(true) => Ok(()),

@@ -20,7 +20,7 @@ use onsager_spine::factory_event::{FactoryEvent, FactoryEventKind};
 use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 
 use super::artifact_store::ArtifactStore;
-use super::stage_runner::{enter_workflow, StageEvent};
+use super::stage_runner::{StageEvent, enter_workflow};
 use super::workflow::Workflow;
 
 /// Parsed `trigger.fired` event payload.
@@ -307,32 +307,38 @@ mod tests {
         // stable key, so we don't fabricate one (which would re-introduce
         // duplicates).
         assert!(trigger_external_ref("wf", "k", &serde_json::json!({})).is_none());
-        assert!(trigger_external_ref(
-            "wf",
-            "k",
-            &serde_json::json!({ "repo_owner": "a", "repo_name": "b" })
-        )
-        .is_none());
-        assert!(trigger_external_ref(
-            "wf",
-            "k",
-            &serde_json::json!({
-                "repo_owner": "",
-                "repo_name": "b",
-                "issue_number": 1
-            })
-        )
-        .is_none());
-        assert!(trigger_external_ref(
-            "wf",
-            "k",
-            &serde_json::json!({
-                "repo_owner": "a",
-                "repo_name": "b",
-                "issue_number": 0
-            })
-        )
-        .is_none());
+        assert!(
+            trigger_external_ref(
+                "wf",
+                "k",
+                &serde_json::json!({ "repo_owner": "a", "repo_name": "b" })
+            )
+            .is_none()
+        );
+        assert!(
+            trigger_external_ref(
+                "wf",
+                "k",
+                &serde_json::json!({
+                    "repo_owner": "",
+                    "repo_name": "b",
+                    "issue_number": 1
+                })
+            )
+            .is_none()
+        );
+        assert!(
+            trigger_external_ref(
+                "wf",
+                "k",
+                &serde_json::json!({
+                    "repo_owner": "a",
+                    "repo_name": "b",
+                    "issue_number": 0
+                })
+            )
+            .is_none()
+        );
     }
 
     #[test]

@@ -22,7 +22,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use syn::visit::Visit;
 use syn::{Expr, ExprLit, Lit};
 
@@ -63,16 +63,15 @@ impl<'ast> Visit<'ast> for RouteVisitor {
         // records A before B (matching source order — the outermost call
         // is the deepest receiver).
         syn::visit::visit_expr_method_call(self, node);
-        if node.method == "route" {
-            if let Some(Expr::Lit(ExprLit {
+        if node.method == "route"
+            && let Some(Expr::Lit(ExprLit {
                 lit: Lit::Str(lit), ..
             })) = node.args.first()
-            {
-                self.out.push(BackendRoute {
-                    path: lit.value(),
-                    subsystem: self.subsystem,
-                });
-            }
+        {
+            self.out.push(BackendRoute {
+                path: lit.value(),
+                subsystem: self.subsystem,
+            });
         }
     }
 }
@@ -820,9 +819,11 @@ mod tests {
         let root = workspace_root();
         let calls = parse_ts_calls(&root.join("apps/dashboard/src/lib/sse.ts")).unwrap();
         let paths: Vec<_> = calls.iter().map(|c| c.path.as_str()).collect();
-        assert!(paths
-            .iter()
-            .any(|p| p.contains("/sessions/") && p.ends_with("/logs")));
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.contains("/sessions/") && p.ends_with("/logs"))
+        );
     }
 
     #[test]

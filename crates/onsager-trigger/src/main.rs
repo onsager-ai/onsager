@@ -19,7 +19,7 @@
 //! The CLI inherits the user's shell environment as its "auth" — there's
 //! no separate token; the CLI is operator-grade by design.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use clap::{Args, Parser, Subcommand};
 use onsager_registry::TRIGGERS;
@@ -133,11 +133,11 @@ async fn fire(store: &EventStore, args: &FireArgs, actor: &str) -> Result<()> {
         "actor": actor,
         "source": "cli",
     });
-    if let Some(extra) = extra_payload {
-        if let (Value::Object(ref mut map), Value::Object(extra_map)) = (&mut payload, extra) {
-            for (k, v) in extra_map {
-                map.insert(k, v);
-            }
+    if let Some(extra) = extra_payload
+        && let (Value::Object(map), Value::Object(extra_map)) = (&mut payload, extra)
+    {
+        for (k, v) in extra_map {
+            map.insert(k, v);
         }
     }
 

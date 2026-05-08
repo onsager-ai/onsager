@@ -30,7 +30,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 
 const SUBSYSTEMS: &[&str] = &["forge", "stiglab", "synodic", "ising"];
 

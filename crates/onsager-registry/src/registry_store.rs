@@ -8,12 +8,12 @@
 
 use chrono::{DateTime, Utc};
 use onsager_spine::{
-    append_factory_event_tx, EventMetadata, EventStore, FactoryEvent, FactoryEventKind,
+    EventMetadata, EventStore, FactoryEvent, FactoryEventKind, append_factory_event_tx,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Row, Transaction};
 
-use crate::registry::{RegistryStatus, TypeDefinition, DEFAULT_WORKSPACE};
+use crate::registry::{DEFAULT_WORKSPACE, RegistryStatus, TypeDefinition};
 
 /// Row-like view of an entry in one of the four registry tables.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -318,7 +318,7 @@ fn row_to_record(row: sqlx::postgres::PgRow) -> sqlx::Result<RegistryRecord> {
         other => {
             return Err(sqlx::Error::Protocol(format!(
                 "unknown registry status: {other}"
-            )))
+            )));
         }
     };
     Ok(RegistryRecord {

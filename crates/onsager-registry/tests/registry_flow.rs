@@ -4,8 +4,8 @@
 //! Skipped unless `DATABASE_URL` is set.
 
 use onsager_registry::{
-    apply_seed, register_engineering_catalog, RegistryKind, RegistryStatus, RegistryStore,
-    SeedCatalog, TypeDefinition,
+    RegistryKind, RegistryStatus, RegistryStore, SeedCatalog, TypeDefinition, apply_seed,
+    register_engineering_catalog,
 };
 use onsager_spine::EventStore;
 
@@ -78,14 +78,18 @@ async fn propose_then_approve_type_lifecycle() {
     assert_eq!(row.status, RegistryStatus::Approved);
 
     // deprecate emits the terminal event
-    assert!(registry
-        .deprecate_type("DraftType", "superseded", "bob")
-        .await
-        .unwrap());
-    assert!(!registry
-        .deprecate_type("DraftType", "noop", "bob")
-        .await
-        .unwrap());
+    assert!(
+        registry
+            .deprecate_type("DraftType", "superseded", "bob")
+            .await
+            .unwrap()
+    );
+    assert!(
+        !registry
+            .deprecate_type("DraftType", "noop", "bob")
+            .await
+            .unwrap()
+    );
 
     // Three registry events should have landed on the spine for this
     // workspace. Filter on event_type (authoritative column) and

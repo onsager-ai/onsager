@@ -3,7 +3,7 @@
 //! Skipped unless `DATABASE_URL` is set (matches the convention in
 //! `store::tests`). Run via `just test-spine`.
 
-use onsager_registry::{apply_seed, SeedCatalog, DEFAULT_WORKSPACE};
+use onsager_registry::{DEFAULT_WORKSPACE, SeedCatalog, apply_seed};
 use onsager_spine::EventStore;
 
 fn db_url() -> Option<String> {
