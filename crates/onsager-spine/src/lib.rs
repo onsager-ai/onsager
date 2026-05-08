@@ -43,9 +43,10 @@ pub mod webhook_routing;
 
 // Backward-compat re-exports of the artifact value objects. Spine depends on
 // `onsager-artifact` because `FactoryEvent` references `ArtifactId`, `Kind`,
-// `ArtifactState`, and `QualitySignal`. These re-exports let existing callers
-// keep using `onsager_spine::{ArtifactId, ...}` without pulling in the
-// registry/protocol crates.
+// `ArtifactState`, and `QualitySignal`. Re-exporting them here lets a
+// subsystem that already depends on `onsager-spine` reach the artifact value
+// objects without adding a separate direct dep on `onsager-artifact` at the
+// call site.
 pub use onsager_artifact as artifact;
 pub use onsager_artifact::{
     Artifact, ArtifactId, ArtifactState, ArtifactVersion, Consumer, ConsumerType, ContentRef,

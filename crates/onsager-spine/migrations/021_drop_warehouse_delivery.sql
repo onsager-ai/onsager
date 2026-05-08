@@ -16,7 +16,9 @@ ALTER TABLE artifacts
     DROP COLUMN IF EXISTS current_version_id,
     DROP COLUMN IF EXISTS version_history;
 
--- Order respects FKs: deliveries → bundles → consumer_sinks → bundles.
+-- Order respects FKs: deliveries depends on both bundles and consumer_sinks,
+-- so it goes first; consumer_sinks and bundles are independent of each other
+-- (consumer_sinks references artifacts, bundles references artifacts).
 DROP TABLE IF EXISTS deliveries;
 DROP TABLE IF EXISTS consumer_sinks;
 DROP TABLE IF EXISTS bundles;
