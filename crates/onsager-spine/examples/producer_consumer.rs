@@ -70,10 +70,14 @@ async fn main() -> anyhow::Result<()> {
     let mut first_id: Option<i64> = None;
     for i in 1..=expected {
         let event = FactoryEvent {
-            event: FactoryEventKind::StiglabSessionCreated {
+            event: FactoryEventKind::StiglabSessionCompleted {
                 session_id: format!("stiglab:session:demo-{i}"),
                 request_id: format!("stiglab:request:{i}"),
-                node_id: "example-node".into(),
+                duration_ms: 100,
+                artifact_id: None,
+                token_usage: None,
+                branch: None,
+                pr_number: None,
             },
             correlation_id: None,
             causation_id: None,

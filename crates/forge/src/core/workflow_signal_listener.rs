@@ -291,7 +291,11 @@ mod tests {
 
     #[test]
     fn unrelated_events_do_not_classify() {
-        let kind = FactoryEventKind::ForgeIdleTick;
+        let kind = FactoryEventKind::ForgeDecisionMade {
+            artifact_id: ArtifactId::new("art_unrelated"),
+            target_version: 0,
+            priority: 0,
+        };
         assert!(classify_signal(&kind).is_none());
     }
 

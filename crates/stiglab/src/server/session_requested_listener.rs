@@ -161,15 +161,6 @@ impl Dispatcher {
                         "stiglab: portal.session_requested — failed to update state: {e}"
                     );
                 }
-                if let Some(ref spine) = state.spine {
-                    let _ = spine
-                        .emit_session_started(
-                            &payload.session_id,
-                            &payload.task_id,
-                            &payload.node_id,
-                        )
-                        .await;
-                }
                 tracing::info!(
                     session_id = %payload.session_id,
                     node_id = %payload.node_id,

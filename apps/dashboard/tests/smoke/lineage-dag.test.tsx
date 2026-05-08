@@ -106,7 +106,7 @@ describe("LineageDAG.buildLanes", () => {
         id: 1,
         stream_id: "s",
         stream_type: "forge",
-        event_type: "forge.idle_tick",
+        event_type: "forge.decision_made",
         data: {},
         actor: "forge",
         created_at: "2026-04-01T00:00:00Z",

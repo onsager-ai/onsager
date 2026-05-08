@@ -15,7 +15,7 @@ projections of the registry's mutation events.
 - `registry_store.rs` — DB projection / CRUD.
 - `seed.rs` — idempotent seed loader.
 
-## Event manifest update process (#150)
+## Event manifest update process (#150, schema simplified by #272)
 
 `events.rs` carries `pub const EVENTS: EventManifest`, a static, human-
 reviewed table of every `FactoryEventKind` variant. Each row declares:
@@ -30,17 +30,27 @@ reviewed table of every `FactoryEventKind` variant. Each row declares:
 - `consumers` — subsystems that act on this event (dispatch off the
   `event_type` string and parse the payload). Dashboard-only reads do
   not count.
-- `audit_only` — `true` when no subsystem consumer is expected (the
-  event exists for audit / dashboard rendering only).
+- `diagnostic_only` — `true` when no subsystem consumer is expected
+  (the event is read by a non-subsystem concern: dashboard timeline,
+  audit trail). Must be paired with a non-empty `reason`. Per spec
+  #272 this replaces the prior `audit_only` flag.
+- `reason` — `Option<&'static str>` explaining what reads this event
+  today (e.g. `"rendered in dashboard event timeline"`). Required
+  when `diagnostic_only` is `true`; `None` for real rows. Free-form
+  by design.
+
+Every row is in one of two states: **real** (non-empty `consumers`)
+or **diagnostic-only** (`diagnostic_only: true` plus a non-empty
+`reason`). Rows that are neither are rejected at lint time.
 
 ### When to update
 
 | Change | Action |
 | --- | --- |
-| Add a `FactoryEventKind` variant | Add a row to `EVENTS` in the same PR. Producer + consumer must be wired or the event tagged `audit_only`. |
+| Add a `FactoryEventKind` variant | Add a row to `EVENTS` in the same PR. Producer + consumer must be wired, or the event marked `diagnostic_only: true` with a non-empty `reason`. |
 | Add a new producer for an existing event | Append the subsystem to `producers`. |
-| Add a new listener for an existing event | Append the subsystem to `consumers`; flip `audit_only` to `false` if it was set. |
-| Backwards-incompatible payload change | Bump `schema_version`. Producer + consumer support for the new version must ship together — coordinated via PRs / tests / review (`check-events` only enforces that a manifest row has ≥1 producer and either ≥1 consumer or `audit_only = true`; it does not reason about `schema_version`). |
+| Add a new listener for an existing event | Append the subsystem to `consumers`; flip `diagnostic_only` to `false` and set `reason: None` if it was set. |
+| Backwards-incompatible payload change | Bump `schema_version`. Producer + consumer support for the new version must ship together — coordinated via PRs / tests / review (`check-events` only enforces that a manifest row has ≥1 producer and is either real or diagnostic-only with a reason; it does not reason about `schema_version`). |
 | Backwards-compatible payload change (new optional field) | No version bump; manifest review still required — flag the change in the PR description. |
 | Remove a `FactoryEventKind` variant | Remove the manifest row in the same PR. |
 
@@ -60,7 +70,8 @@ field — even additive ones — must bump nothing on the manifest yet
 **must** include a manifest review (the PR diff touches `events.rs` or
 the producer/consumer fields are stale). Reviewers should ask: does the
 new field land with both a producer that sets it and a consumer that
-reads it? If not, hold the PR or tag the event `audit_only`.
+reads it? If not, hold the PR or mark the event `diagnostic_only: true`
+with a `reason`.
 
 ### CI enforcement
 
@@ -68,8 +79,9 @@ reads it? If not, hold the PR or tag the event `audit_only`.
 `.github/workflows/rust.yml`) and asserts:
 
 1. Every `FactoryEventKind` variant has a manifest row.
-2. Every manifest row declares ≥1 producer and either ≥1 consumer or
-   `audit_only = true`.
+2. Every manifest row declares ≥1 producer and is either real (≥1
+   consumer) or diagnostic-only (`diagnostic_only = true` plus a
+   non-empty `reason`).
 3. Every `append_ext(_, _, "<event_type>", ...)` literal under
    `crates/{forge,stiglab,synodic,ising}/src/` references an event whose
    `producers` list includes that subsystem.
@@ -86,9 +98,10 @@ truth and reviewers verify the producer subsystem matches.
 
 ### Read API
 
-The manifest is exposed at `GET /api/registry/events` (stiglab) so the
-dashboard can render the catalog without a hardcoded copy. Public by
-design — same pattern as `/api/workflow/kinds`.
+The manifest is exposed at `GET /api/registry/events` (portal owns
+this route as of #257) so the dashboard can render the catalog
+without a hardcoded copy. Public by design — same pattern as
+`/api/workflow/kinds`.
 
 ## Related
 
@@ -97,3 +110,5 @@ design — same pattern as `/api/workflow/kinds`.
 - ADR 0004 — six-lever seam-tightening plan.
 - Spec #131 — strategic plan; this manifest is **Lever E**.
 - Spec #150 — this lever's implementation.
+- Spec #272 — manifest schema simplification (drop `audit_only`,
+  introduce `diagnostic_only` + `reason`, prune dangling wires).

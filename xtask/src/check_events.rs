@@ -6,7 +6,9 @@
 //! 1. **Coverage**: every `FactoryEventKind` variant has a manifest entry
 //!    keyed by its wire `event_type` string.
 //! 2. **Both ends declared**: every manifest entry has at least one
-//!    producer, and either at least one consumer or `audit_only = true`.
+//!    producer, and is either real (non-empty `consumers`) or
+//!    diagnostic-only (`diagnostic_only = true` plus a non-empty
+//!    `reason`).
 //! 3. **Emit call sites match producers**: every `append_ext(_, _,
 //!    "<event_type>", ...)` literal under
 //!    `crates/{forge,stiglab,synodic,ising}/src/` references an event
@@ -253,7 +255,8 @@ fn check_coverage(variants_to_kinds: &BTreeMap<String, String>, errors: &mut Vec
 }
 
 // ---------------------------------------------------------------------------
-// Check 2: every manifest entry has at least one producer + (consumer | audit_only)
+// Check 2: every manifest entry has at least one producer + is real
+// (non-empty consumers) or diagnostic-only (with non-empty reason).
 // ---------------------------------------------------------------------------
 
 fn check_both_ends_declared(errors: &mut Vec<String>) {
@@ -261,9 +264,24 @@ fn check_both_ends_declared(errors: &mut Vec<String>) {
         if e.producers.is_empty() {
             errors.push(format!("[manifest] `{}` declares no producer", e.kind));
         }
-        if e.consumers.is_empty() && !e.audit_only {
+        let real = !e.consumers.is_empty();
+        let diagnostic = e.diagnostic_only && e.reason.is_some_and(|r| !r.is_empty());
+        if !real && !diagnostic {
             errors.push(format!(
-                "[manifest] `{}` declares no consumer and is not audit_only",
+                "[manifest] `{}` is neither real (non-empty consumers) nor \
+                 diagnostic-only (diagnostic_only=true with non-empty reason)",
+                e.kind
+            ));
+        }
+        if e.diagnostic_only && !e.consumers.is_empty() {
+            errors.push(format!(
+                "[manifest] `{}` is both real and diagnostic-only — pick one",
+                e.kind
+            ));
+        }
+        if e.reason.is_some() && !e.diagnostic_only {
+            errors.push(format!(
+                "[manifest] `{}` has a reason but is not diagnostic-only",
                 e.kind
             ));
         }
@@ -450,34 +468,52 @@ mod tests {
     use super::*;
 
     /// Synthetic: pretend we have a manifest with a producer but no
-    /// consumer + audit_only=false. Mirrors `check_both_ends_declared`'s
+    /// consumer + diagnostic_only=false. Mirrors `check_both_ends_declared`'s
     /// branch directly since we can't mutate the static `EVENTS`.
     #[test]
-    fn predicate_flags_no_consumer_non_audit_event() {
+    fn predicate_flags_no_consumer_non_diagnostic_event() {
         fn declared_ok(
             producers: &[Subsystem],
             consumers: &[Subsystem],
-            audit_only: bool,
+            diagnostic_only: bool,
+            reason: Option<&'static str>,
         ) -> Vec<&'static str> {
             let mut errs = Vec::new();
             if producers.is_empty() {
                 errs.push("no producer");
             }
-            if consumers.is_empty() && !audit_only {
-                errs.push("no consumer");
+            let real = !consumers.is_empty();
+            let diagnostic = diagnostic_only && reason.is_some_and(|r| !r.is_empty());
+            if !real && !diagnostic {
+                errs.push("neither real nor diagnostic-only");
             }
             errs
         }
         assert_eq!(
-            declared_ok(&[Subsystem::Forge], &[], false),
-            vec!["no consumer"]
+            declared_ok(&[Subsystem::Forge], &[], false, None),
+            vec!["neither real nor diagnostic-only"]
         );
         assert_eq!(
-            declared_ok(&[Subsystem::Forge], &[], true),
+            declared_ok(&[Subsystem::Forge], &[], true, None),
+            vec!["neither real nor diagnostic-only"],
+            "diagnostic_only without reason must fail"
+        );
+        assert_eq!(
+            declared_ok(&[Subsystem::Forge], &[], true, Some("")),
+            vec!["neither real nor diagnostic-only"],
+            "empty reason must fail"
+        );
+        assert_eq!(
+            declared_ok(
+                &[Subsystem::Forge],
+                &[],
+                true,
+                Some("rendered in dashboard")
+            ),
             Vec::<&str>::new()
         );
         assert_eq!(
-            declared_ok(&[], &[Subsystem::Forge], false),
+            declared_ok(&[], &[Subsystem::Forge], false, None),
             vec!["no producer"]
         );
     }

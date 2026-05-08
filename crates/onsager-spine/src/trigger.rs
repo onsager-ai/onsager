@@ -13,7 +13,8 @@
 //! manifest at `crates/onsager-registry/src/triggers.rs` enforces:
 //! 1. Add a variant here with its config fields.
 //! 2. Add a row to the registry manifest with the snake-case `kind_tag`.
-//! 3. Wire a producer + consumer (or tag the manifest row `audit_only`).
+//! 3. Wire a producer + consumer (or mark the manifest row
+//!    `diagnostic_only: true` with a non-empty `reason`).
 
 use std::collections::BTreeMap;
 
