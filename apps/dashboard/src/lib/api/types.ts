@@ -390,6 +390,15 @@ export interface WorkflowTrigger {
   repo_owner: string;
   repo_name: string;
   label: string;
+  /// Snake-case wire `kind_tag` from the registry manifest (e.g.
+  /// `'github_issue_webhook'`, `'manual'`). Set on every workflow,
+  /// regardless of the UI-side discriminant; the `<RunNowButton>`
+  /// keys off this rather than the legacy `kind` field so it can
+  /// render for `'manual'` workflows without a UI-side variant.
+  kind_tag: string;
+  /// Manual-trigger name when `kind_tag === 'manual'`. Empty for
+  /// other kinds.
+  manual_name?: string;
 }
 
 export type WorkflowGateKind =
@@ -444,7 +453,19 @@ export interface EventManifestEntry {
 // `onsager_registry::TriggerDefinition`; keep in sync with the Rust
 // struct.
 export type TriggerCategory = 'event' | 'schedule' | 'request' | 'manual';
-export type TriggerUiKind = 'webhook';
+export type TriggerUiKind =
+  | 'webhook'
+  | 'github_pull_request_closed'
+  | 'github_workflow_run_completed'
+  | 'telegram_webhook'
+  | 'cron'
+  | 'delay'
+  | 'interval'
+  | 'spine_event'
+  | 'pg_notify'
+  | 'outbox'
+  | 'manual'
+  | 'replay';
 
 export interface TriggerManifestEntry {
   kind_tag: string;

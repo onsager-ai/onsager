@@ -111,4 +111,16 @@ impl Workflow {
             _ => None,
         }
     }
+
+    /// `(repo_owner, repo_name)` extracted from the trigger config for any
+    /// GitHub-shaped webhook trigger (issues, PR-closed, workflow-run-completed).
+    /// Returns `None` for non-GitHub kinds.
+    pub fn github_repo_any(&self) -> Option<(&str, &str)> {
+        match &self.trigger {
+            TriggerKind::GithubIssueWebhook { repo, .. }
+            | TriggerKind::GithubPullRequestClosed { repo, .. }
+            | TriggerKind::GithubWorkflowRunCompleted { repo, .. } => repo.split_once('/'),
+            _ => None,
+        }
+    }
 }

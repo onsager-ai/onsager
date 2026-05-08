@@ -148,6 +148,9 @@ impl Workflow {
     pub fn trigger_artifact_kind(&self) -> &'static str {
         match self.trigger {
             TriggerKind::GithubIssueWebhook { .. } => "github-issue",
+            TriggerKind::GithubPullRequestClosed { .. } => "github-pull-request",
+            TriggerKind::GithubWorkflowRunCompleted { .. } => "github-workflow-run",
+            TriggerKind::TelegramWebhook { .. } => "telegram-update",
             TriggerKind::Cron { .. } | TriggerKind::Delay { .. } | TriggerKind::Interval { .. } => {
                 "scheduled-tick"
             }

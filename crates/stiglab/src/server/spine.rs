@@ -288,6 +288,7 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::RefractDecomposed { .. }
         | FactoryEventKind::RefractFailed { .. }
         | FactoryEventKind::TriggerFired { .. }
+        | FactoryEventKind::WorkflowManualTriggered { .. }
         | FactoryEventKind::TypeProposed { .. }
         | FactoryEventKind::TypeApproved { .. }
         | FactoryEventKind::TypeDeprecated { .. }

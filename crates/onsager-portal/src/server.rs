@@ -13,9 +13,9 @@ use crate::handlers::{
     live_data as live_data_handlers, nodes as node_handlers, pats as pat_handlers,
     projects as project_handlers, registry_events as registry_event_handlers,
     registry_triggers as registry_trigger_handlers, sessions as session_handlers,
-    spine as spine_handlers, tasks as task_handlers, webhook,
-    workflow_kinds as workflow_kind_handlers, workflows as workflow_handlers,
-    workspaces as workspace_handlers,
+    spine as spine_handlers, tasks as task_handlers, telegram_webhook,
+    triggers as trigger_handlers, webhook, workflow_kinds as workflow_kind_handlers,
+    workflows as workflow_handlers, workspaces as workspace_handlers,
 };
 use crate::proxy_cache::ProxyCache;
 use crate::state::AppState;
@@ -292,7 +292,26 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             get(session_handlers::session_logs),
         )
         .route("/api/nodes", get(node_handlers::list_nodes))
-        .route("/api/tasks", post(task_handlers::create_task));
+        .route("/api/tasks", post(task_handlers::create_task))
+        // Manual / replay trigger endpoints (#241 — Category 4 of the
+        // trigger taxonomy umbrella #236). UI button click and
+        // workflow replays land here; the CLI surface is the
+        // standalone `onsager-trigger` binary which writes events
+        // directly to the spine without portal in the loop.
+        .route(
+            "/api/workflows/{id}/triggers/manual/{name}",
+            post(trigger_handlers::fire_manual),
+        )
+        .route(
+            "/api/workflows/{id}/triggers/replay/{source_event_id}",
+            post(trigger_handlers::replay),
+        )
+        // Telegram bot webhook ingress (#240 — Category 3 of the
+        // trigger taxonomy umbrella #236). Verifies the
+        // X-Telegram-Bot-Api-Secret-Token header against
+        // `TELEGRAM_WEBHOOK_SECRET`, then routes the update to active
+        // `TelegramWebhook` workflows.
+        .route("/webhooks/telegram", post(telegram_webhook::handle));
 
     // Dev-login: always in debug builds; in release only when
     // DEV_LOGIN_ENABLED=true (Railway preview environments).

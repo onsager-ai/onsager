@@ -45,6 +45,12 @@ pub struct Config {
     /// enabled in debug builds. Set `DEV_LOGIN_ENABLED=true` on Railway
     /// preview environments that need a login path without GitHub OAuth.
     pub dev_login_enabled: bool,
+    /// Shared secret echoed back by Telegram in the
+    /// `X-Telegram-Bot-Api-Secret-Token` header on every webhook
+    /// delivery. When `None` the `/webhooks/telegram` route returns
+    /// `503` — the trigger kind is registered but the receiver is
+    /// disabled. Set via `TELEGRAM_WEBHOOK_SECRET` (#240).
+    pub telegram_webhook_secret: Option<String>,
 }
 
 impl Config {
@@ -123,6 +129,7 @@ mod tests {
             sso_return_host_allowlist: Vec::new(),
             sso_auth_domain: None,
             dev_login_enabled: false,
+            telegram_webhook_secret: None,
         }
     }
 

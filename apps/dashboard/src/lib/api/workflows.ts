@@ -19,6 +19,11 @@ interface BackendTrigger {
   kind: string;
   repo?: string;
   label?: string;
+  // Manual / replay variants — `name` for `manual`, `source_event_id`
+  // for `replay`. Other variants carry their own per-kind fields the
+  // UI doesn't currently render.
+  name?: string;
+  [extra: string]: unknown;
 }
 
 interface BackendWorkflow {
@@ -112,6 +117,8 @@ function workflowFromBackend(
       repo_owner: repoOwner,
       repo_name: repoName,
       label: w.trigger.label ?? '',
+      kind_tag: w.trigger.kind ?? '',
+      manual_name: typeof w.trigger.name === 'string' ? w.trigger.name : '',
     },
     stages: stages.map(stageFromBackend),
     created_at: w.created_at,
@@ -189,6 +196,39 @@ export const workflows = {
   getWorkflowRuns: (id: string, limit = 20) =>
     request<{ runs: WorkflowRun[] }>(
       `/workflows/${encodeURIComponent(id)}/runs?limit=${limit}`,
+    ),
+  // Manual / replay trigger fires (#241 — Category 4 of the trigger
+  // taxonomy umbrella #236). Both endpoints emit a `trigger.fired`
+  // spine event the workflow runtime consumes, plus a
+  // `workflow.manual_triggered` audit record.
+  fireManualTrigger: (
+    workflowId: string,
+    name: string,
+    payload?: Record<string, unknown>,
+  ) =>
+    request<{
+      workflow_id: string;
+      trigger_kind: 'manual';
+      name: string;
+      trigger_event_id: number;
+      actor: string;
+    }>(
+      `/workflows/${encodeURIComponent(workflowId)}/triggers/manual/${encodeURIComponent(name)}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload === undefined ? {} : { payload }),
+      },
+    ),
+  replayTrigger: (workflowId: string, sourceEventId: number) =>
+    request<{
+      workflow_id: string;
+      trigger_kind: 'replay';
+      source_event_id: number;
+      trigger_event_id: number;
+      actor: string;
+    }>(
+      `/workflows/${encodeURIComponent(workflowId)}/triggers/replay/${sourceEventId}`,
+      { method: 'POST' },
     ),
   // Registry-backed workflow artifact kinds (issue #102). Poll-on-load; the
   // dashboard caches the result for the session. Falls back to the static

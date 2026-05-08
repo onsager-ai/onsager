@@ -22,8 +22,9 @@ use serde_json::Value;
 
 use onsager_github::webhook::{verify_signature, SignatureCheck};
 use onsager_spine::webhook_routing::{
-    route_check_event, route_issues_labeled, route_pull_request_closed, spine_namespace,
-    RoutedEvent,
+    route_check_event, route_issues_labeled, route_pull_request_closed,
+    route_pull_request_closed_workflows, route_workflow_run_completed_workflows, spine_namespace,
+    RoutedEvent, WorkflowTrigger,
 };
 
 use crate::handlers::{issues, pull_request};
@@ -236,7 +237,100 @@ async fn route_workflow_events(
         "check_suite" | "check_run" | "status" => {
             route_check_event(event, payload).into_iter().collect()
         }
-        "pull_request" => route_pull_request_closed(payload).into_iter().collect(),
+        "pull_request" => {
+            // Gate-side `manual_approval_signal` is unconditional on a
+            // `closed+merged` delivery (legacy issue-#118 behaviour).
+            // The new `github_pull_request_closed` workflow trigger
+            // (#240) fans out separately and respects per-workflow
+            // filters (e.g. only-merged).
+            let mut events: Vec<RoutedEvent> =
+                route_pull_request_closed(payload).into_iter().collect();
+            let repo_owner = payload
+                .pointer("/repository/owner/login")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let repo_name = payload
+                .pointer("/repository/name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if !repo_owner.is_empty() && !repo_name.is_empty() {
+                let candidates =
+                    match crate::workflow_db::find_active_pull_request_closed_workflows(
+                        &state.pool,
+                        repo_owner,
+                        repo_name,
+                    )
+                    .await
+                    {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::error!(
+                                repo_owner,
+                                repo_name,
+                                error = %e,
+                                "failed to query active pull-request-closed workflows"
+                            );
+                            Vec::new()
+                        }
+                    };
+                let triggers: Vec<WorkflowTrigger> = candidates
+                    .into_iter()
+                    .map(|w| WorkflowTrigger {
+                        id: w.id,
+                        workspace_id: w.workspace_id,
+                        trigger: w.trigger,
+                    })
+                    .collect();
+                events.extend(route_pull_request_closed_workflows(payload, &triggers));
+            }
+            events
+        }
+        "workflow_run" => {
+            let repo_owner = payload
+                .pointer("/repository/owner/login")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let repo_name = payload
+                .pointer("/repository/name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let workflow_name = payload
+                .pointer("/workflow_run/name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if repo_owner.is_empty() || repo_name.is_empty() || workflow_name.is_empty() {
+                return Vec::new();
+            }
+            let candidates = match crate::workflow_db::find_active_workflow_run_completed_workflows(
+                &state.pool,
+                repo_owner,
+                repo_name,
+                workflow_name,
+            )
+            .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!(
+                        repo_owner,
+                        repo_name,
+                        workflow_name,
+                        error = %e,
+                        "failed to query active workflow-run-completed workflows"
+                    );
+                    return Vec::new();
+                }
+            };
+            let triggers: Vec<WorkflowTrigger> = candidates
+                .into_iter()
+                .map(|w| WorkflowTrigger {
+                    id: w.id,
+                    workspace_id: w.workspace_id,
+                    trigger: w.trigger,
+                })
+                .collect();
+            route_workflow_run_completed_workflows(payload, &triggers)
+        }
         _ => Vec::new(),
     }
 }

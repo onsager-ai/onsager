@@ -14,6 +14,7 @@ struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)]
 enum Command {
     /// Run the webhook server.
     Serve {
@@ -67,6 +68,12 @@ enum Command {
         /// Use this flag for explicit opt-in outside Railway.
         #[arg(long, env = "DEV_LOGIN_ENABLED", default_value_t = false)]
         dev_login_enabled: bool,
+        /// Shared secret echoed back by Telegram in the
+        /// `X-Telegram-Bot-Api-Secret-Token` header on every webhook
+        /// delivery. When unset the `/webhooks/telegram` route returns
+        /// 503. (#240 Category 3)
+        #[arg(long, env = "TELEGRAM_WEBHOOK_SECRET")]
+        telegram_webhook_secret: Option<String>,
     },
     /// Backfill issues + PRs for an existing project.
     Backfill {
@@ -112,6 +119,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             sso_return_host_allowlist,
             sso_auth_domain,
             dev_login_enabled,
+            telegram_webhook_secret,
         } => {
             let allowlist = sso_return_host_allowlist
                 .as_deref()
@@ -146,6 +154,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                     .filter(|s| !s.is_empty())
                     .map(|s| s.trim_end_matches('/').to_string()),
                 dev_login_enabled: dev_login_enabled || is_railway_preview,
+                telegram_webhook_secret: telegram_webhook_secret.filter(|s| !s.is_empty()),
             };
             tracing::info!(%bind, "onsager-portal: starting webhook server");
             onsager_portal::server::run(cfg).await

@@ -580,6 +580,20 @@ pub enum FactoryEventKind {
         payload: serde_json::Value,
     },
 
+    /// Audit record for a manual / CLI / replay trigger fire (#241).
+    /// Emitted alongside the underlying `TriggerFired` so audit views
+    /// can attribute fires to a user. `event_subtype` distinguishes
+    /// surfaces (`"ui_fire"`, `"ui_replay"`, `"cli_fire"`,
+    /// `"cli_replay"`); `detail` carries source-specific fields
+    /// (manual name, source event id).
+    WorkflowManualTriggered {
+        workflow_id: String,
+        workspace_id: String,
+        actor: String,
+        event_subtype: String,
+        detail: serde_json::Value,
+    },
+
     /// A workflow-tagged artifact entered a new stage.
     StageEntered {
         artifact_id: ArtifactId,
@@ -771,6 +785,7 @@ impl FactoryEventKind {
             Self::RefractDecomposed { .. } => "refract.decomposed",
             Self::RefractFailed { .. } => "refract.failed",
             Self::TriggerFired { .. } => "trigger.fired",
+            Self::WorkflowManualTriggered { .. } => "workflow.manual_triggered",
             Self::StageEntered { .. } => "stage.entered",
             Self::StageGatePassed { .. } => "stage.gate_passed",
             Self::StageGateFailed { .. } => "stage.gate_failed",
@@ -855,6 +870,10 @@ impl FactoryEventKind {
             | Self::StageGatePassed { .. }
             | Self::StageGateFailed { .. }
             | Self::StageAdvanced { .. } => "workflow",
+            // Audit-only fan-out for manual fires (#241). Lives in the
+            // `audit` namespace so audit views can filter without
+            // mixing with first-class workflow runtime events.
+            Self::WorkflowManualTriggered { .. } => "audit",
             Self::TypeProposed { .. }
             | Self::TypeApproved { .. }
             | Self::TypeDeprecated { .. }
@@ -933,6 +952,9 @@ impl FactoryEventKind {
             | Self::RefractDecomposed { intent_id, .. }
             | Self::RefractFailed { intent_id, .. } => intent_id.clone(),
             Self::TriggerFired { workflow_id, .. } => format!("workflow:{workflow_id}"),
+            Self::WorkflowManualTriggered { workflow_id, .. } => {
+                format!("audit:workflow:{workflow_id}")
+            }
             Self::StageEntered { artifact_id, .. }
             | Self::StageGatePassed { artifact_id, .. }
             | Self::StageGateFailed { artifact_id, .. }

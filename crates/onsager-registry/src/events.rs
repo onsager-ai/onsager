@@ -588,12 +588,28 @@ pub const EVENTS: EventManifest = EventManifest {
             // - Forge event-trigger listeners (#239 — spine_event /
             //   pg_notify / outbox_row).
             // - Portal — live GitHub `issues.labeled` webhook receiver
-            //   (#222 Slice 1) plus the future `onsager trigger fire` CLI
-            //   / "Run now" UI button (#241).
+            //   (#222 Slice 1), GitHub `pull_request.closed` /
+            //   `workflow_run.completed` / Telegram receivers (#240),
+            //   the `onsager trigger fire` CLI and the dashboard
+            //   "Run now" / replay endpoints (#241).
             producers: &[Subsystem::Stiglab, Subsystem::Forge, Subsystem::Portal],
             consumers: &[Subsystem::Forge],
             audit_only: false,
             description: "A trigger fired (webhook / schedule / event / manual).",
+        },
+        EventDefinition {
+            kind: "workflow.manual_triggered",
+            schema_version: 1,
+            // Producers: portal (UI button + replay endpoint) and the
+            // `onsager-trigger` CLI which writes events directly to the
+            // spine — both surfaces emit alongside the underlying
+            // `trigger.fired` event so audit views can attribute manual /
+            // replay fires to a user (#241).
+            producers: &[Subsystem::Portal],
+            consumers: &[],
+            audit_only: true,
+            description:
+                "Audit record for a manual / CLI / replay trigger fire (actor + workflow).",
         },
         EventDefinition {
             kind: "stage.entered",

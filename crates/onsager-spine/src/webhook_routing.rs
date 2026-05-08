@@ -22,6 +22,7 @@
 use serde_json::Value;
 
 use crate::factory_event::FactoryEventKind;
+use crate::trigger::TriggerKind;
 
 /// A single spine event the webhook handler should emit.
 #[derive(Debug, Clone, PartialEq)]
@@ -217,6 +218,179 @@ pub fn route_check_event(event: &str, payload: &Value) -> Option<RoutedEvent> {
             conclusion,
         },
     })
+}
+
+/// Per-workflow `pull_request.closed` routing (#240). For each matching
+/// workflow whose trigger config matches the delivered payload, emit one
+/// `workflow.trigger_fired` event. `matched` is the slice of candidate
+/// workflows on `(repo_owner, repo_name)` — the routing function applies
+/// the per-workflow `predicate.merged` filter against the delivered
+/// `merged` flag and drops non-matches.
+pub fn route_pull_request_closed_workflows(
+    payload: &Value,
+    matched: &[WorkflowTrigger],
+) -> Vec<RoutedEvent> {
+    if payload.get("action").and_then(Value::as_str) != Some("closed") {
+        return Vec::new();
+    }
+    let Some(pr) = payload.get("pull_request") else {
+        return Vec::new();
+    };
+    let merged = pr.get("merged").and_then(Value::as_bool).unwrap_or(false);
+    let pr_number = pr.get("number").and_then(Value::as_u64).unwrap_or(0);
+    let title = pr.get("title").and_then(Value::as_str).unwrap_or("");
+    let head_branch = pr
+        .pointer("/head/ref")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let base_branch = pr
+        .pointer("/base/ref")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let Some(repo) = payload.get("repository") else {
+        return Vec::new();
+    };
+    let repo_owner = repo
+        .pointer("/owner/login")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let repo_name = repo.get("name").and_then(Value::as_str).unwrap_or("");
+
+    matched
+        .iter()
+        .filter(|w| match &w.trigger {
+            TriggerKind::GithubPullRequestClosed { predicate, .. } => match predicate {
+                Some(p) => match p.merged {
+                    Some(want) => want == merged,
+                    None => true,
+                },
+                None => true,
+            },
+            _ => false,
+        })
+        .map(|w| {
+            let payload = serde_json::json!({
+                "repo_owner": repo_owner,
+                "repo_name": repo_name,
+                "pr_number": pr_number,
+                "title": title,
+                "head_branch": head_branch,
+                "base_branch": base_branch,
+                "merged": merged,
+                "workspace_id": w.workspace_id,
+                "source": trigger_source::WEBHOOK,
+                "trigger_kind": "github_pull_request_closed",
+            });
+            RoutedEvent {
+                kind: FactoryEventKind::TriggerFired {
+                    workflow_id: w.id.clone(),
+                    trigger_kind: "github_pull_request_closed".to_string(),
+                    payload,
+                },
+            }
+        })
+        .collect()
+}
+
+/// Per-workflow `workflow_run.completed` routing (#240). The filter
+/// `name == workflow_name` is performed by the SQL caller; this function
+/// applies the optional in-trigger filters (`event`, `head_branch`,
+/// `conclusion`) and drops non-matches.
+pub fn route_workflow_run_completed_workflows(
+    payload: &Value,
+    matched: &[WorkflowTrigger],
+) -> Vec<RoutedEvent> {
+    if payload.get("action").and_then(Value::as_str) != Some("completed") {
+        return Vec::new();
+    }
+    let Some(run) = payload.get("workflow_run") else {
+        return Vec::new();
+    };
+    let run_event = run.get("event").and_then(Value::as_str).unwrap_or("");
+    let head_branch = run.get("head_branch").and_then(Value::as_str).unwrap_or("");
+    let conclusion = run.get("conclusion").and_then(Value::as_str).unwrap_or("");
+    let run_name = run.get("name").and_then(Value::as_str).unwrap_or("");
+    let run_id = run.get("id").and_then(Value::as_i64).unwrap_or(0);
+    let head_sha = run.get("head_sha").and_then(Value::as_str).unwrap_or("");
+    let html_url = run.get("html_url").and_then(Value::as_str).unwrap_or("");
+    let Some(repo) = payload.get("repository") else {
+        return Vec::new();
+    };
+    let repo_owner = repo
+        .pointer("/owner/login")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let repo_name = repo.get("name").and_then(Value::as_str).unwrap_or("");
+
+    matched
+        .iter()
+        .filter(|w| match &w.trigger {
+            TriggerKind::GithubWorkflowRunCompleted {
+                workflow_name,
+                event,
+                head_branch: hb,
+                conclusion: cc,
+                ..
+            } => {
+                if workflow_name != run_name {
+                    return false;
+                }
+                if let Some(filter) = event {
+                    if filter != run_event {
+                        return false;
+                    }
+                }
+                if let Some(filter) = hb {
+                    if filter != head_branch {
+                        return false;
+                    }
+                }
+                if let Some(filter) = cc {
+                    if filter != conclusion {
+                        return false;
+                    }
+                }
+                true
+            }
+            _ => false,
+        })
+        .map(|w| {
+            let payload = serde_json::json!({
+                "repo_owner": repo_owner,
+                "repo_name": repo_name,
+                "workflow_name": run_name,
+                "event": run_event,
+                "head_branch": head_branch,
+                "head_sha": head_sha,
+                "conclusion": conclusion,
+                "run_id": run_id,
+                "html_url": html_url,
+                "workspace_id": w.workspace_id,
+                "source": trigger_source::WEBHOOK,
+                "trigger_kind": "github_workflow_run_completed",
+            });
+            RoutedEvent {
+                kind: FactoryEventKind::TriggerFired {
+                    workflow_id: w.id.clone(),
+                    trigger_kind: "github_workflow_run_completed".to_string(),
+                    payload,
+                },
+            }
+        })
+        .collect()
+}
+
+/// Workflow row projection used by the multi-workflow webhook routers
+/// (`route_pull_request_closed_workflows`,
+/// `route_workflow_run_completed_workflows`). Carries the full
+/// per-workflow `TriggerKind` so the routers can apply per-workflow
+/// filters (e.g. `predicate.merged`, `head_branch`) without round-
+/// tripping through string lookups.
+#[derive(Debug, Clone)]
+pub struct WorkflowTrigger {
+    pub id: String,
+    pub workspace_id: String,
+    pub trigger: TriggerKind,
 }
 
 /// Inspect a `pull_request` payload; when it's `closed` with `merged=true`
@@ -473,5 +647,182 @@ mod tests {
             "repository": {"name": "widgets", "owner": {"login": "acme"}},
         });
         assert!(route_pull_request_closed(&payload).is_none());
+    }
+
+    // -- #240 multi-workflow routers ---------------------------------------
+
+    fn pr_workflow(merged: Option<bool>) -> WorkflowTrigger {
+        WorkflowTrigger {
+            id: "wf_pr".to_string(),
+            workspace_id: "w1".to_string(),
+            trigger: TriggerKind::GithubPullRequestClosed {
+                repo: "acme/widgets".into(),
+                predicate: merged
+                    .map(|m| crate::trigger::PullRequestClosedPredicate { merged: Some(m) }),
+            },
+        }
+    }
+
+    #[test]
+    fn pr_closed_workflows_emits_when_merged_predicate_matches() {
+        let payload = json!({
+            "action": "closed",
+            "pull_request": {
+                "number": 42,
+                "merged": true,
+                "title": "fix the bug",
+                "head": {"ref": "feature"},
+                "base": {"ref": "main"},
+            },
+            "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        });
+        let workflows = vec![pr_workflow(Some(true))];
+        let out = route_pull_request_closed_workflows(&payload, &workflows);
+        assert_eq!(out.len(), 1);
+        match &out[0].kind {
+            FactoryEventKind::TriggerFired { payload, .. } => {
+                assert_eq!(payload["pr_number"], 42);
+                assert_eq!(payload["merged"], true);
+                assert_eq!(payload["head_branch"], "feature");
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn pr_closed_workflows_skips_when_predicate_misses() {
+        let payload = json!({
+            "action": "closed",
+            "pull_request": {"number": 1, "merged": false, "title": "x"},
+            "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        });
+        let workflows = vec![pr_workflow(Some(true))];
+        assert!(route_pull_request_closed_workflows(&payload, &workflows).is_empty());
+    }
+
+    #[test]
+    fn pr_closed_workflows_no_predicate_fires_on_unmerged() {
+        let payload = json!({
+            "action": "closed",
+            "pull_request": {"number": 1, "merged": false, "title": "x"},
+            "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        });
+        let workflows = vec![pr_workflow(None)];
+        assert_eq!(
+            route_pull_request_closed_workflows(&payload, &workflows).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn pr_closed_workflows_ignores_non_closed_action() {
+        let payload = json!({
+            "action": "opened",
+            "pull_request": {"number": 1, "merged": false},
+            "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        });
+        assert!(
+            route_pull_request_closed_workflows(&payload, &[pr_workflow(Some(true))]).is_empty()
+        );
+    }
+
+    fn run_workflow(
+        name: &str,
+        event: Option<&str>,
+        head_branch: Option<&str>,
+        conclusion: Option<&str>,
+    ) -> WorkflowTrigger {
+        WorkflowTrigger {
+            id: "wf_run".to_string(),
+            workspace_id: "w1".to_string(),
+            trigger: TriggerKind::GithubWorkflowRunCompleted {
+                repo: "acme/widgets".into(),
+                workflow_name: name.into(),
+                event: event.map(String::from),
+                head_branch: head_branch.map(String::from),
+                conclusion: conclusion.map(String::from),
+            },
+        }
+    }
+
+    #[test]
+    fn workflow_run_completed_emits_when_filters_match() {
+        let payload = json!({
+            "action": "completed",
+            "workflow_run": {
+                "id": 9001,
+                "name": "rust",
+                "event": "push",
+                "head_branch": "main",
+                "head_sha": "abc",
+                "conclusion": "success",
+                "html_url": "https://github.com/acme/widgets/actions/runs/9001",
+            },
+            "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        });
+        let workflows = vec![run_workflow(
+            "rust",
+            Some("push"),
+            Some("main"),
+            Some("success"),
+        )];
+        let out = route_workflow_run_completed_workflows(&payload, &workflows);
+        assert_eq!(out.len(), 1);
+        match &out[0].kind {
+            FactoryEventKind::TriggerFired { payload, .. } => {
+                assert_eq!(payload["run_id"], 9001);
+                assert_eq!(payload["workflow_name"], "rust");
+                assert_eq!(payload["conclusion"], "success");
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn workflow_run_completed_skips_when_filter_misses() {
+        let payload = json!({
+            "action": "completed",
+            "workflow_run": {
+                "id": 1,
+                "name": "rust",
+                "event": "pull_request",
+                "head_branch": "main",
+                "conclusion": "success",
+            },
+            "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        });
+        let workflows = vec![run_workflow("rust", Some("push"), None, None)];
+        assert!(route_workflow_run_completed_workflows(&payload, &workflows).is_empty());
+    }
+
+    #[test]
+    fn workflow_run_completed_ignores_wrong_workflow_name() {
+        let payload = json!({
+            "action": "completed",
+            "workflow_run": {
+                "id": 1,
+                "name": "frontend",
+                "event": "push",
+                "head_branch": "main",
+                "conclusion": "success",
+            },
+            "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        });
+        let workflows = vec![run_workflow("rust", None, None, None)];
+        assert!(route_workflow_run_completed_workflows(&payload, &workflows).is_empty());
+    }
+
+    #[test]
+    fn workflow_run_completed_ignores_in_progress_action() {
+        let payload = json!({
+            "action": "in_progress",
+            "workflow_run": {"id": 1, "name": "rust", "event": "push"},
+            "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        });
+        assert!(route_workflow_run_completed_workflows(
+            &payload,
+            &[run_workflow("rust", None, None, None)]
+        )
+        .is_empty());
     }
 }

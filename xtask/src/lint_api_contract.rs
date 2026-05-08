@@ -453,6 +453,10 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "GitHub webhook receiver — called by GitHub, not the dashboard",
     ),
     (
+        "/webhooks/telegram",
+        "Telegram bot webhook receiver — called by Telegram, not the dashboard (#240)",
+    ),
+    (
         "/api/governance/{*path}",
         "catchall proxy that forwards to synodic; covered route-by-route via the synodic check",
     ),
