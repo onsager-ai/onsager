@@ -1,4 +1,4 @@
-// budget-allow: 75-variant event enum; macro/derive compression deferred to follow-up spec per #261
+// budget-allow: 71-variant event enum; macro/derive compression deferred to follow-up spec per #261
 //! Factory events — the authoritative event types emitted to the factory event
 //! spine by each subsystem.
 //!
@@ -7,10 +7,7 @@
 //! library provides a single typed vocabulary.
 
 use chrono::{DateTime, Utc};
-use onsager_artifact::{
-    ArtifactId, ArtifactState, ArtifactVersionId, DeliverableId, Kind, KindId, QualitySignal,
-    WorkflowRunId,
-};
+use onsager_artifact::{ArtifactId, ArtifactState, Kind, QualitySignal};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -71,15 +68,6 @@ pub enum FactoryEventKind {
         to_state: ArtifactState,
     },
 
-    /// New version committed for an artifact.
-    ArtifactVersionCreated {
-        artifact_id: ArtifactId,
-        version: u32,
-        content_ref_uri: String,
-        change_summary: String,
-        session_id: String,
-    },
-
     /// New vertical or horizontal lineage entry recorded.
     ArtifactLineageExtended {
         artifact_id: ArtifactId,
@@ -104,47 +92,6 @@ pub enum FactoryEventKind {
     ArtifactArchived {
         artifact_id: ArtifactId,
         reason: String,
-    },
-
-    // -- Warehouse & Delivery (warehouse-and-delivery-v0.1) -----------------
-    /// A new bundle was sealed for an artifact (§5.1).
-    BundleSealed {
-        artifact_id: ArtifactId,
-        bundle_id: ArtifactVersionId,
-        version: u32,
-    },
-
-    /// A delivery attempt succeeded; the receipt is stored on the delivery row (§5.3).
-    DeliverySucceeded {
-        bundle_id: ArtifactVersionId,
-        consumer_id: String,
-    },
-
-    /// A delivery attempt failed; includes whether the worker will retry or
-    /// has marked the delivery `Abandoned` (§5.3).
-    DeliveryFailed {
-        bundle_id: ArtifactVersionId,
-        consumer_id: String,
-        reason: String,
-        /// Whether the delivery has been abandoned (terminal) or will retry.
-        abandoned: bool,
-    },
-
-    // -- Deliverable (workflow-run output, issue #100/#101) -----------------
-    /// A workflow run produced its first artifact reference. Emitted once per
-    /// run; subsequent additions flow through `DeliverableUpdated`.
-    DeliverableCreated {
-        deliverable_id: DeliverableId,
-        workflow_run_id: WorkflowRunId,
-    },
-
-    /// A workflow run added an artifact reference to its deliverable under a
-    /// given kind. Replay is idempotent on exact `(kind, artifact_id)`.
-    DeliverableUpdated {
-        deliverable_id: DeliverableId,
-        workflow_run_id: WorkflowRunId,
-        kind: KindId,
-        artifact_id: ArtifactId,
     },
 
     // -- Git lifecycle events -------------------------------------------------
@@ -726,16 +673,10 @@ impl FactoryEventKind {
         match self {
             Self::ArtifactRegistered { .. } => "artifact.registered",
             Self::ArtifactStateChanged { .. } => "artifact.state_changed",
-            Self::ArtifactVersionCreated { .. } => "artifact.version_created",
             Self::ArtifactLineageExtended { .. } => "artifact.lineage_extended",
             Self::ArtifactQualityRecorded { .. } => "artifact.quality_recorded",
             Self::ArtifactRouted { .. } => "artifact.routed",
             Self::ArtifactArchived { .. } => "artifact.archived",
-            Self::BundleSealed { .. } => "warehouse.bundle_sealed",
-            Self::DeliverySucceeded { .. } => "delivery.succeeded",
-            Self::DeliveryFailed { .. } => "delivery.failed",
-            Self::DeliverableCreated { .. } => "deliverable.created",
-            Self::DeliverableUpdated { .. } => "deliverable.updated",
             Self::GitBranchCreated { .. } => "git.branch_created",
             Self::GitCommitPushed { .. } => "git.commit_pushed",
             Self::GitPrOpened { .. } => "git.pr_opened",
@@ -809,14 +750,10 @@ impl FactoryEventKind {
         match self {
             Self::ArtifactRegistered { .. }
             | Self::ArtifactStateChanged { .. }
-            | Self::ArtifactVersionCreated { .. }
             | Self::ArtifactLineageExtended { .. }
             | Self::ArtifactQualityRecorded { .. }
             | Self::ArtifactRouted { .. }
             | Self::ArtifactArchived { .. } => "artifact",
-            Self::BundleSealed { .. } => "warehouse",
-            Self::DeliverySucceeded { .. } | Self::DeliveryFailed { .. } => "delivery",
-            Self::DeliverableCreated { .. } | Self::DeliverableUpdated { .. } => "deliverable",
             Self::GitBranchCreated { .. }
             | Self::GitCommitPushed { .. }
             | Self::GitPrOpened { .. }
@@ -892,17 +829,10 @@ impl FactoryEventKind {
         match self {
             Self::ArtifactRegistered { artifact_id, .. }
             | Self::ArtifactStateChanged { artifact_id, .. }
-            | Self::ArtifactVersionCreated { artifact_id, .. }
             | Self::ArtifactLineageExtended { artifact_id, .. }
             | Self::ArtifactQualityRecorded { artifact_id, .. }
             | Self::ArtifactRouted { artifact_id, .. }
             | Self::ArtifactArchived { artifact_id, .. } => artifact_id.to_string(),
-            Self::BundleSealed { bundle_id, .. } => bundle_id.to_string(),
-            Self::DeliverySucceeded { bundle_id, .. } | Self::DeliveryFailed { bundle_id, .. } => {
-                bundle_id.to_string()
-            }
-            Self::DeliverableCreated { deliverable_id, .. }
-            | Self::DeliverableUpdated { deliverable_id, .. } => deliverable_id.to_string(),
             Self::GitBranchCreated { artifact_id, .. }
             | Self::GitCommitPushed { artifact_id, .. }
             | Self::GitPrOpened { artifact_id, .. }

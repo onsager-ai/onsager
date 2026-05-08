@@ -48,7 +48,6 @@ pub struct TrackedArtifact {
     pub artifact_id: ArtifactId,
     pub kind: Kind,
     pub current_state: ArtifactState,
-    pub version: u32,
     pub shaping_count: u32,
     pub first_seen: DateTime<Utc>,
     pub last_updated: DateTime<Utc>,
@@ -139,7 +138,6 @@ impl FactoryModel {
                         artifact_id: artifact_id.clone(),
                         kind: kind.clone(),
                         current_state: ArtifactState::Draft,
-                        version: 0,
                         shaping_count: 0,
                         first_seen: recorded_at,
                         last_updated: recorded_at,
@@ -154,17 +152,6 @@ impl FactoryModel {
             } => {
                 if let Some(tracked) = self.artifacts.get_mut(artifact_id.as_str()) {
                     tracked.current_state = *to_state;
-                    tracked.last_updated = recorded_at;
-                }
-            }
-
-            FactoryEventKind::ArtifactVersionCreated {
-                artifact_id,
-                version,
-                ..
-            } => {
-                if let Some(tracked) = self.artifacts.get_mut(artifact_id.as_str()) {
-                    tracked.version = *version;
                     tracked.last_updated = recorded_at;
                 }
             }

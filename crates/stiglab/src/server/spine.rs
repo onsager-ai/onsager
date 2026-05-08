@@ -224,12 +224,10 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
     match event {
         FactoryEventKind::ArtifactRegistered { artifact_id, .. }
         | FactoryEventKind::ArtifactStateChanged { artifact_id, .. }
-        | FactoryEventKind::ArtifactVersionCreated { artifact_id, .. }
         | FactoryEventKind::ArtifactLineageExtended { artifact_id, .. }
         | FactoryEventKind::ArtifactQualityRecorded { artifact_id, .. }
         | FactoryEventKind::ArtifactRouted { artifact_id, .. }
         | FactoryEventKind::ArtifactArchived { artifact_id, .. }
-        | FactoryEventKind::BundleSealed { artifact_id, .. }
         | FactoryEventKind::GitBranchCreated { artifact_id, .. }
         | FactoryEventKind::GitCommitPushed { artifact_id, .. }
         | FactoryEventKind::GitPrOpened { artifact_id, .. }
@@ -251,7 +249,6 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::SynodicEscalationResolved { artifact_id, .. }
         | FactoryEventKind::SynodicEscalationTimedOut { artifact_id, .. }
         | FactoryEventKind::SynodicGateResolutionProposed { artifact_id, .. }
-        | FactoryEventKind::DeliverableUpdated { artifact_id, .. }
         | FactoryEventKind::StageEntered { artifact_id, .. }
         | FactoryEventKind::StageGatePassed { artifact_id, .. }
         | FactoryEventKind::StageGateFailed { artifact_id, .. }
@@ -260,10 +257,7 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::StiglabSessionFailed { artifact_id, .. } => artifact_id.as_deref(),
         // Variants below name no artifact — system / cross-workspace
         // telemetry. Fall back to "default".
-        FactoryEventKind::DeliverySucceeded { .. }
-        | FactoryEventKind::DeliveryFailed { .. }
-        | FactoryEventKind::DeliverableCreated { .. }
-        | FactoryEventKind::ForgeInsightObserved { .. }
+        FactoryEventKind::ForgeInsightObserved { .. }
         | FactoryEventKind::ForgeIdleTick
         | FactoryEventKind::ForgeStateChanged { .. }
         | FactoryEventKind::StiglabSessionCreated { .. }

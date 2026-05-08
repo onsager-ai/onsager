@@ -107,14 +107,6 @@ pub const EVENTS: EventManifest = EventManifest {
             description: "Artifact transitioned between lifecycle states.",
         },
         EventDefinition {
-            kind: "artifact.version_created",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Ising],
-            audit_only: false,
-            description: "New version committed for an artifact.",
-        },
-        EventDefinition {
             kind: "artifact.lineage_extended",
             schema_version: 1,
             producers: &[Subsystem::Portal],
@@ -145,47 +137,6 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             audit_only: true,
             description: "Artifact reached terminal state (archived).",
-        },
-        // -- Warehouse / delivery / deliverable -------------------------
-        EventDefinition {
-            kind: "warehouse.bundle_sealed",
-            schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[],
-            audit_only: true,
-            description: "A new bundle was sealed for an artifact.",
-        },
-        EventDefinition {
-            kind: "delivery.succeeded",
-            schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[],
-            audit_only: true,
-            description: "A delivery attempt succeeded.",
-        },
-        EventDefinition {
-            kind: "delivery.failed",
-            schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[],
-            audit_only: true,
-            description: "A delivery attempt failed; carries retry/abandoned flag.",
-        },
-        EventDefinition {
-            kind: "deliverable.created",
-            schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[],
-            audit_only: true,
-            description: "A workflow run produced its first artifact reference.",
-        },
-        EventDefinition {
-            kind: "deliverable.updated",
-            schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[],
-            audit_only: true,
-            description: "A workflow run added an artifact reference to its deliverable.",
         },
         // -- Git lifecycle (onsager-portal webhooks) --------------------
         EventDefinition {

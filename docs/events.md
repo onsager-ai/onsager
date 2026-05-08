@@ -52,10 +52,7 @@ that requires a coordinated rollout.
 
 | Stream | Producer subsystem | Event count |
 |---|---|---|
-| `artifact` | forge | 7 |
-| `warehouse` | warehouse worker (forge) | 1 |
-| `delivery` | delivery worker (forge) | 2 |
-| `deliverable` | forge | 2 |
+| `artifact` | forge | 6 |
 | `git` | onsager-portal (GitHub webhooks) | 7 |
 | `forge` | forge | 8 |
 | `stiglab` | stiglab | 11 |
@@ -100,21 +97,6 @@ Artifact transitioned between lifecycle states.
 | `artifact_id` | `ArtifactId` |  |
 | `from_state` | `ArtifactState` |  |
 | `to_state` | `ArtifactState` |  |
-
-### `artifact.version_created`
-
-- Variant: `FactoryEventKind::ArtifactVersionCreated`
-- Stream: `artifact`
-
-New version committed for an artifact.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `version` | `u32` |  |
-| `content_ref_uri` | `String` |  |
-| `change_summary` | `String` |  |
-| `session_id` | `String` |  |
 
 ### `artifact.lineage_extended`
 
@@ -165,83 +147,6 @@ Artifact reached terminal state (archived).
 |---|---|---|
 | `artifact_id` | `ArtifactId` |  |
 | `reason` | `String` |  |
-
-## `warehouse` events
-
-Producer subsystem: **warehouse worker (forge)**.
-
-### `warehouse.bundle_sealed`
-
-- Variant: `FactoryEventKind::BundleSealed`
-- Stream: `warehouse`
-
-A new bundle was sealed for an artifact (§5.1).
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `bundle_id` | `ArtifactVersionId` |  |
-| `version` | `u32` |  |
-
-## `delivery` events
-
-Producer subsystem: **delivery worker (forge)**.
-
-### `delivery.succeeded`
-
-- Variant: `FactoryEventKind::DeliverySucceeded`
-- Stream: `delivery`
-
-A delivery attempt succeeded; the receipt is stored on the delivery row (§5.3).
-
-| Field | Type | Description |
-|---|---|---|
-| `bundle_id` | `ArtifactVersionId` |  |
-| `consumer_id` | `String` |  |
-
-### `delivery.failed`
-
-- Variant: `FactoryEventKind::DeliveryFailed`
-- Stream: `delivery`
-
-A delivery attempt failed; includes whether the worker will retry or has marked the delivery `Abandoned` (§5.3).
-
-| Field | Type | Description |
-|---|---|---|
-| `bundle_id` | `ArtifactVersionId` |  |
-| `consumer_id` | `String` |  |
-| `reason` | `String` |  |
-| `abandoned` | `bool` | Whether the delivery has been abandoned (terminal) or will retry. |
-
-## `deliverable` events
-
-Producer subsystem: **forge**.
-
-### `deliverable.created`
-
-- Variant: `FactoryEventKind::DeliverableCreated`
-- Stream: `deliverable`
-
-A workflow run produced its first artifact reference. Emitted once per run; subsequent additions flow through `DeliverableUpdated`.
-
-| Field | Type | Description |
-|---|---|---|
-| `deliverable_id` | `DeliverableId` |  |
-| `workflow_run_id` | `WorkflowRunId` |  |
-
-### `deliverable.updated`
-
-- Variant: `FactoryEventKind::DeliverableUpdated`
-- Stream: `deliverable`
-
-A workflow run added an artifact reference to its deliverable under a given kind. Replay is idempotent on exact `(kind, artifact_id)`.
-
-| Field | Type | Description |
-|---|---|---|
-| `deliverable_id` | `DeliverableId` |  |
-| `workflow_run_id` | `WorkflowRunId` |  |
-| `kind` | `KindId` |  |
-| `artifact_id` | `ArtifactId` |  |
 
 ## `git` events
 

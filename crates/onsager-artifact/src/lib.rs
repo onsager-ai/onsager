@@ -8,7 +8,5 @@
 //! without pulling in unrelated concerns.
 
 pub mod artifact;
-pub mod deliverable;
 
 pub use artifact::*;
-pub use deliverable::*;
