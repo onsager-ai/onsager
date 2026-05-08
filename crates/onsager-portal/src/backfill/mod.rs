@@ -25,8 +25,8 @@ use onsager_artifact::ArtifactId;
 use onsager_spine::factory_event::FactoryEventKind;
 use onsager_spine::{EventMetadata, EventStore};
 
-use onsager_github::api::issues::{list_recent_issues, Issue};
-use onsager_github::api::pulls::{list_recent_pulls, Pull};
+use onsager_github::api::issues::{Issue, list_recent_issues};
+use onsager_github::api::pulls::{Pull, list_recent_pulls};
 
 use crate::db::{self, IssueLifecycleState, PrLifecycleState};
 

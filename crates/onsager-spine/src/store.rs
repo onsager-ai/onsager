@@ -336,10 +336,9 @@ impl EventStore {
                     Ok(notification) => {
                         if let Ok(parsed) =
                             serde_json::from_str::<EventNotification>(notification.payload())
+                            && tx.send(parsed).is_err()
                         {
-                            if tx.send(parsed).is_err() {
-                                break;
-                            }
+                            break;
                         }
                     }
                     Err(e) => {
@@ -377,10 +376,9 @@ impl EventStore {
                     Ok(notification) => {
                         if let Ok(parsed) =
                             serde_json::from_str::<EventNotification>(notification.payload())
+                            && tx.send(parsed).await.is_err()
                         {
-                            if tx.send(parsed).await.is_err() {
-                                break;
-                            }
+                            break;
                         }
                     }
                     Err(e) => {

@@ -17,8 +17,8 @@ pub mod triggers;
 
 pub use catalog::*;
 pub use evaluators::*;
-pub use events::{EventDefinition, EventManifest, Subsystem, EVENTS};
+pub use events::{EVENTS, EventDefinition, EventManifest, Subsystem};
 pub use registry::*;
 pub use registry_store::*;
 pub use seed::*;
-pub use triggers::{TriggerCategory, TriggerDefinition, TriggerManifest, TriggerUiKind, TRIGGERS};
+pub use triggers::{TRIGGERS, TriggerCategory, TriggerDefinition, TriggerManifest, TriggerUiKind};

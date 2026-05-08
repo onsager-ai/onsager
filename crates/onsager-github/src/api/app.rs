@@ -16,7 +16,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
 
 use crate::api::http::client;
@@ -57,12 +57,11 @@ pub fn normalize_pem(raw: &str) -> String {
         return trimmed.replace("\\n", "\n");
     }
     use base64::Engine;
-    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(trimmed.as_bytes()) {
-        if let Ok(s) = String::from_utf8(bytes) {
-            if s.contains("-----BEGIN") {
-                return s;
-            }
-        }
+    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(trimmed.as_bytes())
+        && let Ok(s) = String::from_utf8(bytes)
+        && s.contains("-----BEGIN")
+    {
+        return s;
     }
     trimmed.to_string()
 }

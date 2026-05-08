@@ -13,16 +13,16 @@
 //!   App JWT to look up the install's account, persists the
 //!   installation row, and redirects the browser back to the dashboard.
 
-use axum::extract::{Query, State};
-use axum::http::{header, StatusCode};
-use axum::response::{IntoResponse, Redirect, Response};
 use axum::Json;
+use axum::extract::{Query, State};
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Redirect, Response};
 use chrono::Utc;
 use onsager_github::api::app as gh_app;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::auth::{generate_state, parse_cookie, AuthUser};
+use crate::auth::{AuthUser, generate_state, parse_cookie};
 use crate::handlers::installations::require_workspace_access;
 use crate::installation::GitHubAppInstallation;
 use crate::installation_db;

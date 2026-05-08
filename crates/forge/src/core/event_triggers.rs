@@ -31,8 +31,8 @@ use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
-use sqlx::postgres::PgListener;
 use sqlx::PgPool;
+use sqlx::postgres::PgListener;
 use tokio::sync::Mutex;
 use tokio::time::interval;
 
@@ -268,11 +268,11 @@ async fn emit_event_trigger_fired(
         "fired_at": now,
         "source": source_kind,
     });
-    if let Value::Object(ref mut map) = payload {
-        if let Value::Object(extra_map) = extra {
-            for (k, v) in extra_map {
-                map.insert(k, v);
-            }
+    if let Value::Object(ref mut map) = payload
+        && let Value::Object(extra_map) = extra
+    {
+        for (k, v) in extra_map {
+            map.insert(k, v);
         }
     }
 
@@ -406,17 +406,23 @@ async fn refresh_pg_notify_channels(
         let to_unlisten: Vec<String> = current.difference(&wanted).cloned().collect();
 
         for ch in &to_listen {
-            if let Err(e) = listener.listen(ch).await {
-                tracing::warn!(channel = %ch, "forge pg_notify trigger: LISTEN failed: {e}");
-            } else {
-                current.insert(ch.clone());
+            match listener.listen(ch).await {
+                Err(e) => {
+                    tracing::warn!(channel = %ch, "forge pg_notify trigger: LISTEN failed: {e}");
+                }
+                _ => {
+                    current.insert(ch.clone());
+                }
             }
         }
         for ch in &to_unlisten {
-            if let Err(e) = listener.unlisten(ch).await {
-                tracing::warn!(channel = %ch, "forge pg_notify trigger: UNLISTEN failed: {e}");
-            } else {
-                current.remove(ch);
+            match listener.unlisten(ch).await {
+                Err(e) => {
+                    tracing::warn!(channel = %ch, "forge pg_notify trigger: UNLISTEN failed: {e}");
+                }
+                _ => {
+                    current.remove(ch);
+                }
             }
         }
     }

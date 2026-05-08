@@ -469,11 +469,12 @@ mod tests {
 
         let art = store.get(&id).unwrap();
         assert_eq!(art.current_stage_index, None);
-        assert!(art
-            .workflow_parked_reason
-            .as_deref()
-            .unwrap()
-            .contains("out of bounds"));
+        assert!(
+            art.workflow_parked_reason
+                .as_deref()
+                .unwrap()
+                .contains("out of bounds")
+        );
     }
 
     #[test]

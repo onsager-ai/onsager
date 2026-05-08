@@ -178,21 +178,24 @@ impl EventHandler for Dispatcher {
 
         let verdict = self.evaluate(&request).await?;
 
-        if let Err(e) = self
+        match self
             .emit_verdict(&gate_id, artifact_id.clone(), gate_point, verdict)
             .await
         {
-            tracing::error!(
-                gate_id = %gate_id,
-                artifact_id = %artifact_id,
-                "synodic: failed to emit gate_verdict: {e}"
-            );
-        } else {
-            tracing::info!(
-                gate_id = %gate_id,
-                artifact_id = %artifact_id,
-                "synodic: emitted gate_verdict for forge.gate_requested"
-            );
+            Err(e) => {
+                tracing::error!(
+                    gate_id = %gate_id,
+                    artifact_id = %artifact_id,
+                    "synodic: failed to emit gate_verdict: {e}"
+                );
+            }
+            _ => {
+                tracing::info!(
+                    gate_id = %gate_id,
+                    artifact_id = %artifact_id,
+                    "synodic: emitted gate_verdict for forge.gate_requested"
+                );
+            }
         }
 
         Ok(())

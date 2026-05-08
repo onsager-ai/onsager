@@ -13,18 +13,18 @@
 //! Bad signatures and unknown installations both return `401`. Malformed
 //! payloads return `400`. Successful dispatches return `202` (accepted).
 
+use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use axum::Json;
 use serde_json::Value;
 
-use onsager_github::webhook::{verify_signature, SignatureCheck};
+use onsager_github::webhook::{SignatureCheck, verify_signature};
 use onsager_spine::webhook_routing::{
-    route_check_event, route_issues_labeled, route_pull_request_closed,
-    route_pull_request_closed_workflows, route_workflow_run_completed_workflows, spine_namespace,
-    RoutedEvent, WorkflowTrigger,
+    RoutedEvent, WorkflowTrigger, route_check_event, route_issues_labeled,
+    route_pull_request_closed, route_pull_request_closed_workflows,
+    route_workflow_run_completed_workflows, spine_namespace,
 };
 
 use crate::handlers::{issues, pull_request};

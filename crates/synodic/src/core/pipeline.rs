@@ -321,60 +321,60 @@ async fn run_l1_check_ui(
     let result = run_l1_check_inner(&name, &cmd, cwd, ui).await?;
 
     // If failed and has fix command, try auto-fix
-    if !result.passed {
-        if let Some(fix_cmd) = &fix {
-            ui.check_line(&ui.check_spinner(""), &format!("auto-fixing {name}..."));
-            // Run fix command silently
-            let fix_status = Command::new("sh")
-                .arg("-c")
-                .arg(fix_cmd)
+    if !result.passed
+        && let Some(fix_cmd) = &fix
+    {
+        ui.check_line(&ui.check_spinner(""), &format!("auto-fixing {name}..."));
+        // Run fix command silently
+        let fix_status = Command::new("sh")
+            .arg("-c")
+            .arg(fix_cmd)
+            .current_dir(cwd)
+            .output()
+            .await;
+
+        if let Ok(output) = fix_status
+            && output.status.success()
+        {
+            // Stage the fix
+            let add_status = Command::new("git")
+                .args(["add", "-A"])
                 .current_dir(cwd)
-                .output()
-                .await;
+                .status()
+                .await
+                .context("failed to run `git add -A` after auto-fix")?;
+            if !add_status.success() {
+                return Err(anyhow::anyhow!(
+                    "`git add -A` failed after auto-fix for check {name}"
+                ));
+            }
 
-            if let Ok(output) = fix_status {
-                if output.status.success() {
-                    // Stage the fix
-                    let add_status = Command::new("git")
-                        .args(["add", "-A"])
-                        .current_dir(cwd)
-                        .status()
-                        .await
-                        .context("failed to run `git add -A` after auto-fix")?;
-                    if !add_status.success() {
-                        return Err(anyhow::anyhow!(
-                            "`git add -A` failed after auto-fix for check {name}"
-                        ));
-                    }
+            // Only commit if there are staged changes
+            let staged = Command::new("git")
+                .args(["diff", "--cached", "--quiet"])
+                .current_dir(cwd)
+                .status()
+                .await
+                .context("failed to check staged auto-fix changes")?;
 
-                    // Only commit if there are staged changes
-                    let staged = Command::new("git")
-                        .args(["diff", "--cached", "--quiet"])
-                        .current_dir(cwd)
-                        .status()
-                        .await
-                        .context("failed to check staged auto-fix changes")?;
-
-                    if staged.code() == Some(1) {
-                        // There are staged changes — commit them
-                        let commit_status = Command::new("git")
-                            .args(["commit", "-m", &format!("fix: auto-fix {name}")])
-                            .current_dir(cwd)
-                            .status()
-                            .await
-                            .context("failed to run `git commit` after auto-fix")?;
-                        if !commit_status.success() {
-                            return Err(anyhow::anyhow!(
-                                "`git commit` failed after auto-fix for check {name}"
-                            ));
-                        }
-                    }
-
-                    // Re-run the check
-                    let retry = run_l1_check_inner(&name, &cmd, cwd, ui).await?;
-                    return Ok(retry);
+            if staged.code() == Some(1) {
+                // There are staged changes — commit them
+                let commit_status = Command::new("git")
+                    .args(["commit", "-m", &format!("fix: auto-fix {name}")])
+                    .current_dir(cwd)
+                    .status()
+                    .await
+                    .context("failed to run `git commit` after auto-fix")?;
+                if !commit_status.success() {
+                    return Err(anyhow::anyhow!(
+                        "`git commit` failed after auto-fix for check {name}"
+                    ));
                 }
             }
+
+            // Re-run the check
+            let retry = run_l1_check_inner(&name, &cmd, cwd, ui).await?;
+            return Ok(retry);
         }
     }
 
@@ -506,7 +506,7 @@ async fn run_semantic_check_ui(
     base_commit: Option<&str>,
     model: Option<&str>,
 ) -> Result<CheckResult> {
-    use crate::core::llm::{default_model_for_provider, LlmClient, LlmRequest};
+    use crate::core::llm::{LlmClient, LlmRequest, default_model_for_provider};
 
     let start = Instant::now();
     let pb = ui.check_spinner(name);
@@ -683,10 +683,10 @@ fn extract_json_from_text(text: &str) -> &str {
         }
     }
     // Try to find raw JSON object
-    if let Some(start) = trimmed.find('{') {
-        if let Some(end) = trimmed.rfind('}') {
-            return &trimmed[start..=end];
-        }
+    if let Some(start) = trimmed.find('{')
+        && let Some(end) = trimmed.rfind('}')
+    {
+        return &trimmed[start..=end];
     }
     trimmed
 }
@@ -869,24 +869,24 @@ pub async fn run_pipeline(
     let outcome = run_pipeline_loop(config, run_cfg, &work_dir, branch.as_deref(), ui, store).await;
 
     // Record error outcomes in telemetry
-    if let Ok(RunOutcome::Error(_)) = &outcome {
-        if let Some(s) = store {
-            let run_record = crate::core::storage::PipelineRun {
-                id: uuid::Uuid::new_v4().to_string(),
-                prompt: run_cfg.prompt.clone(),
-                branch: branch.as_ref().map(|b| b.to_string()),
-                outcome: "error".to_string(),
-                attempts: 0,
-                model: run_cfg.model.clone(),
-                build_duration_ms: None,
-                build_cost_usd: None,
-                inspect_duration_ms: None,
-                total_duration_ms: pipeline_start.elapsed().as_millis() as i64,
-                project_id: None,
-                created_at: chrono::Utc::now(),
-            };
-            let _ = s.record_pipeline_run(run_record).await;
-        }
+    if let Ok(RunOutcome::Error(_)) = &outcome
+        && let Some(s) = store
+    {
+        let run_record = crate::core::storage::PipelineRun {
+            id: uuid::Uuid::new_v4().to_string(),
+            prompt: run_cfg.prompt.clone(),
+            branch: branch.as_ref().map(|b| b.to_string()),
+            outcome: "error".to_string(),
+            attempts: 0,
+            model: run_cfg.model.clone(),
+            build_duration_ms: None,
+            build_cost_usd: None,
+            inspect_duration_ms: None,
+            total_duration_ms: pipeline_start.elapsed().as_millis() as i64,
+            project_id: None,
+            created_at: chrono::Utc::now(),
+        };
+        let _ = s.record_pipeline_run(run_record).await;
     }
 
     // --- CLEANUP: remove worktree ---

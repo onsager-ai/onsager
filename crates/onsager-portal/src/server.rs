@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use axum::routing::{any, delete, get, post, put};
 use axum::Router;
+use axum::routing::{any, delete, get, post, put};
 
 use crate::config::Config;
 use crate::gate::GateClient;
@@ -41,10 +41,10 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     // doesn't see them on a cold start. Best-effort: if the tables
     // aren't there yet, log and continue — stiglab's first migration run
     // will create them, and the next portal start will seed.
-    if cfg!(debug_assertions) || config.dev_login_enabled {
-        if let Err(e) = crate::dev_auth::seed_dev_user_and_workspace(&pool).await {
-            tracing::warn!(error = %e, "portal dev-login seeder skipped (workspaces table missing?)");
-        }
+    if (cfg!(debug_assertions) || config.dev_login_enabled)
+        && let Err(e) = crate::dev_auth::seed_dev_user_and_workspace(&pool).await
+    {
+        tracing::warn!(error = %e, "portal dev-login seeder skipped (workspaces table missing?)");
     }
 
     let gate = Arc::new(GateClient::new(config.synodic_url.clone()));

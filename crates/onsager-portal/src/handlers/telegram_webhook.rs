@@ -16,11 +16,11 @@
 
 use std::collections::HashSet;
 
+use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use axum::Json;
 use onsager_spine::{EventMetadata, TriggerKind};
 use serde_json::Value;
 
@@ -120,10 +120,10 @@ pub async fn handle(
                 _ => continue,
             }
         }
-        if let Some(prefix) = command_prefix {
-            if !text.starts_with(prefix) {
-                continue;
-            }
+        if let Some(prefix) = command_prefix
+            && !text.starts_with(prefix)
+        {
+            continue;
         }
 
         let payload = serde_json::json!({

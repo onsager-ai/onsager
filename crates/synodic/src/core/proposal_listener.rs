@@ -115,16 +115,14 @@ impl EventHandler for Dispatcher {
             "synodic: ingested rule proposal"
         );
 
-        if is_safe_auto {
-            if let Err(e) = apply_auto_action(&*self.storage, &proposed_action).await {
-                // Don't block the listener on a single failed auto-apply —
-                // the proposal stays in the queue as `approved` for the
-                // operator to re-apply manually.
-                tracing::error!(
-                    proposal_id = %created.id,
-                    "synodic: auto-apply failed, leaving as approved for manual retry: {e}"
-                );
-            }
+        if is_safe_auto && let Err(e) = apply_auto_action(&*self.storage, &proposed_action).await {
+            // Don't block the listener on a single failed auto-apply —
+            // the proposal stays in the queue as `approved` for the
+            // operator to re-apply manually.
+            tracing::error!(
+                proposal_id = %created.id,
+                "synodic: auto-apply failed, leaving as approved for manual retry: {e}"
+            );
         }
 
         Ok(())

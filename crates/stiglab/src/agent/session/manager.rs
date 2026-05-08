@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 use crate::core::{AgentMessage, Task};
 
@@ -141,10 +141,10 @@ impl SessionManager {
 
     pub async fn send_input(&self, session_id: &str, input: &str) {
         let sessions = self.sessions.read().await;
-        if let Some(proc) = sessions.get(session_id) {
-            if let Err(e) = proc.send_input(input) {
-                tracing::error!("failed to send input to session {session_id}: {e}");
-            }
+        if let Some(proc) = sessions.get(session_id)
+            && let Err(e) = proc.send_input(input)
+        {
+            tracing::error!("failed to send input to session {session_id}: {e}");
         }
     }
 }

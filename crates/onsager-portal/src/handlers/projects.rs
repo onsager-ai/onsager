@@ -7,10 +7,10 @@
 //! Project deletion blocks with a clear error when live sessions
 //! reference the project; there is no cascade and no soft-delete in v1.
 
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use chrono::Utc;
 use onsager_github::api::app as gh_app;
 use serde::Deserialize;
@@ -212,10 +212,10 @@ pub async fn get_project(
             return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
         }
     };
-    if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
-        if pinned != project.workspace_id {
-            return not_found("project not found");
-        }
+    if let Some(pinned) = auth_user.principal.pinned_workspace_id()
+        && pinned != project.workspace_id
+    {
+        return not_found("project not found");
     }
     if let Err(r) = require_workspace_access(&state.pool, &auth_user, &project.workspace_id).await {
         return r;
@@ -240,10 +240,10 @@ pub async fn delete_project(
             return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
         }
     };
-    if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
-        if pinned != project.workspace_id {
-            return not_found("project not found");
-        }
+    if let Some(pinned) = auth_user.principal.pinned_workspace_id()
+        && pinned != project.workspace_id
+    {
+        return not_found("project not found");
     }
     if let Err(r) = require_workspace_access(&state.pool, &auth_user, &project.workspace_id).await {
         return r;

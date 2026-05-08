@@ -11,7 +11,7 @@
 //! never statically linked into a shared process.
 
 use std::env;
-use std::process::{exit, Command};
+use std::process::{Command, exit};
 
 const HELP: &str = "\
 onsager — AI factory dispatcher

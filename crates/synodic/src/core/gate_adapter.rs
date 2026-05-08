@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn tool_level_end_to_end_with_engine() {
-        use crate::core::intercept::{default_rules, InterceptEngine};
+        use crate::core::intercept::{InterceptEngine, default_rules};
 
         let gate_req = tool_level_request();
         let intercept_req = gate_request_to_intercept(&gate_req);

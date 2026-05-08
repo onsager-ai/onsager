@@ -12,15 +12,15 @@
 //! `routes::portal::proxy` so the dashboard's API_BASE cutover (Slice 6)
 //! can land independently.
 
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::auth::{generate_pat_token, AuthUser};
+use crate::auth::{AuthUser, generate_pat_token};
 use crate::pat_db::{self, UserPat};
 use crate::state::AppState;
 

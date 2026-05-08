@@ -1,9 +1,9 @@
 use axum::extract::FromRequestParts;
-use axum::http::request::Parts;
 use axum::http::StatusCode;
+use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ring::aead;
 use ring::digest;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -231,10 +231,10 @@ pub async fn verify_pat(
     if pat.revoked_at.is_some() {
         return Ok(PatVerifyOutcome::Revoked);
     }
-    if let Some(exp) = pat.expires_at {
-        if exp < chrono::Utc::now() {
-            return Ok(PatVerifyOutcome::Expired);
-        }
+    if let Some(exp) = pat.expires_at
+        && exp < chrono::Utc::now()
+    {
+        return Ok(PatVerifyOutcome::Expired);
     }
     Ok(PatVerifyOutcome::Ok(Box::new(pat)))
 }
@@ -345,77 +345,76 @@ impl FromRequestParts<AppState> for AuthUser {
         //    on the same request — cookie + Bearer normally doesn't happen
         //    in practice, but a CLI smoke test of the dashboard shouldn't
         //    silently fall through to the browser session.
-        if let Some(token) = parse_bearer_token(parts) {
-            if token.starts_with(PAT_TOKEN_NAMESPACE) {
-                match verify_pat(&state.db, &token).await {
-                    Ok(PatVerifyOutcome::Ok(pat)) => {
-                        let user = match db::get_user(&state.db, &pat.user_id).await {
-                            Ok(Some(u)) => u,
-                            Ok(None) => {
-                                tracing::warn!(
-                                    pat_id = %pat.id,
-                                    "PAT references missing user — rejecting"
-                                );
-                                return Err(unauthorized_invalid_token());
-                            }
-                            Err(e) => {
-                                tracing::error!("PAT auth: failed to load user: {e}");
-                                return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
-                            }
-                        };
+        if let Some(token) = parse_bearer_token(parts)
+            && token.starts_with(PAT_TOKEN_NAMESPACE)
+        {
+            match verify_pat(&state.db, &token).await {
+                Ok(PatVerifyOutcome::Ok(pat)) => {
+                    let user = match db::get_user(&state.db, &pat.user_id).await {
+                        Ok(Some(u)) => u,
+                        Ok(None) => {
+                            tracing::warn!(
+                                pat_id = %pat.id,
+                                "PAT references missing user — rejecting"
+                            );
+                            return Err(unauthorized_invalid_token());
+                        }
+                        Err(e) => {
+                            tracing::error!("PAT auth: failed to load user: {e}");
+                            return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                        }
+                    };
 
-                        // Best-effort touch — failure must not block the
-                        // request. Capture client metadata before the move.
-                        let pool = state.db.clone();
-                        let pat_id = pat.id.clone();
-                        let ip = parts
-                            .headers
-                            .get("x-forwarded-for")
-                            .and_then(|v| v.to_str().ok())
-                            .and_then(|s| s.split(',').next())
-                            .map(|s| s.trim().to_string());
-                        let ua = parts
-                            .headers
-                            .get(axum::http::header::USER_AGENT)
-                            .and_then(|v| v.to_str().ok())
-                            .map(|s| s.to_string());
-                        tokio::spawn(async move {
-                            if let Err(e) =
-                                db::touch_user_pat(&pool, &pat_id, ip.as_deref(), ua.as_deref())
-                                    .await
-                            {
-                                tracing::warn!(pat_id = %pat_id, "failed to touch PAT: {e}");
-                            }
-                        });
+                    // Best-effort touch — failure must not block the
+                    // request. Capture client metadata before the move.
+                    let pool = state.db.clone();
+                    let pat_id = pat.id.clone();
+                    let ip = parts
+                        .headers
+                        .get("x-forwarded-for")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.split(',').next())
+                        .map(|s| s.trim().to_string());
+                    let ua = parts
+                        .headers
+                        .get(axum::http::header::USER_AGENT)
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            db::touch_user_pat(&pool, &pat_id, ip.as_deref(), ua.as_deref()).await
+                        {
+                            tracing::warn!(pat_id = %pat_id, "failed to touch PAT: {e}");
+                        }
+                    });
 
-                        let session_kind = session_kind_for_github_id(user.github_id);
-                        return Ok(AuthUser {
-                            user_id: user.id,
-                            github_login: user.github_login,
-                            github_name: user.github_name,
-                            github_avatar_url: user.github_avatar_url,
-                            principal: RequestPrincipal::Pat {
-                                pat_id: pat.id,
-                                workspace_id: pat.workspace_id,
-                            },
-                            session_kind,
-                        });
-                    }
-                    Ok(PatVerifyOutcome::Unknown)
-                    | Ok(PatVerifyOutcome::Revoked)
-                    | Ok(PatVerifyOutcome::Expired) => {
-                        return Err(unauthorized_invalid_token());
-                    }
-                    Err(e) => {
-                        tracing::error!("PAT verification failed: {e}");
-                        return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
-                    }
+                    let session_kind = session_kind_for_github_id(user.github_id);
+                    return Ok(AuthUser {
+                        user_id: user.id,
+                        github_login: user.github_login,
+                        github_name: user.github_name,
+                        github_avatar_url: user.github_avatar_url,
+                        principal: RequestPrincipal::Pat {
+                            pat_id: pat.id,
+                            workspace_id: pat.workspace_id,
+                        },
+                        session_kind,
+                    });
+                }
+                Ok(PatVerifyOutcome::Unknown)
+                | Ok(PatVerifyOutcome::Revoked)
+                | Ok(PatVerifyOutcome::Expired) => {
+                    return Err(unauthorized_invalid_token());
+                }
+                Err(e) => {
+                    tracing::error!("PAT verification failed: {e}");
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
                 }
             }
-            // Other Bearer tokens (e.g. SSO exchange secret on /sso/redeem)
-            // are owned by their dedicated routes — fall through so the
-            // cookie path still works for the dashboard.
         }
+        // Other Bearer tokens (e.g. SSO exchange secret on /sso/redeem)
+        // are owned by their dedicated routes — fall through so the
+        // cookie path still works for the dashboard.
 
         // 2) Fall back to the session cookie.
         let session_id = parts
@@ -528,7 +527,7 @@ mod tests {
     fn test_generate_credential_key_length() {
         let key = generate_credential_key();
         assert_eq!(key.len(), 64); // 32 bytes hex-encoded
-                                   // Should be valid hex
+        // Should be valid hex
         assert!(hex::decode(&key).is_ok());
     }
 

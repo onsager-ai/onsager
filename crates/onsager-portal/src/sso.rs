@@ -12,8 +12,8 @@
 //! `return_to` URL. The owner refuses any `return_to` whose host is not in
 //! `SSO_RETURN_HOST_ALLOWLIST`.
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};

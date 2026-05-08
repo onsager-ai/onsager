@@ -608,8 +608,7 @@ pub const EVENTS: EventManifest = EventManifest {
             producers: &[Subsystem::Portal],
             consumers: &[],
             audit_only: true,
-            description:
-                "Audit record for a manual / CLI / replay trigger fire (actor + workflow).",
+            description: "Audit record for a manual / CLI / replay trigger fire (actor + workflow).",
         },
         EventDefinition {
             kind: "stage.entered",

@@ -76,18 +76,21 @@ fn setup_git_hooks(root: &Path) -> Result<()> {
 
     // Try to derive hooks from pipeline.yml
     let config_path = root.join(".harness/pipeline.yml");
-    if let Ok(config) = pipeline::load_config(&config_path) {
-        for (stage, filename) in [(Stage::Commit, "pre-commit"), (Stage::Push, "pre-push")] {
-            if let Some(script) = pipeline::generate_hook_script(&config.checks, stage) {
-                let hook_path = githooks_dir.join(filename);
-                std::fs::write(&hook_path, &script)?;
-                #[cfg(unix)]
-                set_executable(&hook_path)?;
-                eprintln!("L1: generated .githooks/{filename} from pipeline.yml");
+    match pipeline::load_config(&config_path) {
+        Ok(config) => {
+            for (stage, filename) in [(Stage::Commit, "pre-commit"), (Stage::Push, "pre-push")] {
+                if let Some(script) = pipeline::generate_hook_script(&config.checks, stage) {
+                    let hook_path = githooks_dir.join(filename);
+                    std::fs::write(&hook_path, &script)?;
+                    #[cfg(unix)]
+                    set_executable(&hook_path)?;
+                    eprintln!("L1: generated .githooks/{filename} from pipeline.yml");
+                }
             }
         }
-    } else {
-        eprintln!("L1: no .harness/pipeline.yml, skipping hook generation");
+        _ => {
+            eprintln!("L1: no .harness/pipeline.yml, skipping hook generation");
+        }
     }
 
     // Set hooksPath

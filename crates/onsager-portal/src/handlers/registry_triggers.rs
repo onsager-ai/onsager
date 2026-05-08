@@ -13,8 +13,8 @@
 //! portal so the dashboard's `API_BASE` cutover (#222 Slice 6) can
 //! eventually drop the `routes::portal::proxy` shim.
 
-use axum::response::{IntoResponse, Response};
 use axum::Json;
+use axum::response::{IntoResponse, Response};
 use onsager_registry::TRIGGERS;
 
 /// GET /api/registry/triggers — return the trigger-kind registry manifest.

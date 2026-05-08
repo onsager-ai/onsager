@@ -38,12 +38,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
-use base64::{engine::general_purpose, Engine as _};
+use anyhow::{Context, Result, anyhow, bail};
+use base64::{Engine as _, engine::general_purpose};
 use rustc_hash::FxHashMap;
 use syn::spanned::Spanned;
 use syn::{Attribute, File as SynFile, Item, Meta};
-use tiktoken_rs::{CoreBPE, Rank, ENDOFPROMPT, ENDOFTEXT, O200K_BASE_PAT_STR};
+use tiktoken_rs::{CoreBPE, ENDOFPROMPT, ENDOFTEXT, O200K_BASE_PAT_STR, Rank};
 
 /// BPE merges file for the o200k_base encoding. Pinned in-tree so CI is
 /// offline and deterministic regardless of which `tiktoken-rs` ships.
@@ -292,10 +292,10 @@ fn walk_inner(dir: &Path, out: &mut Vec<PathBuf>) {
                 continue;
             }
             walk_inner(&path, out);
-        } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-            if matches!(ext, "rs" | "ts" | "tsx") {
-                out.push(path);
-            }
+        } else if let Some(ext) = path.extension().and_then(|s| s.to_str())
+            && matches!(ext, "rs" | "ts" | "tsx")
+        {
+            out.push(path);
         }
     }
 }
@@ -407,10 +407,10 @@ fn collect_cfg_test_ranges(items: &[Item], out: &mut Vec<std::ops::Range<usize>>
             }
             continue;
         }
-        if let Item::Mod(m) = item {
-            if let Some((_, inner)) = &m.content {
-                collect_cfg_test_ranges(inner, out);
-            }
+        if let Item::Mod(m) = item
+            && let Some((_, inner)) = &m.content
+        {
+            collect_cfg_test_ranges(inner, out);
         }
     }
 }

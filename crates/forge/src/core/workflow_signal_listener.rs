@@ -26,7 +26,7 @@ use onsager_spine::factory_event::{FactoryEvent, FactoryEventKind};
 use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 
 use super::signal_cache::{Signal, SignalCache, SignalOutcome};
-use super::workflow_gates::{external_check_signal_kind, AGENT_SESSION_SIGNAL};
+use super::workflow_gates::{AGENT_SESSION_SIGNAL, external_check_signal_kind};
 
 /// Pure classifier: turn a [`FactoryEventKind`] into the signal it maps to
 /// (if any). Returned tuple is `(artifact_id, Signal)`.

@@ -34,9 +34,9 @@ mod dispatch;
 mod registry;
 
 pub use dispatch::{
-    command_response, dispatch, dispatch_with_id, CommandResponse, DispatchError, DispatchHandle,
+    CommandResponse, DispatchError, DispatchHandle, command_response, dispatch, dispatch_with_id,
 };
-pub use registry::{await_with_timeout, AwaitError, CorrelationRegistry, Waiter, MAX_SYNC_TIMEOUT};
+pub use registry::{AwaitError, CorrelationRegistry, MAX_SYNC_TIMEOUT, Waiter, await_with_timeout};
 
 /// Default timeout for fast-write helpers (`1s`). The hard cap is
 /// [`MAX_SYNC_TIMEOUT`] (`2s`) — anything that needs more should be a

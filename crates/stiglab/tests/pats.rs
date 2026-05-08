@@ -13,10 +13,10 @@
 //! remain stiglab-local: `verify_pat`, hash invariants, and token format.
 
 use chrono::Utc;
-use sqlx::pool::PoolOptions;
 use sqlx::AnyPool;
+use sqlx::pool::PoolOptions;
 use stiglab::core::{User, Workspace, WorkspaceMember};
-use stiglab::server::auth::{generate_pat_token, hash_pat_token, PAT_PREFIX_LEN};
+use stiglab::server::auth::{PAT_PREFIX_LEN, generate_pat_token, hash_pat_token};
 use stiglab::server::db;
 use uuid::Uuid;
 

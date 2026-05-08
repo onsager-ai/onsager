@@ -82,10 +82,10 @@ pub fn build_trigger_fired_events(
                 "workspace_id": w.workspace_id,
                 "source": ctx.source,
             });
-            if let Some(uid) = ctx.replayed_by {
-                if let Some(obj) = payload.as_object_mut() {
-                    obj.insert("replayed_by".into(), Value::String(uid.to_string()));
-                }
+            if let Some(uid) = ctx.replayed_by
+                && let Some(obj) = payload.as_object_mut()
+            {
+                obj.insert("replayed_by".into(), Value::String(uid.to_string()));
             }
             RoutedEvent {
                 kind: FactoryEventKind::TriggerFired {
@@ -335,20 +335,20 @@ pub fn route_workflow_run_completed_workflows(
                 if workflow_name != run_name {
                     return false;
                 }
-                if let Some(filter) = event {
-                    if filter != run_event {
-                        return false;
-                    }
+                if let Some(filter) = event
+                    && filter != run_event
+                {
+                    return false;
                 }
-                if let Some(filter) = hb {
-                    if filter != head_branch {
-                        return false;
-                    }
+                if let Some(filter) = hb
+                    && filter != head_branch
+                {
+                    return false;
                 }
-                if let Some(filter) = cc {
-                    if filter != conclusion {
-                        return false;
-                    }
+                if let Some(filter) = cc
+                    && filter != conclusion
+                {
+                    return false;
                 }
                 true
             }
@@ -819,10 +819,12 @@ mod tests {
             "workflow_run": {"id": 1, "name": "rust", "event": "push"},
             "repository": {"name": "widgets", "owner": {"login": "acme"}},
         });
-        assert!(route_workflow_run_completed_workflows(
-            &payload,
-            &[run_workflow("rust", None, None, None)]
-        )
-        .is_empty());
+        assert!(
+            route_workflow_run_completed_workflows(
+                &payload,
+                &[run_workflow("rust", None, None, None)]
+            )
+            .is_empty()
+        );
     }
 }

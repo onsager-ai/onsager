@@ -2,14 +2,14 @@
 //!
 //! Moved from `crates/stiglab/src/server/routes/nodes.rs`.
 
+use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 
 use crate::auth::AuthUser;
-use crate::handlers::sessions::missing_workspace;
 use crate::handlers::sessions::WorkspaceQuery;
+use crate::handlers::sessions::missing_workspace;
 use crate::handlers::workspaces::require_workspace_access;
 use crate::session_db;
 use crate::state::AppState;
@@ -28,10 +28,10 @@ pub async fn list_nodes(
     if workspace_id.is_empty() {
         return missing_workspace();
     }
-    if auth_user.user_id != "anonymous" {
-        if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workspace_id).await {
-            return r;
-        }
+    if auth_user.user_id != "anonymous"
+        && let Err(r) = require_workspace_access(&state.pool, &auth_user, &workspace_id).await
+    {
+        return r;
     }
     match session_db::list_nodes(&state.pool).await {
         Ok(nodes) => Json(serde_json::json!({ "nodes": nodes })).into_response(),

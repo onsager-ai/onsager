@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use chrono::Local;
-use console::{style, Term};
+use console::{Term, style};
 use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::core::pipeline::CheckResult;

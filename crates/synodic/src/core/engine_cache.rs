@@ -74,20 +74,20 @@ impl EngineCache {
         // Fast path: cached engine matches the current revision.
         {
             let guard = self.cell.read().await;
-            if let Some(ref entry) = *guard {
-                if entry.revision == current {
-                    return Ok(Arc::clone(&entry.engine));
-                }
+            if let Some(ref entry) = *guard
+                && entry.revision == current
+            {
+                return Ok(Arc::clone(&entry.engine));
             }
         }
 
         // Slow path: rebuild under the write lock. Re-check inside the lock
         // so two racing misses produce only one fetch.
         let mut guard = self.cell.write().await;
-        if let Some(ref entry) = *guard {
-            if entry.revision == current {
-                return Ok(Arc::clone(&entry.engine));
-            }
+        if let Some(ref entry) = *guard
+            && entry.revision == current
+        {
+            return Ok(Arc::clone(&entry.engine));
         }
 
         // Fetch rules and bracket them with a second revision read to catch

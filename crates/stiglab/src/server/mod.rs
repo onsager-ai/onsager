@@ -13,9 +13,9 @@ pub mod ws;
 
 pub use sqlx::AnyPool;
 
-use axum::http::{header, HeaderValue};
-use axum::routing::{any, get};
 use axum::Router;
+use axum::http::{HeaderValue, header};
+use axum::routing::{any, get};
 use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;

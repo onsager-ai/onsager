@@ -41,7 +41,7 @@ mod slot;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use syn::{Expr, ExprLit, Fields, ImplItem, Item, Lit, Meta, Pat, Stmt, Type, Variant, Visibility};
 
 const SPINE_SRC: &str = "crates/onsager-spine/src/factory_event.rs";

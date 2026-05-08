@@ -38,7 +38,7 @@ use async_trait::async_trait;
 use onsager_spine::factory_event::{FactoryEvent, FactoryEventKind};
 use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 
-use crate::server::routes::shaping::{dispatch_shaping_inner, DispatchOutcome};
+use crate::server::routes::shaping::{DispatchOutcome, dispatch_shaping_inner};
 use crate::server::state::AppState;
 
 /// Run the shaping listener forever. Returns only if the underlying

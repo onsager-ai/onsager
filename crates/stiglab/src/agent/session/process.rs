@@ -199,30 +199,28 @@ impl SessionProcess {
                         ClaudeEvent::StreamEvent { event: inner } => {
                             match inner.event_type.as_str() {
                                 "content_block_delta" => {
-                                    if let Some(delta) = inner.delta {
-                                        if delta.delta_type == "text_delta" {
-                                            if let Some(ref text) = delta.text {
-                                                accumulated_output.push_str(text);
-                                                let _ = tx.send(AgentMessage::SessionOutput {
-                                                    session_id: sid.clone(),
-                                                    chunk: text.clone(),
-                                                    stream: "stdout".to_string(),
-                                                });
-                                            }
-                                        }
+                                    if let Some(delta) = inner.delta
+                                        && delta.delta_type == "text_delta"
+                                        && let Some(ref text) = delta.text
+                                    {
+                                        accumulated_output.push_str(text);
+                                        let _ = tx.send(AgentMessage::SessionOutput {
+                                            session_id: sid.clone(),
+                                            chunk: text.clone(),
+                                            stream: "stdout".to_string(),
+                                        });
                                     }
                                 }
                                 "content_block_start" => {
-                                    if let Some(block) = inner.content_block {
-                                        if block.block_type == "tool_use" {
-                                            let tool_name =
-                                                block.name.as_deref().unwrap_or("unknown");
-                                            let _ = tx.send(AgentMessage::SessionOutput {
-                                                session_id: sid.clone(),
-                                                chunk: format!("[tool_use: {tool_name}]\n"),
-                                                stream: "stdout".to_string(),
-                                            });
-                                        }
+                                    if let Some(block) = inner.content_block
+                                        && block.block_type == "tool_use"
+                                    {
+                                        let tool_name = block.name.as_deref().unwrap_or("unknown");
+                                        let _ = tx.send(AgentMessage::SessionOutput {
+                                            session_id: sid.clone(),
+                                            chunk: format!("[tool_use: {tool_name}]\n"),
+                                            stream: "stdout".to_string(),
+                                        });
                                     }
                                 }
                                 _ => {} // content_block_stop and others — no action needed
@@ -232,10 +230,10 @@ impl SessionProcess {
                             subtype,
                             session_id: claude_sid,
                         } => {
-                            if subtype == "session_id" {
-                                if let Some(ref csid) = claude_sid {
-                                    tracing::info!("claude session id for {}: {}", sid, csid);
-                                }
+                            if subtype == "session_id"
+                                && let Some(ref csid) = claude_sid
+                            {
+                                tracing::info!("claude session id for {}: {}", sid, csid);
                             }
                         }
                         ClaudeEvent::Result {
@@ -316,10 +314,9 @@ impl SessionProcess {
 
     /// Consume the NDJSON completion result. Call before `wait()`.
     pub async fn take_ndjson_result(&mut self) -> Option<NdjsonResult> {
-        if let Some(rx) = self.completion_rx.take() {
-            rx.await.ok()
-        } else {
-            None
+        match self.completion_rx.take() {
+            Some(rx) => rx.await.ok(),
+            _ => None,
         }
     }
 

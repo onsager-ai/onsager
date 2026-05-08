@@ -5,10 +5,10 @@
 //! GitHub's private-resource pattern — non-members can't enumerate
 //! workspaces via 403 vs 404 differentiation).
 
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use chrono::Utc;
 use serde::Deserialize;
 use sqlx::postgres::PgPool;
@@ -32,17 +32,17 @@ pub(crate) async fn require_workspace_access(
     auth_user: &AuthUser,
     workspace_id: &str,
 ) -> Result<(), Response> {
-    if let Some(pinned) = auth_user.principal.pinned_workspace_id() {
-        if pinned != workspace_id {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "error": "pat_workspace_scope_mismatch",
-                    "detail": "PAT is pinned to a different workspace",
-                })),
-            )
-                .into_response());
-        }
+    if let Some(pinned) = auth_user.principal.pinned_workspace_id()
+        && pinned != workspace_id
+    {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "pat_workspace_scope_mismatch",
+                "detail": "PAT is pinned to a different workspace",
+            })),
+        )
+            .into_response());
     }
     match workspace_db::is_workspace_member(pool, workspace_id, &auth_user.user_id).await {
         Ok(true) => Ok(()),

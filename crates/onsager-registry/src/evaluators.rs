@@ -192,11 +192,12 @@ mod tests {
     #[tokio::test]
     async fn ci_green_paths() {
         let g = CiGreen::default();
-        assert!(g
-            .evaluate(&ctx(serde_json::json!({"ci_status": "success"})))
-            .await
-            .unwrap()
-            .is_allow());
+        assert!(
+            g.evaluate(&ctx(serde_json::json!({"ci_status": "success"})))
+                .await
+                .unwrap()
+                .is_allow()
+        );
         assert!(matches!(
             g.evaluate(&ctx(serde_json::json!({"ci_status": "failure"})))
                 .await

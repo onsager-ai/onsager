@@ -22,11 +22,11 @@ pub mod workflow_persistence;
 pub mod workflow_signal_listener;
 
 pub use artifact_store::ArtifactStore;
-pub use insight_cache::{InsightCache, DEFAULT_INSIGHT_CACHE_CAPACITY};
+pub use insight_cache::{DEFAULT_INSIGHT_CACHE_CAPACITY, InsightCache};
 pub use kernel::{BaselineKernel, SchedulingKernel, WorldState};
 pub use pipeline::ForgePipeline;
 pub use session_listener::{SessionCompleted, SessionCompletedHandler};
 pub use signal_cache::{Signal, SignalCache, SignalOutcome};
-pub use stage_runner::{advance_workflow_artifacts, enter_workflow, GateEvaluator, StageEvent};
+pub use stage_runner::{GateEvaluator, StageEvent, advance_workflow_artifacts, enter_workflow};
 pub use state::ForgeState;
 pub use workflow::{GateOutcome, GateSpec, StageSpec, TriggerKind, Workflow};

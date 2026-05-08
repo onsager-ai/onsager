@@ -7,8 +7,8 @@ mod tests {
         WorkspaceMember,
     };
     use chrono::Utc;
-    use sqlx::pool::PoolOptions;
     use sqlx::AnyPool;
+    use sqlx::pool::PoolOptions;
     use uuid::Uuid;
 
     async fn test_pool() -> AnyPool {
@@ -252,9 +252,11 @@ mod tests {
             user_id: "u1".to_string(),
             joined_at: Utc::now(),
         };
-        assert!(insert_workspace_with_creator(&pool, &w2, &m2)
-            .await
-            .is_err());
+        assert!(
+            insert_workspace_with_creator(&pool, &w2, &m2)
+                .await
+                .is_err()
+        );
         assert!(get_workspace(&pool, &w2.id).await.unwrap().is_none());
         assert!(!is_workspace_member(&pool, &w2.id, "u1").await.unwrap());
     }

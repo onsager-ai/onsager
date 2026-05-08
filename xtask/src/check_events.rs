@@ -27,8 +27,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
-use onsager_registry::{EventDefinition, Subsystem, EVENTS};
+use anyhow::{Context, Result, anyhow, bail};
+use onsager_registry::{EVENTS, EventDefinition, Subsystem};
 use syn::{Expr, ExprLit, ImplItem, Item, Lit, Pat, Stmt, Type, Visibility};
 
 const SPINE_SRC: &str = "crates/onsager-spine/src/factory_event.rs";

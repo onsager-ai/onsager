@@ -40,10 +40,10 @@ pub async fn connect_and_run(config: AgentConfig) -> Result<()> {
     // Spawn outbound message forwarder
     let send_task = tokio::spawn(async move {
         while let Some(msg) = outbound_rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&msg) {
-                if ws_sender.send(Message::Text(json)).await.is_err() {
-                    break;
-                }
+            if let Ok(json) = serde_json::to_string(&msg)
+                && ws_sender.send(Message::Text(json)).await.is_err()
+            {
+                break;
             }
         }
     });

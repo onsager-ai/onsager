@@ -12,9 +12,9 @@
 //! refactor in #220 Sub-issue B moves these surfaces into portal.
 
 pub use onsager_github::api::app::{
-    get_repo_default_branch, list_installation_repos, list_repo_labels, mint_app_jwt,
-    mint_installation_token, normalize_pem, AccessibleRepo, AppConfig, InstallationToken,
-    RepoLabel,
+    AccessibleRepo, AppConfig, InstallationToken, RepoLabel, get_repo_default_branch,
+    list_installation_repos, list_repo_labels, mint_app_jwt, mint_installation_token,
+    normalize_pem,
 };
 
 use onsager_github::api::app as gh_app;
