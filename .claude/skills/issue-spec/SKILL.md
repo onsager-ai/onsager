@@ -96,7 +96,7 @@ If a related spec issue already exists, reference it — don't duplicate.
 
 Read [references/spec-format.md](references/spec-format.md) for the section-by-section format guide.
 
-**Don't hard-wrap prose paragraphs.** GitHub renders issue and comment bodies with `breaks: true` — every newline inside a paragraph becomes a `<br>`, producing visible mid-sentence line breaks. Source files in this repo wrap at ~70 columns; **issue bodies must not**. Each prose paragraph is one long line, separated from the next by a blank line. Lists, tables, fenced code blocks, and blockquotes are unaffected — wrap those normally. Headings are always a single line (markdown requires it).
+**Don't hard-wrap prose, list items, or blockquote lines.** GitHub renders issue and comment bodies with `breaks: true` — every newline inside a paragraph, list item, or blockquote becomes a `<br>`, producing visible mid-sentence breaks. Source files in this repo wrap at ~70 columns; **issue bodies must not**. Each paragraph, list item, and blockquote line is a single long line; only blank lines separate paragraphs, and each new bullet/quote line starts on its own line. Fenced code blocks and tables preserve formatting and are unaffected. Headings are single-line by markdown's own rules.
 
 Draft the issue body using the lean-spec structure:
 
@@ -155,7 +155,7 @@ Add an **Alignment** section to the issue body (this extends lean-spec for human
 Before creating the issue, self-check:
 
 - [ ] Body is under ~2000 tokens (context economy)
-- [ ] Prose paragraphs are not hard-wrapped (one long line per paragraph, blank line between paragraphs)
+- [ ] Prose paragraphs, list items, and blockquote lines are not hard-wrapped (each is one long line; blank line between paragraphs, new bullet/quote line on its own)
 - [ ] Overview explains *why*, not just *what*
 - [ ] Design captures intent, not implementation details
 - [ ] Plan items are concrete and independently verifiable

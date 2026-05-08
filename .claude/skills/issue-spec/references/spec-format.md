@@ -76,7 +76,7 @@ The `draft → planned` transition is the **human-AI alignment gate**. Only a hu
 
 **Purpose**: Why does this work matter? What problem does it solve?
 
-**Good overview** (note: prose paragraphs are *not* hard-wrapped — GitHub renders single newlines as `<br>` in issue bodies):
+**Good overview** (note: prose, list items, and blockquote lines are *not* hard-wrapped — GitHub renders single newlines as `<br>` in issue bodies; see SKILL.md step 2):
 ```markdown
 ## Overview
 
