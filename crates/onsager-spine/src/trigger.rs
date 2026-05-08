@@ -13,8 +13,11 @@
 //! manifest at `crates/onsager-registry/src/triggers.rs` enforces:
 //! 1. Add a variant here with its config fields.
 //! 2. Add a row to the registry manifest with the snake-case `kind_tag`.
-//! 3. Wire a producer + consumer (or mark the manifest row
-//!    `diagnostic_only: true` with a non-empty `reason`).
+//! 3. Wire a producer for the new kind — the subsystem named in the
+//!    manifest row's `producer` field must fire `trigger.fired` for
+//!    this `TriggerKind` (and the runtime must be able to dispatch
+//!    it). `xtask check-triggers` enforces coverage + that each row
+//!    declares a producer in the category-appropriate subsystem.
 
 use std::collections::BTreeMap;
 
