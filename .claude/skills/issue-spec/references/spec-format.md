@@ -76,14 +76,11 @@ The `draft → planned` transition is the **human-AI alignment gate**. Only a hu
 
 **Purpose**: Why does this work matter? What problem does it solve?
 
-**Good overview:**
+**Good overview** (note: prose, list items, and blockquote lines are *not* hard-wrapped — GitHub renders single newlines as `<br>` in issue bodies; see SKILL.md step 2):
 ```markdown
 ## Overview
 
-Sessions in `WAITING_INPUT` state can hang indefinitely if the user
-disconnects. This wastes agent capacity and leaves stale sessions in
-the dashboard. We need a configurable timeout that transitions idle
-sessions to `FAILED` after a period of inactivity.
+Sessions in `WAITING_INPUT` state can hang indefinitely if the user disconnects. This wastes agent capacity and leaves stale sessions in the dashboard. We need a configurable timeout that transitions idle sessions to `FAILED` after a period of inactivity.
 ```
 
 **Bad overview:**
@@ -108,14 +105,12 @@ The bad version says *what* but not *why*. The AI has no context to make tradeof
 ```markdown
 ## Design
 
-Each session gets an inactivity timer that resets on any WebSocket
-message. When the timer expires:
+Each session gets an inactivity timer that resets on any WebSocket message. When the timer expires:
 1. Emit a `SessionTimeoutWarning` event 5 minutes before deadline
 2. Transition state to `Failed` with reason `session_timeout`
 3. Preserve all session output collected before timeout
 
-The timeout duration is server-configurable via environment variable.
-Per-session overrides are out of scope for now.
+The timeout duration is server-configurable via environment variable. Per-session overrides are out of scope for now.
 ```
 
 **Guidelines:**
@@ -209,10 +204,8 @@ Per-session overrides are out of scope for now.
 ```markdown
 ## Notes
 
-- Considered per-session timeout overrides via API, but deferred to keep
-  scope small. Can add in a follow-up spec.
-- The timeout timer approach uses `tokio::time::sleep` per session.
-  At 100+ concurrent sessions this may need optimization (timer wheel).
+- Considered per-session timeout overrides via API, but deferred to keep scope small. Can add in a follow-up spec.
+- The timeout timer approach uses `tokio::time::sleep` per session. At 100+ concurrent sessions this may need optimization (timer wheel).
 - Related: #23 (session state machine), #31 (node heartbeat)
 ```
 
