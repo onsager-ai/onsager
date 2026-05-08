@@ -173,6 +173,8 @@ export function draftToRequestTrigger(t: WorkflowTriggerDraft): WorkflowTrigger 
     repo_owner: t.repo_owner,
     repo_name: t.repo_name,
     label: t.label,
+    kind_tag: "github_issue_webhook",
+    manual_name: "",
   }
 }
 

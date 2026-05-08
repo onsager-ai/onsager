@@ -32,6 +32,49 @@ pub enum TriggerKind {
     /// `repo` is the `"owner/name"` slug.
     GithubIssueWebhook { repo: String, label: String },
 
+    // -- External request (#240) -------------------------------------------
+    /// A GitHub `pull_request.closed` webhook whose `merged` flag matches
+    /// `predicate.merged` (when set). `repo` is the `"owner/name"` slug.
+    /// `predicate` is optional — an absent predicate matches every closed
+    /// PR; the common case sets `merged: true` to fire only on merges.
+    GithubPullRequestClosed {
+        repo: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        predicate: Option<PullRequestClosedPredicate>,
+    },
+
+    /// A GitHub `workflow_run.completed` webhook. `repo` is the
+    /// `"owner/name"` slug; `workflow_name` matches against the run's
+    /// `workflow_run.name` field. Optional filters narrow further by
+    /// the run's `event`, `head_branch`, and `conclusion`.
+    GithubWorkflowRunCompleted {
+        repo: String,
+        workflow_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        event: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head_branch: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conclusion: Option<String>,
+    },
+
+    /// A Telegram bot webhook. `bot_username` matches against the bot
+    /// the update was delivered to (Telegram identifies the bot via the
+    /// secret-token header we register at `setWebhook` time, but the
+    /// bot username carries through the payload for human review).
+    /// `chat_id_allowlist`, when non-empty, restricts firing to updates
+    /// whose `chat.id` matches one of the listed values; an empty list
+    /// matches every chat the bot can see. `command_prefix`, when set,
+    /// matches against the `text`/`message.text` field — typical use
+    /// is `/onsager`.
+    TelegramWebhook {
+        bot_username: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        chat_id_allowlist: Vec<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command_prefix: Option<String>,
+    },
+
     // -- Schedule (#238) ----------------------------------------------------
     /// Fire on a cron schedule. `expression` is a 5- or 6-field cron string
     /// (minute, hour, day-of-month, month, day-of-week, optional seconds).
@@ -97,6 +140,17 @@ pub enum TriggerKind {
     Replay { source_event_id: String },
 }
 
+/// Predicate for [`TriggerKind::GithubPullRequestClosed`]. Today the only
+/// predicate is `merged` — a `Some(true)` match fires only on merges,
+/// `Some(false)` fires only on closed-without-merge, and `None` fires on
+/// every close. Future fields (e.g. `base_branch`, `labels`) extend with
+/// `serde(default)` so existing rows keep parsing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PullRequestClosedPredicate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged: Option<bool>,
+}
+
 /// Anchor for [`TriggerKind::Delay`]. v1 only supports
 /// `WorkflowActivatedAt` (delay measured from the workflow row's
 /// `created_at` / `last_fired_at` baseline). Future variants:
@@ -159,6 +213,9 @@ impl TriggerKind {
     pub const fn kind_tag(&self) -> &'static str {
         match self {
             TriggerKind::GithubIssueWebhook { .. } => "github_issue_webhook",
+            TriggerKind::GithubPullRequestClosed { .. } => "github_pull_request_closed",
+            TriggerKind::GithubWorkflowRunCompleted { .. } => "github_workflow_run_completed",
+            TriggerKind::TelegramWebhook { .. } => "telegram_webhook",
             TriggerKind::Cron { .. } => "cron",
             TriggerKind::Delay { .. } => "delay",
             TriggerKind::Interval { .. } => "interval",
@@ -242,6 +299,9 @@ impl TriggerKind {
 fn static_kind_tag(kind_tag: &str) -> Option<&'static str> {
     match kind_tag {
         "github_issue_webhook" => Some("github_issue_webhook"),
+        "github_pull_request_closed" => Some("github_pull_request_closed"),
+        "github_workflow_run_completed" => Some("github_workflow_run_completed"),
+        "telegram_webhook" => Some("telegram_webhook"),
         "cron" => Some("cron"),
         "delay" => Some("delay"),
         "interval" => Some("interval"),
@@ -328,6 +388,90 @@ mod tests {
         let (kind, cfg) = original.to_storage();
         let back = TriggerKind::from_storage(kind, &cfg).unwrap();
         assert_eq!(back, original);
+    }
+
+    // -- External-request variants (#240) ----------------------------------
+
+    #[test]
+    fn github_pull_request_closed_round_trips() {
+        let t = TriggerKind::GithubPullRequestClosed {
+            repo: "acme/widgets".into(),
+            predicate: Some(PullRequestClosedPredicate { merged: Some(true) }),
+        };
+        let (kind, cfg) = t.to_storage();
+        assert_eq!(kind, "github_pull_request_closed");
+        assert_eq!(cfg["repo"], "acme/widgets");
+        assert_eq!(cfg["predicate"]["merged"], true);
+        assert_eq!(TriggerKind::from_storage(kind, &cfg).unwrap(), t);
+    }
+
+    #[test]
+    fn github_pull_request_closed_predicate_optional() {
+        let t = TriggerKind::GithubPullRequestClosed {
+            repo: "acme/widgets".into(),
+            predicate: None,
+        };
+        let (kind, cfg) = t.to_storage();
+        assert!(cfg.get("predicate").is_none());
+        assert_eq!(TriggerKind::from_storage(kind, &cfg).unwrap(), t);
+    }
+
+    #[test]
+    fn github_workflow_run_completed_round_trips() {
+        let t = TriggerKind::GithubWorkflowRunCompleted {
+            repo: "acme/widgets".into(),
+            workflow_name: "rust".into(),
+            event: Some("push".into()),
+            head_branch: Some("main".into()),
+            conclusion: Some("success".into()),
+        };
+        let (kind, cfg) = t.to_storage();
+        assert_eq!(kind, "github_workflow_run_completed");
+        assert_eq!(cfg["workflow_name"], "rust");
+        assert_eq!(cfg["head_branch"], "main");
+        assert_eq!(TriggerKind::from_storage(kind, &cfg).unwrap(), t);
+    }
+
+    #[test]
+    fn github_workflow_run_completed_filters_optional() {
+        let t = TriggerKind::GithubWorkflowRunCompleted {
+            repo: "acme/widgets".into(),
+            workflow_name: "rust".into(),
+            event: None,
+            head_branch: None,
+            conclusion: None,
+        };
+        let (kind, cfg) = t.to_storage();
+        assert!(cfg.get("event").is_none());
+        assert!(cfg.get("head_branch").is_none());
+        assert!(cfg.get("conclusion").is_none());
+        assert_eq!(TriggerKind::from_storage(kind, &cfg).unwrap(), t);
+    }
+
+    #[test]
+    fn telegram_webhook_round_trips() {
+        let t = TriggerKind::TelegramWebhook {
+            bot_username: "onsager_bot".into(),
+            chat_id_allowlist: vec![1234, 5678],
+            command_prefix: Some("/onsager".into()),
+        };
+        let (kind, cfg) = t.to_storage();
+        assert_eq!(kind, "telegram_webhook");
+        assert_eq!(cfg["bot_username"], "onsager_bot");
+        assert_eq!(TriggerKind::from_storage(kind, &cfg).unwrap(), t);
+    }
+
+    #[test]
+    fn telegram_webhook_chat_allowlist_optional() {
+        let t = TriggerKind::TelegramWebhook {
+            bot_username: "onsager_bot".into(),
+            chat_id_allowlist: vec![],
+            command_prefix: None,
+        };
+        let (kind, cfg) = t.to_storage();
+        assert!(cfg.get("chat_id_allowlist").is_none());
+        assert!(cfg.get("command_prefix").is_none());
+        assert_eq!(TriggerKind::from_storage(kind, &cfg).unwrap(), t);
     }
 
     // -- Schedule variants (#238) ------------------------------------------

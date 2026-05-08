@@ -18,6 +18,8 @@ pub mod sessions;
 pub mod spec_link;
 pub mod spine;
 pub mod tasks;
+pub mod telegram_webhook;
+pub mod triggers;
 pub mod webhook;
 pub mod workflow_kinds;
 pub mod workflows;

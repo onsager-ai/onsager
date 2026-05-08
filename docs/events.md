@@ -64,6 +64,7 @@ that requires a coordinated rollout.
 | `ising` | ising | 6 |
 | `refract` | refract | 3 |
 | `workflow` | stiglab (trigger) / forge (stage) | 5 |
+| `audit` | (unknown — update `stream_producer` in xtask) | 1 |
 | `registry` | synodic (catalog crud) | 9 |
 | `gate` | onsager-portal (GitHub) / forge (manual) | 2 |
 
@@ -950,6 +951,25 @@ All gates on a stage resolved and the artifact advanced to the next stage (or re
 | `workflow_id` | `String` |  |
 | `from_stage_index` | `u32` |  |
 | `to_stage_index` | `Option<u32>` | `None` when the artifact has just completed the final stage. _(optional)_ |
+
+## `audit` events
+
+Producer subsystem: **(unknown — update `stream_producer` in xtask)**.
+
+### `workflow.manual_triggered`
+
+- Variant: `FactoryEventKind::WorkflowManualTriggered`
+- Stream: `audit`
+
+Audit record for a manual / CLI / replay trigger fire (#241). Emitted alongside the underlying `TriggerFired` so audit views can attribute fires to a user. `event_subtype` distinguishes surfaces (`"ui_fire"`, `"ui_replay"`, `"cli_fire"`, `"cli_replay"`); `detail` carries source-specific fields (manual name, source event id).
+
+| Field | Type | Description |
+|---|---|---|
+| `workflow_id` | `String` |  |
+| `workspace_id` | `String` |  |
+| `actor` | `String` |  |
+| `event_subtype` | `String` |  |
+| `detail` | `serde_json::Value` |  |
 
 ## `registry` events
 

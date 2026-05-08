@@ -343,6 +343,72 @@ pub async fn find_active_github_workflows_for_workspace_repo(
     rows.into_iter().map(row_to_workflow).collect()
 }
 
+/// All active `github_pull_request_closed` workflows on `(repo_owner,
+/// repo_name)`. Used by the GitHub webhook handler to fan out a single
+/// `pull_request.closed` delivery to every subscriber.
+pub async fn find_active_pull_request_closed_workflows(
+    pool: &PgPool,
+    repo_owner: &str,
+    repo_name: &str,
+) -> anyhow::Result<Vec<Workflow>> {
+    let repo = format!("{repo_owner}/{repo_name}");
+    let rows = sqlx::query(
+        "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                workspace_id, install_id, created_by, created_at, updated_at \
+           FROM workflows \
+          WHERE active = TRUE \
+            AND trigger_kind = 'github_pull_request_closed' \
+            AND trigger_config ->> 'repo' = $1",
+    )
+    .bind(&repo)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(row_to_workflow).collect()
+}
+
+/// All active `github_workflow_run_completed` workflows on `(repo_owner,
+/// repo_name, workflow_name)`.
+pub async fn find_active_workflow_run_completed_workflows(
+    pool: &PgPool,
+    repo_owner: &str,
+    repo_name: &str,
+    workflow_name: &str,
+) -> anyhow::Result<Vec<Workflow>> {
+    let repo = format!("{repo_owner}/{repo_name}");
+    let rows = sqlx::query(
+        "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                workspace_id, install_id, created_by, created_at, updated_at \
+           FROM workflows \
+          WHERE active = TRUE \
+            AND trigger_kind = 'github_workflow_run_completed' \
+            AND trigger_config ->> 'repo' = $1 \
+            AND trigger_config ->> 'workflow_name' = $2",
+    )
+    .bind(&repo)
+    .bind(workflow_name)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(row_to_workflow).collect()
+}
+
+/// All active `telegram_webhook` workflows. The Telegram webhook
+/// receiver lacks a per-installation discriminator (Telegram identifies
+/// the bot via the secret-token header rather than a payload field) so
+/// the receiver loads every active row and filters in-memory by
+/// `bot_username` / `chat_id_allowlist` / `command_prefix`.
+pub async fn list_active_telegram_workflows(pool: &PgPool) -> anyhow::Result<Vec<Workflow>> {
+    let rows = sqlx::query(
+        "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                workspace_id, install_id, created_by, created_at, updated_at \
+           FROM workflows \
+          WHERE active = TRUE \
+            AND trigger_kind = 'telegram_webhook'",
+    )
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(row_to_workflow).collect()
+}
+
 /// Whether any other active workflow on `(repo_owner, repo_name)` still
 /// needs webhook delivery. Used by the deactivation hook to decide if it
 /// can deregister the repo-level webhook.

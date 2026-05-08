@@ -95,6 +95,8 @@ describe("workflow-draft serialization", () => {
       repo_owner: "onsager-ai",
       repo_name: "onsager",
       label: "factory",
+      kind_tag: "github_issue_webhook",
+      manual_name: "",
     })
   })
 

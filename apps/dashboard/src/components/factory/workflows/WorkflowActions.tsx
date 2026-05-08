@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
-import { MoreHorizontal, Pause, Play, Trash2 } from "lucide-react"
+import { MoreHorizontal, Pause, Play, Rocket, Trash2 } from "lucide-react"
 import { api, type Workflow } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -49,6 +49,18 @@ export function WorkflowActions({
   const [confirming, setConfirming] = useState(false)
 
   const isActive = workflow.status === "active"
+  const isManualTrigger = workflow.trigger.kind_tag === "manual"
+  const manualName = workflow.trigger.manual_name ?? ""
+
+  const fireManual = useMutation({
+    mutationFn: () => api.fireManualTrigger(workflow.id, manualName),
+    onSuccess: () => {
+      // The trigger.fired event lands within ~50ms; refresh runs so
+      // the new artifact appears without waiting for the 5s poll.
+      queryClient.invalidateQueries({ queryKey: ["workflow-runs", workflow.id] })
+      queryClient.invalidateQueries({ queryKey: ["spine-events"] })
+    },
+  })
 
   const toggle = useMutation({
     mutationFn: (active: boolean) => api.setWorkflowActive(workflow.id, active),
@@ -91,6 +103,15 @@ export function WorkflowActions({
           <MoreHorizontal className="h-5 w-5" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
+          {isManualTrigger && isActive && (
+            <DropdownMenuItem
+              disabled={fireManual.isPending}
+              onClick={() => fireManual.mutate()}
+            >
+              <Rocket className="mr-2 h-4 w-4" />
+              {fireManual.isPending ? "Firing…" : "Run now"}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             disabled={toggle.isPending}
             onClick={() => toggle.mutate(!isActive)}
@@ -112,6 +133,18 @@ export function WorkflowActions({
         className="flex flex-wrap items-center gap-2"
         data-testid="workflow-actions"
       >
+        {isManualTrigger && isActive && (
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            disabled={fireManual.isPending}
+            onClick={() => fireManual.mutate()}
+          >
+            <Rocket className="h-4 w-4" />
+            {fireManual.isPending ? "Firing…" : "Run now"}
+          </Button>
+        )}
         <Button
           type="button"
           variant={isActive ? "outline" : "default"}
@@ -136,6 +169,13 @@ export function WorkflowActions({
             {toggle.error instanceof Error
               ? toggle.error.message
               : "Failed to update workflow"}
+          </p>
+        )}
+        {fireManual.isError && (
+          <p className="w-full text-xs text-destructive">
+            {fireManual.error instanceof Error
+              ? fireManual.error.message
+              : "Run now failed"}
           </p>
         )}
       </div>
