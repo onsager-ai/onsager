@@ -52,10 +52,10 @@ that requires a coordinated rollout.
 
 | Stream | Producer subsystem | Event count |
 |---|---|---|
-| `artifact` | forge | 6 |
-| `git` | onsager-portal (GitHub webhooks) | 7 |
-| `forge` | forge | 8 |
-| `stiglab` | stiglab | 11 |
+| `artifact` | forge | 3 |
+| `git` | onsager-portal (GitHub webhooks) | 4 |
+| `forge` | forge | 6 |
+| `stiglab` | stiglab | 4 |
 | `portal` | (unknown — update `stream_producer` in xtask) | 1 |
 | `synodic` | synodic | 12 |
 | `ising` | ising | 6 |
@@ -98,44 +98,6 @@ Artifact transitioned between lifecycle states.
 | `from_state` | `ArtifactState` |  |
 | `to_state` | `ArtifactState` |  |
 
-### `artifact.lineage_extended`
-
-- Variant: `FactoryEventKind::ArtifactLineageExtended`
-- Stream: `artifact`
-
-New vertical or horizontal lineage entry recorded.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `lineage_type` | `LineageType` |  |
-| `detail` | `serde_json::Value` |  |
-
-### `artifact.quality_recorded`
-
-- Variant: `FactoryEventKind::ArtifactQualityRecorded`
-- Stream: `artifact`
-
-New quality signal appended.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `signal` | `QualitySignal` |  |
-
-### `artifact.routed`
-
-- Variant: `FactoryEventKind::ArtifactRouted`
-- Stream: `artifact`
-
-Released artifact dispatched to a consumer sink.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `consumer_id` | `String` |  |
-| `sink` | `String` |  |
-
 ### `artifact.archived`
 
 - Variant: `FactoryEventKind::ArtifactArchived`
@@ -152,29 +114,6 @@ Artifact reached terminal state (archived).
 
 Producer subsystem: **onsager-portal (GitHub webhooks)**.
 
-### `git.branch_created`
-
-- Variant: `FactoryEventKind::GitBranchCreated`
-- Stream: `git`
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `repo` | `String` |  |
-| `branch` | `String` |  |
-
-### `git.commit_pushed`
-
-- Variant: `FactoryEventKind::GitCommitPushed`
-- Stream: `git`
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `sha` | `String` |  |
-| `message` | `String` |  |
-| `session_id` | `String` |  |
-
 ### `git.pr_opened`
 
 - Variant: `FactoryEventKind::GitPrOpened`
@@ -186,18 +125,6 @@ Producer subsystem: **onsager-portal (GitHub webhooks)**.
 | `repo` | `String` |  |
 | `pr_number` | `u64` |  |
 | `url` | `String` |  |
-
-### `git.pr_review_received`
-
-- Variant: `FactoryEventKind::GitPrReviewReceived`
-- Stream: `git`
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `pr_number` | `u64` |  |
-| `reviewer` | `String` |  |
-| `state` | `String` |  |
 
 ### `git.ci_completed`
 
@@ -316,66 +243,9 @@ Scheduling kernel produced a ShapingDecision.
 | `target_version` | `u32` |  |
 | `priority` | `i32` |  |
 
-### `forge.idle_tick`
-
-- Variant: `FactoryEventKind::ForgeIdleTick`
-- Stream: `forge`
-
-Scheduling kernel returned None (idle, emitted at reduced frequency).
-
-_No payload fields._
-
-### `forge.state_changed`
-
-- Variant: `FactoryEventKind::ForgeStateChanged`
-- Stream: `forge`
-
-Forge process state machine transitioned.
-
-| Field | Type | Description |
-|---|---|---|
-| `from_state` | `ForgeProcessState` |  |
-| `to_state` | `ForgeProcessState` |  |
-
 ## `stiglab` events
 
 Producer subsystem: **stiglab**.
-
-### `stiglab.session_created`
-
-- Variant: `FactoryEventKind::StiglabSessionCreated`
-- Stream: `stiglab`
-
-A new session was allocated for a shaping request.
-
-| Field | Type | Description |
-|---|---|---|
-| `session_id` | `String` |  |
-| `request_id` | `String` |  |
-| `node_id` | `String` |  |
-
-### `stiglab.session_dispatched`
-
-- Variant: `FactoryEventKind::StiglabSessionDispatched`
-- Stream: `stiglab`
-
-A session was dispatched to a Stiglab node.
-
-| Field | Type | Description |
-|---|---|---|
-| `session_id` | `String` |  |
-| `node_id` | `String` |  |
-
-### `stiglab.session_running`
-
-- Variant: `FactoryEventKind::StiglabSessionRunning`
-- Stream: `stiglab`
-
-A session began active execution.
-
-| Field | Type | Description |
-|---|---|---|
-| `session_id` | `String` |  |
 
 ### `stiglab.session_completed`
 
@@ -433,55 +303,6 @@ A session was aborted (e.g. node lost, deadline exceeded).
 |---|---|---|
 | `session_id` | `String` |  |
 | `reason` | `String` |  |
-
-### `stiglab.event_upgraded`
-
-- Variant: `FactoryEventKind::StiglabEventUpgraded`
-- Stream: `stiglab`
-
-A session-internal event was promoted to a factory event.
-
-| Field | Type | Description |
-|---|---|---|
-| `session_id` | `String` |  |
-| `original_event_type` | `String` |  |
-| `reason` | `String` |  |
-
-### `stiglab.node_registered`
-
-- Variant: `FactoryEventKind::StiglabNodeRegistered`
-- Stream: `stiglab`
-
-A new Stiglab node joined the pool.
-
-| Field | Type | Description |
-|---|---|---|
-| `node_id` | `String` |  |
-| `name` | `String` |  |
-| `hostname` | `String` |  |
-
-### `stiglab.node_deregistered`
-
-- Variant: `FactoryEventKind::StiglabNodeDeregistered`
-- Stream: `stiglab`
-
-A Stiglab node left the pool.
-
-| Field | Type | Description |
-|---|---|---|
-| `node_id` | `String` |  |
-| `reason` | `String` |  |
-
-### `stiglab.node_heartbeat_missed`
-
-- Variant: `FactoryEventKind::StiglabNodeHeartbeatMissed`
-- Stream: `stiglab`
-
-A node missed its expected heartbeat.
-
-| Field | Type | Description |
-|---|---|---|
-| `node_id` | `String` |  |
 
 ## `portal` events
 

@@ -6,7 +6,17 @@
 //! the manifest is reviewed when changes land and CI (`cargo xtask
 //! check-events`) enforces the contract.
 //!
-//! See spec issue #150 and the registry CLAUDE.md for the update process.
+//! Schema (per spec #272): every row is in one of two states.
+//!
+//! 1. **Real** — `consumers` is non-empty. The event has at least one
+//!    in-tree subsystem listener.
+//! 2. **Diagnostic-only** — `diagnostic_only: true` plus a non-empty
+//!    `reason` string. The event is emitted today and read by something
+//!    concrete (dashboard timeline, audit trail) but no subsystem listens
+//!    for it.
+//!
+//! See spec issue #150 for the original Lever E plan and #272 for the
+//! schema simplification.
 
 use serde::Serialize;
 
@@ -45,6 +55,12 @@ impl Subsystem {
 }
 
 /// One row of the event-type registry manifest.
+///
+/// Every row is either **real** (`consumers` non-empty) or
+/// **diagnostic-only** (`diagnostic_only: true` plus a non-empty
+/// [`reason`]). `xtask check-events` rejects rows that are neither.
+///
+/// [`reason`]: EventDefinition::reason
 #[derive(Debug, Clone, Serialize)]
 pub struct EventDefinition {
     /// Wire `event_type` string, matching `FactoryEventKind::event_type()`
@@ -58,15 +74,22 @@ pub struct EventDefinition {
     pub producers: &'static [Subsystem],
     /// Subsystems that listen for this event and act on it (i.e. dispatch
     /// off the `event_type` string and parse the payload). Dashboard-only
-    /// reads do not count — set [`audit_only`] for those.
+    /// reads do not count — set [`diagnostic_only`] + [`reason`] for those.
     ///
-    /// [`audit_only`]: EventDefinition::audit_only
+    /// [`diagnostic_only`]: EventDefinition::diagnostic_only
+    /// [`reason`]: EventDefinition::reason
     pub consumers: &'static [Subsystem],
-    /// `true` when no subsystem consumer is expected — the event exists for
-    /// the dashboard / audit log only. Lets the "every event has a consumer"
-    /// check stay strict for events that should have one, while honestly
-    /// labelling events that shouldn't.
-    pub audit_only: bool,
+    /// `true` when no subsystem consumer is expected — the event is read
+    /// by a non-subsystem concern (dashboard timeline, audit trail). Must
+    /// be paired with a non-empty [`reason`].
+    ///
+    /// [`reason`]: EventDefinition::reason
+    pub diagnostic_only: bool,
+    /// Why this row is diagnostic-only — what reads it today (e.g.
+    /// `"rendered in dashboard event timeline"`). Required when
+    /// `diagnostic_only` is `true`; `None` for real rows. Free-form by
+    /// design.
+    pub reason: Option<&'static str>,
     /// One-line description for the manifest read API and dashboard.
     pub description: &'static str,
 }
@@ -87,15 +110,14 @@ impl EventManifest {
 /// have a row here; CI's `cargo xtask check-events` enforces it.
 pub const EVENTS: EventManifest = EventManifest {
     events: &[
-        // -- Artifact lifecycle (forge writes "artifact.state_changed"
-        //    via `emit_pipeline_event`; the others are written by the
-        //    portal / ingestion side). -------------------------------
+        // -- Artifact lifecycle ---------------------------------------------
         EventDefinition {
             kind: "artifact.registered",
             schema_version: 1,
             producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Ising],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "New artifact accepted and ID assigned.",
         },
         EventDefinition {
@@ -103,80 +125,38 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[Subsystem::Ising],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "Artifact transitioned between lifecycle states.",
-        },
-        EventDefinition {
-            kind: "artifact.lineage_extended",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[],
-            audit_only: true,
-            description: "New vertical or horizontal lineage entry recorded.",
-        },
-        EventDefinition {
-            kind: "artifact.quality_recorded",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[],
-            audit_only: true,
-            description: "New quality signal appended.",
-        },
-        EventDefinition {
-            kind: "artifact.routed",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[],
-            audit_only: true,
-            description: "Released artifact dispatched to a consumer sink.",
         },
         EventDefinition {
             kind: "artifact.archived",
             schema_version: 1,
             producers: &[Subsystem::Portal],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some(
+                "forge consumer in flight per spec #273; remains diagnostic-only until that PR lands",
+            ),
             description: "Artifact reached terminal state (archived).",
         },
-        // -- Git lifecycle (onsager-portal webhooks) --------------------
-        EventDefinition {
-            kind: "git.branch_created",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[],
-            audit_only: true,
-            description: "A working branch was pushed for an artifact.",
-        },
-        EventDefinition {
-            kind: "git.commit_pushed",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[],
-            audit_only: true,
-            description: "A commit was pushed to an artifact's branch.",
-        },
+        // -- Git lifecycle (onsager-portal webhooks) ------------------------
         EventDefinition {
             kind: "git.pr_opened",
             schema_version: 1,
             producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Ising],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "A pull request was opened for an artifact.",
-        },
-        EventDefinition {
-            kind: "git.pr_review_received",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[],
-            audit_only: true,
-            description: "A reviewer left a verdict on a PR.",
         },
         EventDefinition {
             kind: "git.ci_completed",
             schema_version: 1,
             producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "A CI check finished for a PR.",
         },
         EventDefinition {
@@ -184,7 +164,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Forge, Subsystem::Ising],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "A PR was merged.",
         },
         EventDefinition {
@@ -192,16 +173,18 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "A PR was closed without merging.",
         },
-        // -- Forge process events ---------------------------------------
+        // -- Forge process events -------------------------------------------
         EventDefinition {
             kind: "forge.shaping_dispatched",
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[Subsystem::Stiglab],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "ShapingRequest sent to Stiglab via the spine (replaces POST /api/shaping).",
         },
         EventDefinition {
@@ -209,7 +192,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[Subsystem::Ising],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "ShapingResult received from Stiglab and recorded by Forge.",
         },
         EventDefinition {
@@ -217,7 +201,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[Subsystem::Synodic],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "GateRequest sent to Synodic via the spine (replaces POST /api/gate).",
         },
         EventDefinition {
@@ -225,7 +210,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[Subsystem::Ising],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "GateVerdict observed by Forge after Synodic responded.",
         },
         EventDefinition {
@@ -233,7 +219,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "Insight forwarded to the scheduling kernel.",
         },
         EventDefinition {
@@ -241,56 +228,18 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("diagnostic trace of forge scheduling kernel; no downstream action"),
             description: "Scheduling kernel produced a ShapingDecision.",
         },
-        EventDefinition {
-            kind: "forge.idle_tick",
-            schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[],
-            audit_only: true,
-            description: "Scheduling kernel returned None (idle, reduced frequency).",
-        },
-        EventDefinition {
-            kind: "forge.state_changed",
-            schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[],
-            audit_only: true,
-            description: "Forge process state machine transitioned.",
-        },
-        // -- Stiglab events --------------------------------------------
-        EventDefinition {
-            kind: "stiglab.session_created",
-            schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[],
-            audit_only: true,
-            description: "A new session was allocated for a shaping request.",
-        },
-        EventDefinition {
-            kind: "stiglab.session_dispatched",
-            schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[],
-            audit_only: true,
-            description: "A session was dispatched to a Stiglab node.",
-        },
-        EventDefinition {
-            kind: "stiglab.session_running",
-            schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[],
-            audit_only: true,
-            description: "A session began active execution.",
-        },
+        // -- Stiglab events -------------------------------------------------
         EventDefinition {
             kind: "stiglab.session_completed",
             schema_version: 1,
             producers: &[Subsystem::Stiglab],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "A session finished successfully; carries optional artifact_id, token usage, branch, and PR number.",
         },
         EventDefinition {
@@ -298,7 +247,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Stiglab],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "Full ShapingResult ready for Forge to act on (replaces POST /api/shaping response).",
         },
         EventDefinition {
@@ -306,7 +256,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Stiglab],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "A session terminated with an error.",
         },
         EventDefinition {
@@ -314,57 +265,28 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Stiglab],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("dashboard event-timeline troubleshooting for node/deadline failures"),
             description: "A session was aborted (node lost, deadline exceeded).",
         },
-        EventDefinition {
-            kind: "stiglab.event_upgraded",
-            schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[],
-            audit_only: true,
-            description: "A session-internal event was promoted to a factory event.",
-        },
-        EventDefinition {
-            kind: "stiglab.node_registered",
-            schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[],
-            audit_only: true,
-            description: "A new Stiglab node joined the pool.",
-        },
-        EventDefinition {
-            kind: "stiglab.node_deregistered",
-            schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[],
-            audit_only: true,
-            description: "A Stiglab node left the pool.",
-        },
-        EventDefinition {
-            kind: "stiglab.node_heartbeat_missed",
-            schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[],
-            audit_only: true,
-            description: "A node missed its expected heartbeat.",
-        },
-        // -- Portal intents (dashboard → agent dispatch) ---------------
+        // -- Portal intents (dashboard → agent dispatch) --------------------
         EventDefinition {
             kind: "portal.session_requested",
             schema_version: 1,
             producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Stiglab],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "Dashboard task request from portal; stiglab dispatches the session to an agent node.",
         },
-        // -- Synodic events --------------------------------------------
+        // -- Synodic events -------------------------------------------------
         EventDefinition {
             kind: "synodic.gate_evaluated",
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("dashboard filtering & audit trail; gate_verdict is the consumer event"),
             description: "Gate request evaluated and a verdict issued (summary; full payload on synodic.gate_verdict).",
         },
         EventDefinition {
@@ -372,7 +294,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("dashboard deny-verdict filtering"),
             description: "Gate request denied (subset of gate_evaluated, for filtering).",
         },
         EventDefinition {
@@ -380,7 +303,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("dashboard modify-verdict filtering"),
             description: "Gate request resolved with verdict Modify (subset of gate_evaluated).",
         },
         EventDefinition {
@@ -388,7 +312,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "Full GateVerdict in response to forge.gate_requested (replaces POST /api/gate response).",
         },
         EventDefinition {
@@ -396,7 +321,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for escalation context"),
             description: "An escalation was initiated.",
         },
         EventDefinition {
@@ -404,7 +330,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in synodic governance UI; audit trail"),
             description: "An escalation was resolved (human, delegate, or timeout).",
         },
         EventDefinition {
@@ -412,7 +339,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in synodic governance UI; audit trail"),
             description: "An escalation timed out and the default verdict was applied.",
         },
         EventDefinition {
@@ -420,7 +348,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in synodic governance UI; audit trail"),
             description: "A delegate proposed a resolution for an active escalation.",
         },
         EventDefinition {
@@ -428,7 +357,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in synodic governance UI; audit trail"),
             description: "A crystallization candidate rule was created.",
         },
         EventDefinition {
@@ -436,7 +366,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in synodic governance UI; audit trail"),
             description: "A proposed rule was approved and entered the active set.",
         },
         EventDefinition {
@@ -444,7 +375,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in synodic governance UI; audit trail"),
             description: "A rule was disabled.",
         },
         EventDefinition {
@@ -452,16 +384,18 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in synodic governance UI; audit trail"),
             description: "A rule was modified, producing a new version.",
         },
-        // -- Ising events ----------------------------------------------
+        // -- Ising events ---------------------------------------------------
         EventDefinition {
             kind: "ising.insight_detected",
             schema_version: 1,
             producers: &[Subsystem::Ising],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in dashboard ising views"),
             description: "An insight passed validation and was recorded on the spine.",
         },
         EventDefinition {
@@ -469,7 +403,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Ising],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "Machine-readable signal emitted on the spine for other subsystems to consume.",
         },
         EventDefinition {
@@ -477,7 +412,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Ising],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in dashboard ising views"),
             description: "An insight was deduplicated or fell below confidence threshold.",
         },
         EventDefinition {
@@ -485,7 +421,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Ising],
             consumers: &[Subsystem::Synodic],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "An insight was packaged as a rule proposal for Synodic.",
         },
         EventDefinition {
@@ -493,7 +430,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Ising],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("operator troubleshooting in dashboard"),
             description: "An analyzer encountered an error during its run.",
         },
         EventDefinition {
@@ -501,16 +439,18 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Ising],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("ising health monitoring in dashboard"),
             description: "Ising finished catching up from a lag position.",
         },
-        // -- Refract (intent decomposition) ----------------------------
+        // -- Refract (intent decomposition) ---------------------------------
         EventDefinition {
             kind: "refract.intent_submitted",
             schema_version: 1,
             producers: &[Subsystem::Portal],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in refract intent timeline"),
             description: "A new intent was submitted for decomposition.",
         },
         EventDefinition {
@@ -518,7 +458,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Portal],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in refract intent timeline"),
             description: "A decomposer produced an artifact tree for an intent.",
         },
         EventDefinition {
@@ -526,10 +467,11 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Portal],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in refract intent timeline"),
             description: "Decomposition failed — no decomposer matched, or the matched decomposer errored out.",
         },
-        // -- Workflow runtime (issue #80 / #81) ------------------------
+        // -- Workflow runtime (issue #80 / #81) -----------------------------
         EventDefinition {
             kind: "trigger.fired",
             schema_version: 1,
@@ -545,7 +487,8 @@ pub const EVENTS: EventManifest = EventManifest {
             //   "Run now" / replay endpoints (#241).
             producers: &[Subsystem::Stiglab, Subsystem::Forge, Subsystem::Portal],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "A trigger fired (webhook / schedule / event / manual).",
         },
         EventDefinition {
@@ -558,7 +501,8 @@ pub const EVENTS: EventManifest = EventManifest {
             // replay fires to a user (#241).
             producers: &[Subsystem::Portal],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for manual / CLI / replay fires"),
             description: "Audit record for a manual / CLI / replay trigger fire (actor + workflow).",
         },
         EventDefinition {
@@ -566,7 +510,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in workflow run timeline"),
             description: "A workflow-tagged artifact entered a new stage.",
         },
         EventDefinition {
@@ -574,7 +519,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in workflow run timeline"),
             description: "A gate on the current stage resolved successfully.",
         },
         EventDefinition {
@@ -582,7 +528,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in workflow run timeline"),
             description: "A gate on the current stage failed; the artifact is parked.",
         },
         EventDefinition {
@@ -590,16 +537,18 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Forge],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("rendered in workflow run timeline"),
             description: "All gates on a stage resolved and the artifact advanced.",
         },
-        // -- Registry events (issue #14) -------------------------------
+        // -- Registry events (issue #14) ------------------------------------
         EventDefinition {
             kind: "registry.type_proposed",
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for registry catalog mutations"),
             description: "A new artifact type was proposed (not yet active).",
         },
         EventDefinition {
@@ -607,7 +556,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for registry catalog mutations"),
             description: "A proposed type was approved and entered the active catalog.",
         },
         EventDefinition {
@@ -615,7 +565,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for registry catalog mutations"),
             description: "A type was deprecated (retained for audit).",
         },
         EventDefinition {
@@ -623,7 +574,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for registry catalog mutations"),
             description: "An adapter implementation was registered in the catalog.",
         },
         EventDefinition {
@@ -631,7 +583,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for registry catalog mutations"),
             description: "An adapter was deprecated.",
         },
         EventDefinition {
@@ -639,7 +592,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for registry catalog mutations"),
             description: "A gate evaluator was registered.",
         },
         EventDefinition {
@@ -647,7 +601,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for registry catalog mutations"),
             description: "A gate evaluator was deprecated.",
         },
         EventDefinition {
@@ -655,7 +610,8 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for registry catalog mutations"),
             description: "An agent profile was registered.",
         },
         EventDefinition {
@@ -663,17 +619,19 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             producers: &[Subsystem::Synodic],
             consumers: &[],
-            audit_only: true,
+            diagnostic_only: true,
+            reason: Some("audit trail for registry catalog mutations"),
             description: "An agent profile was deprecated.",
         },
-        // -- Gate adapters (GitHub webhooks) ---------------------------
+        // -- Gate adapters (GitHub webhooks) --------------------------------
         EventDefinition {
             kind: "gate.check_updated",
             schema_version: 1,
             // Portal owns the GitHub webhook ingress as of #222 Slice 1.
             producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "A GitHub check_suite/check_run/status arrived for a tracked PR.",
         },
         EventDefinition {
@@ -682,7 +640,8 @@ pub const EVENTS: EventManifest = EventManifest {
             // Portal owns the GitHub webhook ingress as of #222 Slice 1.
             producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Forge],
-            audit_only: false,
+            diagnostic_only: false,
+            reason: None,
             description: "A manual-approval gate received a signal (e.g. PR merged).",
         },
     ],
@@ -693,9 +652,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    /// Manifest invariant: every `kind` is unique. A duplicate would let two
-    /// rows disagree on producers/consumers and silently win the "first
-    /// match" race in `lookup`.
+    /// Manifest invariant: every `kind` is unique.
     #[test]
     fn manifest_kinds_are_unique() {
         let mut seen: HashSet<&str> = HashSet::new();
@@ -704,20 +661,33 @@ mod tests {
         }
     }
 
-    /// Strict version of the Lever E "every event has a producer and a
-    /// consumer" check: an event must declare a producer, and must either
-    /// declare a consumer or be `audit_only`.
+    /// Strict version of the schema invariant: every row has a producer,
+    /// and is either real (non-empty consumers) or diagnostic-only with a
+    /// non-empty `reason` string.
     #[test]
-    fn manifest_every_event_has_producer_and_consumer_or_audit_only() {
+    fn manifest_every_event_has_producer_and_is_real_or_diagnostic() {
         for e in EVENTS.events {
             assert!(
                 !e.producers.is_empty(),
                 "event `{}` has no producer",
                 e.kind
             );
+            let real = !e.consumers.is_empty();
+            let diagnostic = e.diagnostic_only && e.reason.is_some_and(|r| !r.is_empty());
             assert!(
-                !e.consumers.is_empty() || e.audit_only,
-                "event `{}` has no consumer and is not audit_only",
+                real || diagnostic,
+                "event `{}` is neither real (non-empty consumers) nor \
+                 diagnostic-only (diagnostic_only=true with non-empty reason)",
+                e.kind
+            );
+            assert!(
+                !e.diagnostic_only || e.consumers.is_empty(),
+                "event `{}` is both real and diagnostic-only",
+                e.kind
+            );
+            assert!(
+                e.reason.is_none() || e.diagnostic_only,
+                "event `{}` has a reason but is not diagnostic-only",
                 e.kind
             );
         }
@@ -737,6 +707,8 @@ mod tests {
         assert!(first.get("kind").is_some());
         assert!(first.get("producers").is_some());
         assert!(first.get("consumers").is_some());
+        assert!(first.get("diagnostic_only").is_some());
+        assert!(first.get("reason").is_some());
     }
 
     #[test]
@@ -747,5 +719,16 @@ mod tests {
         assert!(def.producers.contains(&Subsystem::Forge));
         assert!(def.consumers.contains(&Subsystem::Stiglab));
         assert!(EVENTS.lookup("does.not_exist").is_none());
+    }
+
+    /// Diagnostic-only rows must carry a non-empty reason string.
+    #[test]
+    fn diagnostic_only_rows_have_reason() {
+        for e in EVENTS.events {
+            if e.diagnostic_only {
+                let r = e.reason.expect("diagnostic-only row missing reason");
+                assert!(!r.is_empty(), "event `{}` has empty reason", e.kind);
+            }
+        }
     }
 }

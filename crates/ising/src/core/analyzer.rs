@@ -83,7 +83,7 @@ mod tests {
                 observation: "everything is great".into(),
                 evidence: vec![FactoryEventRef {
                     event_id: 1,
-                    event_type: "forge.idle_tick".into(),
+                    event_type: "forge.decision_made".into(),
                 }],
                 suggested_action: None,
                 confidence: 0.5,

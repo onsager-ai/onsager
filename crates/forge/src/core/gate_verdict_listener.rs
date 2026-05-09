@@ -153,7 +153,11 @@ mod tests {
         // The listener filters by event_type before reaching the
         // classifier, but defense in depth: even if a different variant
         // arrives, we must not park it as a verdict.
-        let kind = FactoryEventKind::ForgeIdleTick;
+        let kind = FactoryEventKind::ForgeDecisionMade {
+            artifact_id: ArtifactId::new("art_unrelated"),
+            target_version: 0,
+            priority: 0,
+        };
         assert!(classify_verdict(kind).is_none());
     }
 

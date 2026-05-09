@@ -126,13 +126,17 @@ Lever status (canonical: ADR 0004's adoption checklist). As of
   backfills + drops), the `BundleId` → `ArtifactVersionId` alias is
   gone (#219), and `workspace_install_ref` was renamed `install_id`
   (#219). One schema, one writer.
-- **E** (#150, PR #227): static event manifest at
-  `crates/onsager-registry/src/events.rs` (75 rows, one per
-  `FactoryEventKind` variant) declares producers/consumers per
+- **E** (#150, PR #227; tightened by #272): static event manifest at
+  `crates/onsager-registry/src/events.rs`, one row per
+  `FactoryEventKind` variant, declares producers/consumers per
   subsystem. `xtask check-events` enforces coverage, both-ends-
   declared, emit-call-sites match producers, and listener-call-
-  sites match consumers; events with no in-tree consumer are
-  tagged `audit_only`. Manifest exposed at `GET /api/registry/events`.
+  sites match consumers. Per #272, every row is either **real**
+  (non-empty `consumers`) or **diagnostic-only** (`diagnostic_only:
+  true` plus a non-empty `reason` string identifying what reads it
+  today, e.g. dashboard timeline / audit trail). Rows that are
+  neither are rejected at lint time. Manifest exposed at
+  `GET /api/registry/events`.
 - **F** (PR #207): `xtask/src/lint_api_contract.rs` asserts every
   backend route has a dashboard caller (or an allowlisted external-
   only reason) and every dashboard call lands on a backend route.

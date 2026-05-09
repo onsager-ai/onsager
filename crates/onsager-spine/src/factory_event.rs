@@ -1,4 +1,4 @@
-// budget-allow: 71-variant event enum; macro/derive compression deferred to follow-up spec per #261
+// budget-allow: factory event enum (~50+ variants after spec #272 prune + #274 cut); macro/derive compression deferred to follow-up spec per #261
 //! Factory events — the authoritative event types emitted to the factory event
 //! spine by each subsystem.
 //!
@@ -7,7 +7,7 @@
 //! library provides a single typed vocabulary.
 
 use chrono::{DateTime, Utc};
-use onsager_artifact::{ArtifactId, ArtifactState, Kind, QualitySignal};
+use onsager_artifact::{ArtifactId, ArtifactState, Kind};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -68,26 +68,6 @@ pub enum FactoryEventKind {
         to_state: ArtifactState,
     },
 
-    /// New vertical or horizontal lineage entry recorded.
-    ArtifactLineageExtended {
-        artifact_id: ArtifactId,
-        lineage_type: LineageType,
-        detail: serde_json::Value,
-    },
-
-    /// New quality signal appended.
-    ArtifactQualityRecorded {
-        artifact_id: ArtifactId,
-        signal: QualitySignal,
-    },
-
-    /// Released artifact dispatched to a consumer sink.
-    ArtifactRouted {
-        artifact_id: ArtifactId,
-        consumer_id: String,
-        sink: String,
-    },
-
     /// Artifact reached terminal state (archived).
     ArtifactArchived {
         artifact_id: ArtifactId,
@@ -95,28 +75,11 @@ pub enum FactoryEventKind {
     },
 
     // -- Git lifecycle events -------------------------------------------------
-    GitBranchCreated {
-        artifact_id: ArtifactId,
-        repo: String,
-        branch: String,
-    },
-    GitCommitPushed {
-        artifact_id: ArtifactId,
-        sha: String,
-        message: String,
-        session_id: String,
-    },
     GitPrOpened {
         artifact_id: ArtifactId,
         repo: String,
         pr_number: u64,
         url: String,
-    },
-    GitPrReviewReceived {
-        artifact_id: ArtifactId,
-        pr_number: u64,
-        reviewer: String,
-        state: String,
     },
     GitCiCompleted {
         artifact_id: ArtifactId,
@@ -206,29 +169,7 @@ pub enum FactoryEventKind {
         priority: i32,
     },
 
-    /// Scheduling kernel returned None (idle, emitted at reduced frequency).
-    ForgeIdleTick,
-
-    /// Forge process state machine transitioned.
-    ForgeStateChanged {
-        from_state: ForgeProcessState,
-        to_state: ForgeProcessState,
-    },
-
-    // -- Stiglab events (session and node lifecycle) -------------------------
-    /// A new session was allocated for a shaping request.
-    StiglabSessionCreated {
-        session_id: String,
-        request_id: String,
-        node_id: String,
-    },
-
-    /// A session was dispatched to a Stiglab node.
-    StiglabSessionDispatched { session_id: String, node_id: String },
-
-    /// A session began active execution.
-    StiglabSessionRunning { session_id: String },
-
+    // -- Stiglab events (session lifecycle) ---------------------------------
     /// A session finished successfully.
     StiglabSessionCompleted {
         session_id: String,
@@ -295,26 +236,6 @@ pub enum FactoryEventKind {
 
     /// A session was aborted (e.g. node lost, deadline exceeded).
     StiglabSessionAborted { session_id: String, reason: String },
-
-    /// A session-internal event was promoted to a factory event.
-    StiglabEventUpgraded {
-        session_id: String,
-        original_event_type: String,
-        reason: String,
-    },
-
-    /// A new Stiglab node joined the pool.
-    StiglabNodeRegistered {
-        node_id: String,
-        name: String,
-        hostname: String,
-    },
-
-    /// A Stiglab node left the pool.
-    StiglabNodeDeregistered { node_id: String, reason: String },
-
-    /// A node missed its expected heartbeat.
-    StiglabNodeHeartbeatMissed { node_id: String },
 
     // -- Portal intents (dashboard → agent dispatch) -------------------------
     /// Dashboard task request from portal. Stiglab's
@@ -673,14 +594,8 @@ impl FactoryEventKind {
         match self {
             Self::ArtifactRegistered { .. } => "artifact.registered",
             Self::ArtifactStateChanged { .. } => "artifact.state_changed",
-            Self::ArtifactLineageExtended { .. } => "artifact.lineage_extended",
-            Self::ArtifactQualityRecorded { .. } => "artifact.quality_recorded",
-            Self::ArtifactRouted { .. } => "artifact.routed",
             Self::ArtifactArchived { .. } => "artifact.archived",
-            Self::GitBranchCreated { .. } => "git.branch_created",
-            Self::GitCommitPushed { .. } => "git.commit_pushed",
             Self::GitPrOpened { .. } => "git.pr_opened",
-            Self::GitPrReviewReceived { .. } => "git.pr_review_received",
             Self::GitCiCompleted { .. } => "git.ci_completed",
             Self::GitPrMerged { .. } => "git.pr_merged",
             Self::GitPrClosed { .. } => "git.pr_closed",
@@ -690,19 +605,10 @@ impl FactoryEventKind {
             Self::ForgeGateVerdict { .. } => "forge.gate_verdict",
             Self::ForgeInsightObserved { .. } => "forge.insight_observed",
             Self::ForgeDecisionMade { .. } => "forge.decision_made",
-            Self::ForgeIdleTick => "forge.idle_tick",
-            Self::ForgeStateChanged { .. } => "forge.state_changed",
-            Self::StiglabSessionCreated { .. } => "stiglab.session_created",
-            Self::StiglabSessionDispatched { .. } => "stiglab.session_dispatched",
-            Self::StiglabSessionRunning { .. } => "stiglab.session_running",
             Self::StiglabSessionCompleted { .. } => "stiglab.session_completed",
             Self::StiglabShapingResultReady { .. } => "stiglab.shaping_result_ready",
             Self::StiglabSessionFailed { .. } => "stiglab.session_failed",
             Self::StiglabSessionAborted { .. } => "stiglab.session_aborted",
-            Self::StiglabEventUpgraded { .. } => "stiglab.event_upgraded",
-            Self::StiglabNodeRegistered { .. } => "stiglab.node_registered",
-            Self::StiglabNodeDeregistered { .. } => "stiglab.node_deregistered",
-            Self::StiglabNodeHeartbeatMissed { .. } => "stiglab.node_heartbeat_missed",
             Self::PortalSessionRequested { .. } => "portal.session_requested",
             Self::SynodicGateEvaluated { .. } => "synodic.gate_evaluated",
             Self::SynodicGateDenied { .. } => "synodic.gate_denied",
@@ -750,14 +656,8 @@ impl FactoryEventKind {
         match self {
             Self::ArtifactRegistered { .. }
             | Self::ArtifactStateChanged { .. }
-            | Self::ArtifactLineageExtended { .. }
-            | Self::ArtifactQualityRecorded { .. }
-            | Self::ArtifactRouted { .. }
             | Self::ArtifactArchived { .. } => "artifact",
-            Self::GitBranchCreated { .. }
-            | Self::GitCommitPushed { .. }
-            | Self::GitPrOpened { .. }
-            | Self::GitPrReviewReceived { .. }
+            Self::GitPrOpened { .. }
             | Self::GitCiCompleted { .. }
             | Self::GitPrMerged { .. }
             | Self::GitPrClosed { .. } => "git",
@@ -766,20 +666,11 @@ impl FactoryEventKind {
             | Self::ForgeGateRequested { .. }
             | Self::ForgeGateVerdict { .. }
             | Self::ForgeInsightObserved { .. }
-            | Self::ForgeDecisionMade { .. }
-            | Self::ForgeIdleTick
-            | Self::ForgeStateChanged { .. } => "forge",
-            Self::StiglabSessionCreated { .. }
-            | Self::StiglabSessionDispatched { .. }
-            | Self::StiglabSessionRunning { .. }
-            | Self::StiglabSessionCompleted { .. }
+            | Self::ForgeDecisionMade { .. } => "forge",
+            Self::StiglabSessionCompleted { .. }
             | Self::StiglabShapingResultReady { .. }
             | Self::StiglabSessionFailed { .. }
-            | Self::StiglabSessionAborted { .. }
-            | Self::StiglabEventUpgraded { .. }
-            | Self::StiglabNodeRegistered { .. }
-            | Self::StiglabNodeDeregistered { .. }
-            | Self::StiglabNodeHeartbeatMissed { .. } => "stiglab",
+            | Self::StiglabSessionAborted { .. } => "stiglab",
             Self::PortalSessionRequested { .. } => "portal",
             Self::SynodicGateEvaluated { .. }
             | Self::SynodicGateDenied { .. }
@@ -829,14 +720,8 @@ impl FactoryEventKind {
         match self {
             Self::ArtifactRegistered { artifact_id, .. }
             | Self::ArtifactStateChanged { artifact_id, .. }
-            | Self::ArtifactLineageExtended { artifact_id, .. }
-            | Self::ArtifactQualityRecorded { artifact_id, .. }
-            | Self::ArtifactRouted { artifact_id, .. }
             | Self::ArtifactArchived { artifact_id, .. } => artifact_id.to_string(),
-            Self::GitBranchCreated { artifact_id, .. }
-            | Self::GitCommitPushed { artifact_id, .. }
-            | Self::GitPrOpened { artifact_id, .. }
-            | Self::GitPrReviewReceived { artifact_id, .. }
+            Self::GitPrOpened { artifact_id, .. }
             | Self::GitCiCompleted { artifact_id, .. }
             | Self::GitPrMerged { artifact_id, .. }
             | Self::GitPrClosed { artifact_id, .. } => artifact_id.to_string(),
@@ -846,19 +731,10 @@ impl FactoryEventKind {
             Self::ForgeGateVerdict { artifact_id, .. } => artifact_id.to_string(),
             Self::ForgeInsightObserved { insight_id, .. } => insight_id.clone(),
             Self::ForgeDecisionMade { artifact_id, .. } => artifact_id.to_string(),
-            Self::ForgeIdleTick => "forge".to_string(),
-            Self::ForgeStateChanged { .. } => "forge".to_string(),
-            Self::StiglabSessionCreated { session_id, .. }
-            | Self::StiglabSessionDispatched { session_id, .. }
-            | Self::StiglabSessionRunning { session_id, .. }
-            | Self::StiglabSessionCompleted { session_id, .. }
+            Self::StiglabSessionCompleted { session_id, .. }
             | Self::StiglabSessionFailed { session_id, .. }
-            | Self::StiglabSessionAborted { session_id, .. }
-            | Self::StiglabEventUpgraded { session_id, .. } => session_id.clone(),
+            | Self::StiglabSessionAborted { session_id, .. } => session_id.clone(),
             Self::StiglabShapingResultReady { artifact_id, .. } => artifact_id.to_string(),
-            Self::StiglabNodeRegistered { node_id, .. }
-            | Self::StiglabNodeDeregistered { node_id, .. }
-            | Self::StiglabNodeHeartbeatMissed { node_id, .. } => node_id.clone(),
             Self::PortalSessionRequested { session_id, .. } => session_id.clone(),
             Self::SynodicGateEvaluated { gate_id, .. } => gate_id.clone(),
             Self::SynodicGateDenied { gate_id, .. } => gate_id.clone(),
@@ -918,15 +794,6 @@ impl FactoryEventKind {
 // Supporting enums
 // ---------------------------------------------------------------------------
 
-/// Whether a lineage entry is vertical (session→version) or horizontal
-/// (artifact→artifact).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LineageType {
-    Vertical,
-    Horizontal,
-}
-
 /// Outcome of a shaping request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -957,7 +824,9 @@ pub enum VerdictSummary {
     Escalate,
 }
 
-/// Forge process states.
+/// Forge process states. Used by forge's internal state machine; no longer
+/// carried on a `FactoryEventKind` variant after spec #272 retired
+/// `ForgeStateChanged`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ForgeProcessState {

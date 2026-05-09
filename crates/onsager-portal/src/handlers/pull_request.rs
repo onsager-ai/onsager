@@ -83,15 +83,6 @@ pub async fn handle(
         .get("number")
         .and_then(|n| n.as_u64())
         .ok_or_else(|| anyhow::anyhow!("missing pr.number"))?;
-    // PR title is fetched live by the proxy; the message field on
-    // `GitCommitPushed` keeps a synchronize-time snapshot purely for the
-    // spine event payload (events are immutable historical facts, not a
-    // denormalization of current state — the artifact row stays clean).
-    let sync_message = pr
-        .get("title")
-        .and_then(|t| t.as_str())
-        .unwrap_or("")
-        .to_string();
     let url = pr
         .get("html_url")
         .and_then(|u| u.as_str())
@@ -143,48 +134,52 @@ pub async fn handle(
     // there is bounded by its TTL window. Portal does not need to push
     // invalidations cross-process.
 
-    // Emit the matching spine event under namespace `git`.
+    // Emit the matching spine event under namespace `git`. Synchronize
+    // (commit push) emits no spine event after spec #272 — `git.commit_pushed`
+    // had no consumer; the artifact version bump above is the only durable
+    // signal that a synchronize occurred.
     let stream_id = pr_stream_id(&project.id, pr_number);
-    let event = match act {
-        PrAction::Opened => FactoryEventKind::GitPrOpened {
+    let event: Option<FactoryEventKind> = match act {
+        PrAction::Opened => Some(FactoryEventKind::GitPrOpened {
             artifact_id: ArtifactId::new(artifact.artifact_id.clone()),
             repo: format!("{owner}/{name}"),
             pr_number,
             url: url.clone(),
-        },
-        PrAction::Synchronize => FactoryEventKind::GitCommitPushed {
-            artifact_id: ArtifactId::new(artifact.artifact_id.clone()),
-            sha: head_sha.clone(),
-            message: sync_message.clone(),
-            session_id: String::new(),
-        },
-        PrAction::Closed if merged => FactoryEventKind::GitPrMerged {
+        }),
+        PrAction::Synchronize => None,
+        PrAction::Closed if merged => Some(FactoryEventKind::GitPrMerged {
             artifact_id: ArtifactId::new(artifact.artifact_id.clone()),
             pr_number,
             merge_sha: merge_sha.clone(),
-        },
-        PrAction::Closed => FactoryEventKind::GitPrClosed {
+        }),
+        PrAction::Closed => Some(FactoryEventKind::GitPrClosed {
             artifact_id: ArtifactId::new(artifact.artifact_id.clone()),
             pr_number,
-        },
+        }),
     };
 
     let metadata = EventMetadata {
         actor: "onsager-portal".into(),
         ..Default::default()
     };
-    let event_id = state
-        .spine
-        .append_ext(
-            &artifact.workspace_id,
-            &stream_id,
-            GIT_NAMESPACE,
-            event.event_type(),
-            serde_json::to_value(&event)?,
-            &metadata,
-            None,
+    let event_id: Option<i64> = if let Some(event) = event.as_ref() {
+        Some(
+            state
+                .spine
+                .append_ext(
+                    &artifact.workspace_id,
+                    &stream_id,
+                    GIT_NAMESPACE,
+                    event.event_type(),
+                    serde_json::to_value(event)?,
+                    &metadata,
+                    None,
+                )
+                .await?,
         )
-        .await?;
+    } else {
+        None
+    };
 
     // Session↔PR correlation: on `opened`, attach a vertical_lineage row if a
     // recent session pushed `head.ref` against this project (Phase 1).
@@ -251,7 +246,7 @@ pub async fn handle(
                     "forge.gate_verdict",
                     gate_event,
                     &metadata,
-                    Some(event_id),
+                    event_id,
                 )
                 .await?;
 
@@ -324,7 +319,7 @@ pub async fn handle(
                         "synodic.escalation_started",
                         escalation_payload,
                         &metadata,
-                        Some(event_id),
+                        event_id,
                     )
                     .await?;
             }
