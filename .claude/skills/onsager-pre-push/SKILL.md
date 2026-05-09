@@ -314,7 +314,11 @@ Retry up to 4 times with exponential backoff on transient network errors.
 **Never** use `--force` on main or long-lived branches without explicit ask.
 
 After push, the `pr-spec-sync.yml` workflow flips the linked spec to
-`in-progress` automatically on PR open.
+`in-progress` automatically on PR open. The `subscribe_pr_activity`
+subscription does **not** fire on every CI surface (commit statuses,
+some check_run completions) — once the PR is open run the post-push CI
+sweep in [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md#post-push-ci-sweep-mandatory)
+(two `pull_request_read` calls) before declaring the push successful.
 
 ## Fast path
 
