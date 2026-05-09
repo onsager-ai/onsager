@@ -17,6 +17,7 @@ see [`../architecture.md`](../architecture.md).
 | [0004](0004-tighten-the-seams.md) | Tighten the seams: HTTP at external boundaries, spine for everything internal | Accepted (2026-04-26, amended 2026-04-30) — all six levers landed (2026-04-30) |
 | [0005](0005-s5-governance-scales-with-scale.md) | S5 governance scales with scale | Accepted (2026-05-05) — `Identity impact: yes` |
 | [0006](0006-edge-dispatcher-as-the-public-boundary.md) | Edge dispatcher as the public boundary | Proposed (2026-05-09) — `Identity impact: no` |
+| [0007](0007-tools-and-skills-as-the-public-contract.md) | Tools and skills as the public contract | Proposed (2026-05-09) — `Identity impact: no` |
 
 ## How to add an ADR
 
