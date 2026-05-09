@@ -46,46 +46,6 @@ impl fmt::Display for ArtifactId {
 }
 
 // ---------------------------------------------------------------------------
-// Artifact version identity
-// ---------------------------------------------------------------------------
-
-/// Content-addressed identifier for an artifact version snapshot.
-///
-/// Format: `ver_<64-char-hex>`, where the hex is the SHA-256 of
-/// `(artifact_id, version, canonical_manifest_bytes)`. Two seals of the same
-/// artifact at the same version with identical file contents produce the same
-/// id (idempotent reseal → `VersionConflict`). Two different artifacts with
-/// identical files produce different ids, so they do not collide.
-///
-/// The legacy `bnd_` prefix is accepted on read for one release cycle; new
-/// ids are minted with `ver_`. The type was previously named `BundleId` (PR
-/// #107); the alias was retired in #149 and call sites now reference
-/// `ArtifactVersionId` directly.
-///
-/// This type lives here (not in `onsager-warehouse`) so that `Artifact` can
-/// reference versions without creating an artifact↔warehouse cycle. The
-/// hashing logic that derives an `ArtifactVersionId` from a manifest lives
-/// in `onsager-warehouse`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ArtifactVersionId(String);
-
-impl ArtifactVersionId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for ArtifactVersionId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Kind
 // ---------------------------------------------------------------------------
 
@@ -323,26 +283,6 @@ pub struct Artifact {
     pub state: ArtifactState,
     pub current_version: u32,
 
-    // Warehouse pointer (warehouse-and-delivery-v0.1 §4.1).
-    //
-    // `current_version_id` advances on each successful release; a rework does
-    // not clear it until the new version is sealed. `version_history` is
-    // append-only and records every sealed version in order. Serde accepts
-    // the legacy `current_bundle_id` / `bundle_history` keys one release cycle
-    // (issue #101).
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        alias = "current_bundle_id"
-    )]
-    pub current_version_id: Option<ArtifactVersionId>,
-    #[serde(
-        default,
-        skip_serializing_if = "Vec::is_empty",
-        alias = "bundle_history"
-    )]
-    pub version_history: Vec<ArtifactVersionId>,
-
     // History (loaded on demand in practice, but modeled here for completeness)
     pub versions: Vec<ArtifactVersion>,
     pub vertical_lineage: Vec<VerticalLineage>,
@@ -366,14 +306,6 @@ pub struct Artifact {
 }
 
 impl Artifact {
-    /// Record a newly sealed artifact version: advance `current_version_id`
-    /// and append to `version_history` (warehouse-and-delivery-v0.1 §6.3,
-    /// invariant §9.4).
-    pub fn record_version(&mut self, version_id: ArtifactVersionId) {
-        self.version_history.push(version_id.clone());
-        self.current_version_id = Some(version_id);
-    }
-
     /// Record an `Issue → PR` referential link on this artifact (issue #103).
     ///
     /// Appends a `HorizontalLineage` entry with `role = "closes_issue"` so
@@ -409,8 +341,6 @@ impl Artifact {
             consumers,
             state: ArtifactState::Draft,
             current_version: 0,
-            current_version_id: None,
-            version_history: Vec::new(),
             versions: Vec::new(),
             vertical_lineage: Vec::new(),
             horizontal_lineage: Vec::new(),
@@ -504,24 +434,6 @@ mod tests {
         assert!(art.git_context.is_none());
         assert!(art.versions.is_empty());
         assert!(!art.consumers.is_empty());
-        assert!(art.current_version_id.is_none());
-        assert!(art.version_history.is_empty());
-    }
-
-    #[test]
-    fn record_version_advances_current_and_history() {
-        let mut art = Artifact::new(Kind::Code, "svc", "marvin", "system", vec![]);
-        let v1 = ArtifactVersionId::new("ver_v1");
-        let v2 = ArtifactVersionId::new("ver_v2");
-
-        art.record_version(v1.clone());
-        assert_eq!(art.current_version_id.as_ref(), Some(&v1));
-        assert_eq!(art.version_history, vec![v1.clone()]);
-
-        art.record_version(v2.clone());
-        // Current pointer advances to newest; history is append-only.
-        assert_eq!(art.current_version_id.as_ref(), Some(&v2));
-        assert_eq!(art.version_history, vec![v1, v2]);
     }
 
     #[test]
@@ -535,48 +447,6 @@ mod tests {
         assert_eq!(link.source_artifact_id, issue_id);
         assert_eq!(link.role, "closes_issue");
         assert_eq!(link.source_version, 1);
-    }
-
-    #[test]
-    fn artifact_version_id_serde_accepts_legacy_prefix() {
-        let legacy = ArtifactVersionId::new("bnd_legacy");
-        let json = serde_json::to_string(&legacy).unwrap();
-        let roundtrip: ArtifactVersionId = serde_json::from_str(&json).unwrap();
-        assert_eq!(roundtrip, legacy);
-
-        let modern = ArtifactVersionId::new("ver_modern");
-        let json = serde_json::to_string(&modern).unwrap();
-        assert_eq!(json, r#""ver_modern""#);
-    }
-
-    #[test]
-    fn artifact_serde_accepts_legacy_bundle_field_names() {
-        let json = serde_json::json!({
-            "artifact_id": "art_01HXYZABC123DEFGHJKMNPQRST",
-            "kind": "code",
-            "name": "svc",
-            "created_at": "2026-04-22T00:00:00Z",
-            "created_by": "system",
-            "owner": "marvin",
-            "consumers": [],
-            "state": "draft",
-            "current_version": 0,
-            "current_bundle_id": "bnd_legacy",
-            "bundle_history": ["bnd_legacy"],
-            "versions": [],
-            "vertical_lineage": [],
-            "horizontal_lineage": [],
-            "quality_signals": []
-        });
-        let art: Artifact = serde_json::from_value(json).unwrap();
-        assert_eq!(
-            art.current_version_id,
-            Some(ArtifactVersionId::new("bnd_legacy"))
-        );
-        assert_eq!(
-            art.version_history,
-            vec![ArtifactVersionId::new("bnd_legacy")]
-        );
     }
 
     #[test]

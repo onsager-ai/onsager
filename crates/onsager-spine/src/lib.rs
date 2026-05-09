@@ -19,12 +19,10 @@
 //!
 //! ## Split layout
 //!
-//! Value objects, storage backends, and protocols that used to live here have
-//! moved into focused sibling crates:
+//! Value objects and registries that used to live here moved into focused
+//! sibling crates:
 //!
-//! - `onsager-artifact` — `Artifact`, `ArtifactId`, `ArtifactVersionId`, lineage, quality.
-//! - `onsager-warehouse` — `Bundle`, `Warehouse`, `FilesystemWarehouse`.
-//! - `onsager-delivery` — `Consumer`, `Delivery`, `Receipt`.
+//! - `onsager-artifact` — `Artifact`, `ArtifactId`, lineage, quality.
 //! - `onsager-registry` — type catalog, adapters, gate evaluators, seed loader.
 //!
 //! Spine keeps what every subsystem needs to speak to the event bus: the
@@ -45,14 +43,15 @@ pub mod webhook_routing;
 
 // Backward-compat re-exports of the artifact value objects. Spine depends on
 // `onsager-artifact` because `FactoryEvent` references `ArtifactId`, `Kind`,
-// `ArtifactState`, `ArtifactVersionId`, and `QualitySignal`. These re-exports let
-// existing callers keep using `onsager_spine::{ArtifactId, ArtifactVersionId, ...}`
-// without pulling in the warehouse/delivery/registry/protocol crates.
+// `ArtifactState`, and `QualitySignal`. Re-exporting them here lets a
+// subsystem that already depends on `onsager-spine` reach the artifact value
+// objects without adding a separate direct dep on `onsager-artifact` at the
+// call site.
 pub use onsager_artifact as artifact;
 pub use onsager_artifact::{
-    Artifact, ArtifactId, ArtifactState, ArtifactVersion, ArtifactVersionId, Consumer,
-    ConsumerType, ContentRef, GitContext, HorizontalLineage, Kind, QualitySignal, QualitySource,
-    QualityValue, VerticalLineage,
+    Artifact, ArtifactId, ArtifactState, ArtifactVersion, Consumer, ConsumerType, ContentRef,
+    GitContext, HorizontalLineage, Kind, QualitySignal, QualitySource, QualityValue,
+    VerticalLineage,
 };
 
 pub use extension_event::ExtensionEventRecord;

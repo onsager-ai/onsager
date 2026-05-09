@@ -68,8 +68,8 @@ pub fn run(database_url: &str, tick_ms: u64) {
         };
 
         // Load existing artifacts from the spine database (issue #30).
-        // `load_artifact_store` restores state, version, and current_version_id
-        // so a mid-tick restart resumes at the last persisted transition.
+        // `load_artifact_store` restores state and version so a mid-tick
+        // restart resumes at the last persisted transition.
         let artifact_store = match spine.as_ref() {
             Some(s) => match persistence::load_artifact_store(s.pool()).await {
                 Ok(store) => {
@@ -225,16 +225,14 @@ pub fn run(database_url: &str, tick_ms: u64) {
                 // audit-log event so a crash between the two leaves the
                 // durable state ahead of (not behind) the event stream —
                 // replay can catch up, but a state behind the event stream
-                // is silent drift (issue #30). Dedupe: a single tick can
-                // emit both ArtifactAdvanced and BundleSealed for the same
-                // artifact; one UPDATE covers both since we snapshot
-                // state + version + bundle_id together.
+                // is silent drift (issue #30).
                 if let Some(ref spine) = spine {
                     let mut seen = std::collections::HashSet::new();
                     for event in &output.events {
                         let artifact_id = match event {
-                            PipelineEvent::ArtifactAdvanced { artifact_id, .. }
-                            | PipelineEvent::BundleSealed { artifact_id, .. } => Some(artifact_id),
+                            PipelineEvent::ArtifactAdvanced { artifact_id, .. } => {
+                                Some(artifact_id)
+                            }
                             _ => None,
                         };
                         let Some(aid) = artifact_id else { continue };
@@ -1015,19 +1013,6 @@ async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
                 "to_state": format!("{to_state:?}"),
             }),
         ),
-        PipelineEvent::BundleSealed {
-            artifact_id,
-            bundle_id,
-            version,
-        } => (
-            format!("warehouse:{artifact_id}"),
-            "warehouse.bundle_sealed",
-            serde_json::json!({
-                "artifact_id": artifact_id,
-                "bundle_id": bundle_id.as_str(),
-                "version": version,
-            }),
-        ),
         PipelineEvent::IdleTick => return,
         PipelineEvent::Error(msg) => (
             "forge:system".to_string(),
@@ -1037,10 +1022,10 @@ async fn emit_pipeline_event(spine: &EventStore, event: &PipelineEvent) {
     };
 
     // #183: events_ext.workspace_id is a real column. Resolve from the
-    // event's artifact when present; system-scoped events (forge.error,
-    // bundle-sealed warehouse rows that lost their artifact ref) fall
-    // back to "default". Lookup errors are logged so a real DB problem
-    // doesn't silently mis-scope every event (Copilot review on #235).
+    // event's artifact when present; system-scoped events (forge.error)
+    // fall back to "default". Lookup errors are logged so a real DB
+    // problem doesn't silently mis-scope every event (Copilot review
+    // on #235).
     let workspace_id = match pipeline_event_artifact_id(event) {
         Some(art) => match spine.lookup_workspace_for_artifact(art).await {
             Ok(Some(ws)) => ws,
@@ -1084,7 +1069,6 @@ fn pipeline_event_artifact_id(event: &PipelineEvent) -> Option<&str> {
         PipelineEvent::GateRequested { artifact_id, .. } => Some(artifact_id.as_str()),
         PipelineEvent::GateVerdictReceived { artifact_id, .. } => Some(artifact_id.as_str()),
         PipelineEvent::ArtifactAdvanced { artifact_id, .. } => Some(artifact_id.as_str()),
-        PipelineEvent::BundleSealed { artifact_id, .. } => Some(artifact_id.as_str()),
         PipelineEvent::IdleTick | PipelineEvent::Error(_) => None,
     }
 }

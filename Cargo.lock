@@ -759,7 +759,6 @@ dependencies = [
  "cron",
  "onsager-artifact",
  "onsager-spine",
- "onsager-warehouse",
  "reqwest",
  "serde",
  "serde_json",
@@ -1634,20 +1633,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "onsager-delivery"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "onsager-artifact",
- "onsager-warehouse",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "ulid",
-]
-
-[[package]]
 name = "onsager-github"
 version = "0.1.0"
 dependencies = [
@@ -1753,24 +1738,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "onsager-warehouse"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "hex",
- "onsager-artifact",
- "onsager-spine",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]

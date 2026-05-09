@@ -22,13 +22,12 @@
 //! per-artifact concurrency by promoting `parked: Option<...>` to
 //! `parked: HashMap<ArtifactId, ParkedDecision>`.
 
-use onsager_artifact::{ArtifactState, ArtifactVersionId};
+use onsager_artifact::ArtifactState;
 use onsager_spine::factory_event::{GatePoint, ShapingOutcome, VerdictSummary};
 use onsager_spine::protocol::{
     GateContext, GateRequest, GateVerdict, ProposedAction, ShapingDecision, ShapingRequest,
     ShapingResult,
 };
-use onsager_warehouse::{Outputs, SealError, SealRequest, Warehouse};
 
 use onsager_artifact::Artifact;
 
@@ -86,90 +85,8 @@ pub enum PipelineEvent {
         from_state: ArtifactState,
         to_state: ArtifactState,
     },
-    /// Emitted after a successful release seals a new bundle
-    /// (warehouse-and-delivery-v0.1 §5.1).
-    BundleSealed {
-        artifact_id: String,
-        bundle_id: ArtifactVersionId,
-        version: u32,
-    },
     IdleTick,
     Error(String),
-}
-
-/// Synchronous sealing sink — abstracts over the async warehouse for the
-/// sync pipeline (warehouse-and-delivery-v0.1 §5.1).
-///
-/// Production implementations wrap a [`Warehouse`] (async) and block on it
-/// inside a `tokio::runtime::Handle::block_on`. Tests use an in-memory mock
-/// that returns a deterministic [`ArtifactVersionId`].
-pub trait SealSink: Send + Sync {
-    fn seal_release(
-        &self,
-        artifact_id: &onsager_artifact::ArtifactId,
-        result: &ShapingResult,
-    ) -> Result<SealedRef, SealError>;
-}
-
-/// Pointer to a bundle that a [`SealSink`] just produced.
-#[derive(Debug, Clone)]
-pub struct SealedRef {
-    pub bundle_id: ArtifactVersionId,
-    pub version: u32,
-}
-
-/// Blocking adapter turning an async [`Warehouse`] into a sync [`SealSink`].
-///
-/// The adapter derives a minimal [`Outputs`] from `ShapingResult`: one manifest
-/// entry per declared `content_ref`, with the URI as the path and the URI
-/// bytes as the blob. Real integrations that need actual file contents will
-/// pre-fetch them and supply their own [`SealSink`].
-pub struct WarehouseSealSink<W: Warehouse + 'static> {
-    warehouse: std::sync::Arc<W>,
-    runtime: tokio::runtime::Handle,
-}
-
-impl<W: Warehouse + 'static> WarehouseSealSink<W> {
-    pub fn new(warehouse: std::sync::Arc<W>, runtime: tokio::runtime::Handle) -> Self {
-        Self { warehouse, runtime }
-    }
-}
-
-impl<W: Warehouse + 'static> SealSink for WarehouseSealSink<W> {
-    fn seal_release(
-        &self,
-        artifact_id: &onsager_artifact::ArtifactId,
-        result: &ShapingResult,
-    ) -> Result<SealedRef, SealError> {
-        let mut outputs = Outputs::new();
-        if let Some(content_ref) = &result.content_ref {
-            // Minimal placeholder entry. A downstream SealSink that understands
-            // the content_ref scheme (git, S3, HTTP) would fetch the real bytes.
-            outputs.push(content_ref.uri.clone(), content_ref.uri.as_bytes().to_vec());
-        }
-        let metadata = serde_json::json!({
-            "change_summary": result.change_summary,
-            "duration_ms": result.duration_ms,
-        });
-        let req = SealRequest {
-            artifact_id: artifact_id.clone(),
-            sealed_by: result.session_id.clone(),
-            metadata,
-            outputs,
-        };
-        let warehouse = self.warehouse.clone();
-        let runtime = self.runtime.clone();
-        // `block_in_place` permits nesting a blocking `block_on` inside an
-        // active Tokio runtime without panicking; matches the pattern used by
-        // the HTTP sync adapters in `crates/forge/src/cmd/serve.rs`.
-        let bundle = tokio::task::block_in_place(|| {
-            runtime.block_on(async move { warehouse.seal(req).await })
-        })?;
-        Ok(SealedRef {
-            bundle_id: bundle.bundle_id,
-            version: bundle.version,
-        })
-    }
 }
 
 /// A decision the pipeline kicked off but hasn't finished. The
@@ -227,10 +144,6 @@ pub(crate) enum ParkStage {
 pub struct ForgePipeline {
     pub store: ArtifactStore,
     pub state: ForgeState,
-    /// Optional sealing sink. When set, the pipeline seals a bundle on
-    /// successful `Released` transitions (warehouse-and-delivery-v0.1 §5.1).
-    /// Absent in legacy deployments; seals are skipped in that case.
-    warehouse: Option<Box<dyn SealSink>>,
     /// Shared cache of the most recent Ising insights (issue #36). The cache
     /// is an `Arc<Mutex<...>>` so the ising listener can push to it without
     /// holding the pipeline lock. Always present — the default cache is
@@ -254,7 +167,6 @@ impl ForgePipeline {
         Self {
             store: ArtifactStore::new(),
             state: ForgeState::new(),
-            warehouse: None,
             insights: InsightCache::default(),
             parked: None,
             pending_verdicts,
@@ -269,13 +181,6 @@ impl ForgePipeline {
     #[cfg(test)]
     fn is_parked(&self) -> bool {
         self.parked.is_some()
-    }
-
-    /// Attach a [`SealSink`]. Calls to `tick` will seal a bundle on every
-    /// successful transition to `Released`.
-    pub fn with_warehouse(mut self, warehouse: Box<dyn SealSink>) -> Self {
-        self.warehouse = Some(warehouse);
-        self
     }
 
     /// Attach a shared [`InsightCache`]. Hand the same clone to the
@@ -589,30 +494,6 @@ impl ForgePipeline {
         let from_state = artifact_snapshot.state;
         let target_state = decision.target_state;
 
-        // warehouse-and-delivery-v0.1 §5.1: Released implies a sealed
-        // bundle. Seal before advancing — if it fails the transition
-        // aborts and the artifact stays in its prior state (kernel
-        // re-proposes on a follow-up tick).
-        let sealing_release =
-            target_state == ArtifactState::Released && result.outcome == ShapingOutcome::Completed;
-        let sealed = if sealing_release {
-            match &self.warehouse {
-                Some(warehouse) => match warehouse.seal_release(&decision.artifact_id, &result) {
-                    Ok(s) => Some(s),
-                    Err(e) => {
-                        output.events.push(PipelineEvent::Error(format!(
-                            "warehouse seal failed for {}: {}",
-                            decision.artifact_id, e
-                        )));
-                        return;
-                    }
-                },
-                None => None,
-            }
-        } else {
-            None
-        };
-
         match self
             .store
             .advance(&decision.artifact_id, target_state, &result)
@@ -623,16 +504,6 @@ impl ForgePipeline {
                     from_state,
                     to_state: target_state,
                 });
-
-                if let Some(sealed) = sealed {
-                    self.store
-                        .record_version(&decision.artifact_id, sealed.bundle_id.clone());
-                    output.events.push(PipelineEvent::BundleSealed {
-                        artifact_id: decision.artifact_id.to_string(),
-                        bundle_id: sealed.bundle_id,
-                        version: sealed.version,
-                    });
-                }
             }
             Err(e) => {
                 output.events.push(PipelineEvent::Error(format!(

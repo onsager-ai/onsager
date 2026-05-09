@@ -1,4 +1,4 @@
-// budget-allow: factory event enum (~50+ variants after spec #272 prune); macro/derive compression deferred to follow-up spec per #261
+// budget-allow: factory event enum (~50+ variants after spec #272 prune + #274 cut); macro/derive compression deferred to follow-up spec per #261
 //! Factory events — the authoritative event types emitted to the factory event
 //! spine by each subsystem.
 //!
@@ -7,7 +7,7 @@
 //! library provides a single typed vocabulary.
 
 use chrono::{DateTime, Utc};
-use onsager_artifact::{ArtifactId, ArtifactState, ArtifactVersionId, Kind};
+use onsager_artifact::{ArtifactId, ArtifactState, Kind};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -68,27 +68,10 @@ pub enum FactoryEventKind {
         to_state: ArtifactState,
     },
 
-    /// New version committed for an artifact.
-    ArtifactVersionCreated {
-        artifact_id: ArtifactId,
-        version: u32,
-        content_ref_uri: String,
-        change_summary: String,
-        session_id: String,
-    },
-
     /// Artifact reached terminal state (archived).
     ArtifactArchived {
         artifact_id: ArtifactId,
         reason: String,
-    },
-
-    // -- Warehouse (warehouse-and-delivery-v0.1) ----------------------------
-    /// A new bundle was sealed for an artifact (§5.1).
-    BundleSealed {
-        artifact_id: ArtifactId,
-        bundle_id: ArtifactVersionId,
-        version: u32,
     },
 
     // -- Git lifecycle events -------------------------------------------------
@@ -611,9 +594,7 @@ impl FactoryEventKind {
         match self {
             Self::ArtifactRegistered { .. } => "artifact.registered",
             Self::ArtifactStateChanged { .. } => "artifact.state_changed",
-            Self::ArtifactVersionCreated { .. } => "artifact.version_created",
             Self::ArtifactArchived { .. } => "artifact.archived",
-            Self::BundleSealed { .. } => "warehouse.bundle_sealed",
             Self::GitPrOpened { .. } => "git.pr_opened",
             Self::GitCiCompleted { .. } => "git.ci_completed",
             Self::GitPrMerged { .. } => "git.pr_merged",
@@ -675,9 +656,7 @@ impl FactoryEventKind {
         match self {
             Self::ArtifactRegistered { .. }
             | Self::ArtifactStateChanged { .. }
-            | Self::ArtifactVersionCreated { .. }
             | Self::ArtifactArchived { .. } => "artifact",
-            Self::BundleSealed { .. } => "warehouse",
             Self::GitPrOpened { .. }
             | Self::GitCiCompleted { .. }
             | Self::GitPrMerged { .. }
@@ -741,9 +720,7 @@ impl FactoryEventKind {
         match self {
             Self::ArtifactRegistered { artifact_id, .. }
             | Self::ArtifactStateChanged { artifact_id, .. }
-            | Self::ArtifactVersionCreated { artifact_id, .. }
             | Self::ArtifactArchived { artifact_id, .. } => artifact_id.to_string(),
-            Self::BundleSealed { bundle_id, .. } => bundle_id.to_string(),
             Self::GitPrOpened { artifact_id, .. }
             | Self::GitCiCompleted { artifact_id, .. }
             | Self::GitPrMerged { artifact_id, .. }

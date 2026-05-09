@@ -209,9 +209,7 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
     match event {
         FactoryEventKind::ArtifactRegistered { artifact_id, .. }
         | FactoryEventKind::ArtifactStateChanged { artifact_id, .. }
-        | FactoryEventKind::ArtifactVersionCreated { artifact_id, .. }
         | FactoryEventKind::ArtifactArchived { artifact_id, .. }
-        | FactoryEventKind::BundleSealed { artifact_id, .. }
         | FactoryEventKind::GitPrOpened { artifact_id, .. }
         | FactoryEventKind::GitCiCompleted { artifact_id, .. }
         | FactoryEventKind::GitPrMerged { artifact_id, .. }
