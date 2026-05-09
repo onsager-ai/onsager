@@ -96,8 +96,9 @@ one — in your own work or someone else's — name it.
   exercise the new code path. Catch it by mutating a line of new code
   locally; if no test fails, the coverage is theater.
 - **narrative-as-state** — using prose like "essentially done",
-  "basically works", "mostly complete" in place of an atomic Plan-item
-  state. Plan items are binary; either complete, or split and amended.
+  "basically works", "mostly complete" in place of an atomic Plan
+  item state. Plan items are binary; either complete, or split and
+  amended.
 - **untracked defer** — a follow-up that lives only in a session
   message or PR description, with no issue. It evaporates at
   squash-merge.
