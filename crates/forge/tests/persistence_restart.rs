@@ -6,12 +6,11 @@
 //! 2. `persist_artifact_state` mirrors the in-memory store back to the row.
 //! 3. `load_artifact_store` rebuilds the store from the row on "restart".
 //!
-//! These tests require Postgres with migrations 001–005 applied. They skip
-//! themselves when `DATABASE_URL` is unset, matching the convention in
-//! `crates/onsager-warehouse/tests/warehouse_flow.rs`.
+//! These tests require Postgres with the spine migrations applied. They
+//! skip themselves when `DATABASE_URL` is unset.
 
 use forge::core::persistence;
-use onsager_artifact::{Artifact, ArtifactId, ArtifactState, ArtifactVersionId, Kind};
+use onsager_artifact::{Artifact, ArtifactId, ArtifactState, Kind};
 use sqlx::PgPool;
 
 fn db_url() -> Option<String> {
@@ -19,7 +18,7 @@ fn db_url() -> Option<String> {
 }
 
 async fn reset(pool: &PgPool, artifact_id: &str) {
-    // Order respects FKs: lineage → versions → warehouse rows → artifacts.
+    // Order respects FKs: lineage → versions → artifacts.
     sqlx::query("DELETE FROM vertical_lineage WHERE artifact_id = $1")
         .bind(artifact_id)
         .execute(pool)
@@ -40,21 +39,6 @@ async fn reset(pool: &PgPool, artifact_id: &str) {
         .execute(pool)
         .await
         .ok();
-    sqlx::query("DELETE FROM deliveries WHERE bundle_id IN (SELECT bundle_id FROM bundles WHERE artifact_id = $1)")
-        .bind(artifact_id)
-        .execute(pool)
-        .await
-        .ok();
-    sqlx::query("UPDATE artifacts SET current_version_id = NULL WHERE artifact_id = $1")
-        .bind(artifact_id)
-        .execute(pool)
-        .await
-        .ok();
-    sqlx::query("DELETE FROM bundles WHERE artifact_id = $1")
-        .bind(artifact_id)
-        .execute(pool)
-        .await
-        .ok();
     sqlx::query("DELETE FROM artifacts WHERE artifact_id = $1")
         .bind(artifact_id)
         .execute(pool)
@@ -63,7 +47,7 @@ async fn reset(pool: &PgPool, artifact_id: &str) {
 }
 
 #[tokio::test]
-async fn restart_in_mid_tick_preserves_state_and_bundle() {
+async fn restart_in_mid_tick_preserves_state_and_version() {
     let Some(url) = db_url() else {
         eprintln!("skipping: DATABASE_URL not set");
         return;
@@ -73,26 +57,19 @@ async fn restart_in_mid_tick_preserves_state_and_bundle() {
     let artifact_id = "art_test_restart_release_01";
     reset(&pool, artifact_id).await;
 
-    // 1. Register via the DB-first path.
     persistence::insert_artifact_row(&pool, artifact_id, "code", "restart-test", "marvin", None)
         .await
         .expect("insert_artifact_row");
 
-    // 2. Simulate a tick that drove the artifact all the way to Released
-    //    and sealed a bundle. The tick only mutates the in-memory store; we
-    //    then call `persist_artifact_state` the way serve.rs does after the
-    //    lock is released.
     let mut advanced = Artifact::new(Kind::Code, "restart-test", "marvin", "forge", vec![]);
     advanced.artifact_id = ArtifactId::new(artifact_id);
     advanced.state = ArtifactState::Released;
     advanced.current_version = 2;
-    advanced.current_version_id = Some(ArtifactVersionId::new("ver_restart_test_abc"));
 
     persistence::persist_artifact_state(&pool, &advanced)
         .await
         .expect("persist_artifact_state");
 
-    // 3. "Restart": throw away all in-memory state, load fresh from the DB.
     let reloaded = persistence::load_artifact_store(&pool)
         .await
         .expect("load_artifact_store");
@@ -103,13 +80,6 @@ async fn restart_in_mid_tick_preserves_state_and_bundle() {
 
     assert_eq!(reloaded_artifact.state, ArtifactState::Released);
     assert_eq!(reloaded_artifact.current_version, 2);
-    assert_eq!(
-        reloaded_artifact
-            .current_version_id
-            .as_ref()
-            .map(|b| b.as_str()),
-        Some("ver_restart_test_abc"),
-    );
 
     reset(&pool, artifact_id).await;
 }

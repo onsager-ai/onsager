@@ -130,15 +130,6 @@ pub const EVENTS: EventManifest = EventManifest {
             description: "Artifact transitioned between lifecycle states.",
         },
         EventDefinition {
-            kind: "artifact.version_created",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Ising],
-            diagnostic_only: false,
-            reason: None,
-            description: "New version committed for an artifact.",
-        },
-        EventDefinition {
             kind: "artifact.archived",
             schema_version: 1,
             producers: &[Subsystem::Portal],
@@ -148,16 +139,6 @@ pub const EVENTS: EventManifest = EventManifest {
                 "forge consumer in flight per spec #273; remains diagnostic-only until that PR lands",
             ),
             description: "Artifact reached terminal state (archived).",
-        },
-        // -- Warehouse ------------------------------------------------------
-        EventDefinition {
-            kind: "warehouse.bundle_sealed",
-            schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in dashboard event timeline for release observability"),
-            description: "A new bundle was sealed for an artifact.",
         },
         // -- Git lifecycle (onsager-portal webhooks) ------------------------
         EventDefinition {

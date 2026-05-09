@@ -403,38 +403,6 @@ mod tests {
         pipeline.tick(kernel);
     }
 
-    /// Mock SealSink: returns a deterministic bundle id per artifact.
-    struct MockSeal {
-        counter: std::sync::atomic::AtomicU32,
-    }
-    impl MockSeal {
-        fn new() -> Self {
-            Self {
-                counter: std::sync::atomic::AtomicU32::new(0),
-            }
-        }
-    }
-    impl SealSink for MockSeal {
-        fn seal_release(
-            &self,
-            artifact_id: &onsager_artifact::ArtifactId,
-            _result: &ShapingResult,
-        ) -> Result<SealedRef, SealError> {
-            let version = self
-                .counter
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                + 1;
-            Ok(SealedRef {
-                bundle_id: ArtifactVersionId::new(format!(
-                    "bnd_mock_{}_{}",
-                    artifact_id.as_str(),
-                    version
-                )),
-                version,
-            })
-        }
-    }
-
     /// Kernel that always targets `Released` for any artifact in
     /// `UnderReview`.
     struct ReleaseKernel;
@@ -459,156 +427,12 @@ mod tests {
     }
 
     #[test]
-    fn seal_emits_bundle_sealed_on_release() {
-        let pending_verdicts = PendingVerdicts::new();
-        let pending_shapings = PendingShapings::new();
-        let mut pipeline = ForgePipeline::new(pending_verdicts.clone(), pending_shapings.clone())
-            .with_warehouse(Box::new(MockSeal::new()));
-        let id = pipeline.store.register(Kind::Code, "svc", "marvin");
-
-        // Drive to UnderReview with the baseline kernel (two decisions).
-        let baseline = BaselineKernel::new();
-        drive_to_completion(
-            &mut pipeline,
-            &pending_verdicts,
-            &pending_shapings,
-            &baseline,
-        );
-        drive_to_completion(
-            &mut pipeline,
-            &pending_verdicts,
-            &pending_shapings,
-            &baseline,
-        );
-        assert_eq!(
-            pipeline.store.get(&id).unwrap().state,
-            ArtifactState::UnderReview
-        );
-
-        // Now push to Released and seal — the final tick of
-        // `drive_to_completion` produces the BundleSealed event.
-        let release = ReleaseKernel;
-        let out1 = pipeline.tick(&release);
-        let g = pre_dispatch_gate_id(&out1);
-        pending_verdicts.insert(&g, GateVerdict::Allow);
-        let out2 = pipeline.tick(&release);
-        let r = shaping_request_id(&out2);
-        pending_shapings.insert(&r, shaping_completed(&r));
-        let out3 = pipeline.tick(&release);
-        let t = transition_gate_id(&out3);
-        pending_verdicts.insert(&t, GateVerdict::Allow);
-        let out4 = pipeline.tick(&release);
-
-        let sealed_event = out4.events.iter().find_map(|e| match e {
-            PipelineEvent::BundleSealed {
-                artifact_id,
-                bundle_id,
-                version,
-            } => Some((artifact_id.clone(), bundle_id.clone(), *version)),
-            _ => None,
-        });
-        let (evt_artifact, evt_bundle, evt_version) =
-            sealed_event.expect("BundleSealed event expected on release");
-
-        assert_eq!(evt_artifact, id.to_string());
-        assert_eq!(evt_version, 1);
-
-        let art = pipeline.store.get(&id).unwrap();
-        assert_eq!(art.state, ArtifactState::Released);
-        assert_eq!(art.current_version_id.as_ref(), Some(&evt_bundle));
-        assert_eq!(art.version_history.len(), 1);
-    }
-
-    /// SealSink that always returns a terminal sealing error.
-    struct FailingSeal;
-    impl SealSink for FailingSeal {
-        fn seal_release(
-            &self,
-            _artifact_id: &onsager_artifact::ArtifactId,
-            _result: &ShapingResult,
-        ) -> Result<SealedRef, SealError> {
-            Err(SealError::Invalid("mock seal failure".into()))
-        }
-    }
-
-    #[test]
-    fn seal_failure_blocks_release_transition() {
-        // warehouse-and-delivery-v0.1 §5.1: Released implies a sealed
-        // bundle. If sealing fails, the artifact must not advance.
-        let pending_verdicts = PendingVerdicts::new();
-        let pending_shapings = PendingShapings::new();
-        let mut pipeline = ForgePipeline::new(pending_verdicts.clone(), pending_shapings.clone())
-            .with_warehouse(Box::new(FailingSeal));
-        let id = pipeline.store.register(Kind::Code, "svc", "marvin");
-
-        // Two complete cycles with the baseline kernel walk through
-        // Draft → InProgress → UnderReview.
-        let baseline = BaselineKernel::new();
-        drive_to_completion(
-            &mut pipeline,
-            &pending_verdicts,
-            &pending_shapings,
-            &baseline,
-        );
-        drive_to_completion(
-            &mut pipeline,
-            &pending_verdicts,
-            &pending_shapings,
-            &baseline,
-        );
-
-        // Attempt the release. The transition gate Allow path tries to
-        // seal, fails, and emits an error event — no advance, no
-        // BundleSealed.
-        let release = ReleaseKernel;
-        let out1 = pipeline.tick(&release);
-        let g = pre_dispatch_gate_id(&out1);
-        pending_verdicts.insert(&g, GateVerdict::Allow);
-        let out2 = pipeline.tick(&release);
-        let r = shaping_request_id(&out2);
-        pending_shapings.insert(&r, shaping_completed(&r));
-        let out3 = pipeline.tick(&release);
-        let t = transition_gate_id(&out3);
-        pending_verdicts.insert(&t, GateVerdict::Allow);
-        let out = pipeline.tick(&release);
-
-        let has_advance = out.events.iter().any(|e| {
-            matches!(
-                e,
-                PipelineEvent::ArtifactAdvanced {
-                    to_state: ArtifactState::Released,
-                    ..
-                }
-            )
-        });
-        assert!(
-            !has_advance,
-            "sealing failure must abort the release transition"
-        );
-        assert!(
-            !out.events
-                .iter()
-                .any(|e| matches!(e, PipelineEvent::BundleSealed { .. }))
-        );
-        let art = pipeline.store.get(&id).unwrap();
-        assert_eq!(art.state, ArtifactState::UnderReview);
-        assert!(art.current_version_id.is_none());
-    }
-
-    #[test]
-    fn release_transition_advances_without_bundle_sealed_when_warehouse_absent() {
-        // Pipelines that don't attach a SealSink (legacy deployments)
-        // still advance to Released — they just don't emit a
-        // BundleSealed event. Regression coverage for the Allow branch
-        // of advance_after_transition when self.warehouse is None.
+    fn release_transition_advances_to_released() {
         let pending_verdicts = PendingVerdicts::new();
         let pending_shapings = PendingShapings::new();
         let mut pipeline = ForgePipeline::new(pending_verdicts.clone(), pending_shapings.clone());
         let id = pipeline.store.register(Kind::Code, "svc", "marvin");
 
-        // Walk through Draft → InProgress → UnderReview with the
-        // baseline kernel, then push to Released with the warehouse
-        // absent.
         let baseline = BaselineKernel::new();
         drive_to_completion(
             &mut pipeline,
@@ -639,7 +463,6 @@ mod tests {
         pending_verdicts.insert(&t, GateVerdict::Allow);
         let out = pipeline.tick(&release);
 
-        // Released, no BundleSealed event.
         assert!(out.events.iter().any(|e| {
             matches!(
                 e,
@@ -649,15 +472,8 @@ mod tests {
                 }
             )
         }));
-        assert!(
-            !out.events
-                .iter()
-                .any(|e| matches!(e, PipelineEvent::BundleSealed { .. })),
-            "pipeline without SealSink must not emit BundleSealed"
-        );
 
         let art = pipeline.store.get(&id).unwrap();
         assert_eq!(art.state, ArtifactState::Released);
-        assert!(art.current_version_id.is_none());
     }
 }

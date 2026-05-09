@@ -52,8 +52,7 @@ that requires a coordinated rollout.
 
 | Stream | Producer subsystem | Event count |
 |---|---|---|
-| `artifact` | forge | 4 |
-| `warehouse` | warehouse worker (forge) | 1 |
+| `artifact` | forge | 3 |
 | `git` | onsager-portal (GitHub webhooks) | 4 |
 | `forge` | forge | 6 |
 | `stiglab` | stiglab | 4 |
@@ -99,21 +98,6 @@ Artifact transitioned between lifecycle states.
 | `from_state` | `ArtifactState` |  |
 | `to_state` | `ArtifactState` |  |
 
-### `artifact.version_created`
-
-- Variant: `FactoryEventKind::ArtifactVersionCreated`
-- Stream: `artifact`
-
-New version committed for an artifact.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `version` | `u32` |  |
-| `content_ref_uri` | `String` |  |
-| `change_summary` | `String` |  |
-| `session_id` | `String` |  |
-
 ### `artifact.archived`
 
 - Variant: `FactoryEventKind::ArtifactArchived`
@@ -125,23 +109,6 @@ Artifact reached terminal state (archived).
 |---|---|---|
 | `artifact_id` | `ArtifactId` |  |
 | `reason` | `String` |  |
-
-## `warehouse` events
-
-Producer subsystem: **warehouse worker (forge)**.
-
-### `warehouse.bundle_sealed`
-
-- Variant: `FactoryEventKind::BundleSealed`
-- Stream: `warehouse`
-
-A new bundle was sealed for an artifact (§5.1).
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `bundle_id` | `ArtifactVersionId` |  |
-| `version` | `u32` |  |
 
 ## `git` events
 

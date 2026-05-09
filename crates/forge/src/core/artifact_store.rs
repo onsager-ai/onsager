@@ -10,8 +10,7 @@ use std::collections::HashMap;
 use chrono::Utc;
 
 use onsager_artifact::{
-    Artifact, ArtifactId, ArtifactState, ArtifactVersion, ArtifactVersionId, ContentRef, Kind,
-    VerticalLineage,
+    Artifact, ArtifactId, ArtifactState, ArtifactVersion, ContentRef, Kind, VerticalLineage,
 };
 use onsager_spine::factory_event::ShapingOutcome;
 use onsager_spine::protocol::ShapingResult;
@@ -58,9 +57,8 @@ impl ArtifactStore {
     /// Mutable access — used by the workflow stage runner (issue #80) to
     /// update `workflow_id`, `current_stage_index`,
     /// `workflow_parked_reason`, and the artifact state when a stage
-    /// declares a `target_state`. Version/bundle/lineage mutations still
-    /// go through `advance` and `record_version` so the state-machine and
-    /// invariants stay enforced.
+    /// declares a `target_state`. Version/lineage mutations still go through
+    /// `advance` so the state-machine and invariants stay enforced.
     pub fn get_mut(&mut self, id: &ArtifactId) -> Option<&mut Artifact> {
         self.artifacts.get_mut(id.as_str())
     }
@@ -132,18 +130,6 @@ impl ArtifactStore {
         artifact.state = target_state;
 
         Ok(())
-    }
-
-    /// Record a newly sealed artifact version on the artifact
-    /// (warehouse-and-delivery-v0.1 §6.3).
-    ///
-    /// No-op if the artifact is not found (the caller already emits an error
-    /// event for the missing artifact; a missing version recording is strictly
-    /// subordinate to that).
-    pub fn record_version(&mut self, id: &ArtifactId, version_id: ArtifactVersionId) {
-        if let Some(artifact) = self.artifacts.get_mut(id.as_str()) {
-            artifact.record_version(version_id);
-        }
     }
 
     /// Archive an artifact (any state -> Archived).
