@@ -165,14 +165,16 @@ first-class edge subsystem. The migration is staged:
   follow-up sub-issues that move the remaining stiglab dashboard
   surface to portal so #222 Slice 6 can drop the proxy.
 - **Spine API — #222 follow-up #259 (landed).** Portal owns the
-  seven dashboard-facing spine routes
-  (`GET /api/spine/events`, `GET/POST /api/spine/artifacts`,
+  dashboard-facing spine routes
+  (`GET /api/spine/events`, `GET /api/spine/artifacts`,
   `GET /api/spine/artifacts/:id`,
   `POST /api/spine/artifacts/:id/{retry,abort,override-gate}`).
-  Reads run against `events_ext` / `artifacts`; writes either
-  `INSERT` an artifact row or `EventStore::append_ext` a single
-  event — no synodic side-effects, no GitHub side-effects. Stiglab
-  proxies the URLs through `routes::portal::proxy` and keeps
+  Reads run against `events_ext` / `artifacts`; writes
+  `EventStore::append_ext` a single event — no synodic side-effects,
+  no GitHub side-effects. Artifact creation is not part of this
+  surface (per #278 the only creation path is forge's auto-trigger
+  flow, which emits `artifact.registered` directly on the spine).
+  Stiglab proxies the URLs through `routes::portal::proxy` and keeps
   `SpineEmitter` for its own session-lifecycle emits.
 - **Routes (follow-ups).** Slice 6: dashboard `API_BASE` cutover
   to portal directly + delete the `routes::portal::proxy` entries

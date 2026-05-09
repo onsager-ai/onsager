@@ -5,9 +5,11 @@
 //! `routes::portal::proxy` shim.
 //!
 //! Reads land directly against the spine `events_ext` and `artifacts`
-//! tables. Writes either insert into `artifacts` or emit a single
-//! event via `EventStore::append_ext` — no synodic side-effects, no
-//! GitHub side-effects. Stiglab's `SpineEmitter::emit_raw` wrapper
+//! tables. Writes are control-only — retry/abort/override-gate emit a
+//! single event via `EventStore::append_ext`, no synodic side-effects,
+//! no GitHub side-effects, no row inserts. (Per #278 artifact creation
+//! is exclusively forge's auto-trigger flow; portal does not own a
+//! creation endpoint.) Stiglab's `SpineEmitter::emit_raw` wrapper
 //! stays in stiglab for the agent-runtime emits; portal calls
 //! `state.spine.append_ext` directly.
 
@@ -94,19 +96,6 @@ pub struct HorizontalLineageRow {
     pub source_version: i32,
     pub role: String,
     pub recorded_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RegisterArtifactRequest {
-    /// Workspace the new artifact belongs to (#164). Caller must be a
-    /// member; the value is written into `artifacts.workspace_id` so
-    /// later list/detail queries scope it correctly.
-    pub workspace_id: String,
-    pub kind: String,
-    pub name: String,
-    pub owner: String,
-    pub description: Option<String>,
-    pub working_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -279,96 +268,6 @@ pub async fn list_artifacts(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": "failed to query artifacts" })),
-            )
-                .into_response()
-        }
-    }
-}
-
-/// POST /api/spine/artifacts — register a new artifact in Draft state.
-pub async fn register_artifact(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Json(req): Json<RegisterArtifactRequest>,
-) -> Response {
-    let workspace_id = req.workspace_id.trim();
-    if workspace_id.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "workspace_id is required" })),
-        )
-            .into_response();
-    }
-    if let Err(r) = require_workspace_access(&state.pool, &auth_user, workspace_id).await {
-        return r;
-    }
-
-    let pool = state.spine.pool();
-    let artifact_id = format!("art_{}", ulid::Ulid::new());
-
-    let result = sqlx::query(
-        "INSERT INTO artifacts (artifact_id, kind, name, owner, created_by, state, current_version, workspace_id) \
-         VALUES ($1, $2, $3, $4, $5, 'draft', 0, $6)",
-    )
-    .bind(&artifact_id)
-    .bind(&req.kind)
-    .bind(&req.name)
-    .bind(&req.owner)
-    .bind("dashboard")
-    .bind(workspace_id)
-    .execute(pool)
-    .await;
-
-    match result {
-        Ok(_) => {
-            emit(
-                &state,
-                workspace_id,
-                &format!("forge:{artifact_id}"),
-                "forge",
-                "dashboard",
-                "artifact.registered",
-                serde_json::json!({
-                    "artifact_id": artifact_id,
-                    "kind": req.kind,
-                    "name": req.name,
-                    "owner": req.owner,
-                    "description": req.description,
-                    "working_dir": req.working_dir,
-                }),
-            )
-            .await;
-
-            let artifact = sqlx::query_as::<_, SpineArtifact>(
-                "SELECT artifact_id AS id, kind, name, state, owner, current_version, consumers, \
-                 external_ref, created_at, updated_at, last_observed_at \
-                 FROM artifacts WHERE artifact_id = $1",
-            )
-            .bind(&artifact_id)
-            .fetch_one(pool)
-            .await;
-
-            match artifact {
-                Ok(a) => (
-                    StatusCode::CREATED,
-                    Json(serde_json::json!({ "artifact": a })),
-                )
-                    .into_response(),
-                Err(e) => {
-                    tracing::error!("failed to read back artifact: {e}");
-                    (
-                        StatusCode::CREATED,
-                        Json(serde_json::json!({ "artifact": { "id": artifact_id } })),
-                    )
-                        .into_response()
-                }
-            }
-        }
-        Err(e) => {
-            tracing::error!("failed to register artifact: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "failed to register artifact" })),
             )
                 .into_response()
         }

@@ -9,8 +9,8 @@ use crate::intent::Intent;
 
 /// Output of a successful decomposition — the per-file artifacts a
 /// decomposer synthesized. Callers are responsible for registering them
-/// with the factory (e.g. via Forge's `POST /api/artifacts` endpoint or
-/// a direct `artifact.registered` spine emission).
+/// with the factory (via a direct `artifact.registered` spine emission;
+/// see forge's auto-trigger handler for the canonical pattern).
 #[derive(Debug)]
 pub struct DecompositionResult {
     pub artifacts: Vec<Artifact>,

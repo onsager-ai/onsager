@@ -3,7 +3,6 @@ import { api, type SpineArtifact } from "@/lib/api"
 import { useActiveWorkspace } from "@/lib/workspace"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -12,9 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ChevronRight, Plus } from "lucide-react"
+import { ChevronRight } from "lucide-react"
 import { Link } from "react-router-dom"
-import { CreateArtifactSheet } from "@/components/factory/CreateArtifactSheet"
 import { usePageHeader } from "@/components/layout/PageHeader"
 
 const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -38,20 +36,11 @@ export function ArtifactsPage() {
 
   return (
     <div className="space-y-4 md:space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="hidden text-2xl font-bold tracking-tight md:block">Artifacts</h1>
-          <p className="text-sm text-muted-foreground">
-            Production artifacts managed by Forge.
-          </p>
-        </div>
-        <CreateArtifactSheet>
-          <Button size="sm" className="shrink-0">
-            <Plus className="h-4 w-4" data-icon="inline-start" />
-            <span className="hidden sm:inline">Register Artifact</span>
-            <span className="sm:hidden">New</span>
-          </Button>
-        </CreateArtifactSheet>
+      <div>
+        <h1 className="hidden text-2xl font-bold tracking-tight md:block">Artifacts</h1>
+        <p className="text-sm text-muted-foreground">
+          Production artifacts managed by Forge. Created automatically by active workflow triggers.
+        </p>
       </div>
 
       <Card>
@@ -66,14 +55,8 @@ export function ArtifactsPage() {
           ) : artifacts.length === 0 ? (
             <div className="py-8 text-center">
               <p className="text-muted-foreground">
-                No artifacts yet. Register one to start the factory pipeline.
+                No artifacts yet. Activate a workflow on a project to start the factory pipeline.
               </p>
-              <CreateArtifactSheet>
-                <Button variant="outline" className="mt-4">
-                  <Plus className="h-4 w-4" data-icon="inline-start" />
-                  Register your first artifact
-                </Button>
-              </CreateArtifactSheet>
             </div>
           ) : (
             <>

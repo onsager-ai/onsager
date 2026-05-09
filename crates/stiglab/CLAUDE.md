@@ -69,9 +69,11 @@ What this means for stiglab specifically:
     `routes::portal::proxy` so dashboard fetches keep working pre–
     API_BASE cutover. Stiglab no longer depends on `onsager-registry`.
   - Spine reads + writes (`GET /api/spine/events`,
-    `GET/POST /api/spine/artifacts`, `GET /api/spine/artifacts/:id`,
+    `GET /api/spine/artifacts`, `GET /api/spine/artifacts/:id`,
     `POST /api/spine/artifacts/:id/{retry,abort,override-gate}`) —
-    #222 follow-up #259. Portal owns the dashboard-facing reads
+    #222 follow-up #259, narrowed by #278 (no artifact creation
+    endpoint; forge's auto-trigger flow is the sole producer of
+    `artifact.registered`). Portal owns the dashboard-facing reads
     (against `events_ext` / `artifacts`) and the single-event emits
     (via `EventStore::append_ext`). Stiglab still keeps
     `SpineEmitter` for the agent-runtime emits

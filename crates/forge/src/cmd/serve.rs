@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use axum::response::IntoResponse;
 use tokio::sync::RwLock;
 
-use onsager_artifact::Kind;
 use onsager_spine::EventStore;
 
 use crate::core::artifact_store::ArtifactStore;
@@ -723,9 +722,52 @@ impl TriggerHandler for WorkflowTriggerHandler {
                 );
                 return Ok(());
             }
+            emit_artifact_registered(&spine, &workflow, &artifact).await;
             emit_stage_event(&spine, &workflow, &stage_event).await;
         }
         Ok(())
+    }
+}
+
+/// Emit `artifact.registered` on the spine for an artifact created by the
+/// auto-trigger flow. Single producer of the event since #278 collapsed the
+/// manual portal route; consumed by Ising's analyzers
+/// (`crates/ising/src/cmd/serve.rs:209`).
+async fn emit_artifact_registered(
+    spine: &EventStore,
+    workflow: &Workflow,
+    artifact: &onsager_artifact::Artifact,
+) {
+    let metadata = onsager_spine::EventMetadata {
+        correlation_id: None,
+        causation_id: None,
+        actor: "forge".to_string(),
+    };
+    let workspace_id = workflow.workspace_id.as_str();
+    let stream_id = format!("forge:{}", artifact.artifact_id);
+    let data = serde_json::json!({
+        "artifact_id": artifact.artifact_id.as_str(),
+        "kind": artifact.kind.to_string(),
+        "name": artifact.name,
+        "owner": artifact.owner,
+        "workspace_id": workspace_id,
+    });
+    if let Err(e) = spine
+        .append_ext(
+            workspace_id,
+            &stream_id,
+            "forge",
+            "artifact.registered",
+            data,
+            &metadata,
+            None,
+        )
+        .await
+    {
+        tracing::warn!(
+            artifact_id = %artifact.artifact_id,
+            "forge: failed to emit artifact.registered: {e}"
+        );
     }
 }
 
@@ -795,10 +837,7 @@ fn build_api(shared: SharedForge) -> axum::Router {
     axum::Router::new()
         .route("/api/health", get(health))
         .route("/api/status", get(status))
-        .route(
-            "/api/artifacts",
-            get(list_artifacts).post(register_artifact),
-        )
+        .route("/api/artifacts", get(list_artifacts))
         .route("/api/artifacts/{id}", get(get_artifact))
         .with_state(shared)
 }
@@ -824,85 +863,6 @@ async fn status(
             "version": a.current_version,
         })).collect::<Vec<_>>(),
     }))
-}
-
-#[derive(serde::Deserialize)]
-struct RegisterRequest {
-    kind: String,
-    name: String,
-    owner: String,
-}
-
-async fn register_artifact(
-    axum::extract::State(shared): axum::extract::State<SharedForge>,
-    axum::Json(req): axum::Json<RegisterRequest>,
-) -> axum::response::Response {
-    let kind = match req.kind.as_str() {
-        "code" => Kind::Code,
-        "document" => Kind::Document,
-        "pull_request" => Kind::PullRequest,
-        other => Kind::Custom(other.to_string()),
-    };
-
-    // Build the artifact up front so we know the ULID before touching any
-    // store. With a spine, the DB row is written first; only on success do
-    // we insert into the in-memory cache. Issue #30: the old code did the
-    // two writes in the other order and ignored the DB error, producing a
-    // ghost artifact on failure.
-    let artifact =
-        onsager_artifact::Artifact::new(kind, req.name.clone(), req.owner.clone(), "forge", vec![]);
-    let id = artifact.artifact_id.clone();
-
-    let spine = {
-        let state = shared.read().await;
-        state.spine.clone()
-    };
-
-    if let Some(spine) = spine.as_ref()
-        && let Err(e) = persistence::insert_artifact_row(
-            spine.pool(),
-            id.as_str(),
-            &req.kind,
-            &req.name,
-            &req.owner,
-            None,
-        )
-        .await
-    {
-        // Full sqlx::Error goes to the server log (which may carry
-        // constraint names, column types, etc.); the HTTP client
-        // only sees a stable, opaque error tag plus the artifact ID
-        // it submitted for correlation.
-        tracing::error!(artifact_id = %id, "forge: failed to register artifact in spine: {e}");
-        return (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            axum::Json(serde_json::json!({
-                "error": "failed to persist artifact",
-                "artifact_id": id.as_str(),
-            })),
-        )
-            .into_response();
-    }
-
-    {
-        let mut state = shared.write().await;
-        state.pipeline.store.insert(artifact);
-    }
-
-    (
-        axum::http::StatusCode::CREATED,
-        axum::Json(serde_json::json!({
-            "artifact": {
-                "id": id.as_str(),
-                "kind": req.kind,
-                "name": req.name,
-                "owner": req.owner,
-                "state": "draft",
-                "current_version": 0,
-            }
-        })),
-    )
-        .into_response()
 }
 
 async fn list_artifacts(

@@ -114,7 +114,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "artifact.registered",
             schema_version: 1,
-            producers: &[Subsystem::Portal],
+            producers: &[Subsystem::Forge],
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
