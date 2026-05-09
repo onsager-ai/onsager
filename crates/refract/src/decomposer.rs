@@ -8,9 +8,12 @@ use thiserror::Error;
 use crate::intent::Intent;
 
 /// Output of a successful decomposition — the per-file artifacts a
-/// decomposer synthesized. Callers are responsible for registering them
-/// with the factory (e.g. via Forge's `POST /api/artifacts` endpoint or
-/// a direct `artifact.registered` spine emission).
+/// decomposer synthesized. Callers are responsible for landing them in
+/// the factory through forge's canonical registration path (insert the
+/// `artifacts` row, persist workflow state, then emit
+/// `artifact.registered` on the spine — see forge's auto-trigger
+/// handler in `crates/forge/src/cmd/serve.rs`). Emitting the event
+/// alone is not a complete registration.
 #[derive(Debug)]
 pub struct DecompositionResult {
     pub artifacts: Vec<Artifact>,

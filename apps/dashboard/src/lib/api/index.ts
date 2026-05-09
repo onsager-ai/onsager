@@ -60,7 +60,6 @@ export type {
   WorkflowRunStage,
   WorkflowRun,
   GitHubLabel,
-  RegisterArtifactRequest,
   ArtifactActionRequest,
   OverrideGateRequestBody,
   ArtifactActionResponse,

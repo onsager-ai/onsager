@@ -131,7 +131,6 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
     command: >
       cargo watch -q -w crates/forge -w crates/onsager-spine -w crates/onsager-artifact
-      -w crates/onsager-warehouse
       -x 'run -p forge -- serve'
 
   dashboard:

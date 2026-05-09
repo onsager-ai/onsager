@@ -558,14 +558,6 @@ export interface GitHubLabel {
   description: string | null;
 }
 
-export interface RegisterArtifactRequest {
-  kind: string;
-  name: string;
-  owner: string;
-  description?: string;
-  working_dir?: string;
-}
-
 export interface ArtifactActionRequest {
   reason?: string;
   actor?: string;

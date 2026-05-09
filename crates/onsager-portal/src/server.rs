@@ -217,10 +217,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // dashboard's API_BASE cutover (#222 Slice 6) can land
         // independently.
         .route("/api/spine/events", get(spine_handlers::list_events))
-        .route(
-            "/api/spine/artifacts",
-            get(spine_handlers::list_artifacts).post(spine_handlers::register_artifact),
-        )
+        .route("/api/spine/artifacts", get(spine_handlers::list_artifacts))
         .route(
             "/api/spine/artifacts/{id}",
             get(spine_handlers::get_artifact),

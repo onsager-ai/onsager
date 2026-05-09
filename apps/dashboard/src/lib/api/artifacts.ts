@@ -1,8 +1,6 @@
 import { request } from './client';
 import type {
-  SpineArtifact,
   ArtifactDetail,
-  RegisterArtifactRequest,
   ArtifactActionRequest,
   ArtifactActionResponse,
   OverrideGateRequestBody,
@@ -10,11 +8,6 @@ import type {
 
 export const artifacts = {
   getArtifact: (id: string) => request<{ artifact: ArtifactDetail }>(`/spine/artifacts/${id}`),
-  registerArtifact: (req: RegisterArtifactRequest) =>
-    request<{ artifact: SpineArtifact }>('/spine/artifacts', {
-      method: 'POST',
-      body: JSON.stringify(req),
-    }),
   retryArtifact: (id: string, body: ArtifactActionRequest = {}) =>
     request<ArtifactActionResponse>(`/spine/artifacts/${id}/retry`, {
       method: 'POST',
