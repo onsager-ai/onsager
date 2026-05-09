@@ -172,13 +172,6 @@ pub async fn dispatch_shaping_inner(
         }
     }
 
-    // Emit session-started spine event.
-    if let Some(ref spine) = state.spine {
-        let _ = spine
-            .emit_session_started(&session.id, &req.request_id, &target_node.id)
-            .await;
-    }
-
     Ok(DispatchOutcome::Created(session))
 }
 

@@ -124,21 +124,6 @@ impl SpineEmitter {
             .await
     }
 
-    /// Emit a session-started event.
-    pub async fn emit_session_started(
-        &self,
-        session_id: &str,
-        request_id: &str,
-        node_id: &str,
-    ) -> Result<i64, sqlx::Error> {
-        self.emit(FactoryEventKind::StiglabSessionCreated {
-            session_id: session_id.to_string(),
-            request_id: request_id.to_string(),
-            node_id: node_id.to_string(),
-        })
-        .await
-    }
-
     /// Emit a session-completed event.
     ///
     /// `artifact_id` links the session to the factory pipeline artifact it
@@ -225,15 +210,9 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         FactoryEventKind::ArtifactRegistered { artifact_id, .. }
         | FactoryEventKind::ArtifactStateChanged { artifact_id, .. }
         | FactoryEventKind::ArtifactVersionCreated { artifact_id, .. }
-        | FactoryEventKind::ArtifactLineageExtended { artifact_id, .. }
-        | FactoryEventKind::ArtifactQualityRecorded { artifact_id, .. }
-        | FactoryEventKind::ArtifactRouted { artifact_id, .. }
         | FactoryEventKind::ArtifactArchived { artifact_id, .. }
         | FactoryEventKind::BundleSealed { artifact_id, .. }
-        | FactoryEventKind::GitBranchCreated { artifact_id, .. }
-        | FactoryEventKind::GitCommitPushed { artifact_id, .. }
         | FactoryEventKind::GitPrOpened { artifact_id, .. }
-        | FactoryEventKind::GitPrReviewReceived { artifact_id, .. }
         | FactoryEventKind::GitCiCompleted { artifact_id, .. }
         | FactoryEventKind::GitPrMerged { artifact_id, .. }
         | FactoryEventKind::GitPrClosed { artifact_id, .. }
@@ -251,7 +230,6 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::SynodicEscalationResolved { artifact_id, .. }
         | FactoryEventKind::SynodicEscalationTimedOut { artifact_id, .. }
         | FactoryEventKind::SynodicGateResolutionProposed { artifact_id, .. }
-        | FactoryEventKind::DeliverableUpdated { artifact_id, .. }
         | FactoryEventKind::StageEntered { artifact_id, .. }
         | FactoryEventKind::StageGatePassed { artifact_id, .. }
         | FactoryEventKind::StageGateFailed { artifact_id, .. }
@@ -260,20 +238,8 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::StiglabSessionFailed { artifact_id, .. } => artifact_id.as_deref(),
         // Variants below name no artifact — system / cross-workspace
         // telemetry. Fall back to "default".
-        FactoryEventKind::DeliverySucceeded { .. }
-        | FactoryEventKind::DeliveryFailed { .. }
-        | FactoryEventKind::DeliverableCreated { .. }
-        | FactoryEventKind::ForgeInsightObserved { .. }
-        | FactoryEventKind::ForgeIdleTick
-        | FactoryEventKind::ForgeStateChanged { .. }
-        | FactoryEventKind::StiglabSessionCreated { .. }
-        | FactoryEventKind::StiglabSessionDispatched { .. }
-        | FactoryEventKind::StiglabSessionRunning { .. }
+        FactoryEventKind::ForgeInsightObserved { .. }
         | FactoryEventKind::StiglabSessionAborted { .. }
-        | FactoryEventKind::StiglabEventUpgraded { .. }
-        | FactoryEventKind::StiglabNodeRegistered { .. }
-        | FactoryEventKind::StiglabNodeDeregistered { .. }
-        | FactoryEventKind::StiglabNodeHeartbeatMissed { .. }
         | FactoryEventKind::SynodicRuleProposed { .. }
         | FactoryEventKind::SynodicRuleApproved { .. }
         | FactoryEventKind::SynodicRuleDisabled { .. }

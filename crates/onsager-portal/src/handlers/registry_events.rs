@@ -40,7 +40,9 @@ mod tests {
         assert!(first["kind"].as_str().is_some());
         assert!(first["producers"].as_array().is_some());
         assert!(first["consumers"].as_array().is_some());
-        assert!(first["audit_only"].as_bool().is_some());
+        assert!(first["diagnostic_only"].as_bool().is_some());
+        // `reason` is `Option<&'static str>` — present in JSON, may be null.
+        assert!(first.get("reason").is_some());
     }
 
     #[tokio::test]

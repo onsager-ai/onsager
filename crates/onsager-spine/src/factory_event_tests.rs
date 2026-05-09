@@ -17,15 +17,6 @@ mod tests {
     }
 
     #[test]
-    fn forge_event_types() {
-        assert_eq!(
-            FactoryEventKind::ForgeIdleTick.event_type(),
-            "forge.idle_tick"
-        );
-        assert_eq!(FactoryEventKind::ForgeIdleTick.stream_type(), "forge");
-    }
-
-    #[test]
     fn git_event_types_and_streams() {
         let event = FactoryEventKind::GitPrOpened {
             artifact_id: ArtifactId::new("art_git123"),

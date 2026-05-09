@@ -444,7 +444,18 @@ export interface EventManifestEntry {
   schema_version: number;
   producers: EventSubsystem[];
   consumers: EventSubsystem[];
-  audit_only: boolean;
+  /**
+   * True when no subsystem consumer is expected — the event is read by a
+   * non-subsystem concern (dashboard timeline, audit trail). Paired with a
+   * non-empty `reason`. Per spec #272, replaces the prior `audit_only`
+   * field.
+   */
+  diagnostic_only: boolean;
+  /**
+   * Why this row is diagnostic-only (e.g. "rendered in dashboard event
+   * timeline"). Required when `diagnostic_only` is true; null otherwise.
+   */
+  reason: string | null;
   description: string;
 }
 

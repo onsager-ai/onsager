@@ -34,15 +34,6 @@ pub async fn handle_agent_message(
             if let Err(e) = db::update_session_state(pool, &session_id, *state).await {
                 tracing::error!("failed to update session state: {e}");
             }
-            // Emit spine event when session transitions to Running
-            if *state == SessionState::Running
-                && let Some(spine) = spine
-            {
-                // We don't have request_id here, use task_id from the session as correlation
-                if let Err(e) = spine.emit_session_started(&session_id, "", node_id).await {
-                    tracing::warn!("failed to emit session_started spine event: {e}");
-                }
-            }
         }
         AgentMessage::SessionOutput {
             session_id,
