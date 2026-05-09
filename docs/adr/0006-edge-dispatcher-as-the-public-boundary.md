@@ -14,7 +14,7 @@
 ADR 0004's 2026-04-30 amendment named `portal` as the owner of
 clause 1 of the seam rule — the external HTTP boundary itself.
 Spec #222 carried that decision through six slices and a series of
-follow-ups (#257, #259, then commit `b601954` which finished
+follow-ups (#257, #259, and the final cleanup commit that landed
 sessions / tasks / nodes plus the dashboard `API_BASE` cutover).
 After all of that, every dashboard-facing `/api/*` route is
 *implemented* on portal: routes, handlers, schema, auth, spine
@@ -24,15 +24,20 @@ But the production deployment topology never caught up. The
 production image is a single Docker container deployed to Railway,
 and Railway exposes exactly one process to the outside. That
 process is `stiglab`. Portal runs inside the same container, bound
-to `127.0.0.1:3002` (`PORTAL_BIND` in `crates/stiglab/deploy/
-entrypoint.sh`). Synodic and forge run alongside, also internal. To
-make portal's routes reachable from the dashboard, stiglab carries
-a wildcard catch-all — `route("/api/{*path}", any(routes::portal::
-proxy))` in `crates/stiglab/src/server/mod.rs` — that
-loopback-forwards every `/api/*` request to portal at
-`config.portal_url`. PR #264 re-introduced this proxy after the
-Slice 6 cutover precisely because the dashboard could not reach
-portal otherwise.
+to `127.0.0.1:3002` via `PORTAL_BIND` in the stiglab deploy
+entrypoint (`crates/stiglab/deploy/entrypoint.sh`). Synodic and
+forge run alongside, also internal. To make portal's routes
+reachable from the dashboard, stiglab's router
+(`crates/stiglab/src/server/mod.rs`) carries a wildcard catch-all
+that loopback-forwards every `/api/*` request to portal at
+`config.portal_url`:
+
+```rust
+.route("/api/{*path}", any(routes::portal::proxy));
+```
+
+PR #264 re-introduced this proxy after the Slice 6 cutover
+precisely because the dashboard could not reach portal otherwise.
 
 The result is a structural tension that no further refactor inside
 the Onsager codebase can resolve:
@@ -92,16 +97,18 @@ Two further forces push toward resolution:
 
 Introduce a real edge dispatcher in the production deployment so
 the process-level boundary matches the route-level boundary that
-ADR 0004 established. Portal becomes the externally-reachable
-process for `/api/*`. Stiglab is externally reachable only for
-`/agent/ws` (the agent WebSocket — the one route stiglab still
-legitimately owns). The stiglab catch-all proxy and
-`crates/stiglab/src/server/routes/portal.rs` are deleted.
+ADR 0004 established. The dispatcher becomes the only
+externally-reachable process; it routes `/api/*` to portal (which
+keeps end-to-end ownership of those routes) and `/agent/ws` to
+stiglab (the one route stiglab still legitimately owns). No
+Onsager subsystem listens on a public port. The stiglab catch-all
+proxy and the `crates/stiglab/src/server/routes/portal.rs` module
+are deleted.
 
-Concretely: add Caddy to the production Docker image (`crates/
-stiglab/deploy/Dockerfile`). The entrypoint starts Caddy on
-`$PORT` (the port Railway exposes); Caddy reverse-proxies
-`/api/*` → `127.0.0.1:3002` (portal), `/agent*` →
+Concretely: add Caddy to the production Docker image
+(`crates/stiglab/deploy/Dockerfile`). The entrypoint starts Caddy
+on `$PORT` (the port Railway exposes); Caddy reverse-proxies
+`/api/*` → `127.0.0.1:3002` (portal), `/agent/ws` →
 `127.0.0.1:3000` (stiglab), and `/*` → static files
 (`/app/static`, the dashboard build). The production Caddyfile
 under `crates/stiglab/deploy/Caddyfile` is a peer of
@@ -109,8 +116,8 @@ under `crates/stiglab/deploy/Caddyfile` is a peer of
 (loopback in production vs. inter-container in dev).
 
 The dev topology is unchanged. Same-origin behavior on the
-dashboard is unchanged. The dashboard's `apps/dashboard/src/lib/
-api/index.ts` keeps `/api` as the base — exactly because the
+dashboard is unchanged. The dashboard keeps `/api` as the base
+URL (`apps/dashboard/src/lib/api/index.ts`) — exactly because the
 dispatcher makes that true in both environments.
 
 Going forward, the rule that owns this ADR is:
