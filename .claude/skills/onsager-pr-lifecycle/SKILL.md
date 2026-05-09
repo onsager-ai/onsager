@@ -276,8 +276,56 @@ tags. The harness forwards them as user messages.
   PR is created (or the user asks you to watch it).
 - Unsubscribe with `mcp__github__unsubscribe_pr_activity` when done — not
   strictly necessary but cleaner.
-- Events are already filtered to CI failures + reviews. Treat each as
-  actionable; skip only if it's a duplicate of one you just addressed.
+- Treat each event as actionable; skip only if it's a duplicate of one you
+  just addressed.
+
+### What the subscription does NOT cover
+
+The subscription is **not** an "all CI events" feed. It's filtered to issue
+comments and review activity, plus a small set of well-known check_run
+state changes. In practice this leaks the following silent-failure
+surfaces, observed on real PRs:
+
+- **Commit statuses.** GitHub's `status` API is a separate channel from
+  `check_run`. Per-PR Railway deploys, GitGuardian, and any GitHub App
+  that posts via the legacy statuses API fire here, not as check_runs.
+  No `<github-webhook-activity>` event arrives — the failure is only
+  visible if you call `pull_request_read get_status` directly.
+- **`check_run` completion transitions.** The subscription fires on some
+  state changes but is not reliable for "the rust.yml `build` job just
+  finished failure". An in-progress check that completes after you've
+  ended your turn does not necessarily wake the session.
+
+PR #279 hit the first failure mode — Railway's deploy failure landed as a
+commit status, no webhook fired, and the agent ended its turn assuming
+the subscription would surface CI completion. It didn't, and the user
+had to flag it manually. The post-push sweep below closes the gap.
+
+### Post-push CI sweep (mandatory)
+
+Once the PR is open and you've subscribed, run this sweep **before
+declaring "all green" or ending the turn**:
+
+1. Read both surfaces explicitly:
+   - `pull_request_read` with `method: get_status` — pulls every commit
+     status for the head SHA. Treat any `state=failure` as actionable
+     even if no webhook fired.
+   - `pull_request_read` with `method: get_check_runs` — pulls every
+     check_run. Treat any `conclusion=failure` as actionable.
+2. Any check still `in_progress` or `queued` is **not** ground for
+   "completed" — record a TodoWrite item like *"Re-poll PR #N CI
+   ~5 min post-push"* and check it off only after a follow-up sweep
+   shows the check finished. Don't sleep-poll inside the same turn;
+   end the turn and let the user (or a subsequent webhook event) bring
+   you back.
+3. If the sweep returns nothing actionable but checks are still
+   running, say so explicitly in the end-of-turn summary
+   ("`build` and `Agent` still running; will follow up") so the user
+   doesn't infer the PR is fully green.
+
+The sweep is cheap (two MCP calls) and is the only mechanical defense
+against the silent-failure surfaces above. Skipping it is how PR #279
+shipped a broken Railway deploy that the agent never noticed.
 
 ## Reporting back to the user
 
