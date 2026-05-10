@@ -7,8 +7,10 @@
   0006 (closes the stiglab carve-out for `/agent/ws`); refines
   ADR 0004's amendment by removing the remaining clause-1
   exception.
-- **Supersedes**: amends the rule clause of ADR 0006 (the
-  `stiglab owns /agent/ws` exception).
+- **Supersedes**: none. This ADR *amends* ADR 0006 — see the
+  Tracking issues field above and the rule statement in the
+  Decision section. ADR 0006 stays in force; only its
+  carve-out clause is closed.
 - **Superseded by**: none
 
 ## Context
