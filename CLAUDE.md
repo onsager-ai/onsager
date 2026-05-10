@@ -41,6 +41,71 @@ below in this file are by default `Identity impact: no`. ADRs themselves
 may carry either value — the flag tracks whether the ADR touches the
 four bullets above, not where the change lives.
 
+### Honoring commitment 3: claim-honesty checks
+
+Commitment 3 binds both directions. Code drifting from spec is a bug;
+shipping under a Plan item without having met it is the same bug from
+the other side. Before claiming a Plan item done — in a session message,
+a checkbox tick, or a PR description — pass these checks. The point is
+not to inflate scope; if a check exposes that the spec was wrong, amend
+the spec, then ship.
+
+- **"The main path works, so it's essentially done."** Plan items are
+  atomic. There is no "essentially." Either the item is complete, or
+  split it into `N.1` (done) and `N.2` (deferred, with reason) and
+  amend the spec before merge. "Essentially done" is narrative, not
+  state.
+- **"Tests pass, so the change is correct."** A green CI proves the
+  test suite did not catch a bug, not that your code is exercised.
+  Before claiming done, break the new code path locally (mutate one
+  line); the corresponding test must fail. Green CI plus uncovered new
+  logic is theater.
+- **"I'll handle the edge case as a follow-up."** A follow-up that has
+  no issue does not exist. Either open a sub-issue (`Part of #N`) and
+  narrow the current PR's stated scope, or do it now. Untracked defers
+  become permanent corners.
+- **"The workaround is fine; the proper fix is too invasive."** The
+  judgment may be right. Honesty requires one of: (a) amend the Plan
+  item to read "workaround, because X"; or (b) open a follow-up issue
+  for the proper fix and link it. Shipping a workaround under
+  unchanged Plan wording is silent scope reduction.
+- **"`cargo check` passes, so the refactor holds."** Compilation proves
+  types align, not that behavior is preserved. Refactors carry the
+  same proof obligation as features: tests pass and the changed paths
+  are exercised by them. Without that, you are shipping a hypothesis.
+- **"To be done, I should test every edge case I can think of."** No.
+  Done means the spec's Test section is satisfied. If the Test section
+  is too thin or too fat, the spec is wrong — amend it. Silently
+  exceeding or shrinking the bar is the same defect as silently
+  delivering less than the Plan.
+
+### Named failure modes
+
+The rebuttals above point at recurring shapes. Naming them lets PR
+review, spec comments, and session messages reference them in one
+token instead of re-describing the failure each time. When you spot
+one — in your own work or someone else's — name it.
+
+- **claim ≠ reality** — the umbrella name for this whole annex: a
+  session asserts done while reality has not met the spec.
+- **silent scope reduction** — shipping a workaround, partial fix, or
+  narrowed behavior under a Plan item whose wording still describes
+  the full scope. The workaround may be the right call; shipping it
+  without amending the Plan or opening a follow-up is the defect.
+- **theater coverage** — green CI plus tests that do not actually
+  exercise the new code path. Catch it by mutating a line of new code
+  locally; if no test fails, the coverage is theater.
+- **narrative-as-state** — using prose like "essentially done",
+  "basically works", "mostly complete" in place of an atomic Plan
+  item state. Plan items are binary; either complete, or split and
+  amended.
+- **untracked defer** — a follow-up that lives only in a session
+  message or PR description, with no issue. It evaporates at
+  squash-merge.
+
+These names apply symmetrically: catching them in your own draft
+before claiming done is the same skill as flagging them in review.
+
 See [ADR 0005](docs/adr/0005-s5-governance-scales-with-scale.md) for
 the meta-rule on how this S5 layer evolves with operational scale.
 
