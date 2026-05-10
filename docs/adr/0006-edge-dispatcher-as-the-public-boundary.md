@@ -288,3 +288,32 @@ ADR (linked under Tracking issues above). Status as of
 - **A separate ADR for the dev Caddyfile**, which already exists
   and works — this ADR adopts the dev shape into production, not
   the other way around.
+
+## Amendment 2026-05-09 — stiglab carve-out closed
+
+The Decision section above carved out one exception to portal's
+ownership of clause 1: *Portal owns `/api/*`; **stiglab owns
+`/agent/ws`***. The carve-out was a pragmatic compromise to keep
+this ADR's scope focused on the dispatcher work; it explicitly
+preserved stiglab's ownership of the agent control-plane
+WebSocket.
+
+[ADR 0008](0008-portal-owns-the-agent-control-plane.md) closes
+that carve-out. Portal becomes the route owner for `/agent/ws`
+too, hosting it as a transparent WebSocket proxy that forwards
+bytes bidirectionally to stiglab on loopback. Stiglab continues
+to own the agent protocol (`AgentMessage`, node registration,
+task dispatch) but stops accepting external connections.
+
+The amended rule statement (as of 2026-05-09):
+
+> The externally-reachable process is the edge dispatcher. The
+> Onsager subsystems (`portal`, `stiglab`, `synodic`, `forge`,
+> `ising`) are reachable only through the dispatcher's routing
+> config. Portal owns every external route; no subsystem
+> carve-outs.
+
+Wherever this ADR's body says *"stiglab owns `/agent/ws`"* or
+*"stiglab is externally reachable only for `/agent/ws`"*, read it
+as the pre-amendment state. The post-amendment state is what ADR
+0008 specifies.
