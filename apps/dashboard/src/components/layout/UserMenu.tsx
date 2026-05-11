@@ -1,4 +1,4 @@
-import { ChevronsUpDown, LogOut, Monitor, Moon, Settings, Sun } from "lucide-react"
+import { Building2, ChevronsUpDown, LogOut, Monitor, Moon, Settings, Sun } from "lucide-react"
 import { Link } from "react-router-dom"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useAuth } from "@/lib/auth"
+import { useOptionalActiveWorkspace } from "@/lib/workspace"
 
 // `icon`: legacy circular avatar button (kept for any non-sidebar use).
 // `row`:  full-width pill used in the sidebar footer — avatar + label +
@@ -24,6 +25,7 @@ export interface UserMenuProps {
 export function UserMenu({ variant = "icon" }: UserMenuProps) {
   const { user, logout } = useAuth()
   const { setTheme } = useTheme()
+  const activeWorkspace = useOptionalActiveWorkspace()
 
   // Auth is always-on as of #193 — `user` is non-null here for any
   // mounted UserMenu (it lives behind ProtectedRoute).
@@ -89,9 +91,17 @@ export function UserMenu({ variant = "icon" }: UserMenuProps) {
             <DropdownMenuSeparator />
           </>
         )}
+        {activeWorkspace && (
+          <DropdownMenuItem
+            render={<Link to={`/workspaces/${activeWorkspace.slug}/settings`} />}
+          >
+            <Building2 className="mr-2 h-4 w-4" />
+            Workspace settings
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem render={<Link to="/settings" />}>
           <Settings className="mr-2 h-4 w-4" />
-          Settings
+          Account settings
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Theme</DropdownMenuLabel>
