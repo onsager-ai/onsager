@@ -15,6 +15,7 @@ pub mod projects;
 pub mod pull_request;
 pub mod registry_events;
 pub mod registry_triggers;
+pub mod runs;
 pub mod sessions;
 pub mod spec_link;
 pub mod spine;

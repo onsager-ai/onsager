@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use futures_util::stream;
+use onsager_spine::EventMetadata;
 use serde::Deserialize;
 use std::convert::Infallible;
 use std::time::Duration;
@@ -152,6 +153,66 @@ pub async fn get_session(
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
         }
     }
+}
+
+/// POST /api/sessions/:id/cancel — emit `portal.session_cancel_requested`
+/// onto the spine. Stiglab's listener forwards a `CancelSession` to the
+/// session's agent (spec #303). Best-effort: terminal sessions / offline
+/// nodes log + drop the cancel.
+pub async fn cancel_session(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(session_id): Path<String>,
+) -> Response {
+    let workspace_id = match authorize_session_read(&state, &auth_user, &session_id).await {
+        Ok(ws) => ws,
+        Err(r) => return r,
+    };
+
+    // Resolve workspace for the spine emit; legacy personal sessions
+    // (no workspace) fall back to `"default"` to match the tasks
+    // handler's convention.
+    let ws_for_emit = workspace_id.as_deref().unwrap_or("default").to_string();
+
+    let metadata = EventMetadata {
+        correlation_id: None,
+        causation_id: None,
+        actor: auth_user.user_id.clone(),
+    };
+    let data = serde_json::json!({
+        "session_id": session_id,
+        "actor": auth_user.user_id,
+    });
+
+    if let Err(e) = state
+        .spine
+        .append_ext(
+            &ws_for_emit,
+            &session_id,
+            "portal",
+            "portal.session_cancel_requested",
+            data,
+            &metadata,
+            None,
+        )
+        .await
+    {
+        tracing::error!(
+            session_id = %session_id,
+            "failed to emit portal.session_cancel_requested: {e}"
+        );
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "failed to enqueue cancel" })),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "ok": true })),
+    )
+        .into_response()
 }
 
 /// GET /api/sessions/:id/logs — SSE stream of log chunks.

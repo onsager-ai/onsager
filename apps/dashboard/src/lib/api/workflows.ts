@@ -7,6 +7,8 @@ import type {
   CreateWorkflowRequest,
   CreateWorkflowStage,
   WorkflowRun,
+  RunDetail,
+  RunLinkedSession,
 } from './types';
 
 // Backend read shapes. Stiglab returns workflows with the unified
@@ -197,6 +199,25 @@ export const workflows = {
     request<{ runs: WorkflowRun[] }>(
       `/workflows/${encodeURIComponent(id)}/runs?limit=${limit}`,
     ),
+  // Run detail hub (#303). Backend returns the projected run alongside
+  // the parent workflow's backend shape; reuse `workflowFromBackend` so
+  // the rest of the dashboard sees the same nested `Workflow` shape it
+  // already consumes from `getWorkflow`.
+  getRun: async (runId: string): Promise<RunDetail> => {
+    const raw = await request<{
+      run: WorkflowRun;
+      workflow: BackendWorkflow;
+      stages: BackendWorkflowStage[];
+      sessions: RunLinkedSession[];
+    }>(`/runs/${encodeURIComponent(runId)}`);
+    const workflow = workflowFromBackend(raw.workflow, raw.stages);
+    return {
+      run: raw.run,
+      workflow,
+      stages: workflow.stages,
+      sessions: raw.sessions,
+    };
+  },
   // Manual / replay trigger fires (#241 — Category 4 of the trigger
   // taxonomy umbrella #236). Both endpoints emit a `trigger.fired`
   // spine event the workflow runtime consumes, plus a

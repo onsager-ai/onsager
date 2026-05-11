@@ -201,6 +201,34 @@ async fn run_server(
                 }
             });
         }
+        // portal.session_cancel_requested listener (spec #303).
+        // Portal owns POST /api/sessions/:id/cancel; this listener
+        // forwards CancelSession to the agent WebSocket.
+        {
+            let listener_store = spine.store_clone();
+            let listener_state = state.clone();
+            tokio::spawn(async move {
+                let since = match listener_store.max_event_id().await {
+                    Ok(cursor) => cursor,
+                    Err(e) => {
+                        tracing::warn!(
+                            "stiglab: max_event_id lookup failed ({e}); starting \
+                             session_cancel_requested listener from the beginning"
+                        );
+                        None
+                    }
+                };
+                if let Err(e) = stiglab::server::session_cancel_requested_listener::run(
+                    listener_store,
+                    listener_state,
+                    since,
+                )
+                .await
+                {
+                    tracing::error!("stiglab: session_cancel_requested listener exited: {e}");
+                }
+            });
+        }
     }
 
     // Start built-in runner if enabled

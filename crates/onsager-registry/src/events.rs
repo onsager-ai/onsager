@@ -279,6 +279,15 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: None,
             description: "Dashboard task request from portal; stiglab dispatches the session to an agent node.",
         },
+        EventDefinition {
+            kind: "portal.session_cancel_requested",
+            schema_version: 1,
+            producers: &[Subsystem::Portal],
+            consumers: &[Subsystem::Stiglab],
+            diagnostic_only: false,
+            reason: None,
+            description: "Dashboard cancel-session request from portal (spec #303); stiglab forwards a CancelSession to the session's agent node.",
+        },
         // -- Synodic events -------------------------------------------------
         // Per spec #285: the redundant `synodic.gate_evaluated` /
         // `gate_denied` / `gate_modified` summary variants were dropped;

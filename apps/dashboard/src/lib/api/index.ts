@@ -59,6 +59,8 @@ export type {
   StageRunStatus,
   WorkflowRunStage,
   WorkflowRun,
+  RunDetail,
+  RunLinkedSession,
   GitHubLabel,
   ArtifactActionRequest,
   OverrideGateRequestBody,
