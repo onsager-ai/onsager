@@ -27,11 +27,17 @@ export function WorkflowArtifactsTab({ runs }: { runs: WorkflowRun[] }) {
     [runs],
   )
 
+  // Artifacts move slowly compared to runs — kind/state/version churn on
+  // human timescales. Up to 50 runs means up to 50 parallel artifact
+  // fetches per interval, so we poll at 30s and pause when the tab isn't
+  // visible. PR 2b's workflow-scoped artifact route folds this into one
+  // request and lets us drop the per-item polling entirely.
   const queries = useQueries({
     queries: artifactIds.map((id) => ({
       queryKey: ["artifact", id],
       queryFn: () => api.getArtifact(id),
-      refetchInterval: 5000,
+      refetchInterval: 30000,
+      refetchIntervalInBackground: false,
     })),
   })
 

@@ -42,17 +42,25 @@ export function ActiveRunsBanner({
     refetchInterval: 5000,
   })
 
+  // Landing-page fan-out: list workflows, then fetch runs per workflow.
+  // `allSettled` so one transient 5xx doesn't blank the whole banner —
+  // the workflows that *did* respond still render. Polls slower than the
+  // workflow-scoped query (15s vs 5s) because the N+1 pattern is more
+  // expensive than the single per-workflow call, and we pause when the
+  // tab isn't visible. PR 2b can replace this with a dedicated
+  // workspace-scoped "active runs" route.
   const workspaceQuery = useQuery({
     queryKey: ["active-runs", workspaceId],
     queryFn: async () => {
       const { workflows } = await api.listWorkflows(workspaceId)
-      const lists = await Promise.all(
+      const results = await Promise.allSettled(
         workflows.map((w) => api.getWorkflowRuns(w.id, 20).then((r) => r.runs)),
       )
-      return lists.flat()
+      return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []))
     },
     enabled: !workflowId,
-    refetchInterval: 5000,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
   })
 
   const runs = useMemo(() => {
