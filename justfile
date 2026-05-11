@@ -40,6 +40,7 @@ lint-rust:
     cargo run -p xtask --quiet -- lint-seams
     cargo run -p xtask --quiet -- check-api-contract
     cargo run -p xtask --quiet -- check-file-budget --mode=fail
+    ONSAGER_SKILLS_DIR=public-skills cargo run -p xtask --quiet -- check-tools-and-skills
 
 lint-ui:
     pnpm --filter dashboard lint
