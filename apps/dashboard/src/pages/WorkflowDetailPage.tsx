@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -13,11 +13,20 @@ import { api, type StageRunStatus, type WorkflowRun } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs"
+import { ActiveRunsBanner } from "@/components/factory/workflows/ActiveRunsBanner"
 import { ArtifactBadge } from "@/components/factory/workflows/ArtifactBadge"
 import { ArtifactFlowOverview } from "@/components/factory/workflows/ArtifactFlowOverview"
 import { WorkflowActions } from "@/components/factory/workflows/WorkflowActions"
+import { WorkflowArtifactsTab } from "@/components/factory/workflows/WorkflowArtifactsTab"
 import { WorkflowEventsCard } from "@/components/factory/workflows/WorkflowEventsCard"
 import { WorkflowSessionsCard } from "@/components/factory/workflows/WorkflowSessionsCard"
+import { WorkflowVerdictsTab } from "@/components/factory/workflows/WorkflowVerdictsTab"
 import { outputArtifactKind } from "@/components/factory/workflows/workflow-meta"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { useActiveWorkspace } from "@/lib/workspace"
@@ -34,6 +43,18 @@ const STATUS_ICON: Record<StageRunStatus, typeof Circle> = {
   blocked: CircleDot,
   passed: CircleCheck,
   failed: CircleX,
+}
+
+const TAB_VALUES = ["definition", "runs", "artifacts", "verdicts"] as const
+type TabValue = (typeof TAB_VALUES)[number]
+const DEFAULT_TAB: TabValue = "runs"
+
+function readTabFromHash(): TabValue {
+  if (typeof window === "undefined") return DEFAULT_TAB
+  const raw = window.location.hash.replace(/^#/, "")
+  return (TAB_VALUES as readonly string[]).includes(raw)
+    ? (raw as TabValue)
+    : DEFAULT_TAB
 }
 
 export function WorkflowDetailPage() {
@@ -56,7 +77,28 @@ export function WorkflowDetailPage() {
     refetchInterval: 5000,
   })
   const workflow = data?.workflow
-  const runs = runsData?.runs ?? []
+  const runs = useMemo(() => runsData?.runs ?? [], [runsData])
+
+  const [tab, setTab] = useState<TabValue>(() => readTabFromHash())
+
+  // Keep state and the URL hash in sync. Initial state is seeded from the
+  // hash so a `#artifacts` deep link lands on the right tab; subsequent
+  // navigations (browser back/forward, manual edits) update via the
+  // `hashchange` listener; tab clicks push via `replaceState` so the
+  // back stack doesn't fill with every glance at the page.
+  useEffect(() => {
+    const onHashChange = () => setTab(readTabFromHash())
+    window.addEventListener("hashchange", onHashChange)
+    return () => window.removeEventListener("hashchange", onHashChange)
+  }, [])
+
+  const handleTabChange = (value: TabValue) => {
+    setTab(value)
+    const next = `#${value}`
+    if (window.location.hash !== next) {
+      window.history.replaceState(null, "", next)
+    }
+  }
 
   // Mobile chrome: back arrow + workflow name + ⋯ overflow with
   // Pause/Delete live in the global top bar. Desktop renders the
@@ -117,77 +159,127 @@ export function WorkflowDetailPage() {
         </Badge>
       </div>
 
-      <Card>
-        <CardHeader className="px-4 pb-2 pt-4 md:px-6">
-          <CardTitle className="text-base">Stages</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 px-4 pb-4 md:px-6">
-          <div className="rounded-md border bg-muted/30 px-3 py-2">
-            <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-              Flow
-            </div>
-            <ArtifactFlowOverview
-              triggerLabel={workflow.trigger.label ?? ""}
-              stages={workflow.stages}
-            />
+      <Tabs value={tab} onValueChange={(v) => handleTabChange(v as TabValue)}>
+        <TabsList className="w-full justify-start overflow-x-auto md:w-auto">
+          <TabsTrigger value="definition">Definition</TabsTrigger>
+          <TabsTrigger value="runs">Runs</TabsTrigger>
+          <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
+          <TabsTrigger value="verdicts">Verdicts</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="definition" className="space-y-4 pt-4 md:space-y-6">
+          <DefinitionTab workflow={workflow} />
+        </TabsContent>
+
+        <TabsContent value="runs" className="space-y-4 pt-4 md:space-y-6">
+          <ActiveRunsBanner
+            workflowId={workflow.id}
+            workspaceId={workspace.id}
+            title="In-flight"
+          />
+          <RunsList runs={runs} stageIds={workflow.stages.map((s) => s.id)} />
+          <WorkflowEventsCard workflowId={workflow.id} runs={runs} />
+          <WorkflowSessionsCard runs={runs} />
+        </TabsContent>
+
+        <TabsContent value="artifacts" className="space-y-4 pt-4 md:space-y-6">
+          <WorkflowArtifactsTab runs={runs} />
+        </TabsContent>
+
+        <TabsContent value="verdicts" className="space-y-4 pt-4 md:space-y-6">
+          <WorkflowVerdictsTab
+            workspaceId={workspace.id}
+            runs={runs}
+            stages={workflow.stages}
+          />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+function DefinitionTab({
+  workflow,
+}: {
+  workflow: NonNullable<Awaited<ReturnType<typeof api.getWorkflow>>["workflow"]>
+}) {
+  return (
+    <Card>
+      <CardHeader className="px-4 pb-2 pt-4 md:px-6">
+        <CardTitle className="text-base">Stages</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 px-4 pb-4 md:px-6">
+        <div className="rounded-md border bg-muted/30 px-3 py-2">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+            Flow
           </div>
-          {workflow.stages.map((s, i) => {
-            const output = outputArtifactKind(s.gate_kind, s.artifact_kind)
-            const transforms = output !== s.artifact_kind
-            return (
-              <div
-                key={s.id}
-                className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
-              >
-                <div className="min-w-0 space-y-1">
-                  <div className="truncate text-sm font-medium">
-                    {i + 1}. {s.name}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                      {s.gate_kind}
-                    </span>
-                    <span className="text-muted-foreground/50">·</span>
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                      in
-                    </span>
-                    <ArtifactBadge kind={s.artifact_kind} />
-                    {transforms && (
-                      <>
-                        <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                          out
-                        </span>
-                        <ArtifactBadge kind={output} />
-                      </>
-                    )}
-                  </div>
+          <ArtifactFlowOverview
+            triggerLabel={workflow.trigger.label ?? ""}
+            stages={workflow.stages}
+          />
+        </div>
+        {workflow.stages.map((s, i) => {
+          const output = outputArtifactKind(s.gate_kind, s.artifact_kind)
+          const transforms = output !== s.artifact_kind
+          return (
+            <div
+              key={s.id}
+              className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
+            >
+              <div className="min-w-0 space-y-1">
+                <div className="truncate text-sm font-medium">
+                  {i + 1}. {s.name}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {s.gate_kind}
+                  </span>
+                  <span className="text-muted-foreground/50">·</span>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    in
+                  </span>
+                  <ArtifactBadge kind={s.artifact_kind} />
+                  {transforms && (
+                    <>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        out
+                      </span>
+                      <ArtifactBadge kind={output} />
+                    </>
+                  )}
                 </div>
               </div>
-            )
-          })}
-        </CardContent>
-      </Card>
+            </div>
+          )
+        })}
+      </CardContent>
+    </Card>
+  )
+}
 
-      <Card>
-        <CardHeader className="px-4 pb-2 pt-4 md:px-6">
-          <CardTitle className="text-base">Live artifacts</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 px-4 pb-4 md:px-6">
-          {runs.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">
-              No artifacts flowing yet. Tag an issue with the trigger label to
-              kick one off.
-            </p>
-          ) : (
-            runs.map((r) => <RunRow key={r.id} run={r} stageIds={workflow.stages.map((s) => s.id)} />)
-          )}
-        </CardContent>
-      </Card>
-
-      <WorkflowEventsCard workflowId={workflow.id} runs={runs} />
-      <WorkflowSessionsCard runs={runs} />
-    </div>
+function RunsList({
+  runs,
+  stageIds,
+}: {
+  runs: WorkflowRun[]
+  stageIds: string[]
+}) {
+  return (
+    <Card>
+      <CardHeader className="px-4 pb-2 pt-4 md:px-6">
+        <CardTitle className="text-base">Run history</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 px-4 pb-4 md:px-6">
+        {runs.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">
+            No runs yet. Tag an issue with the trigger label to kick one off.
+          </p>
+        ) : (
+          runs.map((r) => <RunRow key={r.id} run={r} stageIds={stageIds} />)
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

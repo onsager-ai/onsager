@@ -7,6 +7,7 @@ import { useActiveWorkspace } from "@/lib/workspace"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ActiveRunsBanner } from "@/components/factory/workflows/ActiveRunsBanner"
 import { WorkflowBuilderSheet } from "@/components/factory/workflows/WorkflowBuilderSheet"
 import { usePageHeader } from "@/components/layout/PageHeader"
 
@@ -35,6 +36,8 @@ export function WorkflowsPage() {
           Create workflow
         </Button>
       </div>
+
+      <ActiveRunsBanner workspaceId={workspace.id} />
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
