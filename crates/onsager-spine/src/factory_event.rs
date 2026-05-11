@@ -588,9 +588,9 @@ impl FactoryEventKind {
             Self::IntentSubmitted { .. }
             | Self::RefractDecomposed { .. }
             | Self::RefractFailed { .. } => "refract",
-            Self::TriggerFired { .. }
-            | Self::StageEntered { .. }
-            | Self::StageAdvanced { .. } => "workflow",
+            Self::TriggerFired { .. } | Self::StageEntered { .. } | Self::StageAdvanced { .. } => {
+                "workflow"
+            }
             // Audit-only fan-out for manual fires (#241). Lives in the
             // `audit` namespace so audit views can filter without
             // mixing with first-class workflow runtime events.
@@ -642,8 +642,9 @@ impl FactoryEventKind {
             Self::WorkflowManualTriggered { workflow_id, .. } => {
                 format!("audit:workflow:{workflow_id}")
             }
-            Self::StageEntered { artifact_id, .. }
-            | Self::StageAdvanced { artifact_id, .. } => format!("workflow:{artifact_id}"),
+            Self::StageEntered { artifact_id, .. } | Self::StageAdvanced { artifact_id, .. } => {
+                format!("workflow:{artifact_id}")
+            }
             Self::GateCheckUpdated {
                 repo_owner,
                 repo_name,

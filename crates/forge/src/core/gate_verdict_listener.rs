@@ -160,5 +160,4 @@ mod tests {
         };
         assert!(classify_verdict(kind).is_none());
     }
-
 }

@@ -19,9 +19,9 @@ use onsager_spine::EventStore;
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Transaction};
 
-use crate::registry::{AgentProfile, DEFAULT_WORKSPACE, RegistryStatus, TypeDefinition};
 #[cfg(test)]
 use crate::registry::SEED_ACTOR;
+use crate::registry::{AgentProfile, DEFAULT_WORKSPACE, RegistryStatus, TypeDefinition};
 
 /// An adapter catalog entry as it appears in a seed file.
 #[derive(Debug, Clone, Serialize, Deserialize)]

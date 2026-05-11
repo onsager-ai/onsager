@@ -120,8 +120,7 @@ pub async fn handle_agent_message(
                 // don't fabricate result events with empty fields.
                 if let Some(artifact_id) = artifact_id.as_deref()
                     && let Err(e) =
-                        emit_session_result_for_session(pool, spine, &session_id, artifact_id)
-                            .await
+                        emit_session_result_for_session(pool, spine, &session_id, artifact_id).await
                 {
                     tracing::warn!("failed to emit session_result_ready spine event: {e}");
                 }
