@@ -1,7 +1,7 @@
 # ADR 0008 — Portal owns the agent control plane
 
-- **Status**: Proposed
-- **Date**: 2026-05-09
+- **Status**: Accepted
+- **Date**: 2026-05-09 (accepted 2026-05-11)
 - **Identity impact**: no
 - **Tracking issues**: #291 (implementation spec). Amends ADR
   0006 (closes the stiglab carve-out for `/agent/ws`); refines

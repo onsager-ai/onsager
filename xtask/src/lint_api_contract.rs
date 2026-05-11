@@ -3,7 +3,7 @@
 //! Asserts that the dashboard ↔ backend HTTP surface stays wired in both
 //! directions:
 //!
-//! 1. Every backend route registered in stiglab + synodic has at least one
+//! 1. Every backend route registered in portal + synodic has at least one
 //!    dashboard caller, **or** sits on the [`EXTERNAL_ONLY_ROUTES`]
 //!    allowlist with a reason — webhooks, OAuth callbacks, agent WS,
 //!    dev-login, the governance proxy catchall, and bridge-debt
@@ -11,6 +11,10 @@
 //! 2. Every backend path the dashboard calls (from
 //!    `apps/dashboard/src/lib/api/*.ts` and `apps/dashboard/src/lib/sse.ts`)
 //!    matches a route registered on a backend subsystem.
+//! 3. Stiglab (and any other factory subsystem) registers only
+//!    loopback-only routes — every non-allowlisted entry is a hard
+//!    failure (ADR 0008: portal owns every external route, no
+//!    sibling-subsystem carve-outs).
 //!
 //! Backed by static parsing — `syn` for the Rust route chains, a small
 //! hand-rolled scanner for the TS string literals. No server boot, no
@@ -409,7 +413,8 @@ pub fn matches_route(dashboard: &str, backend: &str) -> bool {
 pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
     (
         "/agent/ws",
-        "agent worker WebSocket — agent binaries connect, not the dashboard",
+        "agent worker WebSocket — agent binaries connect, not the dashboard \
+         (portal terminates the upgrade and proxies to stiglab on loopback per ADR 0008)",
     ),
     (
         "/healthz",
@@ -464,6 +469,17 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "synodic internal health endpoint — ops-only, not a dashboard surface",
     ),
 ];
+
+/// Routes registered by stiglab (or any other factory subsystem) that
+/// are bound to loopback and never externally addressable. The only
+/// caller is portal's `/agent/ws` proxy on the same host. ADR 0008
+/// makes "portal owns every external route" mechanical — any stiglab
+/// route not on this list is a hard failure.
+pub const LOOPBACK_ONLY_ROUTES: &[(&str, &str)] = &[(
+    "/agent/ws-internal",
+    "stiglab loopback agent-protocol WebSocket — portal terminates \
+     `/agent/ws` from outside and proxies bytes here (ADR 0008)",
+)];
 
 // ---------------------------------------------------------------------------
 // Comparison
@@ -569,8 +585,31 @@ const DASHBOARD_SSE_SRC: &str = "apps/dashboard/src/lib/sse.ts";
 pub fn run() -> Result<()> {
     let root = workspace_root()?;
 
+    // Stiglab is loopback-only post-ADR 0008. Every route it registers
+    // must be on `LOOPBACK_ONLY_ROUTES`; anything else is a hard
+    // failure regardless of whether it has a dashboard caller.
+    let stiglab_routes = parse_rust_routes(&root.join(STIGLAB_SRC), "stiglab")?;
+    let mut loopback_violations: Vec<String> = Vec::new();
+    for r in &stiglab_routes {
+        if !LOOPBACK_ONLY_ROUTES.iter().any(|(p, _)| *p == r.path) {
+            loopback_violations.push(r.path.clone());
+        }
+    }
+    if !loopback_violations.is_empty() {
+        eprintln!(
+            "api-contract: stiglab registered external route(s) — portal owns \
+             every external route (ADR 0008):"
+        );
+        for path in &loopback_violations {
+            eprintln!("  {path}");
+        }
+        bail!(
+            "api-contract: {} stiglab route(s) outside the loopback-only allowlist",
+            loopback_violations.len()
+        );
+    }
+
     let mut backend = Vec::new();
-    backend.extend(parse_rust_routes(&root.join(STIGLAB_SRC), "stiglab")?);
     backend.extend(parse_rust_routes(&root.join(PORTAL_SRC), "portal")?);
     backend.extend(parse_rust_routes(&root.join(SYNODIC_SRC), "synodic")?);
 
@@ -579,6 +618,14 @@ pub fn run() -> Result<()> {
     dashboard.extend(parse_ts_calls(&root.join(DASHBOARD_SSE_SRC))?);
 
     let report = analyse(&backend, &dashboard);
+
+    if !LOOPBACK_ONLY_ROUTES.is_empty() {
+        eprintln!("api-contract: stiglab loopback-only routes:");
+        for (path, reason) in LOOPBACK_ONLY_ROUTES {
+            eprintln!("  {path} — {reason}");
+        }
+        eprintln!();
+    }
 
     if !report.allowed.is_empty() {
         eprintln!("api-contract: external-only allowances:");
@@ -696,10 +743,11 @@ mod tests {
         let root = workspace_root();
         let stiglab =
             parse_rust_routes(&root.join("crates/stiglab/src/server/mod.rs"), "stiglab").unwrap();
-        // Post-#222 Slice 6 stiglab owns only /agent/ws; /api/* goes to portal.
+        // Post-ADR 0008 stiglab is loopback-only; its sole route is
+        // `/agent/ws-internal` which portal's `/agent/ws` proxies to.
         assert!(!stiglab.is_empty(), "stiglab routes: {}", stiglab.len());
         let stiglab_paths: Vec<_> = stiglab.iter().map(|r| r.path.as_str()).collect();
-        assert!(stiglab_paths.contains(&"/agent/ws"));
+        assert!(stiglab_paths.contains(&"/agent/ws-internal"));
 
         let portal =
             parse_rust_routes(&root.join("crates/onsager-portal/src/server.rs"), "portal").unwrap();
@@ -841,7 +889,7 @@ mod tests {
             normalize_backend("/api/governance/{*path}", "stiglab"),
             "governance/{*x}"
         );
-        assert_eq!(normalize_backend("/agent/ws", "stiglab"), "agent/ws");
+        assert_eq!(normalize_backend("/agent/ws", "portal"), "agent/ws");
     }
 
     #[test]
@@ -998,11 +1046,12 @@ mod tests {
         // otherwise CI flips red on the same PR that ships the check.
         // This test is the canary: if this fails, either the lint has
         // regressed or somebody added a half-wired surface.
+        //
+        // Stiglab is loopback-only post-ADR 0008 — its routes are
+        // checked separately by the loopback-only guard in `run()`,
+        // not by the dashboard contract check below.
         let root = workspace_root();
         let mut backend = Vec::new();
-        backend.extend(
-            parse_rust_routes(&root.join("crates/stiglab/src/server/mod.rs"), "stiglab").unwrap(),
-        );
         backend.extend(
             parse_rust_routes(&root.join("crates/onsager-portal/src/server.rs"), "portal").unwrap(),
         );

@@ -1,6 +1,7 @@
 //! HTTP handlers — webhook ingress (split by GitHub event type) plus
 //! the user-facing `/api/auth/*` routes portal owns post-#222 Slice 5.
 
+pub mod agent_ws;
 pub mod auth;
 pub mod credentials;
 pub mod github_app;

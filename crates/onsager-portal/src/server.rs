@@ -8,14 +8,15 @@ use axum::routing::{any, delete, get, post, put};
 use crate::config::Config;
 use crate::gate::GateClient;
 use crate::handlers::{
-    auth as auth_handlers, credentials as credential_handlers, github_app as github_app_handlers,
-    governance as governance_handlers, installations as installation_handlers,
-    live_data as live_data_handlers, nodes as node_handlers, pats as pat_handlers,
-    projects as project_handlers, registry_events as registry_event_handlers,
-    registry_triggers as registry_trigger_handlers, sessions as session_handlers,
-    spine as spine_handlers, tasks as task_handlers, telegram_webhook,
-    triggers as trigger_handlers, webhook, workflow_kinds as workflow_kind_handlers,
-    workflows as workflow_handlers, workspaces as workspace_handlers,
+    agent_ws, auth as auth_handlers, credentials as credential_handlers,
+    github_app as github_app_handlers, governance as governance_handlers,
+    installations as installation_handlers, live_data as live_data_handlers,
+    nodes as node_handlers, pats as pat_handlers, projects as project_handlers,
+    registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
+    sessions as session_handlers, spine as spine_handlers, tasks as task_handlers,
+    telegram_webhook, triggers as trigger_handlers, webhook,
+    workflow_kinds as workflow_kind_handlers, workflows as workflow_handlers,
+    workspaces as workspace_handlers,
 };
 use crate::proxy_cache::ProxyCache;
 use crate::state::AppState;
@@ -65,6 +66,11 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/health", get(api_health))
+        // Agent control-plane WebSocket (ADR 0008). Portal terminates
+        // the upgrade and forwards bytes bidirectionally to stiglab
+        // on loopback (`ws://127.0.0.1:3000/agent/ws-internal`).
+        // Caddy in both dev and production routes `/agent/ws` here.
+        .route("/agent/ws", get(agent_ws::proxy_handler))
         .route("/webhooks/github", post(webhook::handle))
         .route("/api/webhooks/github", post(webhook::handle))
         .route("/api/github-app/webhook", post(webhook::handle))

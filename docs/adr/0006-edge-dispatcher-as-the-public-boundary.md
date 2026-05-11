@@ -1,7 +1,7 @@
 # ADR 0006 — Edge dispatcher as the public boundary
 
-- **Status**: Proposed
-- **Date**: 2026-05-09
+- **Status**: Accepted
+- **Date**: 2026-05-09 (accepted 2026-05-11)
 - **Identity impact**: no
 - **Tracking issues**: #283 (implementation spec); #222 (cleanup tail;
   the 2026-05-06 status update flagged the open infra-level dispatch

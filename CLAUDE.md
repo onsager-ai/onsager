@@ -141,12 +141,23 @@ dev-process pattern is filed as evidence for a future primitive.
 linked into the same binary. The `onsager` dispatcher has zero business
 dependencies -- it discovers subsystem binaries on PATH.
 
-`portal` is the **edge** subsystem — eventually the only one that hosts
-public HTTP routes (dashboard API, GitHub webhooks, OAuth, credential
-CRUD). Factory subsystems (`forge`, `stiglab`, `synodic`, `ising`) live
-behind the seam and coordinate exclusively via the spine. Spec #222
-promotes portal to first-class peer status; while that migration is in
-flight stiglab still owns the bulk of the external HTTP surface.
+`portal` is the **edge** subsystem — the only one that hosts public
+HTTP routes (dashboard API, GitHub webhooks, OAuth, credential CRUD,
+the agent control-plane WebSocket). Factory subsystems (`forge`,
+`stiglab`, `synodic`, `ising`) live behind the seam and coordinate
+exclusively via the spine. The route-level move landed via spec #222;
+the process-level move landed via [ADR 0006](docs/adr/0006-edge-dispatcher-as-the-public-boundary.md)
+(spec #283 — Caddy in front of portal in production) and
+[ADR 0008](docs/adr/0008-portal-owns-the-agent-control-plane.md)
+(spec #291 — portal terminates `/agent/ws` and proxies bytes to
+stiglab on loopback). Stiglab no longer accepts external
+connections at either layer.
+
+In production the externally-reachable process is Caddy (the edge
+dispatcher), bundled in the same image. Stiglab binds to
+`127.0.0.1:3000` and serves only `/agent/ws-internal`; portal binds
+to `127.0.0.1:3002` and owns every external route, including the
+public `/agent/ws` it forwards to stiglab over loopback.
 
 ## The seam rule (canonical)
 
@@ -168,6 +179,15 @@ registry-backed event types → API/UI contract enforcement). All six
 levers have landed and are CI-enforced via `lint-seams`,
 `check-api-contract`, and `check-events` (see status below); the
 seam rule is now mechanical, not review-time discipline.
+
+[ADR 0006](docs/adr/0006-edge-dispatcher-as-the-public-boundary.md)
+and [ADR 0008](docs/adr/0008-portal-owns-the-agent-control-plane.md)
+close the process-level half of clause 1: production runs Caddy as
+the edge dispatcher, portal owns 100% of the external HTTP surface
+(including `/agent/ws`), and stiglab is loopback-only. `xtask
+check-api-contract` enforces "every stiglab route is loopback-only"
+— any new route on a factory subsystem outside the
+loopback-only allowlist is a hard failure.
 
 Lever status (canonical: ADR 0004's adoption checklist). As of
 2026-04-30: all six levers landed.

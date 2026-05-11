@@ -299,3 +299,18 @@ change is required. The structural surgery — moving routes, schema, and
 the GitHub side-effects of `workflow_activation` — is scoped under
 spec #222 and gated on #149 (Lever D, landed) and #161 children A/B
 (workspace as first-class scope, landed).
+
+The *process-level* half of clause 1 (which Onsager process is
+externally reachable in production) lagged the code-level move: PR
+#264 re-introduced a stiglab catch-all proxy after #222 Slice 6 so
+dashboard requests could reach portal in Railway's single-container
+image. [ADR 0006](0006-edge-dispatcher-as-the-public-boundary.md)
+closes that gap by putting Caddy in front of portal in production
+(spec #283), and [ADR 0008](0008-portal-owns-the-agent-control-plane.md)
+closes the remaining `/agent/ws` carve-out by hosting it as a
+portal-owned WebSocket proxy that forwards bytes to stiglab on
+loopback (spec #291). After both land, every external route in the
+factory — including the agent control plane — is portal's, with
+zero sibling-subsystem carve-outs. `xtask check-api-contract`
+enforces this mechanically (any stiglab route outside the
+loopback-only allowlist is a hard failure).

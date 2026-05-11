@@ -20,8 +20,12 @@ coordinate exclusively via the spine.
 What this means for portal specifically:
 
 - **Allowed HTTP surfaces.** Public dashboard API, OAuth callbacks,
-  webhook receivers. Anything an external client (browser, GitHub,
-  future GitLab/Slack/Linear integrations) calls into.
+  webhook receivers, and the agent control-plane WebSocket
+  (`/agent/ws` — see ADR 0008). Anything an external client
+  (browser, GitHub, future GitLab/Slack/Linear integrations, agent
+  binaries) connects to. Portal owns 100% of the external HTTP
+  surface; stiglab is loopback-only and portal proxies bytes to it
+  over `127.0.0.1:3000/agent/ws-internal`.
 - **Forbidden HTTP surfaces.** Routes that exist only to be called by
   a sibling subsystem. Clause 2 still applies to portal — when portal
   needs `forge`/`stiglab`/`synodic`/`ising` to do work, it emits a
