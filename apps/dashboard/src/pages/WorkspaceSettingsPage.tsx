@@ -45,7 +45,7 @@ export function WorkspaceSettingsPage() {
         </p>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as TabValue)}>
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="workspace">Workspace</TabsTrigger>
           <TabsTrigger value="infrastructure">Infrastructure</TabsTrigger>
@@ -88,7 +88,7 @@ export function WorkspaceSettingsPage() {
 }
 
 function InfrastructureTab() {
-  const { data, isLoading } = useNodes()
+  const { data, isLoading, isError, error } = useNodes()
   const nodes = data?.nodes ?? []
 
   return (
@@ -102,6 +102,11 @@ function InfrastructureTab() {
       <CardContent className="px-4 md:px-6">
         {isLoading ? (
           <p className="py-8 text-center text-muted-foreground">Loading...</p>
+        ) : isError ? (
+          <p className="py-8 text-center text-sm text-destructive">
+            Failed to load nodes
+            {error instanceof Error ? `: ${error.message}` : "."}
+          </p>
         ) : (
           <NodeTable nodes={nodes} />
         )}

@@ -47,7 +47,7 @@ export function GovernanceEventsList({ workspaceId }: GovernanceEventsListProps)
   const queryClient = useQueryClient()
   const [filter, setFilter] = useState("")
 
-  const { data: events, isLoading } = useQuery({
+  const { data: events, isLoading, isError, error } = useQuery({
     queryKey: ["governance-events", workspaceId, filter],
     queryFn: () => api.getGovernanceEvents(workspaceId, filter || undefined),
     refetchInterval: 5000,
@@ -85,6 +85,11 @@ export function GovernanceEventsList({ workspaceId }: GovernanceEventsListProps)
         <CardContent className="px-4 md:px-6">
           {isLoading ? (
             <p className="py-8 text-center text-muted-foreground">Loading...</p>
+          ) : isError ? (
+            <p className="py-8 text-center text-sm text-destructive">
+              Failed to load events
+              {error instanceof Error ? `: ${error.message}` : "."}
+            </p>
           ) : !events || events.length === 0 ? (
             <p className="py-8 text-center text-muted-foreground">
               No governance events. Submit events via the synodic CLI or API.

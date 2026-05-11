@@ -9,38 +9,45 @@ function readHashValue(allowed: readonly string[]): string | null {
 /**
  * Hash-based tab state. `#tab-name` in the URL selects the active tab so
  * tabs survive reload and deep-link. Falls back to `defaultValue` when
- * the hash is missing or not one of `tabs`.
+ * the hash is missing or not one of `tabs` — both on first render and
+ * when the user clears or edits the hash to something unrecognized.
  *
- * The setter updates `window.location.hash` via `history.replaceState` so
- * tab switches don't pollute the back-button stack.
+ * The returned setter accepts an unknown string and validates it against
+ * `tabs`, so callers can wire it directly to e.g. `Tabs.onValueChange`
+ * without an unchecked cast. Invalid values are dropped silently.
+ *
+ * Updates use `history.replaceState` so tab switches don't pollute the
+ * back-button stack.
  */
 export function useHashTab<T extends string>(
   tabs: readonly T[],
   defaultValue: T,
-): [T, (next: T) => void] {
+): [T, (next: string) => void] {
   const [value, setValue] = useState<T>(() => {
     const fromHash = readHashValue(tabs as readonly string[])
-    return (fromHash as T) ?? defaultValue
+    return (fromHash as T | null) ?? defaultValue
   })
 
   useEffect(() => {
     const onHashChange = () => {
       const fromHash = readHashValue(tabs as readonly string[])
-      if (fromHash) setValue(fromHash as T)
+      setValue((fromHash as T | null) ?? defaultValue)
     }
     window.addEventListener("hashchange", onHashChange)
     return () => window.removeEventListener("hashchange", onHashChange)
-  }, [tabs])
+  }, [tabs, defaultValue])
 
   const update = useCallback(
-    (next: T) => {
-      setValue(next)
+    (next: string) => {
+      if (!(tabs as readonly string[]).includes(next)) return
+      const validated = next as T
+      setValue(validated)
       if (typeof window !== "undefined") {
-        const url = `${window.location.pathname}${window.location.search}#${next}`
+        const url = `${window.location.pathname}${window.location.search}#${validated}`
         window.history.replaceState(null, "", url)
       }
     },
-    [],
+    [tabs],
   )
 
   return [value, update]
