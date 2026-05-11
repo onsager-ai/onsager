@@ -187,13 +187,12 @@ export function WorkflowDetailPage() {
         </TabsContent>
 
         <TabsContent value="artifacts" className="space-y-4 pt-4 md:space-y-6">
-          <WorkflowArtifactsTab runs={runs} />
+          <WorkflowArtifactsTab workflowId={workflow.id} />
         </TabsContent>
 
         <TabsContent value="verdicts" className="space-y-4 pt-4 md:space-y-6">
           <WorkflowVerdictsTab
-            workspaceId={workspace.id}
-            runs={runs}
+            workflowId={workflow.id}
             stages={workflow.stages}
           />
         </TabsContent>

@@ -24,5 +24,6 @@ pub mod telegram_webhook;
 pub mod triggers;
 pub mod webhook;
 pub mod workflow_kinds;
+pub mod workflow_views;
 pub mod workflows;
 pub mod workspaces;
