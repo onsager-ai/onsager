@@ -9,50 +9,52 @@
 #   /*          → /app/static/index.html (SPA shell, no-cache)
 #
 # Railway injects $PORT; Caddy binds to it as the foreground process.
-
 {
-    admin off
-    auto_https off
-    persist_config off
+	admin off
+	auto_https off
+	persist_config off
 }
 
 :{$PORT} {
-    log {
-        output stdout
-        format console
-        level INFO
-    }
+	log {
+		output stdout
+		format console
+		level INFO
+	}
 
-    # Agent control plane WebSocket. Portal terminates the upgrade and
-    # transparently forwards bytes to stiglab on loopback
-    # (ws://127.0.0.1:3000/agent/ws-internal). See ADR 0008.
-    handle /agent/ws* {
-        reverse_proxy 127.0.0.1:3002
-    }
+	# Agent control plane WebSocket. Portal terminates the upgrade and
+	# transparently forwards bytes to stiglab on loopback
+	# (ws://127.0.0.1:3000/agent/ws-internal). See ADR 0008.
+	handle /agent/ws* {
+		reverse_proxy 127.0.0.1:3002
+	}
 
-    # Portal owns every dashboard-facing /api/* route (ADR 0006).
-    handle /api/* {
-        reverse_proxy 127.0.0.1:3002
-    }
+	# Portal owns every dashboard-facing /api/* route (ADR 0006).
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3002
+	}
 
-    # Static assets — content-hashed by Vite, safe to cache for a year.
-    # `@ok` is a response matcher so a 404 during a bad deploy is not
-    # cached for a year by clients and intermediaries.
-    @assets path /assets/*
-    handle @assets {
-        root * /app/static
-        @ok status 200 206
-        header @ok Cache-Control "public, max-age=31536000, immutable"
-        file_server
-    }
+	# Static assets — Vite content-hashes filenames so a year-long
+	# immutable cache is safe; a stale hash simply 404s and the SPA
+	# shell (served with no-cache below) re-fetches the index.html
+	# whose script tags now point at the new hashes. Caddy's
+	# Caddyfile DSL has no top-level `status` response matcher, so
+	# we apply the header unconditionally on this path prefix — fine
+	# because misses on this prefix are themselves stable over time.
+	@assets path /assets/*
+	handle @assets {
+		root * /app/static
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
 
-    # SPA shell + everything else — no-cache so a new deploy is picked
-    # up on the next navigation. `try_files` falls back to index.html
-    # for client-side routes.
-    handle {
-        root * /app/static
-        try_files {path} /index.html
-        header Cache-Control "no-cache"
-        file_server
-    }
+	# SPA shell + everything else — no-cache so a new deploy is picked
+	# up on the next navigation. `try_files` falls back to index.html
+	# for client-side routes.
+	handle {
+		root * /app/static
+		try_files {path} /index.html
+		header Cache-Control "no-cache"
+		file_server
+	}
 }
