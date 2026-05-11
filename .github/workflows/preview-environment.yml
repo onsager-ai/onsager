@@ -126,18 +126,30 @@ jobs:
             // Green only when Railway reports success AND the smoke-test
             // actually got a 200 from /api/health. Anything else
             // (Railway failure/error, or success with a broken
-            // healthcheck) is a red signal.
+            // healthcheck) is a red signal. The title is phrased so it
+            // matches the conclusion at a glance — a success-state with
+            // a failed smoke is "unhealthy", not "success".
             const healthy = state === 'success' && smoke === 'ok';
             const conclusion = healthy ? 'success' : 'failure';
-            const title = healthy
-              ? 'Preview deploy succeeded'
-              : `Preview deploy ${state}${smoke ? ` (smoke: ${smoke})` : ''}`;
+            let title;
+            if (healthy) {
+              title = 'Preview deploy succeeded';
+            } else if (state === 'success') {
+              title = `Preview deploy unhealthy (smoke: ${smoke || 'unknown'})`;
+            } else {
+              title = `Preview deploy ${state}`;
+            }
 
+            // `target_url` is Railway's deployment page (build log +
+            // runtime logs); `environment_url` is the deployed preview
+            // host. Label them distinctly so a reviewer doesn't have to
+            // guess which link goes where, and fall back to whichever
+            // is present so the summary never says "(no link)".
             const summary = [
               `Railway deployment state: \`${state}\`.`,
               smoke ? `Smoke-test \`/api/health\`: \`${smoke}\`.` : null,
               envUrl ? `Preview URL: ${envUrl}` : null,
-              `Railway: ${targetUrl || '(no link)'}`,
+              targetUrl ? `Railway deployment page: ${targetUrl}` : null,
             ].filter(Boolean).join('\n\n');
 
             await github.rest.checks.create({
@@ -147,8 +159,9 @@ jobs:
               head_sha: sha,
               status: 'completed',
               conclusion,
-              // Link to Railway's build log so a red check is one click
-              // from the failure details.
+              // Prefer the Railway deployment page (build + runtime
+              // logs in one place) so a red check is one click from
+              // the failure details; fall back to the preview host.
               details_url: targetUrl || envUrl || undefined,
               output: { title, summary },
             });
