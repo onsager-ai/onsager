@@ -295,18 +295,24 @@ Layers landing in stages (#288):
   v1 stub returning log pointers; server-side AI reasoning is a
   follow-up), Caddyfile `/mcp/*` block, `xtask
   check-tools-and-skills` lint, ADR 0007 flipped to Accepted.
-- **Skills bundle** — `onsager-ai/onsager-skills` (sibling repo)
-  carries the four initial public skills. Follow-up.
+- **Skills bundle (#310)** — the four initial public skills
+  (`onsager-design-workflow`, `onsager-run-workflow`,
+  `onsager-triage-run`, `onsager-explore-artifacts`) live in
+  `public-skills/` while the cross-repo migration to
+  `onsager-ai/onsager-skills` is in flight. See
+  [`public-skills/README.md`](public-skills/README.md) for install
+  (`npx skills add onsager-ai/onsager-skills`), the trigger-phrase
+  matrix, and how the four skills compose into one product loop.
 - **Dashboard MCP client + HitlCard primitive** — `ChatBuilder.tsx`
   migration + the `HitlCard` constructive/diff/destructive primitive
   + `xtask check-hitl-coverage`. Follow-up.
 
 `xtask check-tools-and-skills` is the enforcement counterpart of
 ADR 0007's dev-process clause (every public tool has a skill
-grant; every skill grant references a real tool). The skills
-cross-check activates when `ONSAGER_SKILLS_DIR` points at a local
-checkout of the bundle repo; CI wires this in once the bundle is
-populated.
+grant; every skill grant references a real tool). It runs in CI
+with `ONSAGER_SKILLS_DIR=public-skills` (staging) and is part of
+`just lint`; once the bundle moves to the sibling repo, CI swaps
+the env var to a `git clone` checkout.
 
 ## The seam rule (canonical)
 
