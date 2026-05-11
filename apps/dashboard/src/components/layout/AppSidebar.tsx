@@ -1,4 +1,4 @@
-import { Factory, GitBranch, Inbox, Server, Terminal, Settings, Shield, Package, Activity } from "lucide-react"
+import { GitBranch, MessageSquare } from "lucide-react"
 import { OnsagerLogo } from "./OnsagerLogo"
 import { UserMenu } from "./UserMenu"
 import { Link, useLocation } from "react-router-dom"
@@ -8,7 +8,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -22,51 +21,20 @@ import { WorkspaceSwitcher } from "@/components/workspaces/WorkspaceSwitcher"
 
 interface NavItem {
   title: string
-  icon: typeof Factory
+  icon: typeof GitBranch
   /** Path relative to the active workspace root (`/workspaces/<slug>/...`). */
   path: string
 }
 
-interface NavSection {
-  label: string
-  items: NavItem[]
-}
-
-// Resource sections live under the active workspace. The path here is
-// the suffix appended to `/workspaces/<slug>/`. The Overview row uses
-// an empty suffix to mean "the workspace root".
-const SCOPED_SECTIONS: NavSection[] = [
-  {
-    label: "Factory",
-    items: [
-      { title: "Overview", icon: Factory, path: "" },
-      // Issues inbox (#168) — reference-only `Kind::GithubIssue` artifacts
-      // hydrated live via the portal proxy.
-      { title: "Issues", icon: Inbox, path: "issues" },
-      { title: "Workflows", icon: GitBranch, path: "workflows" },
-      { title: "Artifacts", icon: Package, path: "artifacts" },
-      { title: "Event Spine", icon: Activity, path: "spine" },
-    ],
-  },
-  {
-    label: "Governance",
-    items: [
-      { title: "Governance", icon: Shield, path: "governance" },
-    ],
-  },
-  {
-    label: "Infrastructure",
-    items: [
-      { title: "Sessions", icon: Terminal, path: "sessions" },
-      { title: "Nodes", icon: Server, path: "nodes" },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { title: "Settings", icon: Settings, path: "settings" },
-    ],
-  },
+// Two-surface IA per spec #289: Chat (R&D — design workflows by talking
+// to the agent) and Workflows (production — library of deployed
+// automations). Everything else (Issues, Artifacts, Spine, Governance,
+// Sessions, Nodes, Factory Overview, Settings) stays reachable via the
+// ⌘K command palette and direct URL during the rollout — PR 1 only
+// changes what shows up in the sidebar nav.
+const SCOPED_ITEMS: NavItem[] = [
+  { title: "Chat", icon: MessageSquare, path: "chat" },
+  { title: "Workflows", icon: GitBranch, path: "workflows" },
 ]
 
 export function AppSidebar() {
@@ -90,25 +58,12 @@ export function AppSidebar() {
     if (isMobile) setOpenMobile(false)
   }
 
-  // Progressive disclosure: users with zero workspaces only see the
-  // System group + the switcher (which handles "create workspace").
-  // Once the first workspace lands the full nav unlocks. Gate on
-  // workspacesLoading only (not the aggregate `loading`) so the nav
-  // decision doesn't wait for the slower projects/installs queries.
+  // Progressive disclosure: users with zero workspaces see only the
+  // switcher (which handles "create workspace"). Once the first
+  // workspace lands the nav items unlock. Gate on workspacesLoading
+  // only (not the aggregate `loading`) so the nav decision doesn't
+  // wait for the slower projects/installs queries.
   const gateNav = !workspacesLoading && !hasWorkspace
-  const visibleSections = SCOPED_SECTIONS.filter((s) => {
-    if (gateNav && s.label !== "System") return false
-    return true
-  })
-
-  // Prefix every nav item's path with the active workspace's root.
-  // Outside a scoped route (e.g. while the picker is mounted) we point
-  // the suffix-less Overview row at the picker so the user lands
-  // somewhere they can pick a workspace.
-  const resolvePath = (suffix: string): string => {
-    if (suffix === "") return overviewPath
-    return linkBase ? `${linkBase}/${suffix}` : "/workspaces"
-  }
 
   return (
     <Sidebar>
@@ -120,22 +75,21 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <WorkspaceSwitcher />
-        {visibleSections.map((section) => (
-          <SidebarGroup key={section.label}>
-            <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
+        {!gateNav && (
+          <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                {section.items.map((item) => {
-                  const path = resolvePath(item.path)
-                  // Outside a scoped route every non-Overview item shares
-                  // the `/workspaces` picker fallback — none of them is
+                {SCOPED_ITEMS.map((item) => {
+                  const path = linkBase
+                    ? `${linkBase}/${item.path}`
+                    : "/workspaces"
+                  // Outside a scoped route every item shares the
+                  // `/workspaces` picker fallback — none of them is
                   // really "this page", so don't highlight any.
                   const isActive =
-                    item.path === ""
-                      ? location.pathname === path
-                      : linkBase != null &&
-                        (location.pathname === path ||
-                          location.pathname.startsWith(`${path}/`))
+                    linkBase != null &&
+                    (location.pathname === path ||
+                      location.pathname.startsWith(`${path}/`))
                   return (
                     <SidebarMenuItem key={item.title}>
                       <SidebarMenuButton
@@ -151,7 +105,7 @@ export function AppSidebar() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-        ))}
+        )}
         <SetupChecklist progress={setupProgress} />
       </SidebarContent>
       <SidebarFooter className="gap-1 border-t p-2">

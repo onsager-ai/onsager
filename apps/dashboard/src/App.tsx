@@ -69,6 +69,9 @@ const PersonalAccessTokensPage = lazy(() =>
     default: m.PersonalAccessTokensPage,
   })),
 )
+const ChatPage = lazy(() =>
+  import("@/pages/ChatPage").then((m) => ({ default: m.ChatPage })),
+)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -287,6 +290,10 @@ function AppRoutes() {
                             <Route
                               index
                               element={<LazyRoute><FactoryOverviewPage /></LazyRoute>}
+                            />
+                            <Route
+                              path="chat"
+                              element={<LazyRoute><ChatPage /></LazyRoute>}
                             />
                             <Route
                               path="artifacts"

@@ -12,6 +12,8 @@ import {
   Building2,
   Factory,
   GitBranch,
+  Inbox,
+  MessageSquare,
   Package,
   Search,
   Server,
@@ -165,6 +167,17 @@ function CommandPaletteDialog() {
             <CommandSeparator />
 
             <CommandGroup heading="Go to">
+              <CommandItem
+                keywords={["chat", "agent", "r&d"]}
+                onSelect={() => go(scoped("chat"))}
+              >
+                <MessageSquare className="mr-2 h-4 w-4" />
+                Chat
+              </CommandItem>
+              <CommandItem onSelect={() => go(scoped("workflows"))}>
+                <GitBranch className="mr-2 h-4 w-4" />
+                Workflows
+              </CommandItem>
               <CommandItem keywords={["overview"]} onSelect={() => go(overview)}>
                 <Factory className="mr-2 h-4 w-4" />
                 Factory overview
@@ -173,9 +186,9 @@ function CommandPaletteDialog() {
                 <Building2 className="mr-2 h-4 w-4" />
                 Workspaces
               </CommandItem>
-              <CommandItem onSelect={() => go(scoped("workflows"))}>
-                <GitBranch className="mr-2 h-4 w-4" />
-                Workflows
+              <CommandItem onSelect={() => go(scoped("issues"))}>
+                <Inbox className="mr-2 h-4 w-4" />
+                Issues
               </CommandItem>
               <CommandItem onSelect={() => go(scoped("artifacts"))}>
                 <Package className="mr-2 h-4 w-4" />
