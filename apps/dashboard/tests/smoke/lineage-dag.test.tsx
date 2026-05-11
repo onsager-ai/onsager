@@ -30,7 +30,7 @@ describe("LineageDAG", () => {
       </MemoryRouter>,
     );
     expect(
-      screen.getByText(/No runs yet/i),
+      screen.getByText(/No runs yet\. Lanes appear once the first run starts/i),
     ).toBeInTheDocument();
   });
 

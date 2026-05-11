@@ -67,15 +67,17 @@ impl SeedCatalog {
     }
 }
 
-/// Outcome of a seed apply. `rows_inserted` counts how many registry
-/// rows the apply actually wrote (some entries may already exist via
-/// `ON CONFLICT DO NOTHING`). The legacy `events_emitted` field is kept
-/// as an alias for backwards compatibility on the struct shape; per
-/// spec #285 the loader no longer publishes spine events, so the count
-/// matches `rows_inserted`.
+/// Outcome of a seed apply. Per spec #285 the loader no longer
+/// publishes `registry.*` spine events; the field name
+/// `events_emitted` is kept for struct-shape compatibility but now
+/// counts registry rows actually inserted (rows that hit `ON CONFLICT
+/// DO NOTHING` are not counted).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SeedOutcome {
     pub applied: bool,
+    /// Number of registry rows inserted by this apply. Pre-#285 this
+    /// counted spine events emitted; the two were 1:1, so the field
+    /// kept its name.
     pub events_emitted: usize,
 }
 

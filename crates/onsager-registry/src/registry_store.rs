@@ -160,24 +160,22 @@ impl RegistryStore {
             .map_err(anyhow::Error::from)
     }
 
-    /// Deprecate a type. Per spec #285 no spine event is emitted; the
-    /// `reason` is captured only via the test-side audit trail.
-    pub async fn deprecate_type(
-        &self,
-        type_id: &str,
-        reason: &str,
-        actor: &str,
-    ) -> anyhow::Result<bool> {
+    /// Deprecate a type. Returns `true` if the row was actually
+    /// flipped to `deprecated`, `false` if it was already deprecated.
+    /// Per spec #285 no spine event is emitted and no `reason` column
+    /// exists on `artifact_types`; if a deprecation rationale needs to
+    /// be persisted, that's a schema change to the registry tables
+    /// rather than an event emission.
+    pub async fn deprecate_type(&self, type_id: &str, actor: &str) -> anyhow::Result<bool> {
         let workspace = self.workspace_id.clone();
         let actor = actor.to_owned();
         let type_id = type_id.to_owned();
-        let reason = reason.to_owned();
 
         self.store
             .transaction(move |tx| {
-                Box::pin(async move {
-                    deprecate_type_in_tx(tx, &workspace, &type_id, &reason, &actor).await
-                })
+                Box::pin(
+                    async move { deprecate_type_in_tx(tx, &workspace, &type_id, &actor).await },
+                )
             })
             .await
             .map_err(anyhow::Error::from)
@@ -239,7 +237,6 @@ async fn deprecate_type_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     workspace_id: &str,
     type_id: &str,
-    _reason: &str,
     _actor: &str,
 ) -> sqlx::Result<bool> {
     let updated: Option<(i32,)> = sqlx::query_as(

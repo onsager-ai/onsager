@@ -77,19 +77,9 @@ async fn propose_then_approve_type_lifecycle() {
         .expect("row present");
     assert_eq!(row.status, RegistryStatus::Approved);
 
-    // deprecate emits the terminal event
-    assert!(
-        registry
-            .deprecate_type("DraftType", "superseded", "bob")
-            .await
-            .unwrap()
-    );
-    assert!(
-        !registry
-            .deprecate_type("DraftType", "noop", "bob")
-            .await
-            .unwrap()
-    );
+    // deprecate flips status to `deprecated`; second call is idempotent
+    assert!(registry.deprecate_type("DraftType", "bob").await.unwrap());
+    assert!(!registry.deprecate_type("DraftType", "bob").await.unwrap());
 
     // Per spec #285 registry mutations no longer publish spine events.
     // The registry tables themselves are the source of truth; the row

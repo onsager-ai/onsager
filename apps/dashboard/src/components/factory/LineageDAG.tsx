@@ -25,7 +25,7 @@ export function LineageDAG({ artifact }: LineageDAGProps) {
   if (paired.length === 0) {
     return (
       <div className="rounded-md border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
-        No runs yet. Lanes appear once a workflow dispatches this artifact.
+        No runs yet. Lanes appear once the first run starts for this artifact.
       </div>
     )
   }
