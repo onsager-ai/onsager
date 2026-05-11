@@ -208,8 +208,7 @@ fn match_brace(bytes: &[u8], open: usize) -> Option<usize> {
 fn cross_check(rust: &[ToolEntry], ts: &[TsBinding]) -> Result<()> {
     let rust_by_name: BTreeMap<&str, &ToolEntry> =
         rust.iter().map(|t| (t.name.as_str(), t)).collect();
-    let ts_by_name: BTreeMap<&str, &TsBinding> =
-        ts.iter().map(|t| (t.name.as_str(), t)).collect();
+    let ts_by_name: BTreeMap<&str, &TsBinding> = ts.iter().map(|t| (t.name.as_str(), t)).collect();
     let mut errors: Vec<String> = Vec::new();
 
     // 1. Every Rust tool must have a TS binding with matching category +
@@ -221,9 +220,7 @@ fn cross_check(rust: &[ToolEntry], ts: &[TsBinding]) -> Result<()> {
                 errors.push(format!(
                     "MCP tool `{}` ({}) has no entry in {} — every public tool needs a HitlCard \
                      slot assignment (or read-only info block) on the dashboard side",
-                    tool.name,
-                    tool.category,
-                    MCP_TOOLS_TS,
+                    tool.name, tool.category, MCP_TOOLS_TS,
                 ));
                 continue;
             }
@@ -237,9 +234,7 @@ fn cross_check(rust: &[ToolEntry], ts: &[TsBinding]) -> Result<()> {
             ));
         }
         match tool.category {
-            ToolCategory::Constructive
-            | ToolCategory::Diff
-            | ToolCategory::Destructive => {
+            ToolCategory::Constructive | ToolCategory::Diff | ToolCategory::Destructive => {
                 if !binding.has_build_card {
                     errors.push(format!(
                         "mutation tool `{}` is missing `buildCard:` in its dashboard binding — \
