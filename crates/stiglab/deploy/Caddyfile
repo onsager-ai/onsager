@@ -5,6 +5,7 @@
 # Routing model (peer of deploy/dev/Caddyfile, with loopback upstreams):
 #   /agent/ws*  → 127.0.0.1:3002  (portal — proxies to stiglab on loopback per ADR 0008)
 #   /api/*      → 127.0.0.1:3002  (portal — ADR 0006)
+#   /mcp/*      → 127.0.0.1:3002  (portal — MCP server for AI clients per ADR 0007)
 #   /assets/*   → /app/static/assets (content-hashed, year-long immutable cache)
 #   /*          → /app/static/index.html (SPA shell, no-cache)
 #
@@ -31,6 +32,13 @@
 
 	# Portal owns every dashboard-facing /api/* route (ADR 0006).
 	handle /api/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	# MCP server (ADR 0007 / #288). Runtime-agnostic public contract
+	# for AI clients — same upstream as /api/* (portal owns clause 1
+	# of the seam rule).
+	handle /mcp/* {
 		reverse_proxy 127.0.0.1:3002
 	}
 

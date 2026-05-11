@@ -39,6 +39,7 @@ pub mod gate;
 pub mod handlers;
 pub mod installation;
 pub mod installation_db;
+pub mod mcp;
 pub mod migrate;
 pub mod pat_db;
 pub mod preset;

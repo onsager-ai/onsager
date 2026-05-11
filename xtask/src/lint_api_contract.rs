@@ -468,6 +468,10 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "/health",
         "synodic internal health endpoint — ops-only, not a dashboard surface",
     ),
+    (
+        "/mcp/messages",
+        "MCP server JSON-RPC entry (ADR 0007 / #288) — called by external AI runtimes (Claude Code, Cursor, etc.) and the dashboard chat once #289 PR 4 lands; not a typed dashboard `request<T>` surface",
+    ),
 ];
 
 /// Routes registered by stiglab (or any other factory subsystem) that

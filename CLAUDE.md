@@ -266,6 +266,48 @@ dispatcher), bundled in the same image. Stiglab binds to
 to `127.0.0.1:3002` and owns every external route, including the
 public `/agent/ws` it forwards to stiglab over loopback.
 
+## MCP server + public skills bundle
+
+[ADR 0007](docs/adr/0007-tools-and-skills-as-the-public-contract.md)
+names the **protocol shape** of clause 1 for AI runtimes: portal
+hosts an **MCP server** at `POST /mcp/messages` (JSON-RPC 2.0 over
+HTTP), and a sibling **public skills bundle** at
+`onsager-ai/onsager-skills` packages the operating-procedures
+knowledge that pairs with the tools (`npx skills add
+onsager-ai/onsager-skills`).
+
+The MCP server is portal's clause-1 surface for AI clients (Claude
+Code, Cursor, Codex, custom agents, *and* the dashboard chat —
+which becomes one MCP client among many). The same workspace-scope
+auth (`AuthUser` extractor + `require_workspace_access`) gates
+both REST and MCP. Tools delegate to the same DB helpers the REST
+handlers use — no new business logic, just typed wrappers.
+
+Tool schemas SSOT: derived from Rust serde structs via `schemars`
+(`#[derive(JsonSchema)]`) — no hand-written JSON Schema, no
+parallel-source-of-truth drift. The TS-side counterpart (generated
+TS from the same Rust structs) is a follow-up.
+
+Layers landing in stages (#288):
+
+- **MCP backend slice** — `crates/onsager-portal/src/mcp/`, 7
+  action tools + 4 diagnostic tools (`propose_remediation` is a
+  v1 stub returning log pointers; server-side AI reasoning is a
+  follow-up), Caddyfile `/mcp/*` block, `xtask
+  check-tools-and-skills` lint, ADR 0007 flipped to Accepted.
+- **Skills bundle** — `onsager-ai/onsager-skills` (sibling repo)
+  carries the four initial public skills. Follow-up.
+- **Dashboard MCP client + HitlCard primitive** — `ChatBuilder.tsx`
+  migration + the `HitlCard` constructive/diff/destructive primitive
+  + `xtask check-hitl-coverage`. Follow-up.
+
+`xtask check-tools-and-skills` is the enforcement counterpart of
+ADR 0007's dev-process clause (every public tool has a skill
+grant; every skill grant references a real tool). The skills
+cross-check activates when `ONSAGER_SKILLS_DIR` points at a local
+checkout of the bundle repo; CI wires this in once the bundle is
+populated.
+
 ## The seam rule (canonical)
 
 > HTTP APIs exist only at external boundaries:
