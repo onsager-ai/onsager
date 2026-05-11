@@ -1,7 +1,6 @@
-import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Gavel } from "lucide-react"
-import { api, type GovernanceEvent, type WorkflowRun } from "@/lib/api"
+import { api } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
@@ -15,61 +14,23 @@ const SEVERITY_VARIANT: Record<
   low: "secondary",
 }
 
-// Does this governance event reference one of the workflow's artifact IDs?
-// PR 2b replaces this with a workflow-scoped backend route; until then we
-// pull the workspace-wide list and filter on whatever artifact-id reference
-// the event happens to carry. Synodic events vary in shape, so we probe
-// the common locations (`metadata.artifact_id`, `event.source`) and a
-// last-ditch scan of metadata string values.
-function referencesArtifact(
-  event: GovernanceEvent,
-  artifactIds: Set<string>,
-): boolean {
-  if (artifactIds.size === 0) return false
-  const meta = event.metadata ?? {}
-  const direct = meta["artifact_id"]
-  if (typeof direct === "string" && artifactIds.has(direct)) return true
-  if (event.source && artifactIds.has(event.source)) return true
-  for (const value of Object.values(meta)) {
-    if (typeof value === "string" && artifactIds.has(value)) return true
-  }
-  return false
-}
-
 export function WorkflowVerdictsTab({
-  workspaceId,
-  runs,
+  workflowId,
   stages,
 }: {
-  workspaceId: string
-  runs: WorkflowRun[]
+  workflowId: string
   stages: { gate_kind: string }[]
 }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ["governance-events", workspaceId],
-    queryFn: () => api.getGovernanceEvents(workspaceId),
-    refetchInterval: 5000,
-  })
-
-  const artifactIds = useMemo(
-    () =>
-      new Set(
-        runs
-          .map((r) => r.artifact_id)
-          .filter((id): id is string => !!id),
-      ),
-    [runs],
-  )
-
-  const filtered = useMemo(
-    () =>
-      (data ?? []).filter((e) => referencesArtifact(e, artifactIds)),
-    [data, artifactIds],
-  )
-
   const hasGovernanceStage = stages.some(
     (s) => s.gate_kind === "governance",
   )
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["workflow-verdicts", workflowId],
+    queryFn: () => api.getWorkflowVerdicts(workflowId),
+    refetchInterval: 5000,
+    enabled: hasGovernanceStage,
+  })
 
   if (!hasGovernanceStage) {
     return (
@@ -90,7 +51,9 @@ export function WorkflowVerdictsTab({
     )
   }
 
-  if (filtered.length === 0) {
+  const verdicts = data?.verdicts ?? []
+
+  if (verdicts.length === 0) {
     return (
       <EmptyState
         title="No verdicts yet"
@@ -105,7 +68,7 @@ export function WorkflowVerdictsTab({
         <CardTitle className="text-base">Verdicts</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 px-4 pb-4 md:px-6">
-        {filtered.map((e) => (
+        {verdicts.map((e) => (
           <div
             key={e.id}
             className="space-y-1 rounded-md border px-3 py-2"

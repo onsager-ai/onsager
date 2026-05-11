@@ -15,8 +15,8 @@ use crate::handlers::{
     registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
     runs as run_handlers, sessions as session_handlers, spine as spine_handlers,
     tasks as task_handlers, telegram_webhook, triggers as trigger_handlers, webhook,
-    workflow_kinds as workflow_kind_handlers, workflows as workflow_handlers,
-    workspaces as workspace_handlers,
+    workflow_kinds as workflow_kind_handlers, workflow_views as workflow_view_handlers,
+    workflows as workflow_handlers, workspaces as workspace_handlers,
 };
 use crate::proxy_cache::ProxyCache;
 use crate::state::AppState;
@@ -191,6 +191,19 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route(
             "/api/workflows/{id}/runs",
             get(workflow_handlers::list_workflow_runs),
+        )
+        // Workflow-scoped artifacts + verdicts (spec #302 — #289 PR 2b).
+        // Dedicated routes replace the dashboard's per-run artifact
+        // fan-out fetch and the workspace-wide governance-events
+        // filter. Same workspace-access gating as the rest of
+        // `/api/workflows/*`.
+        .route(
+            "/api/workflows/{id}/artifacts",
+            get(workflow_view_handlers::list_workflow_artifacts),
+        )
+        .route(
+            "/api/workflows/{id}/verdicts",
+            get(workflow_view_handlers::list_workflow_verdicts),
         )
         // Workflow artifact-kind catalog (issue #102 / #222 Slice 4) —
         // public registry pass-through; the dashboard fetches this
