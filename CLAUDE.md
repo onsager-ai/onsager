@@ -303,9 +303,18 @@ Layers landing in stages (#288):
   [`public-skills/README.md`](public-skills/README.md) for install
   (`npx skills add onsager-ai/onsager-skills`), the trigger-phrase
   matrix, and how the four skills compose into one product loop.
-- **Dashboard MCP client + HitlCard primitive** — `ChatBuilder.tsx`
-  migration + the `HitlCard` constructive/diff/destructive primitive
-  + `xtask check-hitl-coverage`. Follow-up.
+- **Dashboard MCP client + HitlCard primitive (landed, spec #311).**
+  `apps/dashboard/src/components/chat/HitlCard.tsx` renders the three
+  HITL card shapes (constructive / diff / destructive) over one
+  primitive; `apps/dashboard/src/lib/mcp-tools.ts` is the typed view
+  over the Rust registry (hand-typed for v1, schemars-to-TS codegen
+  is a follow-up). `ChatBuilder.tsx` is now a same-origin MCP client
+  that calls the Anthropic SDK with prompt caching (per the
+  `claude-api` skill) and routes every mutation tool call through a
+  HitlCard, every read-only call through a plain info block.
+  `xtask check-hitl-coverage` hard-fails on drift between the Rust
+  registry and the dashboard bindings (HITL principle 1, enforced
+  mechanically).
 
 `xtask check-tools-and-skills` is the enforcement counterpart of
 ADR 0007's dev-process clause (every public tool has a skill

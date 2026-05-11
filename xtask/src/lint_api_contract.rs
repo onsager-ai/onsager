@@ -470,7 +470,7 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
     ),
     (
         "/mcp/messages",
-        "MCP server JSON-RPC entry (ADR 0007 / #288) — called by external AI runtimes (Claude Code, Cursor, etc.) and the dashboard chat once #289 PR 4 lands; not a typed dashboard `request<T>` surface",
+        "MCP server JSON-RPC entry (ADR 0007 / #288) — called by external AI runtimes (Claude Code, Cursor, etc.) and the dashboard chat via the bespoke `mcp-client.ts` (#311). Not a typed dashboard `request<T>` surface — the contract is JSON-RPC + schemars-derived schemas, not the REST shape this lint scans",
     ),
 ];
 

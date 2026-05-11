@@ -34,17 +34,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
-use syn::parse::Parser;
-use syn::{Expr, ExprLit, ExprStruct, FieldValue, Item, Lit, Member, Stmt};
 
-const REGISTRY_SRC: &str = "crates/onsager-portal/src/mcp/registry.rs";
+use crate::portal_registry::{self, ToolEntry};
+
 const SKILLS_ENV: &str = "ONSAGER_SKILLS_DIR";
 
 pub fn run() -> Result<()> {
     let root = crate::workspace_root()?;
-    let registry_path = root.join(REGISTRY_SRC);
+    let registry_path = root.join(portal_registry::REGISTRY_SRC);
 
-    let tools = parse_registry(&registry_path)?;
+    let tools = portal_registry::parse_registry(&registry_path)?;
     self_check(&tools)?;
 
     if let Ok(skills_dir) = std::env::var(SKILLS_ENV) {
@@ -71,92 +70,6 @@ pub fn run() -> Result<()> {
         );
     }
     Ok(())
-}
-
-#[derive(Debug, Clone)]
-struct ToolEntry {
-    name: String,
-}
-
-fn parse_registry(path: &Path) -> Result<Vec<ToolEntry>> {
-    let src = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let file = syn::parse_file(&src).with_context(|| format!("parse {}", path.display()))?;
-
-    let build_fn = file
-        .items
-        .iter()
-        .find_map(|it| match it {
-            Item::Fn(f) if f.sig.ident == "build_registry" => Some(f),
-            _ => None,
-        })
-        .ok_or_else(|| anyhow!("could not find fn build_registry() in {}", path.display()))?;
-
-    // Body must end with a `vec![ ToolDescriptor { ... }, ... ]`
-    // expression. We require the **last** statement (not just the
-    // first one that happens to be a no-semicolon expression) so a
-    // debug `dbg!(...)` or `assert!(...)` injected before the return
-    // expression fails loudly instead of silently parsing the wrong
-    // value.
-    let final_expr = match build_fn.block.stmts.last() {
-        Some(Stmt::Expr(e, None)) => e,
-        Some(_) => bail!("build_registry() body's last statement is not a bare expression"),
-        None => bail!("build_registry() body is empty"),
-    };
-
-    let mac = match final_expr {
-        Expr::Macro(m) => &m.mac,
-        _ => bail!("build_registry()'s trailing expression is not `vec![...]`"),
-    };
-    if mac.path.segments.last().map(|s| s.ident.to_string()) != Some("vec".into()) {
-        bail!("build_registry() must end with a `vec![...]` macro invocation");
-    }
-
-    // Parse the macro body as a punctuated list of `Expr`. `syn`'s
-    // `Parser::parse2` accepts the parser closure we want.
-    let exprs = syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated
-        .parse2(mac.tokens.clone())
-        .with_context(|| "parse build_registry()'s vec! body")?;
-
-    let mut tools = Vec::new();
-    for expr in exprs {
-        let s = match expr {
-            Expr::Struct(s) => s,
-            other => bail!(
-                "build_registry() vec! entries must be `ToolDescriptor {{ ... }}` struct \
-                 literals; got {:?}",
-                other
-            ),
-        };
-        tools.push(extract_tool(&s)?);
-    }
-    Ok(tools)
-}
-
-fn extract_tool(s: &ExprStruct) -> Result<ToolEntry> {
-    let name = field_str(&s.fields, "name")
-        .ok_or_else(|| anyhow!("ToolDescriptor missing a `name: \"...\"` field"))?;
-    Ok(ToolEntry { name })
-}
-
-fn field_str(
-    fields: &syn::punctuated::Punctuated<FieldValue, syn::Token![,]>,
-    key: &str,
-) -> Option<String> {
-    for f in fields {
-        let Member::Named(ident) = &f.member else {
-            continue;
-        };
-        if ident != key {
-            continue;
-        }
-        if let Expr::Lit(ExprLit {
-            lit: Lit::Str(s), ..
-        }) = &f.expr
-        {
-            return Some(s.value());
-        }
-    }
-    None
 }
 
 fn self_check(tools: &[ToolEntry]) -> Result<()> {
