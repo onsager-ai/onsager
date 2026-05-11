@@ -91,8 +91,12 @@ gosu onsager sh -c "while true; do STIGLAB_HOST=\"$STIGLAB_HOST\" STIGLAB_PORT=\
 # Caddy is the edge dispatcher — the only externally-reachable process.
 # Routes /api/* and /agent/ws to portal on loopback, serves /assets/* +
 # the SPA shell from /app/static. See ADR 0006 + ADR 0008.
+#
+# Default PORT for local `docker run` so the Caddyfile's `:{$PORT}` site
+# address expands to a usable value when Railway/compose haven't set it.
+: "${PORT:=8080}"
+export PORT
 echo "==> pre-exec: binaries present"
 ls -la /app/stiglab /app/synodic /app/onsager-portal /app/forge /usr/local/bin/caddy
-echo "==> pre-exec: PORT=${PORT:-unset}"
-echo "==> exec-ing caddy on :${PORT:-8080}..."
+echo "==> exec-ing caddy on :${PORT}..."
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

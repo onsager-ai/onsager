@@ -21,9 +21,11 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame as TungsteniteCloseFrame;
 
-/// `GET /agent/ws` — upgrade the connection and proxy to stiglab on
-/// loopback. Returns 502 if the backend dial fails before the upgrade
-/// completes.
+/// `GET /agent/ws` — accept the upgrade and proxy bytes to stiglab
+/// on loopback. The backend dial happens inside `on_upgrade`, so the
+/// HTTP 101 response has already been sent by the time we know
+/// whether stiglab is reachable; a failed dial closes the just-
+/// upgraded socket and the agent CLI's reconnect loop retries.
 pub async fn proxy_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
     let backend_url = env::var("STIGLAB_INTERNAL_WS_URL")
         .unwrap_or_else(|_| "ws://127.0.0.1:3000/agent/ws-internal".to_string());
