@@ -66,14 +66,21 @@ pub async fn get_artifact(state: &AppState, auth_user: &AuthUser, args: Value) -
         )));
     };
 
-    // 404 on workspace mismatch — flat shape, no workspace existence leak.
-    if let Err(err) = require_workspace_access(&state.pool, auth_user, &row.workspace_id).await
-        && matches!(err, ToolError::NotFound(_))
-    {
-        return Err(ToolError::NotFound(format!(
-            "artifact `{}` not found",
-            args.artifact_id
-        )));
+    // Rewrite **all** access failures (workspace not-found AND
+    // PAT-pinned workspace-scope mismatch) to a flat "artifact not
+    // found", matching the non-enumerability goal. Returning the
+    // underlying `Forbidden` for a PAT mismatch would leak that the
+    // artifact id exists in some workspace the caller can't see.
+    if let Err(err) = require_workspace_access(&state.pool, auth_user, &row.workspace_id).await {
+        match err {
+            ToolError::NotFound(_) | ToolError::Forbidden(_) => {
+                return Err(ToolError::NotFound(format!(
+                    "artifact `{}` not found",
+                    args.artifact_id
+                )));
+            }
+            other => return Err(other),
+        }
     }
 
     let value = serde_json::to_value(&row)

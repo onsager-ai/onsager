@@ -90,7 +90,7 @@ fn build_registry() -> Vec<ToolDescriptor> {
         // --- Action tools (workflows) ---
         ToolDescriptor {
             name: "propose_workflow",
-            description: "Create a new workflow blueprint (trigger + ordered stages). Inactive by default; pass `active: true` to activate inline.",
+            description: "Create a new workflow blueprint (trigger + ordered stages). The workflow is always created inactive — the activation pipeline (GitHub label + webhook register) needs request headers the MCP entry point doesn't yet plumb through. Activate via the REST PATCH endpoint after creation; passing `active: true` here returns an InvalidParams error.",
             category: ToolCategory::Constructive,
             input_schema: super::input_schema::<tools::workflows::ProposeWorkflowArgs>(),
             invoke: |state, user, args| {
@@ -106,7 +106,7 @@ fn build_registry() -> Vec<ToolDescriptor> {
         },
         ToolDescriptor {
             name: "edit_workflow",
-            description: "Mutate an existing workflow — toggle `active`, rename, or replace its stage chain. Activation runs the GitHub side-effects (label + webhook) inline.",
+            description: "Deactivate an existing workflow (`active: false`). Re-activation is not supported via MCP today — the activation pipeline runs GitHub side-effects (label + webhook register) that need request headers the MCP entry point doesn't yet plumb through; use the REST PATCH endpoint to re-activate. Rename and stage-chain replacement are also REST-only for now.",
             category: ToolCategory::Diff,
             input_schema: super::input_schema::<tools::workflows::EditWorkflowArgs>(),
             invoke: |state, user, args| {
@@ -115,7 +115,7 @@ fn build_registry() -> Vec<ToolDescriptor> {
         },
         ToolDescriptor {
             name: "schedule_workflow",
-            description: "Set or update the workflow's schedule trigger (cron / interval / delay). Replaces any current trigger.",
+            description: "Set or update the workflow's trigger (typically `cron` / `interval` / `delay`, but any registered trigger kind is accepted). Replaces any current trigger. Validates the kind against the registry manifest and rejects the self-amplifying `spine_event { event_kind: \"trigger.fired\" }` case — same guards `propose_workflow` runs.",
             category: ToolCategory::Diff,
             input_schema: super::input_schema::<tools::workflows::ScheduleWorkflowArgs>(),
             invoke: |state, user, args| {
@@ -141,7 +141,7 @@ fn build_registry() -> Vec<ToolDescriptor> {
         },
         ToolDescriptor {
             name: "cancel_run",
-            description: "Abort an in-flight run by emitting an `artifact.abort_requested` event on the spine. Reversible — the next forge tick consumes the abort and archives the artifact.",
+            description: "Abort an in-flight run: archives the artifact (sets `state = 'archived'`) and emits `artifact.archived` on the `forge:<artifact_id>` stream. Mirrors REST `POST /api/spine/artifacts/:id/abort`. Irreversible at the artifact level — the row is archived synchronously; downstream consumers see the same event shape as the dashboard abort path.",
             category: ToolCategory::Destructive,
             input_schema: super::input_schema::<tools::runs::CancelRunArgs>(),
             invoke: |state, user, args| Box::pin(tools::runs::cancel_run(state, user, args)),

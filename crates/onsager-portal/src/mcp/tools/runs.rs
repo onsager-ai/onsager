@@ -2,11 +2,12 @@
 //!
 //! A "run" is one artifact flowing through a workflow's stage chain
 //! (the same shape `GET /api/workflows/:id/runs` projects). `cancel_run`
-//! emits a `workflow.cancel_requested` event on the spine — same shape
-//! REST's `POST /api/spine/artifacts/:id/abort` produces — and forge's
-//! abort listener consumes it on the next tick.
+//! mirrors REST's `POST /api/spine/artifacts/:id/abort`: it UPDATEs
+//! the artifact row to `state = 'archived'` and emits
+//! `artifact.archived` on the `forge:{artifact_id}` stream so forge's
+//! existing consumers see the same event shape they'd see from a
+//! dashboard-driven abort.
 
-use chrono::Utc;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
@@ -112,10 +113,10 @@ pub async fn cancel_run(state: &AppState, auth_user: &AuthUser, args: Value) -> 
     let args: CancelRunArgs = serde_json::from_value(args)
         .map_err(|e| ToolError::InvalidParams(format!("invalid cancel_run args: {e}")))?;
 
-    // Look up the artifact's workspace and authorize.
+    // Look up the artifact's workspace and current state, then authorize.
     let spine = state.spine.pool();
-    let row: Option<(String, Option<String>)> =
-        sqlx::query_as("SELECT workspace_id, workflow_id FROM artifacts WHERE artifact_id = $1")
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT workspace_id, state FROM artifacts WHERE artifact_id = $1")
             .bind(&args.artifact_id)
             .fetch_optional(spine)
             .await
@@ -124,7 +125,7 @@ pub async fn cancel_run(state: &AppState, auth_user: &AuthUser, args: Value) -> 
                 ToolError::Internal(format!("artifact lookup failed: {e}"))
             })?;
 
-    let Some((workspace_id, workflow_id)) = row else {
+    let Some((workspace_id, previous_state)) = row else {
         return Err(ToolError::NotFound(format!(
             "artifact `{}` not found",
             args.artifact_id
@@ -132,28 +133,47 @@ pub async fn cancel_run(state: &AppState, auth_user: &AuthUser, args: Value) -> 
     };
     require_workspace_access(&state.pool, auth_user, &workspace_id).await?;
 
-    let now = Utc::now();
+    if previous_state == "archived" {
+        return Err(ToolError::InvalidParams("artifact already archived".into()));
+    }
+
+    // Mirror REST `abort_artifact`: UPDATE state = 'archived', then
+    // emit `artifact.archived` on the `forge:{id}` stream so existing
+    // forge consumers see the same shape they'd see from the dashboard
+    // abort path.
+    sqlx::query(
+        "UPDATE artifacts SET state = 'archived', updated_at = NOW() WHERE artifact_id = $1",
+    )
+    .bind(&args.artifact_id)
+    .execute(spine)
+    .await
+    .map_err(|e| {
+        tracing::error!("mcp cancel_run archive update failed: {e}");
+        ToolError::Internal(format!("failed to archive artifact: {e}"))
+    })?;
+
+    let reason = args
+        .reason
+        .clone()
+        .unwrap_or_else(|| "cancelled via MCP".into());
     let payload = serde_json::json!({
         "artifact_id": args.artifact_id,
-        "workflow_id": workflow_id,
-        "workspace_id": workspace_id,
-        "reason": args.reason.clone().unwrap_or_else(|| "cancelled via MCP".into()),
-        "actor": auth_user.user_id,
-        "requested_at": now,
+        "reason": reason,
+        "previous_state": previous_state,
     });
-
     let metadata = onsager_spine::EventMetadata {
         correlation_id: None,
         causation_id: None,
         actor: auth_user.user_id.clone(),
     };
+    let stream_id = format!("forge:{}", args.artifact_id);
     let event_id = state
         .spine
         .append_ext(
             &workspace_id,
-            &args.artifact_id,
-            "artifact",
-            "artifact.abort_requested",
+            &stream_id,
+            "forge",
+            "artifact.archived",
             payload,
             &metadata,
             None,
@@ -161,12 +181,13 @@ pub async fn cancel_run(state: &AppState, auth_user: &AuthUser, args: Value) -> 
         .await
         .map_err(|e| {
             tracing::error!("mcp cancel_run emit failed: {e}");
-            ToolError::Internal(format!("failed to emit abort: {e}"))
+            ToolError::Internal(format!("failed to emit artifact.archived: {e}"))
         })?;
 
     Ok(serde_json::json!({
         "artifact_id": args.artifact_id,
+        "action": "archived",
         "event_id": event_id,
-        "requested_at": now,
+        "previous_state": previous_state,
     }))
 }

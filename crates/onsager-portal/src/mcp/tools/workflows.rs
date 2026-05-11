@@ -6,6 +6,7 @@
 //! `crate::workflow_activation` exactly as they do in the REST path.
 
 use chrono::Utc;
+use onsager_registry::TRIGGERS;
 use onsager_spine::TriggerKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -72,6 +73,23 @@ pub async fn propose_workflow(state: &AppState, auth_user: &AuthUser, args: Valu
             "at least one stage is required".into(),
         ));
     }
+    if args.active {
+        // Activation runs the GitHub side-effects pipeline (label
+        // create + webhook register) which needs the request `HeaderMap`
+        // for forwarded-host resolution — context the MCP entry point
+        // doesn't plumb today. Setting `active=true` without that
+        // pipeline would leave GitHub-trigger workflows in an
+        // inconsistent state (active in spine, no webhook in repo).
+        // Reject explicitly; clients activate via the REST PATCH or
+        // (once the headers plumb-through follow-up lands) a future
+        // version of this tool.
+        return Err(ToolError::InvalidParams(
+            "MCP propose_workflow cannot activate inline — omit `active` or pass `false`, \
+             then activate via the REST PATCH endpoint (the activation pipeline needs \
+             request headers the MCP entry point doesn't yet plumb through)"
+                .into(),
+        ));
+    }
 
     require_workspace_access(&state.pool, auth_user, &args.workspace_id).await?;
     let spine = state.spine.pool();
@@ -111,26 +129,8 @@ pub async fn propose_workflow(state: &AppState, auth_user: &AuthUser, args: Valu
             ToolError::Internal(format!("failed to insert workflow: {e}"))
         })?;
 
-    // Activation side-effects (label create, webhook register) are
-    // GitHub-trigger-only and require the request's `HeaderMap` for
-    // forwarded-host resolution. The MCP entry point does not currently
-    // plumb headers through; `active: true` here records the intent and
-    // is left for the REST path or a future tool to flip via
-    // `edit_workflow`. Clients that need activation in the same call
-    // should follow up with `edit_workflow { active: true }` once the
-    // header-plumbing follow-up lands.
-    let active = if args.active {
-        workflow_db::set_workflow_active(spine, &workflow.id, true)
-            .await
-            .map_err(|e| ToolError::Internal(format!("failed to activate workflow: {e}")))?;
-        true
-    } else {
-        false
-    };
-
-    let created = Workflow { active, ..workflow };
     let envelope = WorkflowEnvelope {
-        workflow: &created,
+        workflow: &workflow,
         stages: &stages,
     };
     serde_json::to_value(envelope).map_err(internal_serialize)
@@ -232,9 +232,12 @@ pub async fn run_workflow(state: &AppState, auth_user: &AuthUser, args: Value) -
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct EditWorkflowArgs {
     pub workflow_id: String,
-    /// Toggle activation. `true` activates, `false` deactivates. Other
-    /// patches (name, trigger, stage chain) are not yet wired to the
-    /// MCP entry point — see Notes in #288's amended Plan.
+    /// Deactivate the workflow (`false`). Re-activation is **not**
+    /// supported via MCP today — the activation pipeline runs GitHub
+    /// side-effects (label create + webhook register) that need the
+    /// request `HeaderMap`, which the MCP entry point doesn't plumb
+    /// through. Pass `true` and the tool returns `InvalidParams`;
+    /// use the REST PATCH endpoint to (re-)activate.
     #[serde(default)]
     pub active: Option<bool>,
 }
@@ -249,6 +252,14 @@ pub async fn edit_workflow(state: &AppState, auth_user: &AuthUser, args: Value) 
     if let Some(desired) = args.active
         && desired != workflow.active
     {
+        if desired {
+            return Err(ToolError::InvalidParams(
+                "MCP edit_workflow cannot activate inline — use the REST PATCH endpoint \
+                 (the activation pipeline needs request headers the MCP entry point \
+                 doesn't yet plumb through). Deactivation is supported."
+                    .into(),
+            ));
+        }
         workflow_db::set_workflow_active(spine, &workflow.id, desired)
             .await
             .map_err(|e| ToolError::Internal(format!("failed to set workflow active: {e}")))?;
@@ -282,6 +293,26 @@ pub async fn schedule_workflow(state: &AppState, auth_user: &AuthUser, args: Val
     require_workspace_access(&state.pool, auth_user, &workflow.workspace_id).await?;
 
     let (kind_tag, config) = args.trigger.to_storage();
+
+    // Same validations `workflow_db::insert_workflow_with_stages`
+    // performs on create — apply them on every trigger swap so a
+    // schedule update can't sneak a kind past the registry manifest
+    // or land a self-amplifying `spine_event { event_kind: "trigger.fired" }`
+    // workflow. Forge's trigger loader would otherwise reject (or
+    // worst-case loop on) the row.
+    if TRIGGERS.lookup(kind_tag).is_none() {
+        return Err(ToolError::InvalidParams(format!(
+            "trigger kind `{kind_tag}` is not in the registry manifest"
+        )));
+    }
+    if let TriggerKind::SpineEvent { event_kind, .. } = &args.trigger
+        && event_kind == "trigger.fired"
+    {
+        return Err(ToolError::InvalidParams(
+            "spine_event workflow cannot listen for `trigger.fired` (would self-amplify)".into(),
+        ));
+    }
+
     let spine = state.spine.pool();
     sqlx::query(
         "UPDATE workflows SET trigger_kind = $1, trigger_config = $2 WHERE workflow_id = $3",

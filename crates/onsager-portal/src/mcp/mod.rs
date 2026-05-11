@@ -200,7 +200,16 @@ async fn tools_call(
 
     let outcome = (desc.invoke)(state, auth_user, parsed.arguments).await;
 
-    Ok(format_tool_outcome(outcome))
+    // `InvalidParams` is a protocol-level failure (bad tool arguments);
+    // it bubbles up as JSON-RPC `-32602 Invalid params` rather than an
+    // MCP tool-result envelope. Domain failures (Forbidden / NotFound /
+    // Internal) ride back inside `tools/call`'s result with
+    // `isError: true` so the client AI can read the message and react
+    // without the JSON-RPC layer erroring out.
+    match outcome {
+        Err(ToolError::InvalidParams(msg)) => Err(ToolError::InvalidParams(msg)),
+        other => Ok(format_tool_outcome(other)),
+    }
 }
 
 /// MCP wraps tool outputs as `{ content: [{type:"text", text}], isError? }`.
@@ -217,12 +226,21 @@ fn format_tool_outcome(outcome: ToolResult) -> Value {
                 "isError": false,
             })
         }
-        Err(ToolError::InvalidParams(msg))
-        | Err(ToolError::Forbidden(msg))
+        Err(ToolError::Forbidden(msg))
         | Err(ToolError::NotFound(msg))
         | Err(ToolError::Internal(msg)) => {
             serde_json::json!({
                 "content": [ { "type": "text", "text": msg } ],
+                "isError": true,
+            })
+        }
+        Err(ToolError::InvalidParams(_)) => {
+            // Unreachable in practice — `tools_call` short-circuits
+            // InvalidParams to a JSON-RPC error before reaching here.
+            // The arm exists so the match stays exhaustive if the
+            // dispatch is restructured.
+            serde_json::json!({
+                "content": [ { "type": "text", "text": "invalid params" } ],
                 "isError": true,
             })
         }

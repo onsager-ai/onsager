@@ -240,7 +240,10 @@ pub async fn propose_remediation(
     .bind(&args.artifact_id)
     .fetch_all(spine)
     .await
-    .unwrap_or_default();
+    .map_err(|e| {
+        tracing::error!("mcp propose_remediation pointers query failed: {e}");
+        ToolError::Internal(format!("failed to query session pointers: {e}"))
+    })?;
 
     let log_pointers: Vec<Value> = pointers
         .into_iter()

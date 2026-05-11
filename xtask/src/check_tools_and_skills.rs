@@ -91,16 +91,17 @@ fn parse_registry(path: &Path) -> Result<Vec<ToolEntry>> {
         })
         .ok_or_else(|| anyhow!("could not find fn build_registry() in {}", path.display()))?;
 
-    // Body must end with a `vec![ ToolDescriptor { ... }, ... ]` expression.
-    let final_expr = build_fn
-        .block
-        .stmts
-        .iter()
-        .find_map(|s| match s {
-            Stmt::Expr(e, None) => Some(e),
-            _ => None,
-        })
-        .ok_or_else(|| anyhow!("build_registry() body has no trailing expression"))?;
+    // Body must end with a `vec![ ToolDescriptor { ... }, ... ]`
+    // expression. We require the **last** statement (not just the
+    // first one that happens to be a no-semicolon expression) so a
+    // debug `dbg!(...)` or `assert!(...)` injected before the return
+    // expression fails loudly instead of silently parsing the wrong
+    // value.
+    let final_expr = match build_fn.block.stmts.last() {
+        Some(Stmt::Expr(e, None)) => e,
+        Some(_) => bail!("build_registry() body's last statement is not a bare expression"),
+        None => bail!("build_registry() body is empty"),
+    };
 
     let mac = match final_expr {
         Expr::Macro(m) => &m.mac,
@@ -240,11 +241,13 @@ fn walk_for_skills(root: &Path, dir: &Path, out: &mut Vec<SkillEntry>) -> Result
     Ok(())
 }
 
-/// Pull `allowed_tools` from a SKILL.md's YAML frontmatter. Returns an
-/// empty vec when the key isn't present (skills with no tool grants
-/// are knowledge-only and are flagged as a warning by the cross-check
-/// — not a hard error, since the spec leaves room for prose-only
-/// skills).
+/// Pull `allowed_tools` from a SKILL.md's YAML frontmatter. Returns
+/// an empty vec when the key isn't present — skills with no tool
+/// grants are knowledge-only and pass the cross-check silently. The
+/// only hard failures are (a) a skill granting a tool that isn't
+/// registered, and (b) a registered tool that no skill grants. A
+/// warning surface for knowledge-only skills is a possible follow-up;
+/// today they're just neutral.
 fn parse_allowed_tools(content: &str) -> Result<Vec<String>> {
     let frontmatter = extract_frontmatter(content)?;
     let mut tools = Vec::new();
