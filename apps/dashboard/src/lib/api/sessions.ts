@@ -7,6 +7,15 @@ export const sessions = {
   getSessions: (workspaceId: string) =>
     request<{ sessions: Session[] }>(`/sessions${scoped(workspaceId)}`),
   getSession: (id: string) => request<{ session: Session }>(`/sessions/${id}`),
+  /**
+   * Request cancellation of an in-flight session (#303). Best-effort —
+   * portal emits `portal.session_cancel_requested` and returns 202; the
+   * UI should not block on the agent actually stopping.
+   */
+  cancelSession: (id: string) =>
+    request<{ ok: boolean }>(`/sessions/${encodeURIComponent(id)}/cancel`, {
+      method: 'POST',
+    }),
   createTask: (task: TaskRequest) =>
     request<{ task: unknown; session: Session }>('/tasks', {
       method: 'POST',

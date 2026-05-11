@@ -177,7 +177,11 @@ export function WorkflowDetailPage() {
             workspaceId={workspace.id}
             title="In-flight"
           />
-          <RunsList runs={runs} stageIds={workflow.stages.map((s) => s.id)} />
+          <RunsList
+            runs={runs}
+            stageIds={workflow.stages.map((s) => s.id)}
+            workspaceSlug={workspace.slug}
+          />
           <WorkflowEventsCard workflowId={workflow.id} runs={runs} />
           <WorkflowSessionsCard runs={runs} />
         </TabsContent>
@@ -261,9 +265,11 @@ function DefinitionTab({
 function RunsList({
   runs,
   stageIds,
+  workspaceSlug,
 }: {
   runs: WorkflowRun[]
   stageIds: string[]
+  workspaceSlug: string
 }) {
   return (
     <Card>
@@ -276,17 +282,35 @@ function RunsList({
             No runs yet. Tag an issue with the trigger label to kick one off.
           </p>
         ) : (
-          runs.map((r) => <RunRow key={r.id} run={r} stageIds={stageIds} />)
+          runs.map((r) => (
+            <RunRow
+              key={r.id}
+              run={r}
+              stageIds={stageIds}
+              workspaceSlug={workspaceSlug}
+            />
+          ))
         )}
       </CardContent>
     </Card>
   )
 }
 
-function RunRow({ run, stageIds }: { run: WorkflowRun; stageIds: string[] }) {
+function RunRow({
+  run,
+  stageIds,
+  workspaceSlug,
+}: {
+  run: WorkflowRun
+  stageIds: string[]
+  workspaceSlug: string
+}) {
   const byStage = new Map(run.stages.map((s) => [s.stage_id, s.status]))
   return (
-    <div className="space-y-2 rounded-md border p-3">
+    <Link
+      to={`/workspaces/${workspaceSlug}/runs/${run.id}`}
+      className="block space-y-2 rounded-md border p-3 hover:bg-muted/50"
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 text-sm font-mono truncate">
           {run.artifact_id ?? run.id}
@@ -306,7 +330,7 @@ function RunRow({ run, stageIds }: { run: WorkflowRun; stageIds: string[] }) {
           )
         })}
       </div>
-    </div>
+    </Link>
   )
 }
 

@@ -243,6 +243,18 @@ pub enum FactoryEventKind {
     /// agent node (spec #222 Follow-up 3).
     PortalSessionRequested { session_id: String },
 
+    /// Dashboard cancel-session request from portal (spec #303). Stiglab's
+    /// `session_cancel_requested_listener` looks up the session's node and
+    /// forwards a `ServerMessage::CancelSession` to the agent. Best-effort:
+    /// if the node is offline or the session is already terminal, the
+    /// cancel is a no-op.
+    PortalSessionCancelRequested {
+        session_id: String,
+        /// Actor identifier captured for audit / debugging.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<String>,
+    },
+
     // -- Synodic events (governance) ----------------------------------------
     /// Full gate verdict issued by Synodic in response to a
     /// `forge.gate_requested` event. Carries the complete `GateVerdict`
@@ -522,6 +534,7 @@ impl FactoryEventKind {
             Self::StiglabSessionFailed { .. } => "stiglab.session_failed",
             Self::StiglabSessionAborted { .. } => "stiglab.session_aborted",
             Self::PortalSessionRequested { .. } => "portal.session_requested",
+            Self::PortalSessionCancelRequested { .. } => "portal.session_cancel_requested",
             Self::SynodicGateVerdict { .. } => "synodic.gate_verdict",
             Self::SynodicEscalationStarted { .. } => "synodic.escalation_started",
             Self::SynodicEscalationResolved { .. } => "synodic.escalation_resolved",
@@ -569,7 +582,9 @@ impl FactoryEventKind {
             | Self::StiglabSessionResultReady { .. }
             | Self::StiglabSessionFailed { .. }
             | Self::StiglabSessionAborted { .. } => "stiglab",
-            Self::PortalSessionRequested { .. } => "portal",
+            Self::PortalSessionRequested { .. } | Self::PortalSessionCancelRequested { .. } => {
+                "portal"
+            }
             Self::SynodicGateVerdict { .. }
             | Self::SynodicEscalationStarted { .. }
             | Self::SynodicEscalationResolved { .. }
@@ -619,7 +634,8 @@ impl FactoryEventKind {
             | Self::StiglabSessionFailed { session_id, .. }
             | Self::StiglabSessionAborted { session_id, .. } => session_id.clone(),
             Self::StiglabSessionResultReady { artifact_id, .. } => artifact_id.to_string(),
-            Self::PortalSessionRequested { session_id, .. } => session_id.clone(),
+            Self::PortalSessionRequested { session_id, .. }
+            | Self::PortalSessionCancelRequested { session_id, .. } => session_id.clone(),
             Self::SynodicGateVerdict { gate_id, .. } => gate_id.clone(),
             Self::SynodicEscalationStarted { escalation_id, .. } => escalation_id.clone(),
             Self::SynodicEscalationResolved { escalation_id, .. } => escalation_id.clone(),

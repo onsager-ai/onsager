@@ -251,6 +251,7 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::WorkflowManualTriggered { .. }
         | FactoryEventKind::GateCheckUpdated { .. }
         | FactoryEventKind::GateManualApprovalSignal { .. }
-        | FactoryEventKind::PortalSessionRequested { .. } => None,
+        | FactoryEventKind::PortalSessionRequested { .. }
+        | FactoryEventKind::PortalSessionCancelRequested { .. } => None,
     }
 }

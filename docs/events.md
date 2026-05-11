@@ -56,7 +56,7 @@ that requires a coordinated rollout.
 | `git` | onsager-portal (GitHub webhooks) | 4 |
 | `forge` | forge | 6 |
 | `stiglab` | stiglab | 4 |
-| `portal` | (unknown — update `stream_producer` in xtask) | 1 |
+| `portal` | (unknown — update `stream_producer` in xtask) | 2 |
 | `synodic` | synodic | 9 |
 | `ising` | ising | 6 |
 | `refract` | refract | 3 |
@@ -317,6 +317,18 @@ Dashboard task request from portal. Stiglab's `session_requested_listener` dispa
 | Field | Type | Description |
 |---|---|---|
 | `session_id` | `String` |  |
+
+### `portal.session_cancel_requested`
+
+- Variant: `FactoryEventKind::PortalSessionCancelRequested`
+- Stream: `portal`
+
+Dashboard cancel-session request from portal (spec #303). Stiglab's `session_cancel_requested_listener` looks up the session's node and forwards a `ServerMessage::CancelSession` to the agent. Best-effort: if the node is offline or the session is already terminal, the cancel is a no-op.
+
+| Field | Type | Description |
+|---|---|---|
+| `session_id` | `String` |  |
+| `actor` | `Option<String>` | Actor identifier captured for audit / debugging. _(optional)_ |
 
 ## `synodic` events
 

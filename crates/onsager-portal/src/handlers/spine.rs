@@ -35,6 +35,14 @@ pub struct EventsQuery {
     /// per-workflow views in the dashboard to pull just the events for
     /// one entity without scanning the whole table client-side.
     pub stream_id: Option<String>,
+    /// Filter to events tied to a specific run (spec #303). A "run" id
+    /// is an artifact_id; events match via any of:
+    /// - `stream_id = run_id` (artifact-keyed events), or
+    /// - `data->>'artifact_id' = run_id` (events that carry the artifact
+    ///   id in their payload), or
+    /// - `stream_id IN (SELECT id FROM sessions WHERE artifact_id = run_id)`
+    ///   (session-keyed events whose session points back to the artifact).
+    pub run_id: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -203,6 +211,19 @@ pub async fn list_events(
     }
     if let Some(sid) = params.stream_id.as_deref() {
         qb.push(" AND stream_id = ").push_bind(sid.to_string());
+    }
+    // run_id (spec #303): a run is an artifact, but related events may
+    // be keyed by either the artifact_id (stream_id) or a session_id
+    // whose session row points back to the artifact. The OR covers
+    // both shapes without forcing the dashboard to issue two queries.
+    if let Some(rid) = params.run_id.as_deref() {
+        qb.push(" AND (stream_id = ");
+        qb.push_bind(rid.to_string());
+        qb.push(" OR data->>'artifact_id' = ");
+        qb.push_bind(rid.to_string());
+        qb.push(" OR stream_id IN (SELECT id FROM sessions WHERE artifact_id = ");
+        qb.push_bind(rid.to_string());
+        qb.push("))");
     }
     qb.push(" ORDER BY id DESC LIMIT ").push_bind(limit);
 

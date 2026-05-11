@@ -4,6 +4,7 @@ pub mod db;
 pub mod github_app;
 pub mod handler;
 pub mod routes;
+pub mod session_cancel_requested_listener;
 pub mod session_requested_listener;
 pub mod shaping_listener;
 pub mod spine;

@@ -13,8 +13,8 @@ use crate::handlers::{
     installations as installation_handlers, live_data as live_data_handlers,
     nodes as node_handlers, pats as pat_handlers, projects as project_handlers,
     registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
-    sessions as session_handlers, spine as spine_handlers, tasks as task_handlers,
-    telegram_webhook, triggers as trigger_handlers, webhook,
+    runs as run_handlers, sessions as session_handlers, spine as spine_handlers,
+    tasks as task_handlers, telegram_webhook, triggers as trigger_handlers, webhook,
     workflow_kinds as workflow_kind_handlers, workflows as workflow_handlers,
     workspaces as workspace_handlers,
 };
@@ -294,6 +294,15 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/sessions/{id}/logs",
             get(session_handlers::session_logs),
         )
+        .route(
+            "/api/sessions/{id}/cancel",
+            post(session_handlers::cancel_session),
+        )
+        // Run detail hub (spec #303). One artifact == one run; this
+        // endpoint joins it with its parent workflow + stage chain +
+        // linked sessions so the dashboard's RunDetailPage tabs render
+        // off a single fetch.
+        .route("/api/runs/{id}", get(run_handlers::get_run))
         .route("/api/nodes", get(node_handlers::list_nodes))
         .route("/api/tasks", post(task_handlers::create_task))
         // Manual / replay trigger endpoints (#241 — Category 4 of the

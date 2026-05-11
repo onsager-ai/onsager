@@ -552,6 +552,23 @@ export interface WorkflowRun {
   updated_at: string;
 }
 
+/** A session linked back to a run via `sessions.artifact_id` (spec #303). */
+export interface RunLinkedSession {
+  id: string;
+  state: Session['state'];
+  node_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Combined response shape for `GET /api/runs/:id` (spec #303). */
+export interface RunDetail {
+  run: WorkflowRun;
+  workflow: Workflow;
+  stages: WorkflowStage[];
+  sessions: RunLinkedSession[];
+}
+
 export interface GitHubLabel {
   name: string;
   color: string | null;

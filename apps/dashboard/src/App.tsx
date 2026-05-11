@@ -56,6 +56,9 @@ const WorkflowStartPage = lazy(() =>
 const WorkflowDetailPage = lazy(() =>
   import("@/pages/WorkflowDetailPage").then((m) => ({ default: m.WorkflowDetailPage })),
 )
+const RunDetailPage = lazy(() =>
+  import("@/pages/RunDetailPage").then((m) => ({ default: m.RunDetailPage })),
+)
 const SettingsPage = lazy(() =>
   import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 )
@@ -342,6 +345,13 @@ function AppRoutes() {
                             <Route
                               path="workflows/:id"
                               element={<LazyRoute variant="detail"><WorkflowDetailPage /></LazyRoute>}
+                            />
+                            {/* Run detail hub (#303). Flat route — runs
+                                have unique IDs (artifact_id), so they
+                                don't need to be nested under workflow. */}
+                            <Route
+                              path="runs/:runId"
+                              element={<LazyRoute variant="detail"><RunDetailPage /></LazyRoute>}
                             />
                             <Route
                               path="settings"
