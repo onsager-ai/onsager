@@ -24,15 +24,22 @@ permissions:
   pull-requests: write
   contents: read
   deployments: read
+  # Lets the `railway-preview` step below post a check_run on the
+  # deployed commit so the harness sees deploy outcomes via
+  # `check_run.completed` webhooks instead of polling Railway (#295).
+  checks: write
 
 jobs:
   announce:
-    # Only react to successful Railway preview deploys. Railway names its PR
-    # environments `pr-<N>` — anything else is prod or a non-PR env and we
-    # ignore it here.
+    # React to every Railway preview deploy outcome — success, failure, and
+    # error — so the `railway-preview` check_run is published on red as
+    # well as green (#295). The smoke-test + sticky-comment steps below
+    # stay gated on `state == 'success'` so a failed deploy isn't reported
+    # as healthy. Railway names its PR environments `pr-<N>`; anything
+    # else is prod or a non-PR env and we ignore it here.
     if: >-
       github.event_name == 'deployment_status' &&
-      github.event.deployment_status.state == 'success' &&
+      contains(fromJSON('["success", "failure", "error"]'), github.event.deployment_status.state) &&
       startsWith(github.event.deployment.environment, 'pr-')
     runs-on: ubuntu-latest
     steps:
@@ -68,7 +75,12 @@ jobs:
           echo "value=$url" >> "$GITHUB_OUTPUT"
 
       - name: Smoke-test /api/health
-        if: steps.url.outputs.value != ''
+        # Only smoke-test on successful deploys — a failed build has nothing
+        # to probe. The `railway-preview` check_run step below still fires
+        # in both branches.
+        if: >-
+          github.event.deployment_status.state == 'success' &&
+          steps.url.outputs.value != ''
         id: smoke
         env:
           URL: ${{ steps.url.outputs.value }}
@@ -86,8 +98,82 @@ jobs:
           done
           echo "status=failed" >> "$GITHUB_OUTPUT"
 
+      - name: Publish `railway-preview` check_run
+        # Always runs when the job fires, including on Railway build/
+        # healthcheck failures (#295). Attaches to the deployment's commit
+        # SHA so the check shows up on whichever PR's head matches —
+        # no PR-number lookup needed.
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_STATE: ${{ github.event.deployment_status.state }}
+          DEPLOY_SHA: ${{ github.event.deployment.sha }}
+          TARGET_URL: ${{ github.event.deployment_status.target_url }}
+          ENV_URL: ${{ steps.url.outputs.value }}
+          SMOKE_STATUS: ${{ steps.smoke.outputs.status }}
+        with:
+          script: |
+            const state = process.env.DEPLOY_STATE || 'unknown';
+            const sha = process.env.DEPLOY_SHA;
+            const smoke = process.env.SMOKE_STATUS || '';
+            const envUrl = process.env.ENV_URL || '';
+            const targetUrl = process.env.TARGET_URL || '';
+
+            if (!sha) {
+              core.warning('deployment_status event had no commit SHA — skipping check_run.');
+              return;
+            }
+
+            // Green only when Railway reports success AND the smoke-test
+            // actually got a 200 from /api/health. Anything else
+            // (Railway failure/error, or success with a broken
+            // healthcheck) is a red signal. The title is phrased so it
+            // matches the conclusion at a glance — a success-state with
+            // a failed smoke is "unhealthy", not "success".
+            const healthy = state === 'success' && smoke === 'ok';
+            const conclusion = healthy ? 'success' : 'failure';
+            let title;
+            if (healthy) {
+              title = 'Preview deploy succeeded';
+            } else if (state === 'success') {
+              title = `Preview deploy unhealthy (smoke: ${smoke || 'unknown'})`;
+            } else {
+              title = `Preview deploy ${state}`;
+            }
+
+            // `target_url` is Railway's deployment page (build log +
+            // runtime logs); `environment_url` is the deployed preview
+            // host. Label them distinctly so a reviewer doesn't have to
+            // guess which link goes where, and fall back to whichever
+            // is present so the summary never says "(no link)".
+            const summary = [
+              `Railway deployment state: \`${state}\`.`,
+              smoke ? `Smoke-test \`/api/health\`: \`${smoke}\`.` : null,
+              envUrl ? `Preview URL: ${envUrl}` : null,
+              targetUrl ? `Railway deployment page: ${targetUrl}` : null,
+            ].filter(Boolean).join('\n\n');
+
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'railway-preview',
+              head_sha: sha,
+              status: 'completed',
+              conclusion,
+              // Prefer the Railway deployment page (build + runtime
+              // logs in one place) so a red check is one click from
+              // the failure details; fall back to the preview host.
+              details_url: targetUrl || envUrl || undefined,
+              output: { title, summary },
+            });
+
       - name: Upsert preview comment
-        if: steps.pr.outputs.number != '' && steps.url.outputs.value != ''
+        # The sticky comment is "preview is live" — only post it when the
+        # deploy actually succeeded. Failed deploys are already visible
+        # via the `railway-preview` check above.
+        if: >-
+          github.event.deployment_status.state == 'success' &&
+          steps.pr.outputs.number != '' &&
+          steps.url.outputs.value != ''
         uses: actions/github-script@v7
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
