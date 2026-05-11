@@ -523,7 +523,6 @@ struct ArtifactRunRow {
     updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-
 /// Project a single artifact row + its workflow's stage chain into the
 /// dashboard `WorkflowRun` shape.
 ///
