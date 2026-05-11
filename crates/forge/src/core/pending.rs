@@ -7,7 +7,7 @@
 //! pipeline decision keyed by the request's correlation id, and the
 //! corresponding listener thread records the response into one of these
 //! maps when the matching event lands on the spine
-//! (`synodic.gate_verdict`, `stiglab.shaping_result_ready`).
+//! (`synodic.gate_verdict`, `stiglab.session_result_ready`).
 //!
 //! Phase-4 wires these maps into `ForgePipeline::tick`'s state machine so
 //! the resume path consults them. Phase-3 only populates them — keeping

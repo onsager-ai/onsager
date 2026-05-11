@@ -160,16 +160,4 @@ mod tests {
         };
         assert!(classify_verdict(kind).is_none());
     }
-
-    #[test]
-    fn classify_returns_none_for_summary_variant() {
-        // SynodicGateEvaluated is the dashboard summary; it does not
-        // carry the full GateVerdict payload phase-4 will act on.
-        let kind = FactoryEventKind::SynodicGateEvaluated {
-            gate_id: "g_eval".into(),
-            artifact_id: ArtifactId::new("art_x"),
-            verdict: onsager_spine::factory_event::VerdictSummary::Allow,
-        };
-        assert!(classify_verdict(kind).is_none());
-    }
 }

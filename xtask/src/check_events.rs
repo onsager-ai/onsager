@@ -190,17 +190,29 @@ fn extract_match_arms(stmts: &[Stmt]) -> Result<Vec<(String, String)>> {
 
     let mut out = Vec::new();
     for arm in &match_expr.arms {
-        let lit = match arm.body.as_ref() {
-            Expr::Lit(ExprLit {
-                lit: Lit::Str(s), ..
-            }) => s.value(),
-            _ => bail!("event_type() match arm body is not a string literal"),
-        };
+        let lit = arm_body_str(arm.body.as_ref())
+            .ok_or_else(|| anyhow!("event_type() match arm body is not a string literal"))?;
         for variant in collect_variants_from_pat(&arm.pat) {
             out.push((variant, lit.clone()));
         }
     }
     Ok(out)
+}
+
+/// Return the string-literal value of a match-arm body. Tolerates the
+/// `=> { "literal" }` block form rustfmt can produce when the arm
+/// pattern wraps onto multiple lines.
+fn arm_body_str(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(s), ..
+        }) => Some(s.value()),
+        Expr::Block(b) if b.block.stmts.len() == 1 => match &b.block.stmts[0] {
+            Stmt::Expr(inner, None) => arm_body_str(inner),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn collect_variants_from_pat(pat: &Pat) -> Vec<String> {

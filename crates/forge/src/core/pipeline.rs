@@ -5,7 +5,7 @@
 //! decision emits a request event (`forge.gate_requested`,
 //! `forge.shaping_dispatched`), parks itself keyed by the request's
 //! correlation id, and resumes on a later tick once the corresponding
-//! response (`synodic.gate_verdict`, `stiglab.shaping_result_ready`)
+//! response (`synodic.gate_verdict`, `stiglab.session_result_ready`)
 //! lands in the [`PendingVerdicts`] / [`PendingShapings`] maps the
 //! event listeners populate.
 //!
@@ -157,7 +157,7 @@ pub struct ForgePipeline {
     /// claim on resume. Cloned in from `ForgeSharedState` so the
     /// listener task and the pipeline see the same map.
     pending_verdicts: PendingVerdicts,
-    /// Shaping results the `shaping_result_listener` parks. Same
+    /// Session results the `session_result_listener` parks. Same
     /// sharing model as [`Self::pending_verdicts`].
     pending_shapings: PendingShapings,
 }

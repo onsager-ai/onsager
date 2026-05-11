@@ -1,15 +1,19 @@
 //! DB-facing registry operations — query, propose, approve, deprecate.
 //!
-//! This is the projection layer that makes the registry usable from code. The
-//! *authoritative* record is still the event stream: every mutation here
-//! writes both a row and a `registry.*` event in the same transaction.
+//! This is the projection layer that makes the registry usable from code.
+//! The registry tables (`artifact_types`, `artifact_adapters`,
+//! `gate_evaluators`, `agent_profiles`) are the source of truth.
+//!
+//! Per spec #285 these mutations no longer publish a `registry.*` spine
+//! event — the previous events had no in-tree consumer or dashboard
+//! reader and were instrumented pre-emptively for a registry timeline
+//! UI that never landed. Add an event back when there is a real
+//! consumer.
 //!
 //! See `registry.rs` for the trait-based plug points and value objects.
 
 use chrono::{DateTime, Utc};
-use onsager_spine::{
-    EventMetadata, EventStore, FactoryEvent, FactoryEventKind, append_factory_event_tx,
-};
+use onsager_spine::EventStore;
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Row, Transaction};
 
@@ -127,8 +131,8 @@ impl RegistryStore {
     }
 
     /// Propose a new artifact type. Inserts at revision 1 with status
-    /// `proposed` and emits `registry.type_proposed`. Idempotent: rerunning
-    /// with the same id is a no-op and emits no event.
+    /// `proposed`. Idempotent: rerunning with the same id is a no-op.
+    /// Per spec #285 no spine event is emitted.
     pub async fn propose_type(&self, def: &TypeDefinition, actor: &str) -> anyhow::Result<bool> {
         let workspace = self.workspace_id.clone();
         let actor = actor.to_owned();
@@ -156,23 +160,22 @@ impl RegistryStore {
             .map_err(anyhow::Error::from)
     }
 
-    /// Deprecate a type. Emits `registry.type_deprecated` with the reason.
-    pub async fn deprecate_type(
-        &self,
-        type_id: &str,
-        reason: &str,
-        actor: &str,
-    ) -> anyhow::Result<bool> {
+    /// Deprecate a type. Returns `true` if the row was actually
+    /// flipped to `deprecated`, `false` if it was already deprecated.
+    /// Per spec #285 no spine event is emitted and no `reason` column
+    /// exists on `artifact_types`; if a deprecation rationale needs to
+    /// be persisted, that's a schema change to the registry tables
+    /// rather than an event emission.
+    pub async fn deprecate_type(&self, type_id: &str, actor: &str) -> anyhow::Result<bool> {
         let workspace = self.workspace_id.clone();
         let actor = actor.to_owned();
         let type_id = type_id.to_owned();
-        let reason = reason.to_owned();
 
         self.store
             .transaction(move |tx| {
-                Box::pin(async move {
-                    deprecate_type_in_tx(tx, &workspace, &type_id, &reason, &actor).await
-                })
+                Box::pin(
+                    async move { deprecate_type_in_tx(tx, &workspace, &type_id, &actor).await },
+                )
             })
             .await
             .map_err(anyhow::Error::from)
@@ -187,7 +190,7 @@ async fn propose_type_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     workspace_id: &str,
     def: &TypeDefinition,
-    actor: &str,
+    _actor: &str,
 ) -> sqlx::Result<bool> {
     let definition = serde_json::to_value(def)
         .map_err(|e| sqlx::Error::Protocol(format!("serialize TypeDefinition: {e}")))?;
@@ -206,27 +209,14 @@ async fn propose_type_in_tx(
     .fetch_optional(&mut **tx)
     .await?;
 
-    let Some((revision,)) = inserted else {
-        return Ok(false);
-    };
-
-    let evt = registry_event(
-        FactoryEventKind::TypeProposed {
-            type_id: def.type_id.as_str().to_owned(),
-            workspace_id: workspace_id.to_owned(),
-            revision,
-        },
-        actor,
-    );
-    append_factory_event_tx(tx, &evt, &actor_metadata(actor)).await?;
-    Ok(true)
+    Ok(inserted.is_some())
 }
 
 async fn approve_type_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     workspace_id: &str,
     type_id: &str,
-    actor: &str,
+    _actor: &str,
 ) -> sqlx::Result<bool> {
     let updated: Option<(i32,)> = sqlx::query_as(
         r#"
@@ -240,28 +230,14 @@ async fn approve_type_in_tx(
     .fetch_optional(&mut **tx)
     .await?;
 
-    let Some((revision,)) = updated else {
-        return Ok(false);
-    };
-
-    let evt = registry_event(
-        FactoryEventKind::TypeApproved {
-            type_id: type_id.to_owned(),
-            workspace_id: workspace_id.to_owned(),
-            revision,
-        },
-        actor,
-    );
-    append_factory_event_tx(tx, &evt, &actor_metadata(actor)).await?;
-    Ok(true)
+    Ok(updated.is_some())
 }
 
 async fn deprecate_type_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     workspace_id: &str,
     type_id: &str,
-    reason: &str,
-    actor: &str,
+    _actor: &str,
 ) -> sqlx::Result<bool> {
     let updated: Option<(i32,)> = sqlx::query_as(
         r#"
@@ -275,38 +251,7 @@ async fn deprecate_type_in_tx(
     .fetch_optional(&mut **tx)
     .await?;
 
-    if updated.is_none() {
-        return Ok(false);
-    }
-
-    let evt = registry_event(
-        FactoryEventKind::TypeDeprecated {
-            type_id: type_id.to_owned(),
-            workspace_id: workspace_id.to_owned(),
-            reason: reason.to_owned(),
-        },
-        actor,
-    );
-    append_factory_event_tx(tx, &evt, &actor_metadata(actor)).await?;
-    Ok(true)
-}
-
-fn registry_event(kind: FactoryEventKind, actor: &str) -> FactoryEvent {
-    FactoryEvent {
-        event: kind,
-        correlation_id: None,
-        causation_id: None,
-        actor: actor.to_owned(),
-        timestamp: Utc::now(),
-    }
-}
-
-fn actor_metadata(actor: &str) -> EventMetadata {
-    EventMetadata {
-        correlation_id: None,
-        causation_id: None,
-        actor: actor.to_owned(),
-    }
+    Ok(updated.is_some())
 }
 
 fn row_to_record(row: sqlx::postgres::PgRow) -> sqlx::Result<RegistryRecord> {

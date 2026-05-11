@@ -284,6 +284,65 @@ subsystems. Internal-quality work that doesn't fit those projections —
 interior-to-a-subsystem hygiene — is equally in scope and should be specced
 and shipped on the same footing as feature work.
 
+## User-facing vocabulary (canonical 4 nouns)
+
+Per spec #286 the dashboard, public API field names, route segments,
+button copy, page titles, and user-visible docs use exactly four
+top-level nouns. Anything else is internal-only or surface-internal
+(visible only inside a workflow/run drill-down, never as a top-level
+navigation noun).
+
+The four canonical nouns:
+
+- **Workflow** — the automation unit (trigger + ordered stages +
+  prompts). Lives at `/api/workflows`. Persisted in spine `workflows`
+  / `workflow_stages` (Lever D).
+- **Run** — one execution of a workflow against an artifact. Lives at
+  `/api/workflows/:id/runs`. Has a status and a sequence of stage
+  outcomes.
+- **Artifact** — what a run produces (issue, PR, deployment, etc.).
+  Already the core noun; lives at `/api/spine/artifacts`. Persisted
+  in spine `artifacts`.
+- **Stage** — a step within a workflow definition (gate kind +
+  parameters). A workflow's structural unit; never a top-level
+  navigation noun.
+
+**Demoted to internal-only.** These terms stay rich in Rust /
+migration / spine vocabulary but never surface to users:
+
+- **shaping** — legacy term for agent-session dispatch. Stays in
+  internal Rust (`shaping_listener.rs`, `ShapingRequest`,
+  `ShapingResult`). The user-facing event-name leakage
+  (`stiglab.shaping_result_ready`) was renamed to
+  `stiglab.session_result_ready` per spec #285.
+- **bundle / sealed / ArtifactVersionId** — internal storage terms.
+  The user-facing concept is "artifact version".
+- **spec** — dev-process term for a GitHub issue with implementation
+  intent. Lives in CLAUDE.md and the `issue-spec` skill; never
+  surfaces in the dashboard.
+
+**Demoted to surface-internal.** Visible only inside a workflow / run
+drill-down, not as a top-level navigation item:
+
+- **gate / verdict** — control points within a stage. Visible in
+  workflow detail and run history; never a top-level surface.
+- **governance** — the audit/escalation surface. Subsumed into run
+  history's verdict view.
+- **session** — a stage execution context. Visible only as a stage
+  gate kind ("agent-session") and as a drill-down from a run's stage
+  history.
+- **node** — infrastructure; visible only in settings, not as a
+  top-level noun.
+- **issue** — the GitHub issue that triggered or was produced by a
+  run. An artifact kind, not a separate concept.
+
+**Enforcement is doc-only.** Dashboard tsx is too varied for a
+useful grep-based vocabulary lint, and the 2026-05-09 audit found
+no significant leakage. The doc commitment plus PR review is the
+enforcement mechanism; a mechanical lint can be added later if drift
+recurs. This vocabulary is for surfaces users see — the seam-level /
+internal vocabulary stays rich per "Internal aesthetic" above.
+
 ## Architectural drift patterns to watch
 
 Loose runtime coupling is correct and stays — but the seams it creates are

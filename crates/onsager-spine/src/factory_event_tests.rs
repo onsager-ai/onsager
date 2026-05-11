@@ -388,11 +388,11 @@ mod tests {
     }
 
     #[test]
-    fn stiglab_shaping_result_ready_roundtrip() {
+    fn stiglab_session_result_ready_roundtrip() {
         use crate::protocol::ShapingResult;
         use onsager_artifact::ContentRef;
 
-        let event = FactoryEventKind::StiglabShapingResultReady {
+        let event = FactoryEventKind::StiglabSessionResultReady {
             artifact_id: ArtifactId::new("art_shaped"),
             result: ShapingResult {
                 request_id: "req_shaping_42".into(),
@@ -410,12 +410,12 @@ mod tests {
         };
 
         // event_type / stream routing — phase-3 listeners filter on these.
-        assert_eq!(event.event_type(), "stiglab.shaping_result_ready");
+        assert_eq!(event.event_type(), "stiglab.session_result_ready");
         assert_eq!(event.stream_type(), "stiglab");
         assert_eq!(event.stream_id(), "art_shaped");
 
         let json = serde_json::to_value(&event).unwrap();
-        assert_eq!(json["type"], "stiglab_shaping_result_ready");
+        assert_eq!(json["type"], "stiglab_session_result_ready");
         assert_eq!(json["artifact_id"], "art_shaped");
         assert_eq!(json["result"]["request_id"], "req_shaping_42");
         assert_eq!(json["result"]["outcome"], "completed");

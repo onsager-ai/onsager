@@ -20,7 +20,7 @@ use crate::core::persistence;
 use crate::core::pipeline::{ForgePipeline, PipelineEvent};
 use crate::core::scheduler;
 use crate::core::session_listener::{self, SessionCompleted, SessionCompletedHandler};
-use crate::core::shaping_result_listener;
+use crate::core::session_result_listener;
 use crate::core::signal_cache::SignalCache;
 use crate::core::stage_runner::{self, StageEvent};
 use crate::core::trigger_subscriber::{
@@ -211,8 +211,6 @@ pub fn run(database_url: &str, tick_ms: u64) {
                         .iter()
                         .map(|e| match e {
                             StageEvent::StageEntered { artifact_id, .. }
-                            | StageEvent::GatePassed { artifact_id, .. }
-                            | StageEvent::GateFailed { artifact_id, .. }
                             | StageEvent::StageAdvanced { artifact_id, .. } => artifact_id.clone(),
                         })
                         .collect();
@@ -322,8 +320,6 @@ pub fn run(database_url: &str, tick_ms: u64) {
                     if let Some(ref spine) = spine {
                         let workflow_id = match event {
                             StageEvent::StageEntered { workflow_id, .. }
-                            | StageEvent::GatePassed { workflow_id, .. }
-                            | StageEvent::GateFailed { workflow_id, .. }
                             | StageEvent::StageAdvanced { workflow_id, .. } => workflow_id,
                         };
                         match workflows_snapshot.get(workflow_id) {
@@ -555,35 +551,36 @@ pub fn run(database_url: &str, tick_ms: u64) {
             }
         });
 
-        // Spawn the Lever C shaping-result listener. Tails
-        // `stiglab.shaping_result_ready`, parses the typed variant, and
+        // Spawn the Lever C session-result listener. Tails
+        // `stiglab.session_result_ready`, parses the typed variant, and
         // parks the embedded `ShapingResult` in `pending_shapings` keyed
-        // by its `request_id`. Same warm-start strategy.
-        let shaping_shared = shared.clone();
+        // by its `request_id`. Same warm-start strategy. (Renamed from
+        // shaping_result_listener per spec #285.)
+        let session_result_shared = shared.clone();
         let pending_shapings_for_listener = pending_shapings.clone();
         tokio::spawn(async move {
             let store = {
-                let state = shaping_shared.read().await;
+                let state = session_result_shared.read().await;
                 state.spine.clone()
             };
             let Some(store) = store else {
-                tracing::info!("forge: shaping_result listener disabled (no spine connection)");
+                tracing::info!("forge: session_result listener disabled (no spine connection)");
                 return;
             };
             let since = match store.max_event_id().await {
                 Ok(cursor) => cursor,
                 Err(e) => {
                     tracing::warn!(
-                        "forge: max_event_id lookup failed ({e}); starting shaping_result \
+                        "forge: max_event_id lookup failed ({e}); starting session_result \
                          listener from the beginning"
                     );
                     None
                 }
             };
             if let Err(e) =
-                shaping_result_listener::run(store, pending_shapings_for_listener, since).await
+                session_result_listener::run(store, pending_shapings_for_listener, since).await
             {
-                tracing::error!("forge: shaping_result listener exited: {e}");
+                tracing::error!("forge: session_result listener exited: {e}");
             }
         });
 
@@ -1107,40 +1104,6 @@ async fn emit_stage_event(spine: &EventStore, workflow: &Workflow, event: &Stage
                 "workspace_id": workspace_id,
                 "stage_index": stage_index,
                 "stage_name": stage_name,
-            }),
-        ),
-        StageEvent::GatePassed {
-            artifact_id,
-            workflow_id,
-            stage_index,
-            gate_kind,
-        } => (
-            format!("workflow:{artifact_id}"),
-            "stage.gate_passed",
-            serde_json::json!({
-                "artifact_id": artifact_id,
-                "workflow_id": workflow_id,
-                "workspace_id": workspace_id,
-                "stage_index": stage_index,
-                "gate_kind": gate_kind,
-            }),
-        ),
-        StageEvent::GateFailed {
-            artifact_id,
-            workflow_id,
-            stage_index,
-            gate_kind,
-            reason,
-        } => (
-            format!("workflow:{artifact_id}"),
-            "stage.gate_failed",
-            serde_json::json!({
-                "artifact_id": artifact_id,
-                "workflow_id": workflow_id,
-                "workspace_id": workspace_id,
-                "stage_index": stage_index,
-                "gate_kind": gate_kind,
-                "reason": reason,
             }),
         ),
         StageEvent::StageAdvanced {

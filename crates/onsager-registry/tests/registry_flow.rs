@@ -15,10 +15,10 @@ fn db_url() -> Option<String> {
 
 async fn wipe(store: &EventStore, workspace: &str) {
     // All deletes are scoped to the workspace under test so tests on shared
-    // or parallel DB backends don't clobber each other.
+    // or parallel DB backends don't clobber each other. Per spec #285
+    // registry mutations no longer publish spine events; the event-table
+    // wipe is dropped from this list.
     let scoped = [
-        "DELETE FROM events WHERE stream_type = 'registry' \
-         AND data->'event'->>'workspace_id' = $1",
         "DELETE FROM registry_seed_marker WHERE workspace_id = $1",
         "DELETE FROM artifact_types WHERE workspace_id = $1",
         "DELETE FROM artifact_adapters WHERE workspace_id = $1",
@@ -77,39 +77,13 @@ async fn propose_then_approve_type_lifecycle() {
         .expect("row present");
     assert_eq!(row.status, RegistryStatus::Approved);
 
-    // deprecate emits the terminal event
-    assert!(
-        registry
-            .deprecate_type("DraftType", "superseded", "bob")
-            .await
-            .unwrap()
-    );
-    assert!(
-        !registry
-            .deprecate_type("DraftType", "noop", "bob")
-            .await
-            .unwrap()
-    );
+    // deprecate flips status to `deprecated`; second call is idempotent
+    assert!(registry.deprecate_type("DraftType", "bob").await.unwrap());
+    assert!(!registry.deprecate_type("DraftType", "bob").await.unwrap());
 
-    // Three registry events should have landed on the spine for this
-    // workspace. Filter on event_type (authoritative column) and
-    // workspace_id inside the envelope so we don't pick up other tests'
-    // rows on a shared DB.
-    let events: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM events \
-         WHERE stream_type = 'registry' \
-           AND event_type IN ('registry.type_proposed','registry.type_approved','registry.type_deprecated') \
-           AND data->'event'->>'workspace_id' = $1",
-    )
-    .bind(workspace)
-    .fetch_one(store.pool())
-    .await
-    .unwrap();
-    assert!(
-        events.0 >= 3,
-        "expected at least 3 events, got {}",
-        events.0
-    );
+    // Per spec #285 registry mutations no longer publish spine events.
+    // The registry tables themselves are the source of truth; the row
+    // assertions above already verified the lifecycle landed.
 
     wipe(&store, workspace).await;
 }

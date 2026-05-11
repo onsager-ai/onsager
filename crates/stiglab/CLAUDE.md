@@ -32,7 +32,7 @@ What this means for stiglab specifically:
   event you care about, write your response as a new event. Concrete
   pattern in production today: stiglab's `shaping_listener` consumes
   `forge.shaping_dispatched`, spawns the agent session, and emits
-  `stiglab.session_completed` + `stiglab.shaping_result_ready` when
+  `stiglab.session_completed` + `stiglab.session_result_ready` when
   the session reaches a terminal state (or `stiglab.session_failed`
   on the error path).
 - **Reads of portal-owned tables.** The route surfaces moved to

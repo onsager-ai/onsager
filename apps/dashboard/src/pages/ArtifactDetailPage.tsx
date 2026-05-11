@@ -252,7 +252,7 @@ export function ArtifactDetailPage() {
           title={
             isTerminal
               ? "Cannot retry an artifact in a terminal state"
-              : "Request another shaping run"
+              : "Request another run"
           }
         >
           <RefreshCw className="mr-1 h-3.5 w-3.5" />
