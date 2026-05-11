@@ -11,10 +11,10 @@
 //! be a member of the workflow's workspace (404 otherwise).
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthUser;
 use crate::handlers::workspaces::require_workspace_access;
@@ -27,6 +27,19 @@ fn not_found(msg: &str) -> Response {
         Json(serde_json::json!({ "error": msg })),
     )
         .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LimitQuery {
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// Default page size + hard cap for the workflow-scoped list endpoints.
+/// Matches `GET /api/workflows/:id/runs` so the three workflow tabs poll
+/// the same shape.
+fn clamp_limit(limit: Option<i64>) -> i64 {
+    limit.unwrap_or(50).clamp(1, 500)
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -47,10 +60,14 @@ struct WorkflowArtifactRow {
 /// GET /api/workflows/:id/artifacts — artifacts produced by runs of
 /// this workflow. Same `SpineArtifact` shape as
 /// `GET /api/spine/artifacts`, filtered by `artifacts.workflow_id`.
+///
+/// `?limit=` (default 50, clamped to 500) keeps the polled response
+/// bounded as a workflow accumulates artifacts.
 pub async fn list_workflow_artifacts(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Path(workflow_id): Path<String>,
+    Query(q): Query<LimitQuery>,
 ) -> Response {
     let spine = state.spine.pool();
     let workflow = match workflow_db::get_workflow(spine, &workflow_id).await {
@@ -66,14 +83,17 @@ pub async fn list_workflow_artifacts(
         return r;
     }
 
+    let limit = clamp_limit(q.limit);
     match sqlx::query_as::<_, WorkflowArtifactRow>(
         "SELECT artifact_id AS id, kind, name, state, owner, current_version, \
                 consumers, external_ref, created_at, updated_at, last_observed_at \
          FROM artifacts \
          WHERE workflow_id = $1 \
-         ORDER BY updated_at DESC",
+         ORDER BY updated_at DESC \
+         LIMIT $2",
     )
     .bind(&workflow_id)
+    .bind(limit)
     .fetch_all(spine)
     .await
     {
@@ -108,6 +128,9 @@ struct WorkflowVerdictRow {
 /// `metadata->>'artifact_id'` against the artifacts owned by this
 /// workflow.
 ///
+/// `?limit=` (default 50, clamped to 500) bounds the polled response;
+/// the dashboard hits this every 5s when a governance stage exists.
+///
 /// Synodic and portal share the spine Postgres in production
 /// (`deploy/docker-compose.yml`) and via the `migrate` service in
 /// `just dev`, so this is a direct SQL read — same pattern as
@@ -117,6 +140,7 @@ pub async fn list_workflow_verdicts(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Path(workflow_id): Path<String>,
+    Query(q): Query<LimitQuery>,
 ) -> Response {
     let spine = state.spine.pool();
     let workflow = match workflow_db::get_workflow(spine, &workflow_id).await {
@@ -132,6 +156,7 @@ pub async fn list_workflow_verdicts(
         return r;
     }
 
+    let limit = clamp_limit(q.limit);
     match sqlx::query_as::<_, WorkflowVerdictRow>(
         "SELECT id, event_type, title, severity, source, metadata, resolved, \
                 resolution_notes, created_at, resolved_at \
@@ -139,9 +164,11 @@ pub async fn list_workflow_verdicts(
          WHERE metadata->>'artifact_id' IN ( \
              SELECT artifact_id FROM artifacts WHERE workflow_id = $1 \
          ) \
-         ORDER BY created_at DESC",
+         ORDER BY created_at DESC \
+         LIMIT $2",
     )
     .bind(&workflow_id)
+    .bind(limit)
     .fetch_all(spine)
     .await
     {

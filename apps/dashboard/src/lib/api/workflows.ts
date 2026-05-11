@@ -203,14 +203,15 @@ export const workflows = {
     ),
   // Workflow-scoped artifacts + verdicts (#302). One round-trip
   // replaces the dashboard's per-run artifact fan-out fetch and the
-  // workspace-wide governance-events filter.
-  getWorkflowArtifacts: (id: string) =>
+  // workspace-wide governance-events filter. Backend clamps `limit`
+  // to [1, 500]; default 50 matches `/workflows/:id/runs`.
+  getWorkflowArtifacts: (id: string, limit = 50) =>
     request<{ artifacts: SpineArtifact[] }>(
-      `/workflows/${encodeURIComponent(id)}/artifacts`,
+      `/workflows/${encodeURIComponent(id)}/artifacts?limit=${limit}`,
     ),
-  getWorkflowVerdicts: (id: string) =>
+  getWorkflowVerdicts: (id: string, limit = 50) =>
     request<{ verdicts: GovernanceEvent[] }>(
-      `/workflows/${encodeURIComponent(id)}/verdicts`,
+      `/workflows/${encodeURIComponent(id)}/verdicts?limit=${limit}`,
     ),
   // Run detail hub (#303). Backend returns the projected run alongside
   // the parent workflow's backend shape; reuse `workflowFromBackend` so
