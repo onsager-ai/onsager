@@ -109,6 +109,56 @@ before claiming done is the same skill as flagging them in review.
 See [ADR 0005](docs/adr/0005-s5-governance-scales-with-scale.md) for
 the meta-rule on how this S5 layer evolves with operational scale.
 
+## Operating posture: pre-launch
+
+Onsager has not yet been launched live to users. While that's true,
+the factory operates aggressively: ship work to `main`, enable new
+surfaces by default, and skip the protective scaffolding that only
+makes sense once humans depend on us. The four kinds of scaffolding
+that fall away pre-launch:
+
+- **Feature flags meant solely to hide work from users** that don't
+  exist. When a surface lands, it lands visibly. Flags are still
+  legitimate for in-flight A/B work or workspace-level admin choices
+  (e.g. "this workspace's owner doesn't want the agent enabled") —
+  but not for hiding incomplete surfaces from a userbase of zero.
+- **Mock implementations as bridges to absent dependencies.** If
+  spec A needs spec B and B hasn't landed, reorder the work so B
+  lands first. Throwaway mocks become "bridges that ossify"
+  (see § "Architectural drift patterns to watch") — pre-launch is
+  exactly when you can pay the reorder cost cheaply.
+- **"Preview" / "beta" banners** on surfaces that are the product
+  for our internal team. We know what we're building; we don't
+  need to warn ourselves.
+- **Bookmark / deprecation preservation work** for routes nobody
+  has bookmarked yet. Delete the old route and its backend handler
+  in the same PR as the replacement. Redirects are still cheap and
+  worth adding when free (the inflight #289 PR 6 does this); long
+  deprecation windows are not.
+
+What does NOT relax with pre-launch posture:
+
+- **Spec discipline.** Specs are still ground truth (commitment 3).
+  Pre-launch lets us amend specs more cheaply, not skip them.
+- **Claim-honesty.** "Done" still means the spec's bar is met, not
+  "essentially works." The annex above applies regardless of
+  launch status — green CI plus uncovered new code is theater
+  whether we have users or not.
+- **Internal-symmetry / seam-rule / file-budget / lint enforcement.**
+  The quality bar that makes the codebase maintainable does not
+  loosen because we lack users. `lint-seams`, `check-events`,
+  `check-api-contract`, `check-file-budget` stay hard-fail.
+- **Identity commitments** (the four bullets at the top of this
+  file). Those define the factory, not its launch status.
+
+**Flipping the posture.** When we launch, delete this section and
+replace it with the post-launch operating bars (bookmark
+preservation, deprecation windows, feature-flag gating for
+high-blast-radius surfaces, mock-implementation policy for
+unmerged dependencies, communication discipline for breaking
+changes). The flip is itself a deliberate ADR-worthy moment —
+landing live to users is a commitment, not a deploy event.
+
 ## Architecture
 
 See § What makes Onsager Onsager (above) for the identity commitments
