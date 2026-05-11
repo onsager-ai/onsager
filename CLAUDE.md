@@ -109,6 +109,113 @@ before claiming done is the same skill as flagging them in review.
 See [ADR 0005](docs/adr/0005-s5-governance-scales-with-scale.md) for
 the meta-rule on how this S5 layer evolves with operational scale.
 
+## Operating posture: pre-launch
+
+Onsager has not yet been launched live to users. That fact removes
+one category of scaffolding from our work — the kind that protects
+users from our half-finished state. It does NOT loosen the internal
+discipline that produces well-built work in the first place. The
+point of pre-launch is to ship more learning per unit time, not to
+ship less rigorously, and not to defer hard problems past launch.
+
+### What pre-launch removes
+
+User-protection scaffolding only makes sense once humans depend on
+us; we skip it now:
+
+- **Feature flags meant solely to hide work from a userbase that
+  doesn't exist yet.** When a surface lands, it lands visibly.
+  Flags are still legitimate for in-flight A/B work or
+  workspace-level admin choices (e.g. "this workspace's owner
+  doesn't want the agent enabled") — but not for hiding incomplete
+  surfaces from a userbase of zero.
+- **Mock implementations as bridges to absent dependencies.** If
+  spec A needs spec B and B hasn't landed, reorder the work so B
+  lands first. Throwaway mocks become "bridges that ossify"
+  (see § "Architectural drift patterns to watch") — pre-launch is
+  exactly when you can pay the reorder cost cheaply.
+- **"Preview" / "beta" banners** on surfaces that are the product
+  for our internal team. We know what we're building; we don't
+  need to warn ourselves.
+- **Bookmark / deprecation preservation work** for routes nobody
+  has bookmarked yet. Delete the old route and its backend handler
+  in the same PR as the replacement. Redirects are still cheap and
+  worth adding when free; long deprecation windows are not.
+
+### What pre-launch does NOT loosen
+
+Pre-launch is not a license to ship less rigorous work. Internal
+discipline matters *more* at high velocity, not less — code we
+touch faster needs more guardrails to catch the mistakes that
+velocity invites, not fewer:
+
+- **Spec discipline.** Specs remain ground truth (commitment 3).
+  Pre-launch lets us amend specs more cheaply, not skip them.
+  Implementation without a spec is *untracked defer* (named
+  failure mode above) — the absence of users does not change that.
+- **Claim-honesty.** "Done" still means the spec's bar is met,
+  not "essentially works." *Theater coverage* (green CI with
+  uncovered new code) is theater whether we have users or not.
+  Plan items are still atomic; split-and-amend, don't silently
+  reduce scope.
+- **Tests.** "Nobody will hit this path yet" is not a reason to
+  skip tests. Tests are how we know the code works *before* we
+  find out it doesn't. The claim-honesty annex's mutation check
+  (mutate one line of new code; a test must fail) applies
+  regardless of launch status.
+- **Review.** Velocity comes from small PRs reviewed quickly, not
+  large PRs reviewed never. Self-review (the claim-honesty checks
+  in commitment 3) is the floor; a second pair of eyes is the
+  norm. Squashing a PR onto `main` does not retire the review
+  obligation.
+- **Root-cause fixes over band-aids.** Pre-launch is the cheapest
+  moment to fix a problem properly — no migration choreography,
+  no in-flight runs, no operational scar tissue. A workaround
+  shipped under unchanged Plan wording is *silent scope
+  reduction*. A workaround shipped with a follow-up issue and an
+  amended Plan is fine. A workaround shipped with neither is the
+  longest-half-life untracked-defer pattern — "I'll fix it after
+  launch" almost never holds, because launch makes the fix more
+  expensive, not less.
+- **Internal symmetry, seam rule, file budget, lint enforcement.**
+  `lint-seams`, `check-events`, `check-api-contract`, and
+  `check-file-budget` stay hard-fail. Code structure rots *faster*
+  pre-launch, not slower, because we touch more of it per unit
+  time.
+- **Identity commitments** (the four bullets at the top of this
+  file). Those define the factory, not its launch status.
+
+### What pre-launch is for
+
+The window only opens once. Use it for moves that are cheap now
+and expensive later:
+
+- **Reordering work** when a dependency surfaces — nobody depends
+  on the current sequence.
+- **Schema changes and migrations** without choreography — no
+  production data to preserve, no zero-downtime constraint.
+- **Discovering wrong abstractions** and rewriting them — no
+  public contract yet, no client code to coordinate with.
+- **Replacing whole subsystems** when the original guess was
+  wrong — no operational scar tissue, no on-call rotation to
+  brief.
+
+Use the window for those *structural* moves. Quality shortcuts
+the discipline above forbids are not the same thing — they don't
+get cheaper at launch, they get more expensive. **Pre-launch
+removes user protection. It does not remove work-quality
+protection.**
+
+### Flipping the posture
+
+When we launch, delete this section and replace it with the
+post-launch operating bars (bookmark preservation, deprecation
+windows, feature-flag gating for high-blast-radius surfaces,
+mock-implementation policy for unmerged dependencies,
+communication discipline for breaking changes). The flip is
+itself a deliberate ADR-worthy moment — landing live to users is
+a commitment, not a deploy event.
+
 ## Architecture
 
 See § What makes Onsager Onsager (above) for the identity commitments
