@@ -117,11 +117,12 @@ surfaces by default, and skip the protective scaffolding that only
 makes sense once humans depend on us. The four kinds of scaffolding
 that fall away pre-launch:
 
-- **Feature flags meant solely to hide work from users** that don't
-  exist. When a surface lands, it lands visibly. Flags are still
-  legitimate for in-flight A/B work or workspace-level admin choices
-  (e.g. "this workspace's owner doesn't want the agent enabled") —
-  but not for hiding incomplete surfaces from a userbase of zero.
+- **Feature flags meant solely to hide work from a userbase that
+  doesn't exist yet.** When a surface lands, it lands visibly.
+  Flags are still legitimate for in-flight A/B work or
+  workspace-level admin choices (e.g. "this workspace's owner
+  doesn't want the agent enabled") — but not for hiding incomplete
+  surfaces from a userbase of zero.
 - **Mock implementations as bridges to absent dependencies.** If
   spec A needs spec B and B hasn't landed, reorder the work so B
   lands first. Throwaway mocks become "bridges that ossify"
@@ -133,8 +134,7 @@ that fall away pre-launch:
 - **Bookmark / deprecation preservation work** for routes nobody
   has bookmarked yet. Delete the old route and its backend handler
   in the same PR as the replacement. Redirects are still cheap and
-  worth adding when free (the inflight #289 PR 6 does this); long
-  deprecation windows are not.
+  worth adding when free; long deprecation windows are not.
 
 What does NOT relax with pre-launch posture:
 
@@ -144,7 +144,7 @@ What does NOT relax with pre-launch posture:
   "essentially works." The annex above applies regardless of
   launch status — green CI plus uncovered new code is theater
   whether we have users or not.
-- **Internal-symmetry / seam-rule / file-budget / lint enforcement.**
+- **Internal symmetry, seam rule, file budget, lint enforcement.**
   The quality bar that makes the codebase maintainable does not
   loosen because we lack users. `lint-seams`, `check-events`,
   `check-api-contract`, `check-file-budget` stay hard-fail.
