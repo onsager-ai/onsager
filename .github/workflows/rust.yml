@@ -55,6 +55,14 @@ jobs:
               # re-trigger the xtask job.
               - 'apps/dashboard/src/lib/api.ts'
               - 'apps/dashboard/src/lib/sse.ts'
+              # Spec #310 — check-tools-and-skills cross-references the
+              # MCP tool registry against the public skills bundle. The
+              # registry lives under crates/onsager-portal (already
+              # covered by `workspace`/path triggers); add the staging
+              # bundle dir and this workflow itself so a skill-only
+              # change still re-triggers the lint.
+              - 'public-skills/**'
+              - '.github/workflows/rust.yml'
 
   check:
     needs: changes
