@@ -233,8 +233,17 @@ impl AnthropicClient {
 
         if !resp.status().is_success() {
             let status = resp.status();
+            // Pull the body for server-side diagnostics only — callers
+            // surface this through `stub_reason`, so we keep the
+            // bubbled-up error short and stable instead of leaking
+            // raw provider output.
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("anthropic API returned {status}: {body}");
+            tracing::warn!(
+                status = %status,
+                body = %body,
+                "anthropic API returned non-2xx"
+            );
+            anyhow::bail!("anthropic API returned {status}");
         }
 
         let parsed: MessagesResponse = resp.json().await.context("decode anthropic response")?;

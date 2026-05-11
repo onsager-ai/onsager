@@ -19,10 +19,10 @@ CREATE TABLE IF NOT EXISTS portal_remediation_calls (
     user_id                     TEXT        NOT NULL,
     artifact_id                 TEXT        NOT NULL,
     model                       TEXT        NOT NULL,
-    input_tokens                INTEGER     NOT NULL DEFAULT 0,
-    output_tokens               INTEGER     NOT NULL DEFAULT 0,
-    cache_creation_input_tokens INTEGER     NOT NULL DEFAULT 0,
-    cache_read_input_tokens     INTEGER     NOT NULL DEFAULT 0,
+    input_tokens                BIGINT      NOT NULL DEFAULT 0,
+    output_tokens               BIGINT      NOT NULL DEFAULT 0,
+    cache_creation_input_tokens BIGINT      NOT NULL DEFAULT 0,
+    cache_read_input_tokens     BIGINT      NOT NULL DEFAULT 0,
     cost_usd                    DOUBLE PRECISION NOT NULL DEFAULT 0,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

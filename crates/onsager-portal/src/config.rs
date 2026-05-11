@@ -54,7 +54,8 @@ pub struct Config {
     /// Per-workspace per-month USD spend cap for `propose_remediation`
     /// AI calls (#312). When a workspace's spend in the current
     /// calendar month reaches this value, further calls short-circuit
-    /// to the stub envelope with `stub_reason: budget_exceeded`.
+    /// to the stub envelope with `stub_reason = "budget_exceeded"`
+    /// and a `details` object carrying `{spent_usd, cap_usd}`.
     /// Defaults to a conservative double-digit dollar value; override
     /// via `PORTAL_REMEDIATION_MONTHLY_CAP_USD`.
     pub remediation_monthly_cap_usd: f64,

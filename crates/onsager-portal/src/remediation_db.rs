@@ -17,8 +17,10 @@ use crate::anthropic::Usage;
 /// Outcome of the per-workspace budget check.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BudgetStatus {
-    /// At least one more call fits under the monthly cap. Carries the
-    /// remaining headroom so the caller can surface it.
+    /// At least one more call fits under the monthly cap. Carries
+    /// `spent_usd` and `cap_usd` so the caller can compute remaining
+    /// headroom (`cap_usd - spent_usd`) and surface a warning when
+    /// the workspace is approaching the limit.
     Ok { spent_usd: f64, cap_usd: f64 },
     /// Over the monthly cap — the call must short-circuit to stub.
     OverCap { spent_usd: f64, cap_usd: f64 },
@@ -92,10 +94,10 @@ pub async fn record_call(
     .bind(user_id)
     .bind(artifact_id)
     .bind(model)
-    .bind(usage.input_tokens as i32)
-    .bind(usage.output_tokens as i32)
-    .bind(usage.cache_creation_input_tokens as i32)
-    .bind(usage.cache_read_input_tokens as i32)
+    .bind(usage.input_tokens as i64)
+    .bind(usage.output_tokens as i64)
+    .bind(usage.cache_creation_input_tokens as i64)
+    .bind(usage.cache_read_input_tokens as i64)
     .bind(cost_usd)
     .execute(pool)
     .await?;

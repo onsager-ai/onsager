@@ -291,32 +291,35 @@ pub async fn propose_remediation(
         .collect();
 
     // Decide whether to go to the model. Each guard returns the stub
-    // envelope with a specific `stub_reason` so the dashboard can
-    // tell the user why their request degraded.
+    // envelope with a stable machine-readable `stub_reason` code so
+    // the dashboard can branch on the reason; detailed error context
+    // is logged server-side rather than embedded in the client
+    // payload (security: avoids leaking SQL errors / provider bodies
+    // through the chat surface).
     let api_key = match load_workspace_anthropic_key(state, auth_user, &workspace_id).await {
         Ok(Some(k)) => k,
         Ok(None) => {
             return Ok(stub_envelope(
                 &summary,
                 &log_pointers,
-                "no ANTHROPIC_API_KEY credential set for this workspace",
+                stub_reason::NO_CREDENTIAL,
+                None,
             ));
         }
-        Err(reason) => {
-            return Ok(stub_envelope(&summary, &log_pointers, &reason));
+        Err(code) => {
+            return Ok(stub_envelope(&summary, &log_pointers, code, None));
         }
     };
 
     let cap_usd = state.config.remediation_monthly_cap_usd;
     match remediation_db::check_budget(&state.pool, &workspace_id, cap_usd).await {
         Ok(BudgetStatus::OverCap { spent_usd, cap_usd }) => {
-            return Ok(stub_envelope(
+            return Ok(stub_envelope_with_budget(
                 &summary,
                 &log_pointers,
-                &format!(
-                    "workspace monthly remediation budget exceeded ({:.2} USD / {:.2} USD cap)",
-                    spent_usd, cap_usd
-                ),
+                stub_reason::BUDGET_EXCEEDED,
+                spent_usd,
+                cap_usd,
             ));
         }
         Ok(BudgetStatus::Ok { .. }) => {}
@@ -338,10 +341,12 @@ pub async fn propose_remediation(
     let client = match AnthropicClient::new(api_key) {
         Ok(c) => c,
         Err(e) => {
+            tracing::warn!("propose_remediation anthropic client init failed: {e}");
             return Ok(stub_envelope(
                 &summary,
                 &log_pointers,
-                &format!("anthropic client init failed: {e}"),
+                stub_reason::ANTHROPIC_INIT_FAILED,
+                None,
             ));
         }
     };
@@ -367,7 +372,8 @@ pub async fn propose_remediation(
             return Ok(stub_envelope(
                 &summary,
                 &log_pointers,
-                &format!("anthropic call failed: {e}"),
+                stub_reason::ANTHROPIC_CALL_FAILED,
+                None,
             ));
         }
     };
@@ -481,16 +487,23 @@ fn build_user_prompt(
 }
 
 /// Pull the most recent log tails for up to three distinct sessions
-/// surfaced in the artifact's `stiglab.*` events. Each tail is capped
-/// to ~1500 characters to keep the prompt bounded; we keep the last
-/// N chars rather than the first, because failure messages live at
-/// the end of the log.
+/// surfaced in the artifact's `stiglab.*` events. We pull only the
+/// last N chunks per session at the SQL layer (failure messages live
+/// at the end of the log), then trim the joined text to a char
+/// budget. Bounded SQL + bounded post-processing keeps tool latency
+/// independent of session size.
 async fn collect_recent_log_tails(
     state: &AppState,
     pointers: &[SessionPointer],
 ) -> Vec<(String, String)> {
     const MAX_SESSIONS: usize = 3;
     const MAX_TAIL_CHARS: usize = 1500;
+    const TAIL_CHUNK_LIMIT: i64 = 64;
+
+    #[derive(FromRow)]
+    struct ChunkRow {
+        chunk: String,
+    }
 
     let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut out = Vec::new();
@@ -504,7 +517,18 @@ async fn collect_recent_log_tails(
         if !seen.insert(sid.to_string()) {
             continue;
         }
-        let chunks = match session_db::get_session_logs_after(&state.pool, sid, 0).await {
+        // Fetch only the last TAIL_CHUNK_LIMIT chunks, then reverse
+        // into ascending order for the prompt. Bounded SQL work —
+        // a 10k-chunk session costs the same as a 64-chunk one.
+        let chunks = match sqlx::query_as::<_, ChunkRow>(
+            "SELECT chunk FROM session_logs WHERE session_id = $1 \
+             ORDER BY seq DESC LIMIT $2",
+        )
+        .bind(sid)
+        .bind(TAIL_CHUNK_LIMIT)
+        .fetch_all(&state.pool)
+        .await
+        {
             Ok(c) => c,
             Err(e) => {
                 tracing::debug!(session_id = sid, "log tail fetch failed: {e}");
@@ -515,7 +539,7 @@ async fn collect_recent_log_tails(
             continue;
         }
         let mut joined = String::new();
-        for c in &chunks {
+        for c in chunks.iter().rev() {
             joined.push_str(&c.chunk);
         }
         let tail = if joined.len() > MAX_TAIL_CHARS {
@@ -536,19 +560,20 @@ async fn collect_recent_log_tails(
 
 /// Resolve the caller's `ANTHROPIC_API_KEY` for `workspace_id`.
 /// Returns `Ok(None)` when the user has no such credential (clean
-/// stub fallback); `Err(reason)` when the credential exists but
-/// can't be decrypted (something is wrong server-side and we should
-/// surface a different stub_reason).
+/// stub fallback); `Err(stable_code)` on operational failures
+/// (lookup error, missing decryption key, decrypt failure). The
+/// detailed error context is logged here — only the stable
+/// `stub_reason` code travels back to the caller.
 async fn load_workspace_anthropic_key(
     state: &AppState,
     auth_user: &AuthUser,
     workspace_id: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, &'static str> {
     #[derive(FromRow)]
     struct EncRow {
         encrypted_value: String,
     }
-    let row = sqlx::query_as::<_, EncRow>(
+    let row = match sqlx::query_as::<_, EncRow>(
         "SELECT encrypted_value FROM user_credentials \
          WHERE workspace_id = $1 AND user_id = $2 AND name = 'ANTHROPIC_API_KEY'",
     )
@@ -556,23 +581,55 @@ async fn load_workspace_anthropic_key(
     .bind(&auth_user.user_id)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|e| format!("credential lookup failed: {e}"))?;
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("propose_remediation credential lookup failed: {e}");
+            return Err(stub_reason::CREDENTIAL_LOOKUP_FAILED);
+        }
+    };
 
     let Some(row) = row else { return Ok(None) };
     let Some(key) = state.config.credential_key.as_deref() else {
-        return Err("portal credential_key is not configured; cannot decrypt".into());
+        tracing::warn!("propose_remediation: portal credential_key not configured");
+        return Err(stub_reason::CREDENTIAL_KEY_MISSING);
     };
-    decrypt_credential(key, &row.encrypted_value)
-        .map(Some)
-        .map_err(|e| format!("ANTHROPIC_API_KEY decryption failed: {e}"))
+    match decrypt_credential(key, &row.encrypted_value) {
+        Ok(v) => Ok(Some(v)),
+        Err(e) => {
+            tracing::warn!("propose_remediation ANTHROPIC_API_KEY decrypt failed: {e}");
+            Err(stub_reason::CREDENTIAL_DECRYPT_FAILED)
+        }
+    }
+}
+
+/// Stable machine-readable codes for the stub envelope's
+/// `stub_reason` field. The dashboard branches on these to render a
+/// targeted degraded experience (e.g. "go set ANTHROPIC_API_KEY in
+/// Settings → Credentials" for `no_credential`, "your workspace hit
+/// the monthly cap" for `budget_exceeded`). Operational details
+/// (SQL errors, provider response bodies) stay in server logs —
+/// these strings are part of the public tool contract.
+mod stub_reason {
+    pub const NO_CREDENTIAL: &str = "no_credential";
+    pub const CREDENTIAL_LOOKUP_FAILED: &str = "credential_lookup_failed";
+    pub const CREDENTIAL_KEY_MISSING: &str = "credential_key_missing";
+    pub const CREDENTIAL_DECRYPT_FAILED: &str = "credential_decrypt_failed";
+    pub const BUDGET_EXCEEDED: &str = "budget_exceeded";
+    pub const ANTHROPIC_INIT_FAILED: &str = "anthropic_init_failed";
+    pub const ANTHROPIC_CALL_FAILED: &str = "anthropic_call_failed";
 }
 
 /// Parse the model's response. The system prompt asks for a JSON
-/// object with `rationale` + `proposed_actions`; we accept either
-/// that shape directly or any JSON object found inside the response.
-/// On parse failure we surface the raw text as rationale and an
-/// empty actions list — clients render the rationale and the user
-/// can decide.
+/// object with `rationale` + `proposed_actions`; the parser is
+/// intentionally narrow — it trims whitespace, peels off an
+/// accidental ```json ... ``` markdown fence if present, and then
+/// requires the remaining text to be a complete JSON value. On
+/// parse failure we surface the raw text as rationale and an empty
+/// actions list so the client renders something the user can decide
+/// against. (Extracting an embedded object from mixed prose is a
+/// possible follow-up — today the system prompt forbids surrounding
+/// commentary, so the strict path is sufficient.)
 fn parse_remediation_response(raw: &str) -> (Vec<Value>, String) {
     let trimmed = raw.trim();
     // Strip an accidental markdown code fence if the model emitted one.
@@ -607,10 +664,17 @@ fn parse_remediation_response(raw: &str) -> (Vec<Value>, String) {
 }
 
 /// Stub envelope shared by every short-circuit path. Mirrors the v1
-/// shape so existing clients keep working — only the `stub_reason`
-/// string changes.
-fn stub_envelope(summary: &Value, log_pointers: &[Value], reason: &str) -> Value {
-    serde_json::json!({
+/// shape so existing clients keep working — `stub_reason` is a
+/// stable machine-readable code from the `stub_reason` module;
+/// optional `details` carries structured extras (e.g. budget numbers
+/// for `budget_exceeded`).
+fn stub_envelope(
+    summary: &Value,
+    log_pointers: &[Value],
+    reason: &str,
+    details: Option<Value>,
+) -> Value {
+    let mut env = serde_json::json!({
         "v1_stub": true,
         "stub_reason": reason,
         "failure_summary": summary,
@@ -620,7 +684,29 @@ fn stub_envelope(summary: &Value, log_pointers: &[Value], reason: &str) -> Value
             "get_artifact",
             "inspect_run",
         ],
-    })
+    });
+    if let Some(d) = details {
+        env["details"] = d;
+    }
+    env
+}
+
+fn stub_envelope_with_budget(
+    summary: &Value,
+    log_pointers: &[Value],
+    reason: &str,
+    spent_usd: f64,
+    cap_usd: f64,
+) -> Value {
+    stub_envelope(
+        summary,
+        log_pointers,
+        reason,
+        Some(serde_json::json!({
+            "spent_usd": spent_usd,
+            "cap_usd": cap_usd,
+        })),
+    )
 }
 
 #[cfg(test)]
@@ -656,14 +742,47 @@ mod propose_remediation_tests {
     fn stub_envelope_carries_reason_and_pointers() {
         let summary = serde_json::json!({"artifact": {"workspace_id":"w1"}});
         let pointers = vec![serde_json::json!({"session_id":"s1"})];
-        let env = stub_envelope(&summary, &pointers, "no key");
+        let env = stub_envelope(&summary, &pointers, stub_reason::NO_CREDENTIAL, None);
         assert_eq!(env["v1_stub"], true);
-        assert_eq!(env["stub_reason"], "no key");
+        assert_eq!(env["stub_reason"], "no_credential");
         assert_eq!(env["failure_summary"]["artifact"]["workspace_id"], "w1");
         assert_eq!(env["log_pointers"][0]["session_id"], "s1");
+        assert!(env.get("details").is_none());
         // Stub keeps the legacy suggested_next_tools so degraded
         // clients can still chain.
         assert!(env["suggested_next_tools"].is_array());
+    }
+
+    #[test]
+    fn stub_envelope_with_budget_carries_numeric_details() {
+        let summary = serde_json::json!({});
+        let env =
+            stub_envelope_with_budget(&summary, &[], stub_reason::BUDGET_EXCEEDED, 12.34, 10.0);
+        assert_eq!(env["stub_reason"], "budget_exceeded");
+        assert_eq!(env["details"]["spent_usd"], 12.34);
+        assert_eq!(env["details"]["cap_usd"], 10.0);
+    }
+
+    #[test]
+    fn stub_reason_codes_are_snake_case_identifiers() {
+        // Stability check — these are part of the public tool
+        // contract. If you rename one, downstream clients break.
+        for code in [
+            stub_reason::NO_CREDENTIAL,
+            stub_reason::CREDENTIAL_LOOKUP_FAILED,
+            stub_reason::CREDENTIAL_KEY_MISSING,
+            stub_reason::CREDENTIAL_DECRYPT_FAILED,
+            stub_reason::BUDGET_EXCEEDED,
+            stub_reason::ANTHROPIC_INIT_FAILED,
+            stub_reason::ANTHROPIC_CALL_FAILED,
+        ] {
+            assert!(
+                code.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "stub_reason `{code}` must be lowercase snake_case"
+            );
+            assert!(!code.is_empty());
+        }
     }
 
     #[test]
