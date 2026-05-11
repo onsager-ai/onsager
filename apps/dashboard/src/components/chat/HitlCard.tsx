@@ -43,6 +43,19 @@ export function HitlCard({
   const initialEdits = useMemo(() => initialEditValues(card), [card])
   const [edits, setEdits] = useState<Record<string, string>>(initialEdits)
   const [typedConfirm, setTypedConfirm] = useState("")
+  // Reset client-side edits when the parent swaps in a new card (e.g.
+  // a re-proposed tool call for the same mounted HitlCard). React's
+  // "store previous prop value, reset on change" pattern: cheaper than
+  // an effect (no extra render) and avoids the `set-state-in-effect`
+  // anti-pattern. Card lifecycle transitions (pending → committing →
+  // failed → retry) keep the same `card` reference, so retry preserves
+  // the user's in-progress edits.
+  const [prevCard, setPrevCard] = useState(card)
+  if (card !== prevCard) {
+    setPrevCard(card)
+    setEdits(initialEdits)
+    setTypedConfirm("")
+  }
 
   if (state === "committed" || state === "rejected" || state === "superseded") {
     return <CollapsedCard card={card} state={state} />

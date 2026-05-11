@@ -4,12 +4,18 @@ import type { McpTool } from "@/lib/mcp-client"
 // Latest Claude model id per the claude-api skill (Opus 4.7). The
 // dashboard chat runs same-origin against `/mcp/messages` for tool
 // execution; the LLM call goes direct to Anthropic from the browser
-// (with `dangerouslyAllowBrowser`) using a key the user wires into
-// the dashboard env. This is acceptable pre-launch — the only humans
-// holding keys are the team building Onsager. Post-launch the call
-// moves behind a portal-hosted relay (a follow-up).
+// (with `dangerouslyAllowBrowser`).
+//
+// **API-key source.** The key is read from `localStorage` at runtime
+// (`onsager.anthropic.apiKey`) — never from `import.meta.env.VITE_*`,
+// which Vite inlines into the build output and would leak the key
+// into every deployed dashboard bundle. The user pastes their key
+// into a settings UI / dev console; it stays in their browser. The
+// proper end-state is a portal-hosted Anthropic relay so the key
+// never touches the browser at all — filed as a follow-up.
 const DEFAULT_MODEL = "claude-opus-4-7"
 const MAX_TOKENS = 1024
+const API_KEY_STORAGE_KEY = "onsager.anthropic.apiKey"
 
 /**
  * One chat turn from the LLM. `text` is rendered as plain markdown;
@@ -37,7 +43,11 @@ export interface RunChatArgs {
   messages: LlmTurnMessage[]
   tools: McpTool[]
   workspaceId?: string
-  /** Optional override; defaults to `VITE_ANTHROPIC_API_KEY`. */
+  /**
+   * Optional override; defaults to `localStorage["onsager.anthropic.apiKey"]`.
+   * Never read from build-time env (`import.meta.env.VITE_*`) — that
+   * inlines the key into the bundle.
+   */
   apiKey?: string
   /** Optional model override; defaults to the constant above. */
   model?: string
@@ -70,11 +80,14 @@ const SYSTEM_PROMPT = [
  * is not cached for v1.
  */
 export async function runChatTurn(args: RunChatArgs): Promise<LlmTurn> {
-  const apiKey = args.apiKey ?? readBrowserEnv("VITE_ANTHROPIC_API_KEY")
+  const apiKey = args.apiKey ?? readApiKey()
   if (!apiKey) {
     throw new LlmConfigError(
-      "Anthropic API key missing. Set VITE_ANTHROPIC_API_KEY in the " +
-        "dashboard env, or pass an explicit `apiKey` to the chat client.",
+      `Anthropic API key missing. Set it in your browser via ` +
+        `\`localStorage.setItem("${API_KEY_STORAGE_KEY}", "sk-ant-…")\` ` +
+        "and reload, or pass an explicit `apiKey` to the chat client. " +
+        "(The key is never read from build-time env vars, which would " +
+        "inline it into the dashboard bundle.)",
     )
   }
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
@@ -123,9 +136,8 @@ export async function runChatTurn(args: RunChatArgs): Promise<LlmTurn> {
   return { text, toolCalls }
 }
 
-function readBrowserEnv(name: string): string | undefined {
-  // Vite exposes env vars under `import.meta.env`; the cast keeps
-  // tsc happy without a global ambient declaration.
-  const env = (import.meta as unknown as { env?: Record<string, string> }).env
-  return env?.[name]
+function readApiKey(): string | undefined {
+  if (typeof window === "undefined" || !window.localStorage) return undefined
+  const v = window.localStorage.getItem(API_KEY_STORAGE_KEY)
+  return v && v.trim() !== "" ? v : undefined
 }

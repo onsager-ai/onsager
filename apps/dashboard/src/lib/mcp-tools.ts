@@ -84,24 +84,31 @@ const propose_workflow: McpToolBinding = {
   name: "propose_workflow",
   category: "constructive",
   title: (args) => `Create workflow${str(args, "name") ? ` · ${str(args, "name")}` : ""}`,
-  buildCard: (args) => ({
-    kind: "constructive",
-    title: `Create workflow${str(args, "name") ? ` · ${str(args, "name")}` : ""}`,
-    summary: stagesSummary(args),
-    body: {
-      fields: [
-        field("Name", str(args, "name"), { editable: true, key: "name" }),
-        field("Repo", `${str(args, "repo_owner")}/${str(args, "repo_name")}`),
-        field("Trigger label", str(args, "trigger_label"), {
-          editable: true,
-          key: "trigger_label",
-        }),
-        field("Stages", stagesSummary(args)),
-      ],
-    },
-    commit: { label: "Create workflow", intent: "primary" },
-    reject: { label: "Reject" },
-  }),
+  buildCard: (args) => {
+    const trigger = args.trigger as Record<string, unknown> | undefined
+    const triggerKind =
+      trigger && typeof trigger.kind === "string" ? trigger.kind : "(none)"
+    const installId =
+      typeof args.install_id === "number" || typeof args.install_id === "string"
+        ? String(args.install_id)
+        : "0"
+    return {
+      kind: "constructive",
+      title: `Create workflow${str(args, "name") ? ` · ${str(args, "name")}` : ""}`,
+      summary: stagesSummary(args),
+      body: {
+        fields: [
+          field("Name", str(args, "name"), { editable: true, key: "name" }),
+          field("Workspace", str(args, "workspace_id")),
+          field("Trigger", triggerKind),
+          field("Install id", installId),
+          field("Stages", stagesSummary(args)),
+        ],
+      },
+      commit: { label: "Create workflow", intent: "primary" },
+      reject: { label: "Reject" },
+    }
+  },
 }
 
 const run_workflow: McpToolBinding = {
@@ -112,11 +119,11 @@ const run_workflow: McpToolBinding = {
     kind: "destructive",
     title: `Run workflow · ${str(args, "workflow_id", "unknown")}`,
     body: {
-      info: `Fires the workflow's manual trigger \`${str(args, "manual_name", "manual")}\` and starts a new run.`,
+      info: `Fires the workflow's manual trigger \`${str(args, "trigger_name", "manual")}\` and starts a new run.`,
     },
     sideEffects: [
-      "Creates a new artifact + run row",
-      "Emits `forge.run_started` on the spine",
+      "Emits `trigger.fired` on the workflow's trigger stream",
+      "Forge picks up the trigger and starts a new run for the artifact",
     ],
     reversibility: "Reversible — cancel the run from its detail page if needed.",
     commit: { label: "Run workflow", intent: "destructive" },

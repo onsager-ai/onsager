@@ -113,6 +113,39 @@ export function ChatBuilder({ workspaceId }: ChatBuilderProps) {
     return out
   }, [turns, workspaceId])
 
+  const autoRunReadOnly = useCallback(
+    async (turnId: string, call: ToolCallEntry) => {
+      try {
+        const result = await mcpCallTool(call.toolName, call.input)
+        if (result.isError) {
+          const text = result.content[0]?.text ?? "tool returned isError=true"
+          setTurns((prev) =>
+            updateCall(prev, turnId, call.id, {
+              state: "failed",
+              errorMessage: text,
+            }),
+          )
+          return
+        }
+        const resultText = result.content[0]?.text
+        setTurns((prev) =>
+          updateCall(prev, turnId, call.id, {
+            state: "committed",
+            resultText,
+          }),
+        )
+      } catch (err) {
+        setTurns((prev) =>
+          updateCall(prev, turnId, call.id, {
+            state: "failed",
+            errorMessage: errorMessage(err),
+          }),
+        )
+      }
+    },
+    [],
+  )
+
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault()
@@ -146,20 +179,27 @@ export function ChatBuilder({ workspaceId }: ChatBuilderProps) {
           toolName: tc.name,
           input: tc.input,
           card: buildCardFor(tc.name, tc.input),
-          state: isMutationTool(tc.name) ? "pending" : "committed",
+          // Mutations stay `pending` for HITL review; read-only calls
+          // start as `committing` and are auto-executed below so the
+          // dashboard actually fetches the data the agent asked for.
+          state: isMutationTool(tc.name) ? "pending" : "committing",
         }))
         setTurns((prev) =>
           prev.map((t) =>
-            t.id === turnId
-              ? { ...t, assistantMessage, toolCalls }
-              : t,
+            t.id === turnId ? { ...t, assistantMessage, toolCalls } : t,
           ),
         )
+        // Fire read-only tool calls immediately. Each settles
+        // independently and writes its result back into the same
+        // ToolCallEntry the InfoBlock renders from. Mutations wait
+        // for the user to commit/reject from the HitlCard.
+        for (const tc of toolCalls) {
+          if (isMutationTool(tc.toolName)) continue
+          autoRunReadOnly(turnId, tc)
+        }
       } catch (err) {
         const msg =
-          err instanceof LlmConfigError
-            ? `${err.message} Set VITE_ANTHROPIC_API_KEY and reload the dashboard.`
-            : errorMessage(err)
+          err instanceof LlmConfigError ? err.message : errorMessage(err)
         setTurns((prev) =>
           prev.map((t) => (t.id === turnId ? { ...t, error: msg } : t)),
         )
@@ -167,7 +207,7 @@ export function ChatBuilder({ workspaceId }: ChatBuilderProps) {
         setSubmitting(false)
       }
     },
-    [prompt, submitting, tools, llmMessages, workspaceId],
+    [prompt, submitting, tools, llmMessages, workspaceId, autoRunReadOnly],
   )
 
   const handleCommit = useCallback(
@@ -265,16 +305,20 @@ export function ChatBuilder({ workspaceId }: ChatBuilderProps) {
                   }
                   if (call.card && isMutationTool(call.toolName)) {
                     return (
-                      <HitlCard
-                        key={call.id}
-                        card={call.card}
-                        state={call.state}
-                        errorMessage={call.errorMessage}
-                        onCommit={(edits) =>
-                          handleCommit(turn.id, call.id, edits)
-                        }
-                        onReject={() => handleReject(turn.id, call.id)}
-                      />
+                      <div key={call.id} className="flex flex-col gap-1.5">
+                        <HitlCard
+                          card={call.card}
+                          state={call.state}
+                          errorMessage={call.errorMessage}
+                          onCommit={(edits) =>
+                            handleCommit(turn.id, call.id, edits)
+                          }
+                          onReject={() => handleReject(turn.id, call.id)}
+                        />
+                        {call.state === "committed" && call.resultText ? (
+                          <ResultBlock text={call.resultText} />
+                        ) : null}
+                      </div>
                     )
                   }
                   return (
@@ -285,6 +329,9 @@ export function ChatBuilder({ workspaceId }: ChatBuilderProps) {
                         call.binding.renderInfo?.(call.input) ??
                         `Calling ${call.toolName}.`
                       }
+                      state={call.state}
+                      resultText={call.resultText}
+                      errorMessage={call.errorMessage}
                     />
                   )
                 })}
@@ -340,15 +387,58 @@ function AssistantBubble({ content }: { content: string }) {
   )
 }
 
-function InfoBlock({ title, body }: { title: string; body: string }) {
+function InfoBlock({
+  title,
+  body,
+  state,
+  resultText,
+  errorMessage,
+}: {
+  title: string
+  body: string
+  state?: HitlCardState
+  resultText?: string
+  errorMessage?: string
+}) {
+  const statusLabel =
+    state === "committing"
+      ? "Running…"
+      : state === "failed"
+        ? "Failed"
+        : undefined
   return (
     <div
       data-slot="mcp-info-block"
-      className="rounded-md border bg-muted/20 px-2.5 py-1.5"
+      data-state={state}
+      className="flex flex-col gap-1 rounded-md border bg-muted/20 px-2.5 py-1.5"
     >
-      <div className="text-xs font-medium">{title}</div>
+      <div className="flex items-center gap-2">
+        <div className="text-xs font-medium">{title}</div>
+        {statusLabel ? (
+          <span className="text-xs text-muted-foreground italic">
+            {statusLabel}
+          </span>
+        ) : null}
+      </div>
       <div className="text-xs text-muted-foreground">{body}</div>
+      {state === "failed" && errorMessage ? (
+        <div className="text-xs text-destructive">{errorMessage}</div>
+      ) : null}
+      {state === "committed" && resultText ? (
+        <ResultBlock text={resultText} />
+      ) : null}
     </div>
+  )
+}
+
+function ResultBlock({ text }: { text: string }) {
+  return (
+    <pre
+      data-slot="mcp-tool-result"
+      className="max-h-48 overflow-auto rounded-md border bg-background/60 p-2 font-mono text-[11px] whitespace-pre-wrap break-all"
+    >
+      {text}
+    </pre>
   )
 }
 
