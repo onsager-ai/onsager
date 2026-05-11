@@ -51,7 +51,20 @@ pub struct Config {
     /// `503` — the trigger kind is registered but the receiver is
     /// disabled. Set via `TELEGRAM_WEBHOOK_SECRET` (#240).
     pub telegram_webhook_secret: Option<String>,
+    /// Per-workspace per-month USD spend cap for `propose_remediation`
+    /// AI calls (#312). When a workspace's spend in the current
+    /// calendar month reaches this value, further calls short-circuit
+    /// to the stub envelope with `stub_reason: budget_exceeded`.
+    /// Defaults to a conservative double-digit dollar value; override
+    /// via `PORTAL_REMEDIATION_MONTHLY_CAP_USD`.
+    pub remediation_monthly_cap_usd: f64,
 }
+
+/// Default monthly per-workspace cap for `propose_remediation` AI
+/// spend. Sized to absorb a steady stream of failed-run analyses at
+/// Sonnet pricing without an operator surprise; revisit when real
+/// usage data exists.
+pub const DEFAULT_REMEDIATION_MONTHLY_CAP_USD: f64 = 10.0;
 
 impl Config {
     /// Classify the process's role in the SSO flow. `None` means no GitHub
@@ -130,6 +143,7 @@ mod tests {
             sso_auth_domain: None,
             dev_login_enabled: false,
             telegram_webhook_secret: None,
+            remediation_monthly_cap_usd: DEFAULT_REMEDIATION_MONTHLY_CAP_USD,
         }
     }
 

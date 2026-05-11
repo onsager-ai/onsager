@@ -74,6 +74,12 @@ enum Command {
         /// 503. (#240 Category 3)
         #[arg(long, env = "TELEGRAM_WEBHOOK_SECRET")]
         telegram_webhook_secret: Option<String>,
+        /// Per-workspace per-month USD spend cap for `propose_remediation`
+        /// AI calls (#312). Calls past the cap fall back to the stub
+        /// envelope. Defaults to the code-side
+        /// `DEFAULT_REMEDIATION_MONTHLY_CAP_USD`.
+        #[arg(long, env = "PORTAL_REMEDIATION_MONTHLY_CAP_USD")]
+        remediation_monthly_cap_usd: Option<f64>,
     },
     /// Backfill issues + PRs for an existing project.
     Backfill {
@@ -120,6 +126,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             sso_auth_domain,
             dev_login_enabled,
             telegram_webhook_secret,
+            remediation_monthly_cap_usd,
         } => {
             let allowlist = sso_return_host_allowlist
                 .as_deref()
@@ -155,6 +162,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                     .map(|s| s.trim_end_matches('/').to_string()),
                 dev_login_enabled: dev_login_enabled || is_railway_preview,
                 telegram_webhook_secret: telegram_webhook_secret.filter(|s| !s.is_empty()),
+                remediation_monthly_cap_usd: remediation_monthly_cap_usd
+                    .unwrap_or(onsager_portal::config::DEFAULT_REMEDIATION_MONTHLY_CAP_USD),
             };
             tracing::info!(%bind, "onsager-portal: starting webhook server");
             onsager_portal::server::run(cfg).await

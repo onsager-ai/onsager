@@ -174,7 +174,7 @@ fn build_registry() -> Vec<ToolDescriptor> {
         },
         ToolDescriptor {
             name: "propose_remediation",
-            description: "v1 stub: returns the failed run's state + structured log pointers so the *client-side* AI can reason about remediation. No server-side AI call; the Full version (server-side prompt + cost model) is filed as a follow-up.",
+            description: "Server-side AI analysis of a failed run. Reads the artifact's state, recent spine events, and trailing session logs, then asks Claude for `proposed_actions` (registered tool names + concrete arguments) the operator can review via HitlCard. Requires an `ANTHROPIC_API_KEY` workspace credential; falls back to the v1 stub envelope (state + log pointers, no AI call) when the credential is missing, the per-workspace monthly budget is exhausted, or the model call errors. Pass `model: \"opus\"` for hard cases (cost: ~5x sonnet); defaults to Sonnet.",
             category: ToolCategory::ReadOnly,
             input_schema: super::input_schema::<tools::diagnostics::ProposeRemediationArgs>(),
             invoke: |state, user, args| {
