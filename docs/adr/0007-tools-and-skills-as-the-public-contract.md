@@ -1,6 +1,6 @@
 # ADR 0007 — Tools and skills as the public contract
 
-- **Status**: Proposed
+- **Status**: Accepted (2026-05-11)
 - **Date**: 2026-05-09
 - **Identity impact**: no
 - **Tracking issues**: #288 (implementation spec). Builds on ADR

@@ -18,13 +18,14 @@
 
 use chrono::{DateTime, Utc};
 pub use onsager_spine::TriggerKind;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
 /// Gate kind attached to a workflow stage. These map to the four gate runtime
 /// implementations forge ships.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum GateKind {
     AgentSession,
@@ -58,7 +59,7 @@ impl FromStr for GateKind {
 }
 
 /// One ordered stage in a workflow's stage chain.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowStage {
     pub id: String,
     pub workflow_id: String,
@@ -72,7 +73,7 @@ pub struct WorkflowStage {
 }
 
 /// A persisted workflow blueprint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Workflow {
     pub id: String,
     pub workspace_id: String,

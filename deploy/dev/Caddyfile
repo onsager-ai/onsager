@@ -7,6 +7,7 @@
 #   /api/synodic/*  → synodic:3001  (strip prefix)
 #   /api/forge/*    → forge:3003    (strip prefix)
 #   /api/*          → portal:3002   (ADR 0006 — portal owns all /api/*)
+#   /mcp/*          → portal:3002   (ADR 0007 — MCP server for AI clients)
 #   /agent/ws*      → portal:3002   (ADR 0008 — portal proxies to stiglab loopback)
 #   /*              → dashboard:5173 (Vite dev server, with HMR upgrade)
 #
@@ -47,6 +48,13 @@
 		reverse_proxy portal:3002
 	}
 	handle /agent/ws* {
+		reverse_proxy portal:3002
+	}
+
+	# MCP server (ADR 0007 / #288) — runtime-agnostic public contract
+	# for AI clients. Same upstream as /api/* (portal owns clause 1 of
+	# the seam rule).
+	handle /mcp/* {
 		reverse_proxy portal:3002
 	}
 

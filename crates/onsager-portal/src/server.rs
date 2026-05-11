@@ -314,7 +314,13 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // X-Telegram-Bot-Api-Secret-Token header against
         // `TELEGRAM_WEBHOOK_SECRET`, then routes the update to active
         // `TelegramWebhook` workflows.
-        .route("/webhooks/telegram", post(telegram_webhook::handle));
+        .route("/webhooks/telegram", post(telegram_webhook::handle))
+        // MCP server (ADR 0007 / #288). JSON-RPC 2.0 over HTTP — the
+        // runtime-agnostic public contract for AI clients. Auth reuses
+        // the `AuthUser` extractor (PAT or session); workspace-scoped
+        // tools call `tools::require_workspace_access` before
+        // delegating. The dispatcher's `/mcp/*` block forwards here.
+        .route("/mcp/messages", post(crate::mcp::handle_messages));
 
     // Dev-login: always in debug builds; in release only when
     // DEV_LOGIN_ENABLED=true (Railway preview environments).
