@@ -80,8 +80,12 @@ impl Canceller {
             }
         };
 
-        // Idempotency: terminal sessions are no-ops. Pending sessions
-        // never dispatched, so just mark them aborted locally.
+        // Idempotency: terminal sessions are no-ops — no agent message
+        // to send and no state to update. Non-terminal sessions get a
+        // best-effort CancelSession forwarded below; the agent owns the
+        // actual state transition (it emits `stiglab.session_aborted`
+        // when the local process exits, which the rest of the system
+        // observes via the spine).
         if matches!(session.state, SessionState::Done | SessionState::Failed) {
             tracing::debug!(
                 session_id = %payload.session_id,

@@ -36,10 +36,12 @@ pub struct EventsQuery {
     /// one entity without scanning the whole table client-side.
     pub stream_id: Option<String>,
     /// Filter to events tied to a specific run (spec #303). A "run" id
-    /// is an artifact_id; events join via either `stream_id = run_id`
-    /// (artifact-keyed) or via `data->>'artifact_id' = run_id` /
-    /// `data->>'session_id'` for session-keyed events linked back to
-    /// the artifact through the `sessions` table.
+    /// is an artifact_id; events match via any of:
+    /// - `stream_id = run_id` (artifact-keyed events), or
+    /// - `data->>'artifact_id' = run_id` (events that carry the artifact
+    ///   id in their payload), or
+    /// - `stream_id IN (SELECT id FROM sessions WHERE artifact_id = run_id)`
+    ///   (session-keyed events whose session points back to the artifact).
     pub run_id: Option<String>,
     pub limit: Option<i64>,
 }
