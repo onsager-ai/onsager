@@ -78,14 +78,19 @@ services:
       dockerfile: crates/stiglab/deploy/Dockerfile
     restart: unless-stopped
     ports:
-      - "${STIGLAB_PORT:-3000}:3000"
+      - "${STIGLAB_PORT:-3000}:8080"
     depends_on:
       migrate:
         condition: service_completed_successfully
     volumes:
       - ${AGENT_WORKSPACE_DIR:-./workspace}:/workspace
     environment:
-      STIGLAB_HOST: "0.0.0.0"
+      # Caddy (in the same image) is the externally-reachable process
+      # on $PORT; stiglab binds internally to STIGLAB_PORT on loopback
+      # (ADR 0006 / ADR 0008). Railway sets $PORT for its preview/prod
+      # environments; for compose we pick 8080 to avoid colliding with
+      # the stiglab loopback port.
+      PORT: "8080"
       STIGLAB_PORT: "3000"
       DATABASE_URL: "postgres://${POSTGRES_USER:-onsager}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onsager}"
       ONSAGER_DATABASE_URL: "postgres://${POSTGRES_USER:-onsager}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onsager}"
@@ -98,7 +103,7 @@ services:
       STIGLAB_CREDENTIAL_KEY: "${STIGLAB_CREDENTIAL_KEY:-}"
       STIGLAB_PUBLIC_URL: "${STIGLAB_PUBLIC_URL:-}"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

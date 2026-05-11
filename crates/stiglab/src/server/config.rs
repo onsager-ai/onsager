@@ -2,17 +2,14 @@ use std::env;
 
 /// Runtime configuration for the stiglab server.
 ///
-/// Auth-related fields (`github_client_id`, `github_client_secret`,
-/// `sso_*`) used to live here. They moved to portal in spec #222 Slice 5
-/// — portal owns `/api/auth/*` and is the only process that talks to
-/// GitHub OAuth. Stiglab still validates the cookie out-of-band against
-/// the shared `auth_sessions` table (single DB, single writer).
+/// Stiglab binds to loopback only post-ADR 0006 / ADR 0008. Caddy
+/// (the edge dispatcher) and portal (the route owner for `/agent/ws`)
+/// are the only processes that reach this server.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
     pub database_url: String,
-    pub static_dir: Option<String>,
     pub cors_origin: Option<String>,
     pub credential_key: Option<String>,
     pub public_url: Option<String>,
@@ -25,16 +22,11 @@ pub struct ServerConfig {
     /// Goes away with the seam (Lever C, spec #131 / #148) once
     /// shaping moves to spine events.
     pub internal_dispatch_token: Option<String>,
-    /// URL of the onsager-portal process (e.g. `http://127.0.0.1:3002`).
-    /// All `/api/*` traffic not handled by stiglab itself is reverse-proxied
-    /// here. Reads `PORTAL_URL`; falls back to `http://127.0.0.1:$PORTAL_PORT`
-    /// (default port 3002).
-    pub portal_url: String,
 }
 
 impl ServerConfig {
     pub fn from_env() -> Self {
-        let host = env::var("STIGLAB_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+        let host = env::var("STIGLAB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
         let port = env::var("PORT")
             .ok()
             .and_then(|p| p.parse().ok())
@@ -42,31 +34,21 @@ impl ServerConfig {
             .unwrap_or(3000);
         let database_url =
             env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://./data/stiglab.db".to_string());
-        let static_dir = env::var("STIGLAB_STATIC_DIR").ok();
         let cors_origin = env::var("STIGLAB_CORS_ORIGIN").ok();
         let credential_key = env::var("STIGLAB_CREDENTIAL_KEY").ok();
         let public_url = env::var("STIGLAB_PUBLIC_URL").ok();
         let internal_dispatch_token = env::var("STIGLAB_INTERNAL_DISPATCH_TOKEN")
             .ok()
             .filter(|s| !s.is_empty());
-        let portal_url = env::var("PORTAL_URL")
-            .unwrap_or_else(|_| {
-                let portal_port = env::var("PORTAL_PORT").unwrap_or_else(|_| "3002".to_string());
-                format!("http://127.0.0.1:{portal_port}")
-            })
-            .trim_end_matches('/')
-            .to_string();
 
         ServerConfig {
             host,
             port,
             database_url,
-            static_dir,
             cors_origin,
             credential_key,
             public_url,
             internal_dispatch_token,
-            portal_url,
         }
     }
 }

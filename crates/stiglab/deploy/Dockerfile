@@ -91,6 +91,12 @@ COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 # Claude Code CLI installed globally via npm
 COPY --from=node-runtime /usr/local/bin/claude /usr/local/bin/claude
 
+# Caddy — the edge dispatcher. Caddy terminates the public port and
+# routes /api/* to portal, /agent/ws to portal (which proxies to
+# stiglab on loopback), and /* to the static dashboard files.
+# See ADR 0006 (edge dispatcher) + ADR 0008 (portal owns /agent/ws).
+COPY --from=caddy:2.8-alpine /usr/bin/caddy /usr/local/bin/caddy
+
 # Git credential helper — reads GITHUB_TOKEN from env at push time.
 # Users add GITHUB_TOKEN as a credential in Dashboard > Settings; stiglab
 # injects it as an env var into the claude subprocess, and this helper
@@ -114,11 +120,12 @@ COPY crates/onsager-spine/migrations/ /app/spine-migrations/
 # Synodic (governance) migrations
 COPY crates/synodic/migrations/pg/ /app/synodic-migrations/
 COPY crates/stiglab/deploy/entrypoint.sh /app/entrypoint.sh
+# Caddy serves /api/* and /agent/ws via reverse proxy and /* (the
+# dashboard) from /app/static. See ADR 0006.
+COPY crates/stiglab/deploy/Caddyfile /etc/caddy/Caddyfile
 RUN chmod +x /app/entrypoint.sh
 
 RUN chown -R onsager:onsager /home/onsager
 
-ENV STIGLAB_STATIC_DIR=/app/static
-ENV STIGLAB_HOST=0.0.0.0
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["server"]

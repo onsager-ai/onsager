@@ -6,8 +6,8 @@
 # Routing model — same-origin for everything the browser hits:
 #   /api/synodic/*  → synodic:3001  (strip prefix)
 #   /api/forge/*    → forge:3003    (strip prefix)
-#   /api/*          → stiglab:3000  (catch-all; matches today's vite proxy)
-#   /agent          → stiglab:3000  (WebSocket upgrade)
+#   /api/*          → portal:3002   (ADR 0006 — portal owns all /api/*)
+#   /agent/ws*      → portal:3002   (ADR 0008 — portal proxies to stiglab loopback)
 #   /*              → dashboard:5173 (Vite dev server, with HMR upgrade)
 #
 # Caddy upgrades any WebSocket request transparently — no per-route
@@ -41,15 +41,14 @@
         reverse_proxy forge:3003
     }
 
-    # Portal owns all /api/* routes post-#222 Slice 6; stiglab keeps
-    # only the agent WebSocket (/agent/ws). This matches the dev-time
-    # behavior of vite.config.ts so the dashboard needs no per-environment
-    # URL changes.
+    # Portal owns all /api/* routes (ADR 0006) and is the route owner
+    # for /agent/ws (ADR 0008 — portal terminates the WebSocket and
+    # proxies bytes to stiglab on loopback at /agent/ws-internal).
     handle /api/* {
         reverse_proxy portal:3002
     }
-    handle /agent* {
-        reverse_proxy stiglab:3000
+    handle /agent/ws* {
+        reverse_proxy portal:3002
     }
 
     # Everything else → the Vite dev server. Vite handles its own HMR

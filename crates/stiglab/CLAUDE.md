@@ -1,8 +1,10 @@
 # Stiglab
 
-Distributed AI agent session orchestration. Lives behind a public-ish
-HTTP surface on port 3000 (sessions, nodes, WebSocket) and listens on
-the spine for cross-subsystem coordination.
+Distributed AI agent session orchestration. Post-ADR 0006 / ADR 0008
+stiglab is fully **internal**: it binds to `127.0.0.1:3000` (loopback
+only), exposes a single route (`/agent/ws-internal`) that portal's
+`/agent/ws` proxies bytes to, and listens on the spine for
+cross-subsystem coordination.
 
 ## The seam rule (canonical)
 
@@ -10,94 +12,22 @@ the spine for cross-subsystem coordination.
 > - **User-facing endpoints** called by the dashboard.
 > - **Webhooks** called by external services (GitHub, etc.).
 >
-> Subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
+> The external HTTP boundary is owned by `portal` (the edge subsystem).
+> Factory subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
 > **exclusively** via the spine: events on the bus + reads against
 > shared spine tables. No subsystem makes HTTP calls to another
 > subsystem. No subsystem imports another subsystem's crate.
 
 What this means for stiglab specifically:
 
-- **Allowed HTTP surfaces.** Routes under `src/server/routes/` that are
-  called by the dashboard. Routes that have moved to portal (spec
-  #222) stay live as reverse proxies via `routes::portal::proxy` so
-  the dashboard's API_BASE cutover in Slice 6 can land independently:
-  - GitHub webhook ingestion (`/webhooks/github`,
-    `/api/webhooks/github`, `/api/github-app/webhook`) — Slice 1.
-  - Auth / OAuth / SSO (`/api/auth/github`,
-    `/api/auth/github/callback`, `/api/auth/me`, `/api/auth/logout`,
-    `/api/auth/sso/redeem`, `/api/auth/sso/finish`,
-    `/api/auth/dev-login` in debug builds) — Slice 5. Stiglab keeps
-    cookie + PAT validation (`AuthUser` extractor reads the shared
-    `auth_sessions` and `user_pats` tables) but no longer mints
-    sessions or PATs.
-  - Personal Access Tokens (`GET/POST /api/pats`,
-    `DELETE /api/pats/{id}`) — Slice 2b. Portal mints/lists/revokes;
-    stiglab still verifies presented PATs in its own `AuthUser`
-    extractor for the workspaces/projects/workflows routes that
-    haven't moved yet.
-  - Per-workspace credentials
-    (`GET /api/workspaces/:id/credentials`,
-    `PUT/DELETE /api/workspaces/:id/credentials/:name`) — Slice 2a.
-    Portal owns the read/write surface and the AES-256-GCM helpers;
-    stiglab still owns the in-process decrypt-and-launch path used
-    when spawning agent sessions (`decrypt_credential` in
-    `tasks.rs`/`workflows.rs`).
-  - Workspace + member + project CRUD (`GET/POST /api/workspaces`,
-    `GET /api/workspaces/:id`, `GET /api/workspaces/:id/members`,
-    `GET/POST /api/workspaces/:id/projects`, `GET /api/projects`,
-    `GET/DELETE /api/projects/:id`) — Slice 3a. Portal is the only
-    writer; the `workspaces` / `workspace_members` / `projects`
-    schema lives in `crates/onsager-spine/migrations/020_workspaces_to_spine.sql`
-    post-Slice 3a. Stiglab still reads the same Postgres tables for
-    the in-process session/task/workflow lookups (`db::is_workspace_member`,
-    `db::get_project`, `db::list_workspaces_for_user`, etc.) — same
-    database, separate connection pool.
-  - GitHub App installation routes
-    (`GET/POST /api/workspaces/:id/github-installations*`,
-    `GET /api/github-app/{config,install-start,callback}`) — Slice 3b.
-    Portal is the only writer; the `github_app_installations` schema
-    lives in `crates/onsager-portal/migrations/007_github_app_installations.sql`
-    post-Slice 3b. Stiglab still reads the same Postgres table for
-    the in-process session/task/project lookups
-    (`db::get_github_app_installation`,
-    `db::get_install_webhook_secret_cipher`) — same database,
-    separate connection pool.
-  - Registry manifests (`GET /api/registry/events`,
-    `GET /api/registry/triggers`) — #222 follow-up #257. Portal owns
-    the static manifest reads (`onsager_registry::EVENTS` /
-    `TRIGGERS`); stiglab proxies the URLs through
-    `routes::portal::proxy` so dashboard fetches keep working pre–
-    API_BASE cutover. Stiglab no longer depends on `onsager-registry`.
-  - Spine reads + writes (`GET /api/spine/events`,
-    `GET /api/spine/artifacts`, `GET /api/spine/artifacts/:id`,
-    `POST /api/spine/artifacts/:id/{retry,abort,override-gate}`) —
-    #222 follow-up #259, narrowed by #278 (no artifact creation
-    endpoint; forge's auto-trigger flow is the sole producer of
-    `artifact.registered`). Portal owns the dashboard-facing reads
-    (against `events_ext` / `artifacts`) and the single-event emits
-    (via `EventStore::append_ext`). Stiglab still keeps
-    `SpineEmitter` for the agent-runtime emits
-    (`emit_session_started/completed/failed`,
-    `emit_shaping_result_ready`) — those are session-lifecycle, not
-    dashboard-facing — and still uses the spine pool for in-process
-    reads (`routes::projects::replay_issue_trigger`).
-  - Workflow CRUD + GitHub side-effects
-    (`GET/POST /api/workflows`, `GET/PATCH/DELETE /api/workflows/:id`,
-    `GET /api/workflows/:id/runs`, `GET /api/workflow/kinds`) — Slice 4.
-    Portal is the only writer of `workflows` / `workflow_stages` and
-    the only process that talks to GitHub for label create + webhook
-    register/deregister. Stiglab keeps `src/server/workflow_db.rs`
-    slimmed to a single read function
-    (`find_active_github_workflows_for_workspace_repo`) used by
-    `routes/projects.rs` replay-trigger — same database, separate
-    connection pool, portal is the only writer. The
-    `core/preset.rs` and `core/workflow.rs` writer surface (and
-    `server/workflow_activation.rs`) moved to portal in the same PR.
-- **Forbidden HTTP surfaces.** Anything called from `forge`, `synodic`,
-  or `ising`. **Lever C status (#148): no remaining violation** —
-  `HttpStiglabDispatcher` and the `POST /api/shaping` route it
-  called are gone as of phase 5. Do not add new internal routes to
-  satisfy a sibling subsystem — emit/consume an event instead.
+- **No external HTTP surfaces.** After [ADR 0008](../../docs/adr/0008-portal-owns-the-agent-control-plane.md)
+  (spec #291) stiglab hosts exactly one HTTP route —
+  `/agent/ws-internal` — and it is bound to loopback only. Portal
+  terminates the externally-reachable `/agent/ws` upgrade and
+  forwards bytes here over `127.0.0.1:3000`. Every dashboard-facing
+  `/api/*` route lives on portal; stiglab no longer carries any
+  reverse proxies. `xtask check-api-contract` enforces this:
+  adding a non-loopback-only route here is a hard CI failure.
 - **Coordinating with forge or synodic.** Listen on the spine for the
   event you care about, write your response as a new event. Concrete
   pattern in production today: stiglab's `shaping_listener` consumes
@@ -105,30 +35,31 @@ What this means for stiglab specifically:
   `stiglab.session_completed` + `stiglab.shaping_result_ready` when
   the session reaches a terminal state (or `stiglab.session_failed`
   on the error path).
+- **Reads of portal-owned tables.** The route surfaces moved to
+  portal in spec #222 (`workspaces` / `workspace_members` /
+  `projects`, `github_app_installations`, `workflows` /
+  `workflow_stages`, PATs, credentials, auth sessions, spine API).
+  Portal is the only writer. Stiglab keeps narrowly-scoped reads of
+  the same tables via its own connection pool when the agent runtime
+  needs them — same database, separate pool, never a write.
 - **Cargo deps.** `stiglab` may depend on `onsager-{artifact,
-  registry, spine}` (the protocol DTOs now live in
-  `onsager_spine::protocol` per #131 Lever C; the standalone
-  `onsager-protocol` crate is gone). It must NOT depend on `forge`,
-  `synodic`, or `ising`. CI will hard-fail this once Lever B's
-  architecture lint lands.
+  github, spine}`. It must NOT depend on `forge`, `synodic`, or
+  `ising`. CI hard-fails this via `lint-seams`.
 - **Spine as single source of truth.** Lever D (#149) is done. Stiglab
   no longer keeps a private `workspace_workflows` schema; the
   `workflow_spine_mirror.rs` translator is gone and the source tables
-  are dropped by the spine migration. Spec #222 Slice 4 then moved
-  the writer surface (`server/workflow_activation.rs` and the full
-  `server/workflow_db.rs` CRUD) to portal — the slim
-  `server/workflow_db.rs` that remains in stiglab is read-only,
-  serving the `routes/projects.rs` replay-trigger. New code that
-  reads spine tables uses the spine pool
-  (`state.spine.as_ref().pool()`); new writes go through the
-  appropriate edge subsystem (portal owns workflow writes), not a
-  per-subsystem mirror table.
+  are dropped by the spine migration. New reads of spine tables use
+  the spine pool (`state.spine.as_ref().pool()`); new writes go
+  through the appropriate edge subsystem (portal owns workflow
+  writes), not a per-subsystem mirror table.
 - **In-memory caches.** State the spine owns is read from the spine.
   Cache only with an explicit invalidation path tied to a spine event
   (the PR #123 drift pattern is what happens otherwise).
 
 See [ADR 0001](../../docs/adr/0001-event-bus-coordination-model.md) for
-the original decision and spec #131 for the six-lever enforcement plan.
+the original decision, spec #131 for the six-lever enforcement plan,
+and ADR 0006 / ADR 0008 for the process-level move that closed the
+last clause-1 carve-out.
 
 ## Architecture quick map
 
@@ -137,16 +68,16 @@ src/
   agent/                <- agent connection + session execution
   core/                 <- session lifecycle, queue, drain logic
   server/
-    routes/             <- dashboard-facing HTTP (allowed seam)
-                            + reverse proxies to portal for GitHub webhook
-                            ingress and `/api/auth/*`
-                            (`routes::portal::proxy`)
+    routes/             <- shaping dispatch core called by the
+                            spine listener (no HTTP routes
+                            registered post-ADR 0008)
     spine.rs            <- spine read/write helpers (preferred path
                             for cross-subsystem coordination)
     workflow_db.rs      <- read-only workflow lookup against the
-                            spine pool (writer surface moved to
-                            portal in #222 Slice 4)
-    ws/                 <- agent WebSocket (allowed seam)
+                            spine pool (writer surface lives in
+                            portal per #222 Slice 4)
+    ws/                 <- /agent/ws-internal handler (loopback only;
+                            portal proxies /agent/ws here)
 ```
 
 ## Build & Test

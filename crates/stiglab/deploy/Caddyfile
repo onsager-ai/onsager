@@ -1,0 +1,58 @@
+# Production edge dispatcher. Caddy is the only externally-reachable
+# process in the Railway single-container image; everything below sits
+# on loopback.
+#
+# Routing model (peer of deploy/dev/Caddyfile, with loopback upstreams):
+#   /agent/ws*  → 127.0.0.1:3002  (portal — proxies to stiglab on loopback per ADR 0008)
+#   /api/*      → 127.0.0.1:3002  (portal — ADR 0006)
+#   /assets/*   → /app/static/assets (content-hashed, year-long immutable cache)
+#   /*          → /app/static/index.html (SPA shell, no-cache)
+#
+# Railway injects $PORT; Caddy binds to it as the foreground process.
+
+{
+    admin off
+    auto_https off
+    persist_config off
+}
+
+:{$PORT} {
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+
+    # Agent control plane WebSocket. Portal terminates the upgrade and
+    # transparently forwards bytes to stiglab on loopback
+    # (ws://127.0.0.1:3000/agent/ws-internal). See ADR 0008.
+    handle /agent/ws* {
+        reverse_proxy 127.0.0.1:3002
+    }
+
+    # Portal owns every dashboard-facing /api/* route (ADR 0006).
+    handle /api/* {
+        reverse_proxy 127.0.0.1:3002
+    }
+
+    # Static assets — content-hashed by Vite, safe to cache for a year.
+    # `@ok` is a response matcher so a 404 during a bad deploy is not
+    # cached for a year by clients and intermediaries.
+    @assets path /assets/*
+    handle @assets {
+        root * /app/static
+        @ok status 200 206
+        header @ok Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+
+    # SPA shell + everything else — no-cache so a new deploy is picked
+    # up on the next navigation. `try_files` falls back to index.html
+    # for client-side routes.
+    handle {
+        root * /app/static
+        try_files {path} /index.html
+        header Cache-Control "no-cache"
+        file_server
+    }
+}

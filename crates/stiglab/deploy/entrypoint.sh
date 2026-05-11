@@ -28,15 +28,15 @@ if [ -n "$ONSAGER_DATABASE_URL" ] && [ -d /app/synodic-migrations ]; then
 fi
 
 # Start synodic (governance API) on an internal port.
-# Not exposed by Railway — stiglab reverse-proxies /api/governance/* to it.
+# Not exposed by Railway — portal reverse-proxies /api/governance/* to it.
 SYNODIC_PORT="${SYNODIC_PORT:-3001}"
 echo "Starting synodic on :${SYNODIC_PORT}..."
 gosu onsager sh -c "while true; do DATABASE_URL=\"$ONSAGER_DATABASE_URL\" /app/synodic serve --port $SYNODIC_PORT 2>&1; echo 'synodic exited, restarting in 1s...'; sleep 1; done" &
 
-# Start onsager-portal (GitHub webhook ingress) on an internal port.
-# Not exposed by Railway — stiglab reverse-proxies /webhooks/github to it so
-# the public surface stays a single service. Skipped entirely when the spine
-# DB isn't configured (useful for local smoke tests without portal wiring).
+# Start onsager-portal on an internal port. Caddy (the edge dispatcher)
+# routes /api/* and /agent/ws here (ADR 0006 + ADR 0008). Skipped when
+# the spine DB isn't configured (useful for local smoke tests without
+# portal wiring).
 if [ -n "$ONSAGER_DATABASE_URL" ]; then
     PORTAL_PORT="${PORTAL_PORT:-3002}"
     PORTAL_BIND="${PORTAL_BIND:-127.0.0.1:${PORTAL_PORT}}"
@@ -49,19 +49,15 @@ if [ -n "$ONSAGER_DATABASE_URL" ]; then
 fi
 
 # Start forge (workflow orchestrator) on an internal port.
-# Forge subscribes to `trigger.fired` events on the spine, registers the
-# workflow's first artifact, and dispatches stage-0 work back to stiglab
-# via HTTP. Without forge running, trigger events accumulate with no
-# downstream effect — see CLAUDE.md "factory event bus".
-# Skipped when the spine DB isn't configured (no events to consume).
+# Forge subscribes to `trigger.fired` events on the spine and registers
+# the workflow's first artifact; downstream dispatch flows through
+# spine events post-Lever C (#148). Skipped when the spine DB isn't
+# configured (no events to consume).
 #
-# Issue #156: stiglab and forge share STIGLAB_INTERNAL_DISPATCH_TOKEN.
-# Stiglab requires this header on /api/shaping when the request sets
-# `created_by` (otherwise an attacker could exfiltrate any user's
-# credentials by guessing their user_id). Forge sends it. If unset,
-# auto-generate a per-boot token so the two co-located processes still
-# trust each other; an operator can pin a stable value via the env if
-# they want logs across restarts to authenticate to the same secret.
+# Issue #156: stiglab and forge share STIGLAB_INTERNAL_DISPATCH_TOKEN —
+# kept as a per-boot ephemeral secret for any legacy callers still
+# checking it. If unset, auto-generate so co-located processes still
+# trust each other.
 if [ -z "$STIGLAB_INTERNAL_DISPATCH_TOKEN" ]; then
     # 32 bytes of urandom rendered as 64 hex chars = 128 bits of entropy,
     # plenty for an in-container shared secret that's never written to
@@ -83,12 +79,20 @@ if [ -n "$ONSAGER_DATABASE_URL" ]; then
     gosu onsager sh -c "while true; do DATABASE_URL=\"$ONSAGER_DATABASE_URL\" FORGE_PORT=\"$FORGE_PORT\" STIGLAB_URL=\"$FORGE_STIGLAB_URL\" SYNODIC_URL=\"$FORGE_SYNODIC_URL\" STIGLAB_INTERNAL_DISPATCH_TOKEN=\"$STIGLAB_INTERNAL_DISPATCH_TOKEN\" /app/forge serve 2>&1; echo 'forge exited, restarting in 1s...'; sleep 1; done" &
 fi
 
-# Drop from root to unprivileged user and start stiglab.
-# Claude Code CLI refuses --permission-mode bypassPermissions under root.
+# Stiglab binds to 127.0.0.1:3000 (loopback only). The agent
+# control-plane WebSocket is reachable from outside only through Caddy
+# → portal → stiglab (ADR 0008). Stiglab is no longer the externally-
+# reachable process (ADR 0006).
+STIGLAB_PORT="${STIGLAB_PORT:-3000}"
+STIGLAB_HOST="${STIGLAB_HOST:-127.0.0.1}"
+echo "Starting stiglab on ${STIGLAB_HOST}:${STIGLAB_PORT}..."
+gosu onsager sh -c "while true; do STIGLAB_HOST=\"$STIGLAB_HOST\" STIGLAB_PORT=\"$STIGLAB_PORT\" PORT=\"$STIGLAB_PORT\" STIGLAB_INTERNAL_DISPATCH_TOKEN=\"$STIGLAB_INTERNAL_DISPATCH_TOKEN\" /app/stiglab \"\$@\" 2>&1; echo 'stiglab exited, restarting in 1s...'; sleep 1; done" stiglab-supervisor "$@" &
+
+# Caddy is the edge dispatcher — the only externally-reachable process.
+# Routes /api/* and /agent/ws to portal on loopback, serves /assets/* +
+# the SPA shell from /app/static. See ADR 0006 + ADR 0008.
 echo "==> pre-exec: binaries present"
-ls -la /app/stiglab /app/synodic /app/onsager-portal /app/forge
-echo "==> pre-exec: gosu version"
-gosu --version || true
-echo "==> pre-exec: PORT=${PORT:-unset} STIGLAB_PORT=${STIGLAB_PORT:-unset}"
-echo "==> exec-ing stiglab..."
-exec gosu onsager /app/stiglab "$@"
+ls -la /app/stiglab /app/synodic /app/onsager-portal /app/forge /usr/local/bin/caddy
+echo "==> pre-exec: PORT=${PORT:-unset}"
+echo "==> exec-ing caddy on :${PORT:-8080}..."
+exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
