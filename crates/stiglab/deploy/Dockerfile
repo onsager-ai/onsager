@@ -73,11 +73,16 @@ RUN find crates -name "*.rs" | xargs touch \
          -p stiglab -p synodic -p onsager-portal -p forge \
          --features synodic/postgres
 
-# ---- Stage 3: Node.js for runtime (glibc-compatible) ----
+# ---- Stage 3: Caddy binary ----
+# Pulled as a named build stage so older BuildKit / Docker frontends that
+# don't auto-pull external images on `COPY --from=image:tag` still work.
+FROM caddy:2.8-alpine AS caddy-bin
+
+# ---- Stage 4: Node.js for runtime (glibc-compatible) ----
 FROM node:20-bookworm-slim AS node-runtime
 RUN npm install -g @anthropic-ai/claude-code
 
-# ---- Stage 4: Runtime ----
+# ---- Stage 5: Runtime ----
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates libssl3 libsqlite3-0 libgcc-s1 libstdc++6 \
@@ -94,8 +99,10 @@ COPY --from=node-runtime /usr/local/bin/claude /usr/local/bin/claude
 # Caddy — the edge dispatcher. Caddy terminates the public port and
 # routes /api/* to portal, /agent/ws to portal (which proxies to
 # stiglab on loopback), and /* to the static dashboard files.
+# Caddy's official image ships a static (CGO_ENABLED=0) Go binary,
+# safe to drop into a debian-slim runtime.
 # See ADR 0006 (edge dispatcher) + ADR 0008 (portal owns /agent/ws).
-COPY --from=caddy:2.8-alpine /usr/bin/caddy /usr/local/bin/caddy
+COPY --from=caddy-bin /usr/bin/caddy /usr/local/bin/caddy
 
 # Git credential helper — reads GITHUB_TOKEN from env at push time.
 # Users add GITHUB_TOKEN as a credential in Dashboard > Settings; stiglab
