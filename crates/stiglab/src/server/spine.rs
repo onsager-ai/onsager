@@ -155,21 +155,22 @@ impl SpineEmitter {
         .await
     }
 
-    /// Emit a `stiglab.shaping_result_ready` event carrying the full
-    /// `ShapingResult` payload so Forge's `shaping_result_listener` can
+    /// Emit a `stiglab.session_result_ready` event carrying the full
+    /// `ShapingResult` payload so Forge's `session_result_listener` can
     /// resume the parked pipeline decision (spec #131 / ADR 0004
-    /// Lever C, phase 3). Emitted alongside `stiglab.session_completed`:
-    /// the lifecycle event signals "this session finished" (used by the
+    /// Lever C, phase 3; renamed from `shaping_result_ready` per spec
+    /// #285). Emitted alongside `stiglab.session_completed`: the
+    /// lifecycle event signals "this session finished" (used by the
     /// dashboard); this event signals "the artifact outputs are ready
     /// for the next pipeline stage" (used by Forge's state machine).
     /// Sessions without an artifact link skip this — see
     /// `handler.rs::handle_agent_message` for the gate.
-    pub async fn emit_shaping_result_ready(
+    pub async fn emit_session_result_ready(
         &self,
         artifact_id: onsager_artifact::ArtifactId,
         result: onsager_spine::protocol::ShapingResult,
     ) -> Result<i64, sqlx::Error> {
-        self.emit(FactoryEventKind::StiglabShapingResultReady {
+        self.emit(FactoryEventKind::StiglabSessionResultReady {
             artifact_id,
             result,
         })
@@ -219,18 +220,13 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::ForgeGateRequested { artifact_id, .. }
         | FactoryEventKind::ForgeGateVerdict { artifact_id, .. }
         | FactoryEventKind::ForgeDecisionMade { artifact_id, .. }
-        | FactoryEventKind::StiglabShapingResultReady { artifact_id, .. }
-        | FactoryEventKind::SynodicGateEvaluated { artifact_id, .. }
-        | FactoryEventKind::SynodicGateDenied { artifact_id, .. }
-        | FactoryEventKind::SynodicGateModified { artifact_id, .. }
+        | FactoryEventKind::StiglabSessionResultReady { artifact_id, .. }
         | FactoryEventKind::SynodicGateVerdict { artifact_id, .. }
         | FactoryEventKind::SynodicEscalationStarted { artifact_id, .. }
         | FactoryEventKind::SynodicEscalationResolved { artifact_id, .. }
         | FactoryEventKind::SynodicEscalationTimedOut { artifact_id, .. }
         | FactoryEventKind::SynodicGateResolutionProposed { artifact_id, .. }
         | FactoryEventKind::StageEntered { artifact_id, .. }
-        | FactoryEventKind::StageGatePassed { artifact_id, .. }
-        | FactoryEventKind::StageGateFailed { artifact_id, .. }
         | FactoryEventKind::StageAdvanced { artifact_id, .. } => Some(artifact_id.as_str()),
         FactoryEventKind::StiglabSessionCompleted { artifact_id, .. }
         | FactoryEventKind::StiglabSessionFailed { artifact_id, .. } => artifact_id.as_deref(),
@@ -253,15 +249,6 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::RefractFailed { .. }
         | FactoryEventKind::TriggerFired { .. }
         | FactoryEventKind::WorkflowManualTriggered { .. }
-        | FactoryEventKind::TypeProposed { .. }
-        | FactoryEventKind::TypeApproved { .. }
-        | FactoryEventKind::TypeDeprecated { .. }
-        | FactoryEventKind::AdapterRegistered { .. }
-        | FactoryEventKind::AdapterDeprecated { .. }
-        | FactoryEventKind::GateRegistered { .. }
-        | FactoryEventKind::GateDeprecated { .. }
-        | FactoryEventKind::ProfileRegistered { .. }
-        | FactoryEventKind::ProfileDeprecated { .. }
         | FactoryEventKind::GateCheckUpdated { .. }
         | FactoryEventKind::GateManualApprovalSignal { .. }
         | FactoryEventKind::PortalSessionRequested { .. } => None,

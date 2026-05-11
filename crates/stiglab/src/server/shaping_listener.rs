@@ -7,7 +7,7 @@
 //! to carry the full `ShapingRequest` payload as
 //! `FactoryEventKind::ForgeShapingDispatched.request`; the listener
 //! spawns a session and returns. Result correlation flows back via
-//! `stiglab.shaping_result_ready` from the agent message handler when
+//! `stiglab.session_result_ready` from the agent message handler when
 //! the session reaches a terminal state.
 //!
 //! The HTTP route stays alive during phase 3 so existing forge

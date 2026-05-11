@@ -145,7 +145,7 @@ async fn run_server(
     // request, calls the same dispatch core the HTTP route uses, and
     // reuses idempotency via `request_id` so spine redelivery never
     // produces a duplicate session. Result correlation flows back via
-    // `stiglab.shaping_result_ready` from the agent message handler.
+    // `stiglab.session_result_ready` from the agent message handler.
     //
     // Warm-start at `max_event_id` so a fresh boot doesn't replay every
     // historical request. Phase 6 will persist a per-process cursor.

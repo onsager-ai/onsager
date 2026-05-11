@@ -1,25 +1,27 @@
 //! Idempotent seed loader for the factory registry.
 //!
-//! Loads a [`SeedCatalog`] (typically parsed from a YAML file) and materializes
-//! its entries into the registry tables, emitting the corresponding
-//! `registry.*` events onto the spine with `actor = "seed"`.
+//! Loads a [`SeedCatalog`] (typically parsed from a YAML file) and
+//! materializes its entries into the registry tables.
 //!
-//! Idempotency: the loader checks [`registry_seed_marker`] first. If a seed
-//! with the same name has already been applied to the workspace, it returns
-//! immediately with zero events. This is the bootstrap-termination rule from
-//! issue #14 — the seed runs exactly once; after that, every registry change
-//! goes through the normal propose/approve flow.
+//! Idempotency: the loader checks [`registry_seed_marker`] first. If a
+//! seed with the same name has already been applied to the workspace,
+//! it returns immediately. This is the bootstrap-termination rule from
+//! issue #14 — the seed runs exactly once; after that, every registry
+//! change goes through the normal propose/approve flow.
+//!
+//! Per spec #285 the loader no longer publishes `registry.*` spine
+//! events — the events had no in-tree consumer or dashboard reader.
+//! `SeedOutcome::events_emitted` is retained as a counter of registry
+//! rows actually inserted (renamed semantically, same field name kept
+//! for backwards compatibility on the public struct).
 
-use chrono::Utc;
-use onsager_spine::{
-    EventMetadata, EventStore, FactoryEvent, FactoryEventKind, append_factory_event_tx,
-};
+use onsager_spine::EventStore;
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Transaction};
 
-use crate::registry::{
-    AgentProfile, DEFAULT_WORKSPACE, RegistryStatus, SEED_ACTOR, TypeDefinition,
-};
+#[cfg(test)]
+use crate::registry::SEED_ACTOR;
+use crate::registry::{AgentProfile, DEFAULT_WORKSPACE, RegistryStatus, TypeDefinition};
 
 /// An adapter catalog entry as it appears in a seed file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,18 +67,25 @@ impl SeedCatalog {
     }
 }
 
-/// Outcome of a seed apply.
+/// Outcome of a seed apply. Per spec #285 the loader no longer
+/// publishes `registry.*` spine events; the field name
+/// `events_emitted` is kept for struct-shape compatibility but now
+/// counts registry rows actually inserted (rows that hit `ON CONFLICT
+/// DO NOTHING` are not counted).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SeedOutcome {
     pub applied: bool,
+    /// Number of registry rows inserted by this apply. Pre-#285 this
+    /// counted spine events emitted; the two were 1:1, so the field
+    /// kept its name.
     pub events_emitted: usize,
 }
 
 /// Apply a seed catalog idempotently.
 ///
-/// The entire apply runs in a single transaction: either every row lands
-/// (registry tables + marker + events) or nothing does. Rerunning with the
-/// same `name`/`workspace_id` pair emits zero events.
+/// The entire apply runs in a single transaction: either every row
+/// lands (registry tables + marker) or nothing does. Rerunning with
+/// the same `name`/`workspace_id` pair is a no-op.
 pub async fn apply_seed(store: &EventStore, catalog: &SeedCatalog) -> anyhow::Result<SeedOutcome> {
     let workspace_id = catalog
         .workspace_id
@@ -115,13 +124,12 @@ async fn apply_in_tx(
         return Ok(SeedOutcome::default());
     }
 
-    let mut events_emitted = 0usize;
+    let mut rows_inserted = 0usize;
     let status = RegistryStatus::Approved.as_str();
 
-    // Only emit a registry.* event when the row was actually inserted. ON
-    // CONFLICT DO NOTHING returns 0 rows affected for duplicates (YAML
-    // duplicates or concurrent seeds), and an event in that case would
-    // falsely claim a registration happened.
+    // Count rows actually inserted. `ON CONFLICT DO NOTHING` returns 0
+    // rows_affected for duplicates (YAML duplicates or concurrent
+    // seeds); those don't bump the counter.
 
     for adapter in &catalog.adapters {
         let affected = sqlx::query(
@@ -140,13 +148,7 @@ async fn apply_in_tx(
         .rows_affected();
 
         if affected == 1 {
-            let evt = registry_event(FactoryEventKind::AdapterRegistered {
-                adapter_id: adapter.adapter_id.clone(),
-                workspace_id: workspace_id.to_owned(),
-                revision: 1,
-            });
-            append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
-            events_emitted += 1;
+            rows_inserted += 1;
         }
     }
 
@@ -167,13 +169,7 @@ async fn apply_in_tx(
         .rows_affected();
 
         if affected == 1 {
-            let evt = registry_event(FactoryEventKind::GateRegistered {
-                evaluator_id: evaluator.evaluator_id.clone(),
-                workspace_id: workspace_id.to_owned(),
-                revision: 1,
-            });
-            append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
-            events_emitted += 1;
+            rows_inserted += 1;
         }
     }
 
@@ -195,13 +191,7 @@ async fn apply_in_tx(
         .rows_affected();
 
         if affected == 1 {
-            let evt = registry_event(FactoryEventKind::ProfileRegistered {
-                profile_id: profile.profile_id.as_str().to_owned(),
-                workspace_id: workspace_id.to_owned(),
-                revision: 1,
-            });
-            append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
-            events_emitted += 1;
+            rows_inserted += 1;
         }
     }
 
@@ -223,13 +213,7 @@ async fn apply_in_tx(
         .rows_affected();
 
         if affected == 1 {
-            let evt = registry_event(FactoryEventKind::TypeApproved {
-                type_id: type_def.type_id.as_str().to_owned(),
-                workspace_id: workspace_id.to_owned(),
-                revision: 1,
-            });
-            append_factory_event_tx(tx, &evt, &seed_metadata()).await?;
-            events_emitted += 1;
+            rows_inserted += 1;
         }
     }
 
@@ -243,26 +227,8 @@ async fn apply_in_tx(
 
     Ok(SeedOutcome {
         applied: true,
-        events_emitted,
+        events_emitted: rows_inserted,
     })
-}
-
-fn registry_event(kind: FactoryEventKind) -> FactoryEvent {
-    FactoryEvent {
-        event: kind,
-        correlation_id: None,
-        causation_id: None,
-        actor: SEED_ACTOR.to_owned(),
-        timestamp: Utc::now(),
-    }
-}
-
-fn seed_metadata() -> EventMetadata {
-    EventMetadata {
-        correlation_id: None,
-        causation_id: None,
-        actor: SEED_ACTOR.to_owned(),
-    }
 }
 
 /// Convert anyhow errors back into `sqlx::Error` so they can bubble out of
@@ -308,23 +274,8 @@ mod tests {
     }
 
     #[test]
-    fn seed_metadata_uses_seed_actor() {
-        let meta = seed_metadata();
-        assert_eq!(meta.actor, SEED_ACTOR);
+    fn seed_actor_is_seed() {
         assert_eq!(SEED_ACTOR, "seed");
-    }
-
-    #[test]
-    fn registry_event_preserves_kind() {
-        let evt = registry_event(FactoryEventKind::TypeApproved {
-            type_id: "Spec".into(),
-            workspace_id: DEFAULT_WORKSPACE.into(),
-            revision: 1,
-        });
-        assert_eq!(evt.actor, SEED_ACTOR);
-        assert_eq!(evt.event.event_type(), "registry.type_approved");
-        assert_eq!(evt.event.stream_type(), "registry");
-        assert_eq!(evt.event.stream_id(), "type:Spec");
     }
 
     #[test]

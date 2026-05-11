@@ -57,12 +57,11 @@ that requires a coordinated rollout.
 | `forge` | forge | 6 |
 | `stiglab` | stiglab | 4 |
 | `portal` | (unknown — update `stream_producer` in xtask) | 1 |
-| `synodic` | synodic | 12 |
+| `synodic` | synodic | 9 |
 | `ising` | ising | 6 |
 | `refract` | refract | 3 |
-| `workflow` | stiglab (trigger) / forge (stage) | 5 |
+| `workflow` | stiglab (trigger) / forge (stage) | 3 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
-| `registry` | synodic (catalog crud) | 9 |
 | `gate` | onsager-portal (GitHub) / forge (manual) | 2 |
 
 Each section below covers one stream. Inside a section, every event lists its wire `event_type` string, the Rust variant name, the variant's doc comment, and a payload field table (where the field's own doc comment is the description).
@@ -264,9 +263,9 @@ A session finished successfully.
 | `branch` | `Option<String>` | Working-tree branch the agent pushed at session completion (issue #60). Used by `onsager-portal` to attach `vertical_lineage` when the matching PR webhook arrives. Optional — sessions that don't touch a git working dir leave it `None`. _(optional)_ |
 | `pr_number` | `Option<u64>` | PR number the agent opened, when known at completion time. Optional for the same reasons as `branch`. _(optional)_ |
 
-### `stiglab.shaping_result_ready`
+### `stiglab.session_result_ready`
 
-- Variant: `FactoryEventKind::StiglabShapingResultReady`
+- Variant: `FactoryEventKind::StiglabSessionResultReady`
 - Stream: `stiglab`
 
 Full `ShapingResult` produced by a Stiglab session, ready for Forge to act on. Replaces the legacy synchronous `forge → stiglab POST /api/shaping` HTTP response per spec #131 / ADR 0004 Lever C.
@@ -275,7 +274,7 @@ Emitted in addition to (not instead of) `stiglab.session_completed`: the lifecyc
 
 | Field | Type | Description |
 |---|---|---|
-| `artifact_id` | `ArtifactId` | Artifact this shaping was for. Hoisted so `stream_id()` can route the event without parsing the embedded result. |
+| `artifact_id` | `ArtifactId` | Artifact this session was for. Hoisted so `stream_id()` can route the event without parsing the embedded result. |
 | `result` | `crate::protocol::ShapingResult` | Full result payload — the same shape Forge previously consumed as the `POST /api/shaping` response body. `request_id` inside this struct correlates back to the originating `forge.shaping_dispatched`. |
 
 ### `stiglab.session_failed`
@@ -323,44 +322,6 @@ Dashboard task request from portal. Stiglab's `session_requested_listener` dispa
 
 Producer subsystem: **synodic**.
 
-### `synodic.gate_evaluated`
-
-- Variant: `FactoryEventKind::SynodicGateEvaluated`
-- Stream: `synodic`
-
-A gate request was evaluated and a verdict issued.
-
-| Field | Type | Description |
-|---|---|---|
-| `gate_id` | `String` |  |
-| `artifact_id` | `ArtifactId` |  |
-| `verdict` | `VerdictSummary` |  |
-
-### `synodic.gate_denied`
-
-- Variant: `FactoryEventKind::SynodicGateDenied`
-- Stream: `synodic`
-
-A gate request was denied (subset of gate_evaluated, for easy filtering).
-
-| Field | Type | Description |
-|---|---|---|
-| `gate_id` | `String` |  |
-| `artifact_id` | `ArtifactId` |  |
-| `reason` | `String` |  |
-
-### `synodic.gate_modified`
-
-- Variant: `FactoryEventKind::SynodicGateModified`
-- Stream: `synodic`
-
-A gate request verdict was Modify (subset of gate_evaluated).
-
-| Field | Type | Description |
-|---|---|---|
-| `gate_id` | `String` |  |
-| `artifact_id` | `ArtifactId` |  |
-
 ### `synodic.gate_verdict`
 
 - Variant: `FactoryEventKind::SynodicGateVerdict`
@@ -368,7 +329,7 @@ A gate request verdict was Modify (subset of gate_evaluated).
 
 Full gate verdict issued by Synodic in response to a `forge.gate_requested` event. Carries the complete `GateVerdict` payload — Allow, Deny{reason}, Modify{new_action}, or Escalate{context} — so Forge can act on it without a follow-up HTTP roundtrip.
 
-Replaces the legacy synchronous `forge → synodic POST /api/gate` response per spec #131 / ADR 0004 Lever C. The summary variants above (`SynodicGateEvaluated`, `SynodicGateDenied`, `SynodicGateModified`) remain for dashboard filtering; this variant is the one consumers act on.
+Replaces the legacy synchronous `forge → synodic POST /api/gate` response per spec #131 / ADR 0004 Lever C. The dashboard renders gate timelines directly off this event (verdict-shape filtering is a query-side concern); per spec #285 the redundant `synodic.gate_evaluated` / `gate_denied` / `gate_modified` summary variants are gone.
 
 | Field | Type | Description |
 |---|---|---|
@@ -635,41 +596,14 @@ A workflow-tagged artifact entered a new stage.
 | `stage_index` | `u32` |  |
 | `stage_name` | `String` |  |
 
-### `stage.gate_passed`
-
-- Variant: `FactoryEventKind::StageGatePassed`
-- Stream: `workflow`
-
-A gate on the current stage resolved successfully.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `workflow_id` | `String` |  |
-| `stage_index` | `u32` |  |
-| `gate_kind` | `String` |  |
-
-### `stage.gate_failed`
-
-- Variant: `FactoryEventKind::StageGateFailed`
-- Stream: `workflow`
-
-A gate on the current stage failed. The artifact is parked in `under_review` until the gate-failure condition is cleared (e.g. a new CI run succeeds, a reviewer approves).
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `workflow_id` | `String` |  |
-| `stage_index` | `u32` |  |
-| `gate_kind` | `String` |  |
-| `reason` | `String` |  |
-
 ### `stage.advanced`
 
 - Variant: `FactoryEventKind::StageAdvanced`
 - Stream: `workflow`
 
 All gates on a stage resolved and the artifact advanced to the next stage (or reached terminal state when this was the last stage).
+
+Per spec #285 the redundant per-gate `stage.gate_passed` / `stage.gate_failed` events are gone; the run timeline reconstructs gate outcomes from `synodic.gate_verdict` plus this advancement signal.
 
 | Field | Type | Description |
 |---|---|---|
@@ -696,127 +630,6 @@ Audit record for a manual / CLI / replay trigger fire (#241). Emitted alongside 
 | `actor` | `String` |  |
 | `event_subtype` | `String` |  |
 | `detail` | `serde_json::Value` |  |
-
-## `registry` events
-
-Producer subsystem: **synodic (catalog crud)**.
-
-### `registry.type_proposed`
-
-- Variant: `FactoryEventKind::TypeProposed`
-- Stream: `registry`
-
-A new artifact type was proposed (not yet active).
-
-| Field | Type | Description |
-|---|---|---|
-| `type_id` | `String` |  |
-| `workspace_id` | `String` |  |
-| `revision` | `i32` |  |
-
-### `registry.type_approved`
-
-- Variant: `FactoryEventKind::TypeApproved`
-- Stream: `registry`
-
-A proposed type was approved and entered the active catalog.
-
-| Field | Type | Description |
-|---|---|---|
-| `type_id` | `String` |  |
-| `workspace_id` | `String` |  |
-| `revision` | `i32` |  |
-
-### `registry.type_deprecated`
-
-- Variant: `FactoryEventKind::TypeDeprecated`
-- Stream: `registry`
-
-A type was deprecated (retained for audit, not used for new artifacts).
-
-| Field | Type | Description |
-|---|---|---|
-| `type_id` | `String` |  |
-| `workspace_id` | `String` |  |
-| `reason` | `String` |  |
-
-### `registry.adapter_registered`
-
-- Variant: `FactoryEventKind::AdapterRegistered`
-- Stream: `registry`
-
-An adapter implementation was registered in the catalog.
-
-| Field | Type | Description |
-|---|---|---|
-| `adapter_id` | `String` |  |
-| `workspace_id` | `String` |  |
-| `revision` | `i32` |  |
-
-### `registry.adapter_deprecated`
-
-- Variant: `FactoryEventKind::AdapterDeprecated`
-- Stream: `registry`
-
-An adapter was deprecated.
-
-| Field | Type | Description |
-|---|---|---|
-| `adapter_id` | `String` |  |
-| `workspace_id` | `String` |  |
-| `reason` | `String` |  |
-
-### `registry.gate_registered`
-
-- Variant: `FactoryEventKind::GateRegistered`
-- Stream: `registry`
-
-A gate evaluator was registered.
-
-| Field | Type | Description |
-|---|---|---|
-| `evaluator_id` | `String` |  |
-| `workspace_id` | `String` |  |
-| `revision` | `i32` |  |
-
-### `registry.gate_deprecated`
-
-- Variant: `FactoryEventKind::GateDeprecated`
-- Stream: `registry`
-
-A gate evaluator was deprecated.
-
-| Field | Type | Description |
-|---|---|---|
-| `evaluator_id` | `String` |  |
-| `workspace_id` | `String` |  |
-| `reason` | `String` |  |
-
-### `registry.profile_registered`
-
-- Variant: `FactoryEventKind::ProfileRegistered`
-- Stream: `registry`
-
-An agent profile was registered.
-
-| Field | Type | Description |
-|---|---|---|
-| `profile_id` | `String` |  |
-| `workspace_id` | `String` |  |
-| `revision` | `i32` |  |
-
-### `registry.profile_deprecated`
-
-- Variant: `FactoryEventKind::ProfileDeprecated`
-- Stream: `registry`
-
-An agent profile was deprecated.
-
-| Field | Type | Description |
-|---|---|---|
-| `profile_id` | `String` |  |
-| `workspace_id` | `String` |  |
-| `reason` | `String` |  |
 
 ## `gate` events
 

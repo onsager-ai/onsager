@@ -306,19 +306,31 @@ fn extract_match_arms(stmts: &[Stmt]) -> Result<Vec<(String, String)>> {
 
     let mut out = Vec::new();
     for arm in &match_expr.arms {
-        let lit = match arm.body.as_ref() {
-            Expr::Lit(ExprLit {
-                lit: Lit::Str(s), ..
-            }) => s.value(),
-            // event_type() returns &'static str literals. stream_type() likewise.
-            // Anything else (formatted strings, .to_string(), etc.) is unexpected.
-            _ => bail!("match arm body is not a string literal — generator can't handle it"),
-        };
+        let lit = arm_body_str(arm.body.as_ref()).ok_or_else(|| {
+            anyhow!("match arm body is not a string literal — generator can't handle it")
+        })?;
         for variant in collect_variants_from_pat(&arm.pat) {
             out.push((variant, lit.clone()));
         }
     }
     Ok(out)
+}
+
+/// Return the string-literal value of a match-arm body. Tolerates the
+/// `=> { "literal" }` block form rustfmt can produce when the arm
+/// pattern wraps onto multiple lines, so the gen-docs / lint parsers
+/// don't break on cosmetic reformat.
+fn arm_body_str(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(s), ..
+        }) => Some(s.value()),
+        Expr::Block(b) if b.block.stmts.len() == 1 => match &b.block.stmts[0] {
+            Stmt::Expr(inner, None) => arm_body_str(inner),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// From a pattern like `Self::A { .. } | Self::B { .. }` extract `["A", "B"]`.

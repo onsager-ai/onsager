@@ -78,7 +78,7 @@ What this means for stiglab specifically:
     (via `EventStore::append_ext`). Stiglab still keeps
     `SpineEmitter` for the agent-runtime emits
     (`emit_session_started/completed/failed`,
-    `emit_shaping_result_ready`) — those are session-lifecycle, not
+    `emit_session_result_ready`) — those are session-lifecycle, not
     dashboard-facing — and still uses the spine pool for in-process
     reads (`routes::projects::replay_issue_trigger`).
   - Workflow CRUD + GitHub side-effects
@@ -102,7 +102,7 @@ What this means for stiglab specifically:
   event you care about, write your response as a new event. Concrete
   pattern in production today: stiglab's `shaping_listener` consumes
   `forge.shaping_dispatched`, spawns the agent session, and emits
-  `stiglab.session_completed` + `stiglab.shaping_result_ready` when
+  `stiglab.session_completed` + `stiglab.session_result_ready` when
   the session reaches a terminal state (or `stiglab.session_failed`
   on the error path).
 - **Cargo deps.** `stiglab` may depend on `onsager-{artifact,

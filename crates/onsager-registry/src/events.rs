@@ -243,13 +243,13 @@ pub const EVENTS: EventManifest = EventManifest {
             description: "A session finished successfully; carries optional artifact_id, token usage, branch, and PR number.",
         },
         EventDefinition {
-            kind: "stiglab.shaping_result_ready",
+            kind: "stiglab.session_result_ready",
             schema_version: 1,
             producers: &[Subsystem::Stiglab],
             consumers: &[Subsystem::Forge],
             diagnostic_only: false,
             reason: None,
-            description: "Full ShapingResult ready for Forge to act on (replaces POST /api/shaping response).",
+            description: "Full session ShapingResult ready for Forge to act on (replaces POST /api/shaping response). Renamed from stiglab.shaping_result_ready per spec #285.",
         },
         EventDefinition {
             kind: "stiglab.session_failed",
@@ -280,33 +280,10 @@ pub const EVENTS: EventManifest = EventManifest {
             description: "Dashboard task request from portal; stiglab dispatches the session to an agent node.",
         },
         // -- Synodic events -------------------------------------------------
-        EventDefinition {
-            kind: "synodic.gate_evaluated",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("dashboard filtering & audit trail; gate_verdict is the consumer event"),
-            description: "Gate request evaluated and a verdict issued (summary; full payload on synodic.gate_verdict).",
-        },
-        EventDefinition {
-            kind: "synodic.gate_denied",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("dashboard deny-verdict filtering"),
-            description: "Gate request denied (subset of gate_evaluated, for filtering).",
-        },
-        EventDefinition {
-            kind: "synodic.gate_modified",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("dashboard modify-verdict filtering"),
-            description: "Gate request resolved with verdict Modify (subset of gate_evaluated).",
-        },
+        // Per spec #285: the redundant `synodic.gate_evaluated` /
+        // `gate_denied` / `gate_modified` summary variants were dropped;
+        // the dashboard renders gate timelines from `synodic.gate_verdict`
+        // directly (verdict-shape filtering is a query-side concern).
         EventDefinition {
             kind: "synodic.gate_verdict",
             schema_version: 1,
@@ -514,24 +491,9 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some("rendered in workflow run timeline"),
             description: "A workflow-tagged artifact entered a new stage.",
         },
-        EventDefinition {
-            kind: "stage.gate_passed",
-            schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in workflow run timeline"),
-            description: "A gate on the current stage resolved successfully.",
-        },
-        EventDefinition {
-            kind: "stage.gate_failed",
-            schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in workflow run timeline"),
-            description: "A gate on the current stage failed; the artifact is parked.",
-        },
+        // Per spec #285: per-gate `stage.gate_passed` / `stage.gate_failed`
+        // events were dropped; the run timeline reconstructs gate outcomes
+        // from `synodic.gate_verdict` plus the stage advancement signal.
         EventDefinition {
             kind: "stage.advanced",
             schema_version: 1,
@@ -541,88 +503,12 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some("rendered in workflow run timeline"),
             description: "All gates on a stage resolved and the artifact advanced.",
         },
-        // -- Registry events (issue #14) ------------------------------------
-        EventDefinition {
-            kind: "registry.type_proposed",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("audit trail for registry catalog mutations"),
-            description: "A new artifact type was proposed (not yet active).",
-        },
-        EventDefinition {
-            kind: "registry.type_approved",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("audit trail for registry catalog mutations"),
-            description: "A proposed type was approved and entered the active catalog.",
-        },
-        EventDefinition {
-            kind: "registry.type_deprecated",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("audit trail for registry catalog mutations"),
-            description: "A type was deprecated (retained for audit).",
-        },
-        EventDefinition {
-            kind: "registry.adapter_registered",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("audit trail for registry catalog mutations"),
-            description: "An adapter implementation was registered in the catalog.",
-        },
-        EventDefinition {
-            kind: "registry.adapter_deprecated",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("audit trail for registry catalog mutations"),
-            description: "An adapter was deprecated.",
-        },
-        EventDefinition {
-            kind: "registry.gate_registered",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("audit trail for registry catalog mutations"),
-            description: "A gate evaluator was registered.",
-        },
-        EventDefinition {
-            kind: "registry.gate_deprecated",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("audit trail for registry catalog mutations"),
-            description: "A gate evaluator was deprecated.",
-        },
-        EventDefinition {
-            kind: "registry.profile_registered",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("audit trail for registry catalog mutations"),
-            description: "An agent profile was registered.",
-        },
-        EventDefinition {
-            kind: "registry.profile_deprecated",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("audit trail for registry catalog mutations"),
-            description: "An agent profile was deprecated.",
-        },
+        // -- Registry events removed by spec #285 ---------------------------
+        // The nine `registry.*` mutation events had no in-tree consumer
+        // or dashboard reader. The registry tables remain the source of
+        // truth; mutations no longer publish a spine event. Add a row
+        // back here when there is a real consumer.
+
         // -- Gate adapters (GitHub webhooks) --------------------------------
         EventDefinition {
             kind: "gate.check_updated",
