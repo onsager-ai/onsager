@@ -54,6 +54,19 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "006_user_credentials",
         include_str!("../migrations/006_user_credentials.sql"),
     ),
+    // 007_github_app_installations was historically applied via
+    // stiglab's runtime CREATE TABLE IF NOT EXISTS path; the `.sql`
+    // file is the canonical schema. Wire it here so the apply order
+    // matches filename order — the SQL is idempotent so a deploy
+    // where stiglab migrated first is unaffected.
+    (
+        "007_github_app_installations",
+        include_str!("../migrations/007_github_app_installations.sql"),
+    ),
+    (
+        "008_portal_remediation_calls",
+        include_str!("../migrations/008_portal_remediation_calls.sql"),
+    ),
 ];
 
 /// Apply all portal-owned table migrations. Idempotent — safe to call on
