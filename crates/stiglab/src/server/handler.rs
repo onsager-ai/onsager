@@ -108,20 +108,22 @@ pub async fn handle_agent_message(
                     tracing::warn!("failed to emit session_completed spine event: {e}");
                 }
 
-                // Emit `stiglab.shaping_result_ready` carrying the full
+                // Emit `stiglab.session_result_ready` carrying the full
                 // `ShapingResult` so Forge's pipeline can resume the
-                // parked decision (spec #131 / ADR 0004 Lever C, phase 3).
+                // parked decision (spec #131 / ADR 0004 Lever C, phase 3;
+                // renamed from `shaping_result_ready` per spec #285).
                 // The lifecycle event above stays for dashboard / node
                 // telemetry; this event is the actionable signal Forge
-                // consumes via `shaping_result_listener`. Sessions
+                // consumes via `session_result_listener`. Sessions
                 // without an artifact link are direct task POSTs that
                 // never produced a shaping request — skip them so we
                 // don't fabricate result events with empty fields.
                 if let Some(artifact_id) = artifact_id.as_deref()
                     && let Err(e) =
-                        emit_shaping_result_for_session(pool, spine, &session_id, artifact_id).await
+                        emit_session_result_for_session(pool, spine, &session_id, artifact_id)
+                            .await
                 {
-                    tracing::warn!("failed to emit shaping_result_ready spine event: {e}");
+                    tracing::warn!("failed to emit session_result_ready spine event: {e}");
                 }
             }
         }
@@ -224,7 +226,8 @@ async fn git_context_for_session(
 }
 
 /// Build a `ShapingResult` from a terminal session row and emit it as
-/// `stiglab.shaping_result_ready` (spec #131 / ADR 0004 Lever C, phase 3).
+/// `stiglab.session_result_ready` (spec #131 / ADR 0004 Lever C, phase 3;
+/// renamed from `shaping_result_ready` per spec #285).
 ///
 /// We synthesize a minimal `ShapingRequest` envelope from the session's
 /// stored `task_id` (= original request_id) and artifact link so the
@@ -234,7 +237,7 @@ async fn git_context_for_session(
 /// row (inputs, constraints, deadline) default to empty — Forge's
 /// pipeline never reads them off the result, only the request, so the
 /// adapter stays consistent with the HTTP path it replaces.
-async fn emit_shaping_result_for_session(
+async fn emit_session_result_for_session(
     pool: &AnyPool,
     spine: &SpineEmitter,
     session_id: &str,
@@ -273,7 +276,7 @@ async fn emit_shaping_result_for_session(
     let result = adapter::session_to_shaping_result(&synthesized_req, &session, duration_ms);
 
     spine
-        .emit_shaping_result_ready(onsager_artifact::ArtifactId::new(artifact_id), result)
+        .emit_session_result_ready(onsager_artifact::ArtifactId::new(artifact_id), result)
         .await
         .map_err(anyhow::Error::from)?;
     Ok(())

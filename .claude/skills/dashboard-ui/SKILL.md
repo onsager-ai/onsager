@@ -80,6 +80,27 @@ Any hit in your diff should be replaced with the shadcn primitive.
 - Styling lives in one place (the `ui/` component) — ad-hoc native elements
   diverge quickly and are expensive to re-skin later.
 
+## Vocabulary: the canonical 4 nouns
+
+User-facing surfaces (page titles, headings, button copy, route
+segments, public API field names, user-visible docs) use exactly four
+top-level nouns: **Workflow**, **Run**, **Artifact**, **Stage**. Per
+spec #286 / root `CLAUDE.md` § "User-facing vocabulary":
+
+- **Internal-only** (stay in Rust / migrations / spine, never in
+  user copy): `shaping`, `bundle`, `sealed`, `spec`,
+  `ArtifactVersionId`.
+- **Surface-internal** (visible only inside a workflow / run
+  drill-down, never as a top-level navigation noun): `gate`,
+  `verdict`, `governance`, `session`, `node`, `issue`.
+
+When you write a page title, a button label, a heading, or a
+field name, default to one of the four canonical nouns. Use the
+demoted vocabulary only inside a workflow- or run-detail drill-down,
+and never as a top-level navigation item or noun. Enforcement is
+PR review — there is no mechanical lint — so spotting drift in your
+own diff before opening the PR is the bar.
+
 ## UX principle: avoid manual input, streamline everything
 
 When designing any flow that touches external systems (GitHub, Railway,

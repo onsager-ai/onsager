@@ -216,6 +216,19 @@ The timeout duration is server-configurable via environment variable. Per-sessio
 - Keep it brief — notes are context, not a second design section.
 - Omit this section entirely if there's nothing to note.
 
+## User-facing vocabulary
+
+When a spec touches a user-facing surface (dashboard pages, button
+copy, public API field names, route segments, user-visible docs),
+use the canonical 4 nouns: **Workflow**, **Run**, **Artifact**,
+**Stage**. Spec #286 / root `CLAUDE.md` § "User-facing vocabulary"
+demote everything else (`shaping`, `bundle`, `sealed`, `gate`,
+`verdict`, `governance`, `session`, `node`, `issue`, `spec`) to
+internal-only or surface-internal — they stay rich in Rust /
+migration / spine vocabulary but never surface to users at the top
+level. Internal/seam vocabulary stays distinct per the audit's
+"keep distinct" findings; this rule only governs what users see.
+
 ## Context Economy Rules
 
 Smaller specs produce better results — for both AI implementation and human review:

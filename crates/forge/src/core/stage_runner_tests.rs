@@ -198,12 +198,22 @@ mod tests {
         let events = advance_workflow_artifacts(&workflows, &mut store, &eval);
         let art = store.get(&id).unwrap();
         assert_eq!(art.state, ArtifactState::UnderReview);
-        assert!(art.workflow_parked_reason.is_some());
-        assert!(events.iter().any(|e| matches!(
-            e,
-            StageEvent::GateFailed { gate_kind, .. } if gate_kind == "external_check"
-        )));
-        // Artifact stays on stage 0 — failure parks, doesn't advance.
+        let parked = art
+            .workflow_parked_reason
+            .as_deref()
+            .expect("artifact parked");
+        assert!(
+            parked.contains("external_check"),
+            "parked reason should name the failing gate: {parked}"
+        );
+        // No StageAdvanced event — failure parks, doesn't advance. Per
+        // spec #285 there is no per-gate event either.
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, StageEvent::StageAdvanced { .. }))
+        );
+        // Artifact stays on stage 0.
         assert_eq!(art.current_stage_index, Some(0));
     }
 
@@ -350,63 +360,11 @@ mod tests {
     }
 
     #[test]
-    fn gate_passed_events_emit_only_when_stage_advances() {
-        // A gate that passes while another is pending should NOT emit a
-        // GatePassed event every tick — otherwise the stream spams
-        // duplicate events (issue #80 copilot-review).
-        let wf = make_workflow(
-            "wf_noise",
-            vec![make_stage(
-                "s0",
-                Some(ArtifactState::InProgress),
-                vec![
-                    GateSpec::AgentSession {
-                        shaping_intent: serde_json::Value::Null,
-                    },
-                    GateSpec::ManualApproval {
-                        signal_kind: "approve".into(),
-                    },
-                ],
-            )],
-        );
-        let mut store = ArtifactStore::new();
-        let id = enroll(&mut store, &wf, "noisy");
-        let mut workflows = HashMap::new();
-        workflows.insert(wf.workflow_id.clone(), wf);
-
-        // agent_session passes, manual_approval pending.
-        let mut eval = MockEvaluator::new();
-        eval.set(id.as_str(), "agent_session", GateOutcome::Pass);
-
-        // Three ticks with the same outcome — must not emit GatePassed
-        // over and over.
-        let mut total_gate_passed = 0;
-        for _ in 0..3 {
-            let events = advance_workflow_artifacts(&workflows, &mut store, &eval);
-            total_gate_passed += events
-                .iter()
-                .filter(|e| matches!(e, StageEvent::GatePassed { .. }))
-                .count();
-        }
-        assert_eq!(
-            total_gate_passed, 0,
-            "no GatePassed events should fire while another gate is pending"
-        );
-
-        // Once both pass, the runner emits a single batch.
-        eval.set(id.as_str(), "manual_approval", GateOutcome::Pass);
-        let events = advance_workflow_artifacts(&workflows, &mut store, &eval);
-        let batch = events
-            .iter()
-            .filter(|e| matches!(e, StageEvent::GatePassed { .. }))
-            .count();
-        assert_eq!(batch, 2);
-    }
-
-    #[test]
-    fn gate_failed_events_emit_only_on_park_state_change() {
-        // Two ticks with the same failing gate: the second tick is a
-        // no-op because the parked reason already matches.
+    fn parking_is_idempotent_across_ticks() {
+        // Two ticks with the same failing gate: the second tick must
+        // not flap the parked reason. Per spec #285 there is no
+        // per-gate `stage.gate_failed` event; the artifact row is the
+        // durable record.
         let wf = make_workflow(
             "wf_quiet_fail",
             vec![make_stage(
@@ -429,22 +387,25 @@ mod tests {
             GateOutcome::Fail("red".into()),
         );
 
-        let tick1 = advance_workflow_artifacts(&workflows, &mut store, &eval);
+        advance_workflow_artifacts(&workflows, &mut store, &eval);
+        let parked_after_first = store
+            .get(&id)
+            .unwrap()
+            .workflow_parked_reason
+            .clone()
+            .expect("first tick parks");
+
+        advance_workflow_artifacts(&workflows, &mut store, &eval);
+        let parked_after_second = store
+            .get(&id)
+            .unwrap()
+            .workflow_parked_reason
+            .clone()
+            .expect("still parked");
+
         assert_eq!(
-            tick1
-                .iter()
-                .filter(|e| matches!(e, StageEvent::GateFailed { .. }))
-                .count(),
-            1
-        );
-        let tick2 = advance_workflow_artifacts(&workflows, &mut store, &eval);
-        assert_eq!(
-            tick2
-                .iter()
-                .filter(|e| matches!(e, StageEvent::GateFailed { .. }))
-                .count(),
-            0,
-            "re-emitting the same failure each tick would spam the stream"
+            parked_after_first, parked_after_second,
+            "second tick must not flap the parked reason"
         );
     }
 

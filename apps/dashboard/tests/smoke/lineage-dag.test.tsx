@@ -30,7 +30,7 @@ describe("LineageDAG", () => {
       </MemoryRouter>,
     );
     expect(
-      screen.getByText(/No shaping runs yet/i),
+      screen.getByText(/No runs yet/i),
     ).toBeInTheDocument();
   });
 

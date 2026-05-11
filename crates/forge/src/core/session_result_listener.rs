@@ -1,4 +1,4 @@
-//! Listener that records `stiglab.shaping_result_ready` events into
+//! Listener that records `stiglab.session_result_ready` events into
 //! [`PendingShapings`] (spec #131 / ADR 0004 Lever C, phase 3).
 //!
 //! Symmetric with [`crate::core::gate_verdict_listener`]: filters on
@@ -67,16 +67,16 @@ impl Dispatcher {
 }
 
 /// Pure classifier: extract the `(request_id, ShapingResult)` pair from a
-/// [`FactoryEventKind`], or `None` if the kind is not a shaping result.
+/// [`FactoryEventKind`], or `None` if the kind is not a session result.
 ///
 /// Key is the `request_id` Forge stamped on the originating
 /// `forge.shaping_dispatched`. The duplicate top-level `artifact_id` on
 /// the event is kept for stream routing; we don't need it here.
-pub fn classify_shaping_result(
+pub fn classify_session_result(
     kind: FactoryEventKind,
 ) -> Option<(String, onsager_spine::protocol::ShapingResult)> {
     match kind {
-        FactoryEventKind::StiglabShapingResultReady { result, .. } => {
+        FactoryEventKind::StiglabSessionResultReady { result, .. } => {
             Some((result.request_id.clone(), result))
         }
         _ => None,
@@ -86,7 +86,7 @@ pub fn classify_shaping_result(
 #[async_trait]
 impl EventHandler for Dispatcher {
     async fn handle(&self, notification: EventNotification) -> anyhow::Result<()> {
-        if notification.event_type != "stiglab.shaping_result_ready" {
+        if notification.event_type != "stiglab.session_result_ready" {
             return Ok(());
         }
 
@@ -94,10 +94,10 @@ impl EventHandler for Dispatcher {
             return Ok(());
         };
 
-        if let Some((request_id, result)) = classify_shaping_result(kind) {
+        if let Some((request_id, result)) = classify_session_result(kind) {
             tracing::info!(
                 request_id = %request_id,
-                "forge: parking stiglab.shaping_result_ready for pipeline resume"
+                "forge: parking stiglab.session_result_ready for pipeline resume"
             );
             self.pending.insert(&request_id, result);
         }
@@ -112,7 +112,7 @@ mod tests {
     use onsager_spine::factory_event::ShapingOutcome;
     use onsager_spine::protocol::ShapingResult;
 
-    fn shaping_completed(req: &str) -> ShapingResult {
+    fn session_completed(req: &str) -> ShapingResult {
         ShapingResult {
             request_id: req.into(),
             outcome: ShapingOutcome::Completed,
@@ -130,11 +130,11 @@ mod tests {
 
     #[test]
     fn classify_extracts_request_id_and_full_result() {
-        let kind = FactoryEventKind::StiglabShapingResultReady {
+        let kind = FactoryEventKind::StiglabSessionResultReady {
             artifact_id: ArtifactId::new("art_x"),
-            result: shaping_completed("req_42"),
+            result: session_completed("req_42"),
         };
-        let (request_id, result) = classify_shaping_result(kind).expect("matches variant");
+        let (request_id, result) = classify_session_result(kind).expect("matches variant");
         assert_eq!(request_id, "req_42");
         assert_eq!(result.outcome, ShapingOutcome::Completed);
         assert_eq!(result.content_ref.unwrap().uri, "git://repo@abc");
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn classify_returns_none_for_session_completed() {
         // Lifecycle event — different consumer (SessionLinker writes
-        // vertical_lineage). Must not be parked as a shaping result.
+        // vertical_lineage). Must not be parked as a session result.
         let kind = FactoryEventKind::StiglabSessionCompleted {
             session_id: "s".into(),
             request_id: "r".into(),
@@ -153,7 +153,7 @@ mod tests {
             branch: None,
             pr_number: None,
         };
-        assert!(classify_shaping_result(kind).is_none());
+        assert!(classify_session_result(kind).is_none());
     }
 
     #[test]
@@ -163,6 +163,6 @@ mod tests {
             target_version: 0,
             priority: 0,
         };
-        assert!(classify_shaping_result(kind).is_none());
+        assert!(classify_session_result(kind).is_none());
     }
 }

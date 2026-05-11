@@ -1,4 +1,4 @@
-// budget-allow: factory event enum (~50+ variants after spec #272 prune + #274 cut); macro/derive compression deferred to follow-up spec per #261
+// budget-allow: factory event enum (~40 variants after spec #285 prune); macro/derive compression deferred to follow-up spec per #261
 //! Factory events — the authoritative event types emitted to the factory event
 //! spine by each subsystem.
 //!
@@ -209,8 +209,8 @@ pub enum FactoryEventKind {
     /// state machine to advance / seal). Stiglab emits it only for
     /// sessions that were dispatched as shaping requests — direct task
     /// POSTs that produce no `ShapingResult` skip it.
-    StiglabShapingResultReady {
-        /// Artifact this shaping was for. Hoisted so `stream_id()` can
+    StiglabSessionResultReady {
+        /// Artifact this session was for. Hoisted so `stream_id()` can
         /// route the event without parsing the embedded result.
         artifact_id: ArtifactId,
         /// Full result payload — the same shape Forge previously
@@ -244,26 +244,6 @@ pub enum FactoryEventKind {
     PortalSessionRequested { session_id: String },
 
     // -- Synodic events (governance) ----------------------------------------
-    /// A gate request was evaluated and a verdict issued.
-    SynodicGateEvaluated {
-        gate_id: String,
-        artifact_id: ArtifactId,
-        verdict: VerdictSummary,
-    },
-
-    /// A gate request was denied (subset of gate_evaluated, for easy filtering).
-    SynodicGateDenied {
-        gate_id: String,
-        artifact_id: ArtifactId,
-        reason: String,
-    },
-
-    /// A gate request verdict was Modify (subset of gate_evaluated).
-    SynodicGateModified {
-        gate_id: String,
-        artifact_id: ArtifactId,
-    },
-
     /// Full gate verdict issued by Synodic in response to a
     /// `forge.gate_requested` event. Carries the complete `GateVerdict`
     /// payload — Allow, Deny{reason}, Modify{new_action}, or
@@ -271,10 +251,11 @@ pub enum FactoryEventKind {
     /// HTTP roundtrip.
     ///
     /// Replaces the legacy synchronous `forge → synodic POST /api/gate`
-    /// response per spec #131 / ADR 0004 Lever C. The summary variants
-    /// above (`SynodicGateEvaluated`, `SynodicGateDenied`,
-    /// `SynodicGateModified`) remain for dashboard filtering; this
-    /// variant is the one consumers act on.
+    /// response per spec #131 / ADR 0004 Lever C. The dashboard renders
+    /// gate timelines directly off this event (verdict-shape filtering
+    /// is a query-side concern); per spec #285 the redundant
+    /// `synodic.gate_evaluated` / `gate_denied` / `gate_modified`
+    /// summary variants are gone.
     SynodicGateVerdict {
         /// Correlation ID echoed from the originating
         /// `forge.gate_requested` event.
@@ -470,27 +451,13 @@ pub enum FactoryEventKind {
         stage_name: String,
     },
 
-    /// A gate on the current stage resolved successfully.
-    StageGatePassed {
-        artifact_id: ArtifactId,
-        workflow_id: String,
-        stage_index: u32,
-        gate_kind: String,
-    },
-
-    /// A gate on the current stage failed. The artifact is parked in
-    /// `under_review` until the gate-failure condition is cleared (e.g. a
-    /// new CI run succeeds, a reviewer approves).
-    StageGateFailed {
-        artifact_id: ArtifactId,
-        workflow_id: String,
-        stage_index: u32,
-        gate_kind: String,
-        reason: String,
-    },
-
     /// All gates on a stage resolved and the artifact advanced to the next
     /// stage (or reached terminal state when this was the last stage).
+    ///
+    /// Per spec #285 the redundant per-gate `stage.gate_passed` /
+    /// `stage.gate_failed` events are gone; the run timeline reconstructs
+    /// gate outcomes from `synodic.gate_verdict` plus this advancement
+    /// signal.
     StageAdvanced {
         artifact_id: ArtifactId,
         workflow_id: String,
@@ -499,69 +466,14 @@ pub enum FactoryEventKind {
         to_stage_index: Option<u32>,
     },
 
-    // -- Registry events (factory pipeline foundations, issue #14) ----------
-    /// A new artifact type was proposed (not yet active).
-    TypeProposed {
-        type_id: String,
-        workspace_id: String,
-        revision: i32,
-    },
-
-    /// A proposed type was approved and entered the active catalog.
-    TypeApproved {
-        type_id: String,
-        workspace_id: String,
-        revision: i32,
-    },
-
-    /// A type was deprecated (retained for audit, not used for new artifacts).
-    TypeDeprecated {
-        type_id: String,
-        workspace_id: String,
-        reason: String,
-    },
-
-    /// An adapter implementation was registered in the catalog.
-    AdapterRegistered {
-        adapter_id: String,
-        workspace_id: String,
-        revision: i32,
-    },
-
-    /// An adapter was deprecated.
-    AdapterDeprecated {
-        adapter_id: String,
-        workspace_id: String,
-        reason: String,
-    },
-
-    /// A gate evaluator was registered.
-    GateRegistered {
-        evaluator_id: String,
-        workspace_id: String,
-        revision: i32,
-    },
-
-    /// A gate evaluator was deprecated.
-    GateDeprecated {
-        evaluator_id: String,
-        workspace_id: String,
-        reason: String,
-    },
-
-    /// An agent profile was registered.
-    ProfileRegistered {
-        profile_id: String,
-        workspace_id: String,
-        revision: i32,
-    },
-
-    /// An agent profile was deprecated.
-    ProfileDeprecated {
-        profile_id: String,
-        workspace_id: String,
-        reason: String,
-    },
+    // -- Registry events removed by spec #285 -------------------------------
+    // The nine `registry.*` mutation events (`type_proposed`, `type_approved`,
+    // `type_deprecated`, `adapter_registered`, `adapter_deprecated`,
+    // `gate_registered`, `gate_deprecated`, `profile_registered`,
+    // `profile_deprecated`) had no in-tree consumer or dashboard reader;
+    // the registry tables are still the source of truth, but mutations no
+    // longer publish a spine event. Add a variant back here when there is
+    // a real consumer.
 
     // -- Workflow events (issue #81 — stiglab workflow CRUD + webhook) ------
     // `TriggerFired` is defined above in the issue #80 block; the stiglab
@@ -606,13 +518,10 @@ impl FactoryEventKind {
             Self::ForgeInsightObserved { .. } => "forge.insight_observed",
             Self::ForgeDecisionMade { .. } => "forge.decision_made",
             Self::StiglabSessionCompleted { .. } => "stiglab.session_completed",
-            Self::StiglabShapingResultReady { .. } => "stiglab.shaping_result_ready",
+            Self::StiglabSessionResultReady { .. } => "stiglab.session_result_ready",
             Self::StiglabSessionFailed { .. } => "stiglab.session_failed",
             Self::StiglabSessionAborted { .. } => "stiglab.session_aborted",
             Self::PortalSessionRequested { .. } => "portal.session_requested",
-            Self::SynodicGateEvaluated { .. } => "synodic.gate_evaluated",
-            Self::SynodicGateDenied { .. } => "synodic.gate_denied",
-            Self::SynodicGateModified { .. } => "synodic.gate_modified",
             Self::SynodicGateVerdict { .. } => "synodic.gate_verdict",
             Self::SynodicEscalationStarted { .. } => "synodic.escalation_started",
             Self::SynodicEscalationResolved { .. } => "synodic.escalation_resolved",
@@ -634,18 +543,7 @@ impl FactoryEventKind {
             Self::TriggerFired { .. } => "trigger.fired",
             Self::WorkflowManualTriggered { .. } => "workflow.manual_triggered",
             Self::StageEntered { .. } => "stage.entered",
-            Self::StageGatePassed { .. } => "stage.gate_passed",
-            Self::StageGateFailed { .. } => "stage.gate_failed",
             Self::StageAdvanced { .. } => "stage.advanced",
-            Self::TypeProposed { .. } => "registry.type_proposed",
-            Self::TypeApproved { .. } => "registry.type_approved",
-            Self::TypeDeprecated { .. } => "registry.type_deprecated",
-            Self::AdapterRegistered { .. } => "registry.adapter_registered",
-            Self::AdapterDeprecated { .. } => "registry.adapter_deprecated",
-            Self::GateRegistered { .. } => "registry.gate_registered",
-            Self::GateDeprecated { .. } => "registry.gate_deprecated",
-            Self::ProfileRegistered { .. } => "registry.profile_registered",
-            Self::ProfileDeprecated { .. } => "registry.profile_deprecated",
             Self::GateCheckUpdated { .. } => "gate.check_updated",
             Self::GateManualApprovalSignal { .. } => "gate.manual_approval_signal",
         }
@@ -668,14 +566,11 @@ impl FactoryEventKind {
             | Self::ForgeInsightObserved { .. }
             | Self::ForgeDecisionMade { .. } => "forge",
             Self::StiglabSessionCompleted { .. }
-            | Self::StiglabShapingResultReady { .. }
+            | Self::StiglabSessionResultReady { .. }
             | Self::StiglabSessionFailed { .. }
             | Self::StiglabSessionAborted { .. } => "stiglab",
             Self::PortalSessionRequested { .. } => "portal",
-            Self::SynodicGateEvaluated { .. }
-            | Self::SynodicGateDenied { .. }
-            | Self::SynodicGateModified { .. }
-            | Self::SynodicGateVerdict { .. }
+            Self::SynodicGateVerdict { .. }
             | Self::SynodicEscalationStarted { .. }
             | Self::SynodicEscalationResolved { .. }
             | Self::SynodicEscalationTimedOut { .. }
@@ -695,22 +590,11 @@ impl FactoryEventKind {
             | Self::RefractFailed { .. } => "refract",
             Self::TriggerFired { .. }
             | Self::StageEntered { .. }
-            | Self::StageGatePassed { .. }
-            | Self::StageGateFailed { .. }
             | Self::StageAdvanced { .. } => "workflow",
             // Audit-only fan-out for manual fires (#241). Lives in the
             // `audit` namespace so audit views can filter without
             // mixing with first-class workflow runtime events.
             Self::WorkflowManualTriggered { .. } => "audit",
-            Self::TypeProposed { .. }
-            | Self::TypeApproved { .. }
-            | Self::TypeDeprecated { .. }
-            | Self::AdapterRegistered { .. }
-            | Self::AdapterDeprecated { .. }
-            | Self::GateRegistered { .. }
-            | Self::GateDeprecated { .. }
-            | Self::ProfileRegistered { .. }
-            | Self::ProfileDeprecated { .. } => "registry",
             Self::GateCheckUpdated { .. } | Self::GateManualApprovalSignal { .. } => "gate",
         }
     }
@@ -734,11 +618,8 @@ impl FactoryEventKind {
             Self::StiglabSessionCompleted { session_id, .. }
             | Self::StiglabSessionFailed { session_id, .. }
             | Self::StiglabSessionAborted { session_id, .. } => session_id.clone(),
-            Self::StiglabShapingResultReady { artifact_id, .. } => artifact_id.to_string(),
+            Self::StiglabSessionResultReady { artifact_id, .. } => artifact_id.to_string(),
             Self::PortalSessionRequested { session_id, .. } => session_id.clone(),
-            Self::SynodicGateEvaluated { gate_id, .. } => gate_id.clone(),
-            Self::SynodicGateDenied { gate_id, .. } => gate_id.clone(),
-            Self::SynodicGateModified { gate_id, .. } => gate_id.clone(),
             Self::SynodicGateVerdict { gate_id, .. } => gate_id.clone(),
             Self::SynodicEscalationStarted { escalation_id, .. } => escalation_id.clone(),
             Self::SynodicEscalationResolved { escalation_id, .. } => escalation_id.clone(),
@@ -762,18 +643,7 @@ impl FactoryEventKind {
                 format!("audit:workflow:{workflow_id}")
             }
             Self::StageEntered { artifact_id, .. }
-            | Self::StageGatePassed { artifact_id, .. }
-            | Self::StageGateFailed { artifact_id, .. }
             | Self::StageAdvanced { artifact_id, .. } => format!("workflow:{artifact_id}"),
-            Self::TypeProposed { type_id, .. }
-            | Self::TypeApproved { type_id, .. }
-            | Self::TypeDeprecated { type_id, .. } => format!("type:{type_id}"),
-            Self::AdapterRegistered { adapter_id, .. }
-            | Self::AdapterDeprecated { adapter_id, .. } => format!("adapter:{adapter_id}"),
-            Self::GateRegistered { evaluator_id, .. }
-            | Self::GateDeprecated { evaluator_id, .. } => format!("gate:{evaluator_id}"),
-            Self::ProfileRegistered { profile_id, .. }
-            | Self::ProfileDeprecated { profile_id, .. } => format!("profile:{profile_id}"),
             Self::GateCheckUpdated {
                 repo_owner,
                 repo_name,

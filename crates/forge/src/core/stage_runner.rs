@@ -25,6 +25,12 @@ use super::workflow::{GateOutcome, GateSpec, Workflow};
 
 /// Event emitted by a single stage-runner tick. These translate 1:1 to
 /// `stage.*` factory events on the spine.
+///
+/// Per spec #285 the per-gate `GatePassed` / `GateFailed` variants are
+/// gone; the run timeline reconstructs gate outcomes from
+/// `synodic.gate_verdict` and the stage advancement signal. Parking on
+/// failure is still tracked on the artifact row's
+/// `workflow_parked_reason`, just no longer mirrored as a spine event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StageEvent {
     /// The artifact transitioned into a new stage.
@@ -33,21 +39,6 @@ pub enum StageEvent {
         workflow_id: String,
         stage_index: u32,
         stage_name: String,
-    },
-    /// A gate on the current stage resolved successfully.
-    GatePassed {
-        artifact_id: String,
-        workflow_id: String,
-        stage_index: u32,
-        gate_kind: String,
-    },
-    /// A gate on the current stage failed. Artifact is parked.
-    GateFailed {
-        artifact_id: String,
-        workflow_id: String,
-        stage_index: u32,
-        gate_kind: String,
-        reason: String,
     },
     /// All gates on the stage resolved; artifact advances.
     StageAdvanced {
@@ -176,11 +167,10 @@ fn advance_single_artifact<E: GateEvaluator>(
 
     let mut any_pending = false;
     let mut gate_failures: Vec<(String, String)> = Vec::new();
-    let mut gate_passes: Vec<String> = Vec::new();
 
     for gate in &stage.gates {
         match evaluator.evaluate(&artifact_snapshot, workflow, stage_index, gate) {
-            GateOutcome::Pass => gate_passes.push(gate.kind_tag().to_string()),
+            GateOutcome::Pass => {}
             GateOutcome::Fail(reason) => {
                 gate_failures.push((gate.kind_tag().to_string(), reason));
             }
@@ -189,10 +179,12 @@ fn advance_single_artifact<E: GateEvaluator>(
     }
 
     if !gate_failures.is_empty() {
-        // Park in UnderReview with the combined failure reason. Only emit
-        // a GateFailed event per gate if the park reason is newly being
-        // set (or would change) — otherwise repeated ticks over the same
-        // failing condition would spam identical events.
+        // Park in UnderReview with the combined failure reason. Only
+        // touch the row when the park reason actually changes so
+        // repeated ticks over the same failing condition don't keep
+        // bumping `updated_at`. Per spec #285 the per-gate
+        // `stage.gate_failed` mirror event is gone; the parked reason
+        // on the artifact row is the durable record.
         let parked_reason = gate_failures
             .iter()
             .map(|(k, r)| format!("{k}: {r}"))
@@ -202,15 +194,6 @@ fn advance_single_artifact<E: GateEvaluator>(
             .get(artifact_id)
             .and_then(|a| a.workflow_parked_reason.clone());
         if existing_reason.as_deref() != Some(parked_reason.as_str()) {
-            for (gate_kind, reason) in gate_failures {
-                events.push(StageEvent::GateFailed {
-                    artifact_id: artifact_id.as_str().to_string(),
-                    workflow_id: workflow.workflow_id.clone(),
-                    stage_index,
-                    gate_kind,
-                    reason,
-                });
-            }
             park_artifact(store, artifact_id, parked_reason);
         }
         return;
@@ -227,18 +210,9 @@ fn advance_single_artifact<E: GateEvaluator>(
         return;
     }
 
-    // All gates passed — advance the artifact to the next stage. Only now
-    // do we emit `GatePassed` events — otherwise every tick where *some*
-    // gates pass but others are pending would spam the stream.
-    for gate_kind in gate_passes {
-        events.push(StageEvent::GatePassed {
-            artifact_id: artifact_id.as_str().to_string(),
-            workflow_id: workflow.workflow_id.clone(),
-            stage_index,
-            gate_kind,
-        });
-    }
-
+    // All gates passed — advance the artifact to the next stage. Per
+    // spec #285 we no longer emit a per-gate `stage.gate_passed`;
+    // `stage.advanced` (below) is the durable signal.
     let next_index = stage_index + 1;
     let next_stage = workflow.stage(next_index as usize).cloned();
 

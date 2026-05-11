@@ -11,7 +11,7 @@ pub mod persistence;
 pub mod pipeline;
 pub mod scheduler;
 pub mod session_listener;
-pub mod shaping_result_listener;
+pub mod session_result_listener;
 pub mod signal_cache;
 pub mod stage_runner;
 pub mod state;
