@@ -66,36 +66,37 @@ function renderAppSidebar(initialPath: string) {
 describe("AppSidebar nav link resolution", () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it("scopes nav links to the workspace in the URL", async () => {
-    renderAppSidebar("/workspaces/acme/sessions")
+  it("scopes the two-surface IA nav links to the workspace in the URL", async () => {
+    renderAppSidebar("/workspaces/acme/workflows")
 
+    // Two-surface IA per spec #289: only Chat + Workflows in the nav.
+    // Settings is reached via the footer avatar menu; everything else
+    // (Sessions, Nodes, Issues, Artifacts, Spine, Governance, Overview)
+    // is reachable via direct URL and the ⌘K command palette.
     await waitFor(() => {
-      const sessions = screen.getByRole("link", { name: /Sessions/i })
-      expect(sessions).toHaveAttribute("href", "/workspaces/acme/sessions")
+      const workflows = screen.getByRole("link", { name: /^Workflows$/ })
+      expect(workflows).toHaveAttribute("href", "/workspaces/acme/workflows")
     })
 
-    expect(
-      screen.getByRole("link", { name: /^Workflows$/ }),
-    ).toHaveAttribute("href", "/workspaces/acme/workflows")
-    expect(screen.getByRole("link", { name: /Settings/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /^Chat$/ })).toHaveAttribute(
       "href",
-      "/workspaces/acme/settings",
-    )
-    // Overview row uses an empty suffix; it should land on the workspace
-    // root rather than the global picker.
-    expect(screen.getByRole("link", { name: /Overview/i })).toHaveAttribute(
-      "href",
-      "/workspaces/acme",
+      "/workspaces/acme/chat",
     )
   })
 
   it("falls back to /workspaces when there is no workspace in the URL", async () => {
     renderAppSidebar("/settings")
 
-    // Wait for the workspaces query to resolve so the system row renders.
+    // Outside a scoped route every nav item shares the `/workspaces`
+    // picker fallback so the user lands somewhere that can resolve
+    // the missing workspace context.
     await waitFor(() => {
-      const settings = screen.getByRole("link", { name: /Settings/i })
-      expect(settings).toHaveAttribute("href", "/workspaces")
+      const workflows = screen.getByRole("link", { name: /^Workflows$/ })
+      expect(workflows).toHaveAttribute("href", "/workspaces")
     })
+    expect(screen.getByRole("link", { name: /^Chat$/ })).toHaveAttribute(
+      "href",
+      "/workspaces",
+    )
   })
 })
