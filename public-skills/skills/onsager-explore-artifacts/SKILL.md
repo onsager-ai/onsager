@@ -45,7 +45,7 @@ Response shape:
       "artifact_id": "art_…",
       "status": "passed" | "failed" | "blocked" | "pending",
       "current_stage_index": 2,
-      "parked_reason": null | "spec_link_check: no spec issue linked",
+      "parked_reason": null | "external-check: no spec issue linked",
       "started_at": "2026-…",
       "updated_at": "2026-…"
     },
@@ -73,7 +73,7 @@ Surface to the user as a table or a tight list. The dashboard's run-detail URL i
 
 Response shape includes:
 
-- `id`, `workspace_id`, `kind` (`issue` / `pull_request` / `agent_session` / `deployment` / …), `name`, `state`.
+- `id`, `workspace_id`, `kind` (`github_issue` / `pull_request` / `code` / `document` / or a custom workspace-defined string — see [`onsager-artifact::Kind`](https://github.com/onsager-ai/onsager/blob/main/crates/onsager-artifact/src/artifact.rs)), `name`, `state` (one of `draft` / `in_progress` / `under_review` / `released` / `archived`).
 - `owner`, `current_version`, `consumers` (downstream artifacts), `external_ref` (e.g. `github.com/org/repo/issues/42`).
 - `workflow_id`, `current_stage_index`, `workflow_parked_reason`.
 - `created_at`, `updated_at`, `last_observed_at`.

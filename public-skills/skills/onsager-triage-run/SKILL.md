@@ -38,16 +38,16 @@ Start with `inspect_run` on the artifact:
 
 Read these fields:
 
-- `artifact.state` — `archived` means the run was cancelled or hit a terminal failure. `released` means it actually finished. `provisioning` / `running` means in-flight; `parked` means stuck at a gate.
-- `artifact.workflow_parked_reason` — non-null means parked. This string is the **first thing to surface** to the user; it's often the whole answer ("`spec_link_check: no spec issue linked`").
+- `artifact.state` — one of `draft`, `in_progress`, `under_review`, `released`, `archived`. `archived` means the run was cancelled or hit a terminal failure. `released` means every stage passed. `under_review` is the typical resting state for a parked artifact at an `external-check` / `governance` / `manual-approval` stage; `in_progress` is the typical state for an artifact mid-`agent-session`.
+- `artifact.workflow_parked_reason` — non-null means **parked**. This string is the **first thing to surface** to the user; it's often the whole answer ("`external-check: no spec issue linked`"). The state alone (e.g. `under_review`) does not tell you parked-vs-progressing — always read `workflow_parked_reason` for that.
 - `artifact.current_stage_index` — which stage parked / failed.
 - `recent_events` — newest first. Scan for the last `stage.entered`, `stage.exited`, `synodic.gate_verdict`, `stiglab.session_*` events. Each `stiglab.session_*` event carries a `session_id` you'll need below.
 
-If `workflow_parked_reason` plus the recent events make the failure obvious (e.g. "spec_link_check parked because no `Closes #N` in the PR body"), tell the user and stop. Don't fetch logs you don't need.
+If `workflow_parked_reason` plus the recent events make the failure obvious (e.g. "`external-check` parked because no `Closes #N` in the PR body"), tell the user and stop. Don't fetch logs you don't need.
 
 ### Step 2 — gather log pointers
 
-If the failure was inside an `agent_session` stage, call `propose_remediation`:
+If the failure was inside an `agent-session` stage, call `propose_remediation`:
 
 ```json
 { "artifact_id": "<artifact_id>" }
@@ -64,11 +64,11 @@ The v1 response shape:
     { "session_id": "sess_…", "event_type": "stiglab.session_failed", "created_at": "…" },
     …
   ],
-  "suggested_next_tools": ["get_stage_logs"]
+  "suggested_next_tools": ["get_stage_logs", "get_artifact", "inspect_run"]
 }
 ```
 
-`log_pointers` is the input you need for step 3. Each entry's `session_id` corresponds to one agent-session stage execution; the newest (first in the list) is usually the one that failed.
+`log_pointers` is the input you need for step 3. Each entry's `session_id` corresponds to one agent-session stage execution; the newest (first in the list) is usually the one that failed. The `suggested_next_tools` list is a fixed hint at the diagnostic chain; clients may rely on it when sequencing follow-up calls, so don't synthesise it differently in the body of your response.
 
 ### Step 3 — read the logs
 
@@ -98,7 +98,7 @@ Surface to the user **one** of:
 
 - **Mechanical failure** ("the agent timed out", "rate-limited by GitHub") — tell them what the failure was and that re-running often fixes it.
 - **Prompt / data failure** ("the agent didn't see a spec issue to link") — tell them which input was missing.
-- **Workflow design failure** ("`spec_link_check` is gating a PR that legitimately has no spec because it's a docs-only change") — suggest the workflow needs a different gate, and hand off to `onsager-design-workflow` for a fix.
+- **Workflow design failure** ("an `external-check` gate is parking a PR that legitimately has no spec because it's a docs-only change") — suggest the workflow needs a different gate, and hand off to `onsager-design-workflow` for a fix.
 
 Don't fabricate a fix you can't verify. If the logs don't tell you, say so explicitly.
 
@@ -116,13 +116,17 @@ If the artifact is already `archived`, `cancel_run` returns `InvalidParams: arti
 
 ## Common failure shapes
 
-### `workflow_parked_reason = "spec_link_check: no spec issue linked"`
+### `workflow_parked_reason = "external-check: no spec issue linked"`
 
 The PR body doesn't have `Closes #N` or `Part of #N`. Tell the user; if they want, suggest a one-line edit to the PR body and that the workflow will re-evaluate on the next push.
 
-### `workflow_parked_reason = "synodic_review: pending"`
+### `workflow_parked_reason = "governance: pending"`
 
-A human needs to approve via the dashboard's governance surface. Not a bug — just waiting.
+A human needs to approve via the dashboard's governance surface (the `governance` gate kind). Not a bug — just waiting.
+
+### `workflow_parked_reason = "manual-approval: pending"`
+
+A human needs to click the approve button in the dashboard. Same shape as `governance` but a different gate kind.
 
 ### `stiglab.session_failed` with `chunks` showing `RATE_LIMITED`
 
