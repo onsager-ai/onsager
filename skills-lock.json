@@ -3,7 +3,6 @@
   "skills": {
     "plan-dag": {
       "source": "onsager-ai/onsager-skills",
-      "ref": "claude/migrate-plan-dag-skills-7D6Fm",
       "sourceType": "github",
       "skillPath": "skills/plan-dag/SKILL.md",
       "computedHash": "448edc2a6042bfab30d3a8efbe70ef3f8e2dcd633286beb826fb73eb2f78fce4"
