@@ -1,7 +1,7 @@
 ---
 name: plan-dag
 description: Render the current plan as a monospace-safe text dependency DAG (Unicode box-drawing glyphs) — nodes are issues / sub-issues / PRs, edges come from sub-issue links plus dependency-language prose ("Depends on", "Part of", "Blocks", "Closes") and PR / commit cross-references, and every node carries a done / in-progress / open marker so sequencing and critical path are obvious at a glance. Use when asked "plan as dag", "draw a dag", "dag diagram", "show the dependency graph", "what's blocking what", "what's the critical path", "what can be parallelized", "what's left for #N", or right after a `what's next` survey when sequencing the next pick is the actual question. Mermaid is offered as a second view only when the user is going to paste the plan elsewhere — terminals don't render it.
-allowed-tools: Read, Bash(git log:*), Bash(git status:*), Bash(git branch:*), Bash(.claude/skills/plan-dag/scripts/plan-dag-render.py:*), Bash(~/.claude/skills/plan-dag/scripts/plan-dag-render.py:*), mcp__github__issue_read, mcp__github__list_issues, mcp__github__search_issues, mcp__github__list_pull_requests, mcp__github__pull_request_read
+allowed-tools: Read, Bash(git log:*), Bash(git status:*), Bash(git branch:*), Bash(.claude/skills/plan-dag/scripts/plan-dag-render.py:*), Bash(~/.claude/skills/plan-dag/scripts/plan-dag-render.py:*), Bash(.claude/skills/plan-dag/scripts/plan-dag-render.test.sh:*), Bash(~/.claude/skills/plan-dag/scripts/plan-dag-render.test.sh:*), mcp__github__issue_read, mcp__github__list_issues, mcp__github__search_issues, mcp__github__list_pull_requests, mcp__github__pull_request_read
 ---
 
 # plan-dag
@@ -152,11 +152,17 @@ If the renderer aborts with `IR validation failed`, fix the IR — do not work a
 
 ## Tests
 
-Golden tests live in `scripts/plan-dag-render.test.sh` and exercise the validator and three render targets against fixtures in `fixtures/`. Run from the skill root:
+Golden tests live next to the renderer at `scripts/plan-dag-render.test.sh` and exercise the validator and three render targets against fixtures in `fixtures/`. Run with the same install-aware path the renderer uses:
 
 ```bash
-./scripts/plan-dag-render.test.sh
+# project-scope install
+.claude/skills/plan-dag/scripts/plan-dag-render.test.sh
+
+# user-global install
+~/.claude/skills/plan-dag/scripts/plan-dag-render.test.sh
 ```
+
+Both forms are in `allowed-tools` so Claude Code doesn't re-prompt for permission. The test script internally `cd`s into the skill root and invokes `scripts/plan-dag-render.py` as a child process — that child invocation runs inside the script's own shell, not through Claude Code's permission engine, so it doesn't need a separate allowlist entry.
 
 Requires `graph-easy` on PATH for the `boxart` / `ascii` targets.
 

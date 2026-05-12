@@ -33,6 +33,12 @@ def validate(ir):
             errors.append(f"nodes[{i}] missing id")
             continue
         nid = str(n["id"])
+        if nid == "close":
+            errors.append(
+                f"nodes[{i}].id={nid!r} is reserved for the synthetic CLOSE sentinel; "
+                f"use a different id and set ir.close instead"
+            )
+            continue
         if nid in ids:
             errors.append(f"duplicate node id: {nid}")
         ids.add(nid)
@@ -49,7 +55,7 @@ def validate(ir):
                 if ch in label:
                     errors.append(
                         f"node #{nid}: label contains forbidden character {ch!r} "
-                        f"(any of {FORBIDDEN_LABEL_CHARS} break DOT/mermaid emission)"
+                        f"(any of {FORBIDDEN_LABEL_CHARS} break mermaid emission)"
                     )
                     break
     ids.add("close")
@@ -57,6 +63,7 @@ def validate(ir):
     if not isinstance(edges, list):
         errors.append(f"ir.edges must be a list, got {type(edges).__name__}")
         return errors
+    references_close = False
     for i, e in enumerate(edges):
         if not isinstance(e, dict):
             errors.append(f"edges[{i}] must be an object, got {type(e).__name__}")
@@ -64,14 +71,45 @@ def validate(ir):
         for end in ("from", "to"):
             if end not in e:
                 errors.append(f"edges[{i}] missing {end}")
-            elif str(e[end]) not in ids:
-                errors.append(f"edges[{i}].{end}={e[end]!r} not in declared nodes")
+            else:
+                val = str(e[end])
+                if val == "close":
+                    references_close = True
+                if val not in ids:
+                    errors.append(f"edges[{i}].{end}={e[end]!r} not in declared nodes")
         if not e.get("source"):
             errors.append(f"edges[{i}] missing source (citation required)")
         elif e["source"] not in VALID_SOURCES:
             errors.append(
                 f"edges[{i}].source={e['source']!r} not in {sorted(VALID_SOURCES)}"
             )
+    close = ir.get("close")
+    if references_close and close is None:
+        errors.append(
+            "edges reference the CLOSE sentinel but ir.close is missing "
+            "(set ir.close to the closing issue id, e.g. 'ir.close': '300')"
+        )
+    if close is not None and not isinstance(close, (str, int)):
+        errors.append(
+            f"ir.close must be a string or int, got {type(close).__name__}"
+        )
+    cp = ir.get("critical_path")
+    if cp is not None:
+        if not isinstance(cp, list):
+            errors.append(
+                f"ir.critical_path must be a list, got {type(cp).__name__}"
+            )
+        else:
+            for i, node_id in enumerate(cp):
+                if not isinstance(node_id, (str, int)):
+                    errors.append(
+                        f"critical_path[{i}]: must be a string or int, "
+                        f"got {type(node_id).__name__}"
+                    )
+                elif str(node_id) not in ids:
+                    errors.append(
+                        f"critical_path[{i}]={node_id!r} not in declared nodes"
+                    )
     return errors
 
 

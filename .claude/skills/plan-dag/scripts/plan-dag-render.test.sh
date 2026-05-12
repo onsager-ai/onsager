@@ -66,7 +66,9 @@ else
 fi
 for token in 'duplicate node id' 'invalid status' 'missing label' \
              'not in declared nodes' 'missing source' 'not in [' \
-             'must be an object' 'forbidden character'; do
+             'must be an object' 'forbidden character' \
+             'reserved for the synthetic CLOSE' 'ir.close is missing' \
+             'critical_path[1]'; do
     if grep -qF "$token" "$tmp/bad.err"; then
         pass=$((pass + 1))
         printf '  ok  bad stderr contains: %s\n' "$token"
