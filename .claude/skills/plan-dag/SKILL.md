@@ -120,6 +120,16 @@ scripts/plan-dag-render.py /tmp/plan.json --as=dot
 
 If the renderer aborts with `IR validation failed`, fix the IR — do not work around it by hand-drawing. The validation surface is the citation rule (`Conventions › No invented edges`) made executable.
 
+**Response handling after running the renderer:**
+
+- Wrap the renderer's stdout in a fenced block tagged ` ```text ` — never `bash`, `mermaid`, or unlabeled. Syntax highlighting recolors box-drawing characters (`─`, `│`, `┌`, `▶`) and breaks the visual.
+- Do **not** retype or paraphrase the renderer output. Copy the tool result verbatim. A single shifted character destroys column alignment, and the AI's spatial reasoning is the failure mode the script was introduced to eliminate.
+- Surface rules:
+  - **Claude Code (terminal runtime):** the stdout is already visible in the terminal pane. Do not duplicate it in the reply. Add commentary only — critical path summary, next pickable node, sequencing rationale.
+  - **claude.ai web / mobile (no terminal pane):** echo the stdout once, fenced as ` ```text `, then add commentary below.
+- Width handling: if the boxart exceeds ~90 columns (visible by line length in the tool result), prefer `--as=mermaid` for the response and keep `--as=boxart` for local terminal use only. Mermaid wraps gracefully in narrow surfaces; boxart does not.
+- For very wide graphs (>10 nodes with cross-edges) where even mermaid LR is unwieldy, split the plan into per-track DAGs (one renderer call per track) and render the cross-edges as a final short prose list, per the existing "Cross-edges" convention in §3.
+
 ## Conventions
 
 - **No invented edges.** If you can't cite the source (sub-issue link, body prose, PR header), don't draw it.
