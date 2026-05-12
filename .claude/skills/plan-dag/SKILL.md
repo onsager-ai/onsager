@@ -1,7 +1,7 @@
 ---
 name: plan-dag
 description: Render the current plan as a monospace-safe text dependency DAG (Unicode box-drawing glyphs) — nodes are issues / sub-issues / PRs, edges come from sub-issue links plus dependency-language prose ("Depends on", "Part of", "Blocks", "Closes") and PR / commit cross-references, and every node carries a done / in-progress / open marker so sequencing and critical path are obvious at a glance. Use when asked "plan as dag", "draw a dag", "dag diagram", "show the dependency graph", "what's blocking what", "what's the critical path", "what can be parallelized", "what's left for #N", or right after a `what's next` survey when sequencing the next pick is the actual question. Mermaid is offered as a second view only when the user is going to paste the plan elsewhere — terminals don't render it.
-allowed-tools: Read, Bash(git log:*), Bash(git status:*), Bash(git branch:*), mcp__github__issue_read, mcp__github__list_issues, mcp__github__search_issues, mcp__github__list_pull_requests, mcp__github__pull_request_read
+allowed-tools: Read, Bash(git log:*), Bash(git status:*), Bash(git branch:*), Bash(scripts/plan-dag-render.py:*), mcp__github__issue_read, mcp__github__list_issues, mcp__github__search_issues, mcp__github__list_pull_requests, mcp__github__pull_request_read
 ---
 
 # plan-dag
@@ -77,45 +77,48 @@ If a dependency is "obvious to me but uncited", the node label can hint at it; t
 
 ### 4. Render
 
-Rendering conventions (proven shape — match this exactly so output is consistent across sessions):
+Emit a JSON IR matching the schema below, then invoke the renderer. **Do not hand-draw ASCII boxes** — `graph-easy` produces deterministically correct layout that the AI's spatial reasoning will not match, especially with cross-edges and fan-out.
 
-- One block per **track**: an umbrella spec, an independent thread, or the "landed prereqs" group.
-- Track header: short title, optional `(status)` parenthetical, underline of 3+ box-drawing dashes (`─`).
-- Done nodes: inline at the top of the track if dense; one-per-line when the chain matters for ordering.
-- Edges: `──►`. Branching uses line-art `┐ ├ ┤ └`. Keep edges horizontal; vertical drops are fine but avoid diagonals.
-- Cross-track edges in a final **"Cross-edges"** block — don't tangle the track diagrams with each other.
-- Final line: **critical path** as `A → B → close`, the longest open chain that ends in spec closure or a user-visible outcome.
+**Schema:**
 
-Template:
-
-```
-Track name (status)
-───────────────────
-  ✓ #N1 short label
-  ✓ #N2 short label ─┐
-                     ├──► [#N4 open label] ──► closes #parent
-  ✓ #N3 short label ─┘
-
-Cross-edges
-───────────
-  #X ── hard-dep ──► #Y (status)
-
-Critical path: #X → #Y → close
+```json
+{
+  "nodes": [
+    {"id": "288", "label": "MCP",    "status": "done"},
+    {"id": "305", "label": "router", "status": "in_progress"},
+    {"id": "306", "label": "cleanup","status": "open"}
+  ],
+  "edges": [
+    {"from": "288", "to": "304", "source": "sub-issue"},
+    {"from": "305", "to": "306", "source": "depends-on"}
+  ],
+  "close": "300",
+  "critical_path": ["301", "305", "306", "307", "close"]
+}
 ```
 
-Token-frugal: one or two words per node label, the issue number does the linking. The reader can click the number; don't restate the issue title.
+- `status` ∈ `{done, in_progress, open}`; defaults to `open`. Status markers (`✓`, `…`) are added by the renderer — do not embed them in `label`.
+- `edges[].source` ∈ `{sub-issue, depends-on, pr-link, closes, part-of}`, required. This is the citation rule from Conventions made enforceable: no edge without a documented source on GitHub.
+- Every `from` / `to` resolves to a declared node id, or the literal `"close"`.
+- `critical_path` is optional; renderer appends it as a callout under ASCII / box-art targets.
 
-### Mermaid (optional second view)
+**Invocation:**
 
-Add a `mermaid` fenced block **only** when the user signals they're going to paste the plan elsewhere ("for the PR", "into Notion", "for the doc"). GitHub issue bodies, PR descriptions, and most note tools render mermaid; terminals do not — that's why monospace text is the default, not the fallback.
+```bash
+# default: box-art for modern terminals (Claude Code, iTerm, WezTerm)
+scripts/plan-dag-render.py /tmp/plan.json
 
-```mermaid
-graph LR
-  N301[#301 ✓]:::done --> N306[#306 cleanup]
-  N304[#304 chat] --> N306
-  N288[#288 MCP] --> N304
-  classDef done fill:#cfc,stroke:#3a3
+# pure ASCII for restricted terminals and email
+scripts/plan-dag-render.py /tmp/plan.json --as=ascii
+
+# mermaid for GitHub PR/issue bodies and Notion
+scripts/plan-dag-render.py /tmp/plan.json --as=mermaid
+
+# raw DOT for debugging or piping elsewhere
+scripts/plan-dag-render.py /tmp/plan.json --as=dot
 ```
+
+If the renderer aborts with `IR validation failed`, fix the IR — do not work around it by hand-drawing. The validation surface is the citation rule (`Conventions › No invented edges`) made executable.
 
 ## Conventions
 
