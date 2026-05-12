@@ -7,7 +7,7 @@ set -u
 cd "$(dirname "$0")/.."
 
 SCRIPT="scripts/plan-dag-render.py"
-FIX="scripts/fixtures/plan-dag"
+FIX="fixtures"
 EXP="$FIX/expected"
 
 fail=0
@@ -65,7 +65,10 @@ else
     printf '  ok  bad exit 1\n'
 fi
 for token in 'duplicate node id' 'invalid status' 'missing label' \
-             'not in declared nodes' 'missing source' 'not in ['; do
+             'not in declared nodes' 'missing source' 'not in [' \
+             'must be an object' 'forbidden character' \
+             'reserved for the synthetic CLOSE' 'ir.close is missing' \
+             'critical_path[1]'; do
     if grep -qF "$token" "$tmp/bad.err"; then
         pass=$((pass + 1))
         printf '  ok  bad stderr contains: %s\n' "$token"

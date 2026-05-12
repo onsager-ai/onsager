@@ -1,12 +1,14 @@
 ---
 name: plan-dag
 description: Render the current plan as a monospace-safe text dependency DAG (Unicode box-drawing glyphs) — nodes are issues / sub-issues / PRs, edges come from sub-issue links plus dependency-language prose ("Depends on", "Part of", "Blocks", "Closes") and PR / commit cross-references, and every node carries a done / in-progress / open marker so sequencing and critical path are obvious at a glance. Use when asked "plan as dag", "draw a dag", "dag diagram", "show the dependency graph", "what's blocking what", "what's the critical path", "what can be parallelized", "what's left for #N", or right after a `what's next` survey when sequencing the next pick is the actual question. Mermaid is offered as a second view only when the user is going to paste the plan elsewhere — terminals don't render it.
-allowed-tools: Read, Bash(git log:*), Bash(git status:*), Bash(git branch:*), Bash(scripts/plan-dag-render.py:*), mcp__github__issue_read, mcp__github__list_issues, mcp__github__search_issues, mcp__github__list_pull_requests, mcp__github__pull_request_read
+allowed-tools: Read, Bash(git log:*), Bash(git status:*), Bash(git branch:*), Bash(.claude/skills/plan-dag/scripts/plan-dag-render.py:*), Bash(~/.claude/skills/plan-dag/scripts/plan-dag-render.py:*), Bash(.claude/skills/plan-dag/scripts/plan-dag-render.test.sh:*), Bash(~/.claude/skills/plan-dag/scripts/plan-dag-render.test.sh:*), mcp__github__issue_read, mcp__github__list_issues, mcp__github__search_issues, mcp__github__list_pull_requests, mcp__github__pull_request_read
 ---
 
 # plan-dag
 
 Render the current plan as a dependency DAG so sequencing, the critical path, and parallelizable work are visible at a glance. Default output is monospace text using Unicode box-drawing glyphs (`─`, `►`, `┐ ├ ┤ └`) so it lands cleanly in chat, terminals, and PR descriptions.
+
+This skill is repo-agnostic. It assumes a GitHub-backed issue tracker with sub-issue links and dependency-language prose; it makes no assumptions about specific labels, area taxonomies, or repo-specific dev-process skills.
 
 ## When to use
 
@@ -102,20 +104,30 @@ Emit a JSON IR matching the schema below, then invoke the renderer. **Do not han
 - Every `from` / `to` resolves to a declared node id, or the literal `"close"`.
 - `critical_path` is optional; renderer appends it as a callout under ASCII / box-art targets.
 
-**Invocation** (requires `graph-easy` on PATH for `boxart` / `ascii` targets; install once with `cpan -T -i Graph::Easy`, or `apt install libgraph-easy-perl` on Debian/Ubuntu):
+**Invocation** (requires `graph-easy` on PATH for `boxart` / `ascii` targets; install once with `cpan -T -i Graph::Easy`, or `apt install libgraph-easy-perl` on Debian/Ubuntu).
+
+The renderer ships inside the skill. Use the path that matches how the skill was installed:
+
+- **Project-scope install** (default for `npx skills add onsager-ai/onsager-skills` from a repo root): `.claude/skills/plan-dag/scripts/plan-dag-render.py`
+- **User-global install** (`npx skills add -g …`): `~/.claude/skills/plan-dag/scripts/plan-dag-render.py`
+
+Pick whichever exists. If unsure, `test -x .claude/skills/plan-dag/scripts/plan-dag-render.py && echo project || echo global`.
 
 ```bash
+SCRIPT=.claude/skills/plan-dag/scripts/plan-dag-render.py   # project install
+# SCRIPT=~/.claude/skills/plan-dag/scripts/plan-dag-render.py  # global install
+
 # default: box-art for modern terminals (Claude Code, iTerm, WezTerm)
-scripts/plan-dag-render.py /tmp/plan.json
+"$SCRIPT" /tmp/plan.json
 
 # pure ASCII for restricted terminals and email
-scripts/plan-dag-render.py /tmp/plan.json --as=ascii
+"$SCRIPT" /tmp/plan.json --as=ascii
 
 # mermaid for GitHub PR/issue bodies and Notion
-scripts/plan-dag-render.py /tmp/plan.json --as=mermaid
+"$SCRIPT" /tmp/plan.json --as=mermaid
 
 # raw DOT for debugging or piping elsewhere
-scripts/plan-dag-render.py /tmp/plan.json --as=dot
+"$SCRIPT" /tmp/plan.json --as=dot
 ```
 
 If the renderer aborts with `IR validation failed`, fix the IR — do not work around it by hand-drawing. The validation surface is the citation rule (`Conventions › No invented edges`) made executable.
@@ -138,10 +150,24 @@ If the renderer aborts with `IR validation failed`, fix the IR — do not work a
 - **End with the picked path.** A DAG without a recommended sequence is a wall of boxes. Close with the critical path and the next pickable node, framed so the user can redirect.
 - **Don't editorialize inside the diagram.** Commentary ("this looks risky", "we should reorder") goes in prose above or below, never inside a node label.
 
-## References
+## Tests
 
-| Reference | When to read |
-|-----------|--------------|
-| `onsager-dev-process` | The SDD loop the DAG visualizes — parent / child / depends-on semantics. |
-| `issue-spec` § "Spec Relationships via Sub-Issues" | How parent / child / depends-on edges are persisted on GitHub. |
-| `onsager-pr-lifecycle` | How "in-progress" status flips on PR open / merge — drives the `…` marker. |
+Golden tests live next to the renderer at `scripts/plan-dag-render.test.sh` and exercise the validator and three render targets against fixtures in `fixtures/`. Run with the same install-aware path the renderer uses:
+
+```bash
+# project-scope install
+.claude/skills/plan-dag/scripts/plan-dag-render.test.sh
+
+# user-global install
+~/.claude/skills/plan-dag/scripts/plan-dag-render.test.sh
+```
+
+Both forms are in `allowed-tools` so Claude Code doesn't re-prompt for permission. The test script internally `cd`s into the skill root and invokes `scripts/plan-dag-render.py` as a child process — that child invocation runs inside the script's own shell, not through Claude Code's permission engine, so it doesn't need a separate allowlist entry.
+
+Requires `graph-easy` on PATH for the `boxart` / `ascii` targets.
+
+## Related skills
+
+- The repo's spec-driven-development loop skill (e.g. `onsager-dev-process`, `duhem-dev-process`) — the parent / child / depends-on semantics the DAG visualizes.
+- The repo's `issue-spec` skill — how parent / child / depends-on edges are persisted on GitHub.
+- The repo's PR-lifecycle skill — how "in-progress" status flips on PR open / merge, which drives the `…` marker.
