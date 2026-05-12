@@ -1,12 +1,12 @@
 ---
 name: plan-dag
-description: Render the current plan as a monospace-safe ASCII dependency DAG — nodes are issues / sub-issues / PRs, edges come from sub-issue links and "depends on" / "Part of" / "Closes" prose, and every node carries a done / in-progress / open marker so sequencing and critical path are obvious at a glance. Use when asked "plan as dag", "draw a dag", "dag diagram", "show the dependency graph", "what's blocking what", "what's the critical path", "what can be parallelized", "what's left for #N", or right after a `what's next` survey when sequencing the next pick is the actual question. Mermaid is offered as a second view only when the user is going to paste the plan elsewhere — terminals don't render it.
+description: Render the current plan as a monospace-safe text dependency DAG (Unicode box-drawing glyphs) — nodes are issues / sub-issues / PRs, edges come from sub-issue links plus dependency-language prose ("Depends on", "Part of", "Blocks", "Closes") and PR / commit cross-references, and every node carries a done / in-progress / open marker so sequencing and critical path are obvious at a glance. Use when asked "plan as dag", "draw a dag", "dag diagram", "show the dependency graph", "what's blocking what", "what's the critical path", "what can be parallelized", "what's left for #N", or right after a `what's next` survey when sequencing the next pick is the actual question. Mermaid is offered as a second view only when the user is going to paste the plan elsewhere — terminals don't render it.
 allowed-tools: Read, Bash(git log:*), Bash(git status:*), Bash(git branch:*), mcp__github__issue_read, mcp__github__list_issues, mcp__github__search_issues, mcp__github__list_pull_requests, mcp__github__pull_request_read
 ---
 
 # plan-dag
 
-Render the current plan as a dependency DAG so sequencing, the critical path, and parallelizable work are visible at a glance. Default output is monospace ASCII so it lands cleanly in chat, terminals, and PR descriptions.
+Render the current plan as a dependency DAG so sequencing, the critical path, and parallelizable work are visible at a glance. Default output is monospace text using Unicode box-drawing glyphs (`─`, `►`, `┐ ├ ┤ └`) so it lands cleanly in chat, terminals, and PR descriptions.
 
 ## When to use
 
@@ -27,7 +27,7 @@ Skip when:
 |-----------|---------|
 | **Scope** | Inferred — current branch's spec, the umbrella the user named, or the open issues just surveyed. |
 | **Granularity** | Spec-level; drop to sub-issue / PR level for an umbrella that has fanned out. |
-| **Output format** | ASCII. Add a mermaid block on top of it only when the user is going to paste the plan elsewhere. |
+| **Output format** | Monospace text (Unicode box-drawing). Add a mermaid block on top of it only when the user is going to paste the plan elsewhere. |
 
 ## Workflow
 
@@ -69,7 +69,7 @@ Don't render "blocked" as a separate marker — the inbound edge to a non-done n
 
 Edges come from three sources, in this order of trust. **Don't draw an edge you can't cite from one of these** — speculation pollutes the DAG.
 
-1. **Sub-issue links** (`mcp__github__issue_read` + `method: get_sub_issues`). Parent → child.
+1. **Sub-issue links** (`mcp__github__issue_read` + `method: get_sub_issues`). Edge direction is **child → parent** (prerequisite → dependent) — the parent closes when its children close, so the DAG flows toward closure.
 2. **Explicit prose** in issue body: `Depends on #N`, `Hard depends on #N`, `Blocks #N`, `Part of #N`, `Closes #N`.
 3. **PR/commit references**: `merged in PR #N`, `closed by #N`, `PR-A → PR-B` ordering inside an umbrella spec's Plan.
 
@@ -77,7 +77,7 @@ If a dependency is "obvious to me but uncited", the node label can hint at it; t
 
 ### 4. Render
 
-ASCII conventions (proven shape — match this exactly so output is consistent across sessions):
+Rendering conventions (proven shape — match this exactly so output is consistent across sessions):
 
 - One block per **track**: an umbrella spec, an independent thread, or the "landed prereqs" group.
 - Track header: short title, optional `(status)` parenthetical, underline of 3+ box-drawing dashes (`─`).
@@ -107,7 +107,7 @@ Token-frugal: one or two words per node label, the issue number does the linking
 
 ### Mermaid (optional second view)
 
-Add a `mermaid` fenced block **only** when the user signals they're going to paste the plan elsewhere ("for the PR", "into Notion", "for the doc"). GitHub issue bodies, PR descriptions, and most note tools render mermaid; terminals do not — that's why ASCII is the default, not the fallback.
+Add a `mermaid` fenced block **only** when the user signals they're going to paste the plan elsewhere ("for the PR", "into Notion", "for the doc"). GitHub issue bodies, PR descriptions, and most note tools render mermaid; terminals do not — that's why monospace text is the default, not the fallback.
 
 ```mermaid
 graph LR
