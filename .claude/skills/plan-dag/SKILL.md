@@ -102,7 +102,7 @@ Emit a JSON IR matching the schema below, then invoke the renderer. **Do not han
 - Every `from` / `to` resolves to a declared node id, or the literal `"close"`.
 - `critical_path` is optional; renderer appends it as a callout under ASCII / box-art targets.
 
-**Invocation:**
+**Invocation** (requires `graph-easy` on PATH for `boxart` / `ascii` targets; install once with `cpan -T -i Graph::Easy`, or `apt install libgraph-easy-perl` on Debian/Ubuntu):
 
 ```bash
 # default: box-art for modern terminals (Claude Code, iTerm, WezTerm)
