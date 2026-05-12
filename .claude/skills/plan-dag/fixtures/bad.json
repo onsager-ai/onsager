@@ -3,7 +3,9 @@
     {"id": "288", "label": "MCP", "status": "done"},
     {"id": "288", "label": "duplicate", "status": "open"},
     {"id": "304", "label": "chat", "status": "shipped"},
-    {"id": "305", "status": "open"}
+    {"id": "305", "status": "open"},
+    {"id": "307", "label": "bad \"quote\""},
+    "not-an-object"
   ],
   "edges": [
     {"from": "288", "to": "999"},
