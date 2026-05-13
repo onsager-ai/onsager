@@ -1,3 +1,6 @@
+// budget-allow: ChatPage is the top-level chat surface — it owns the full
+// turn lifecycle (persistence, MCP wiring, HITL routing, DAG preview). Its
+// breadth cannot be split without a second spec.
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -8,6 +11,8 @@ import {
   useRef,
   useState,
 } from "react"
+import Markdown from "react-markdown"
+import rehypeHighlight from "rehype-highlight"
 import { AlertTriangle, MessageSquare, Send, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -34,6 +39,8 @@ import {
 import { useActiveWorkspace } from "@/lib/workspace"
 import { useAuth } from "@/lib/auth"
 import { usePageHeader } from "@/components/layout/PageHeader"
+import { WorkflowDAGPreview } from "@/components/chat/WorkflowDAGPreview"
+import type { WorkflowDraft } from "@/components/factory/workflows/workflow-draft"
 
 // ─── Runtime types ──────────────────────────────────────────────────────────
 
@@ -181,10 +188,41 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
+// Extract a WorkflowDraft from propose_workflow args for the DAG preview.
+function extractWorkflowDraft(args: Record<string, unknown>): WorkflowDraft | null {
+  try {
+    const name = typeof args.name === "string" ? args.name : ""
+    const trigger = (args.trigger ?? {}) as Record<string, unknown>
+    const stages = Array.isArray(args.stages)
+      ? (args.stages as Record<string, unknown>[]).map((s, i) => ({
+          id: typeof s.id === "string" ? s.id : `stage-${i}`,
+          name: typeof s.name === "string" ? s.name : "",
+          gate_kind: (typeof s.gate_kind === "string" ? s.gate_kind : "agent-session") as import("@/lib/api").WorkflowGateKind,
+          artifact_kind: (typeof s.artifact_kind === "string" ? s.artifact_kind : "Issue") as import("@/lib/api").WorkflowArtifactKind,
+          config: (typeof s.config === "object" && s.config ? s.config : {}) as Record<string, unknown>,
+        }))
+      : []
+    return {
+      name,
+      trigger: {
+        install_id: String(trigger.install_id ?? ""),
+        repo_owner: typeof trigger.repo_owner === "string" ? trigger.repo_owner : "",
+        repo_name: typeof trigger.repo_name === "string" ? trigger.repo_name : "",
+        label: typeof trigger.label === "string" ? trigger.label : "",
+      },
+      stages,
+    }
+  } catch {
+    return null
+  }
+}
+
 // ─── ChatPage ───────────────────────────────────────────────────────────────
 
 export function ChatPage() {
-  usePageHeader({ title: "Chat" })
+  // fullBleed: the chat surface owns the full viewport area below the header;
+  // AppLayout switches <main> to overflow-hidden + no padding for split-panel.
+  usePageHeader({ title: "Chat", fullBleed: true })
 
   const workspace = useActiveWorkspace()
   const { user } = useAuth()
@@ -198,27 +236,19 @@ export function ChatPage() {
   const [toolsError, setToolsError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [prompt, setPrompt] = useState("")
+  const [workflowDraft, setWorkflowDraft] = useState<WorkflowDraft | null>(null)
   const feedEndRef = useRef<HTMLDivElement>(null)
 
-  // Load conversation from localStorage on mount. user is guaranteed
-  // non-null behind ProtectedRoute; compute key inline to avoid a
-  // second render before the initializer fires.
   const [turns, setTurns] = useState<ChatTurn[]>(() => {
     if (!user) return []
     return hydrateTurns(loadStoredTurns(chatStorageKey(user.id, workspace.id)))
   })
 
-  // Keep a stable ref so handleCommit can read the latest turns without
-  // capturing a stale closure. The ref is updated synchronously before
-  // any async work that depends on it.
   const turnsRef = useRef<ChatTurn[]>(turns)
   useEffect(() => {
     turnsRef.current = turns
   }, [turns])
 
-  // Re-hydrate when the user switches workspaces (storageKey changes).
-  // Skip the mount render — the useState initializer above already loaded
-  // from the initial storageKey.
   const prevStorageKeyRef = useRef(storageKey)
   useEffect(() => {
     if (storageKey === prevStorageKeyRef.current) return
@@ -226,28 +256,19 @@ export function ChatPage() {
     setTurns(storageKey ? hydrateTurns(loadStoredTurns(storageKey)) : [])
   }, [storageKey])
 
-  // Persist on every turn change.
   useEffect(() => {
     if (!storageKey) return
     saveStoredTurns(storageKey, dehydrateTurns(turns))
   }, [turns, storageKey])
 
-  // Load MCP tools once.
   useEffect(() => {
     let cancelled = false
     mcpListTools()
-      .then((t) => {
-        if (!cancelled) setTools(t)
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setToolsError(errMsg(e))
-      })
-    return () => {
-      cancelled = true
-    }
+      .then((t) => { if (!cancelled) setTools(t) })
+      .catch((e: unknown) => { if (!cancelled) setToolsError(errMsg(e)) })
+    return () => { cancelled = true }
   }, [])
 
-  // Scroll new content into view.
   useEffect(() => {
     feedEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [turns])
@@ -302,8 +323,6 @@ export function ChatPage() {
       const newToolCalls: ToolCallEntry[] = result.toolCalls.map((tc) => {
         const isMutation = isMutationTool(tc.name)
         const card = isMutation ? buildCardFor(tc.name, tc.input) : undefined
-        // A mutation tool that produces no card has no HITL path — mark failed
-        // immediately rather than leaving it stuck in `pending` forever.
         const state: HitlCardState = isMutation
           ? card
             ? "pending"
@@ -362,8 +381,6 @@ export function ChatPage() {
       setTurns((prev) =>
         updateCall(prev, turnId, callId, { state: "committing", errorMessage: undefined }),
       )
-      // Read from the ref — not the closed-over `turns` — to avoid the
-      // stale-closure race between the state update above and the lookup here.
       const target = findCall(turnsRef.current, turnId, callId)
       if (!target) {
         setTurns((prev) =>
@@ -382,6 +399,9 @@ export function ChatPage() {
         setTurns((prev) =>
           updateCall(prev, turnId, callId, { state: "committed", resultText: result.content[0]?.text }),
         )
+        if (target.toolName === "propose_workflow") {
+          setWorkflowDraft(extractWorkflowDraft(mergedArgs))
+        }
       } catch (err) {
         setTurns((prev) =>
           updateCall(prev, turnId, callId, { state: "failed", errorMessage: errMsg(err) }),
@@ -398,83 +418,77 @@ export function ChatPage() {
   const isEmpty = turns.length === 0
 
   return (
-    <div className="flex min-h-full flex-col">
-      <div className="mb-6 hidden md:block">
-        <h1 className="text-2xl font-bold tracking-tight">Chat</h1>
-        <p className="text-sm text-muted-foreground">
-          R&amp;D mode — design workflows by talking to the agent.
-        </p>
-      </div>
+    <div className="grid h-full grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      {/* ── Left panel: chat ────────────────────────────────────────── */}
+      <div className="flex h-full flex-col overflow-hidden border-r">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
+          {isEmpty ? (
+            <EmptyState onChip={setPrompt} />
+          ) : (
+            <ConversationFeed
+              turns={turns}
+              handleCommit={handleCommit}
+              handleReject={handleReject}
+              feedEndRef={feedEndRef}
+            />
+          )}
+        </div>
 
-      <div className="flex-1">
-        {isEmpty ? (
-          <EmptyState onChip={setPrompt} />
-        ) : (
-          <ConversationFeed
-            turns={turns}
-            handleCommit={handleCommit}
-            handleReject={handleReject}
-            feedEndRef={feedEndRef}
-          />
-        )}
-      </div>
-
-      {/* Sticky composer — breaks out of main's horizontal padding to span full
-          width; background covers content below when pinned at viewport bottom. */}
-      <div className="sticky bottom-0 -mx-4 border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:-mx-6 md:px-6 md:py-4">
-        {toolsError ? (
-          <div
-            role="alert"
-            className="mb-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive"
-          >
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>MCP server unavailable — {toolsError}</span>
+        <div className="shrink-0 border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          {toolsError ? (
+            <div
+              role="alert"
+              className="mb-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive"
+            >
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>MCP server unavailable — {toolsError}</span>
+            </div>
+          ) : null}
+          <form onSubmit={onFormSubmit} className="flex items-end gap-2">
+            <Textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder={
+                isEmpty
+                  ? "Describe a workflow, or pick an example above…"
+                  : "Refine or ask a follow-up…"
+              }
+              rows={2}
+              disabled={!tools || submitting}
+              className="flex-1 resize-none"
+              aria-label="Describe what you want the agent to do"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!prompt.trim() || submitting || !tools}
+              aria-label="Send message"
+            >
+              <Send className="h-4 w-4" />
+              {submitting ? "Thinking…" : "Send"}
+            </Button>
+          </form>
+          <div className="mt-1.5 text-xs text-muted-foreground">
+            {tools
+              ? `${tools.length} tools available`
+              : toolsError
+                ? "MCP disconnected"
+                : "Connecting to MCP server…"}
+            {" · "}
+            ⏎ to send · Shift+⏎ for new line
           </div>
-        ) : null}
-        <form onSubmit={onFormSubmit} className="flex items-end gap-2">
-          <Textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder={
-              isEmpty
-                ? "Describe a workflow, or pick an example above…"
-                : "Refine or ask a follow-up…"
-            }
-            rows={2}
-            disabled={!tools || submitting}
-            className="flex-1 resize-none"
-            aria-label="Describe what you want the agent to do"
-          />
-          <Button
-            type="submit"
-            size="sm"
-            disabled={!prompt.trim() || submitting || !tools}
-            aria-label="Send message"
-          >
-            <Send className="h-4 w-4" />
-            {submitting ? "Thinking…" : "Send"}
-          </Button>
-        </form>
-        <div className="mt-1.5 text-xs text-muted-foreground">
-          {tools
-            ? `${tools.length} tools available`
-            : toolsError
-              ? "MCP disconnected"
-              : "Connecting to MCP server…"}
-          {" · "}
-          ⏎ to send · Shift+⏎ for new line
         </div>
       </div>
+
+      {/* ── Right panel: workflow DAG preview ───────────────────────── */}
+      <WorkflowDAGPreview draft={workflowDraft} />
     </div>
   )
 }
 
 // ─── Empty state ─────────────────────────────────────────────────────────────
 
-// Locked copy per spec #289 Design § "Chat surface first-run / empty state".
-// Chip wording is revisable against real MCP tools (shape locked: three chips,
-// three archetypes — auto-merge / triage / scheduled).
 const EXAMPLE_CHIPS = [
   "Auto-merge PRs labeled `auto-merge` once CI is green.",
   "Summarize newly-labeled issues and post to Slack.",
@@ -596,7 +610,7 @@ function ConversationFeed({
 
 function UserBubble({ content }: { content: string }) {
   return (
-    <div className="self-end max-w-[85%] rounded-lg bg-primary/10 px-3 py-1.5 text-sm">
+    <div className="self-end max-w-[85%] rounded-2xl rounded-tr-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
       {content}
     </div>
   )
@@ -604,8 +618,26 @@ function UserBubble({ content }: { content: string }) {
 
 function AssistantBubble({ content }: { content: string }) {
   return (
-    <div className="max-w-[85%] rounded-lg bg-muted/40 px-3 py-1.5 text-sm">
-      {content}
+    <div className="max-w-[90%] rounded-2xl rounded-tl-sm bg-muted/40 px-3 py-2 text-sm">
+      <Markdown
+        rehypePlugins={[rehypeHighlight]}
+        components={{
+          pre: ({ children }) => (
+            <pre className="my-1 max-h-64 overflow-auto rounded-md border bg-background/60 p-2 text-[11px]">
+              {children}
+            </pre>
+          ),
+          code: ({ children, className }) =>
+            className ? (
+              <code className={className}>{children}</code>
+            ) : (
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{children}</code>
+            ),
+          p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+        }}
+      >
+        {content}
+      </Markdown>
     </div>
   )
 }
