@@ -87,13 +87,8 @@ impl SessionPrOpener {
                     None::<String>
                 })
                 .unwrap_or_default();
-            self.emit_pr_open_failed(
-                None,
-                Some(&branch),
-                &workspace_id,
-                "empty_branch",
-            )
-            .await;
+            self.emit_pr_open_failed(None, Some(&branch), &workspace_id, "empty_branch")
+                .await;
             return Ok(());
         }
 
@@ -133,9 +128,11 @@ impl SessionPrOpener {
             return Ok(());
         };
 
-        let installation =
-            crate::installation_db::get_installation(&self.pool, &project.github_app_installation_id)
-                .await?;
+        let installation = crate::installation_db::get_installation(
+            &self.pool,
+            &project.github_app_installation_id,
+        )
+        .await?;
         let Some(install) = installation else {
             tracing::warn!(
                 install_row_id = %project.github_app_installation_id,
@@ -155,9 +152,13 @@ impl SessionPrOpener {
         // itself during the session. Upsert the artifact and record lineage
         // without making a new GitHub API call.
         if let Some(pr_number) = event_pr_number {
-            let pr_art =
-                db::upsert_pr_artifact_ref(&self.pool, project_id, pr_number, PrLifecycleState::InProgress)
-                    .await?;
+            let pr_art = db::upsert_pr_artifact_ref(
+                &self.pool,
+                project_id,
+                pr_number,
+                PrLifecycleState::InProgress,
+            )
+            .await?;
             self.record_lineage_and_link(
                 &pr_art.artifact_id,
                 issue_artifact_id,
@@ -343,9 +344,13 @@ impl SessionPrOpener {
         };
 
         // Materialize the PR artifact and record lineage.
-        let pr_art =
-            db::upsert_pr_artifact_ref(&self.pool, project_id, pr_number, PrLifecycleState::InProgress)
-                .await?;
+        let pr_art = db::upsert_pr_artifact_ref(
+            &self.pool,
+            project_id,
+            pr_number,
+            PrLifecycleState::InProgress,
+        )
+        .await?;
 
         self.record_lineage_and_link(
             &pr_art.artifact_id,

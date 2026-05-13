@@ -593,33 +593,40 @@ pub async fn find_artifact_info(
     pool: &PgPool,
     artifact_id: &str,
 ) -> anyhow::Result<Option<ArtifactInfo>> {
-    let row: Option<(String, String, Option<String>, String, Option<serde_json::Value>)> =
-        sqlx::query_as(
-            "SELECT artifact_id, kind, name, workspace_id, metadata \
+    let row: Option<(
+        String,
+        String,
+        Option<String>,
+        String,
+        Option<serde_json::Value>,
+    )> = sqlx::query_as(
+        "SELECT artifact_id, kind, name, workspace_id, metadata \
              FROM artifacts WHERE artifact_id = $1",
-        )
-        .bind(artifact_id)
-        .fetch_optional(pool)
-        .await?;
-    Ok(row.map(|(artifact_id, kind, name, workspace_id, metadata)| {
-        let project_id = metadata
-            .as_ref()
-            .and_then(|m| m.get("project_id"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let issue_number = metadata
-            .as_ref()
-            .and_then(|m| m.get("issue_number"))
-            .and_then(|v| v.as_i64());
-        ArtifactInfo {
-            artifact_id,
-            kind,
-            name,
-            workspace_id,
-            project_id,
-            issue_number,
-        }
-    }))
+    )
+    .bind(artifact_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(
+        row.map(|(artifact_id, kind, name, workspace_id, metadata)| {
+            let project_id = metadata
+                .as_ref()
+                .and_then(|m| m.get("project_id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let issue_number = metadata
+                .as_ref()
+                .and_then(|m| m.get("issue_number"))
+                .and_then(|v| v.as_i64());
+            ArtifactInfo {
+                artifact_id,
+                kind,
+                name,
+                workspace_id,
+                project_id,
+                issue_number,
+            }
+        }),
+    )
 }
 
 /// Check for an existing open PR for `(project_id, branch)` — used by the
@@ -639,9 +646,7 @@ pub async fn find_pr_for_branch(
     .bind(branch)
     .fetch_optional(pool)
     .await?;
-    Ok(row
-        .and_then(|(pr_number,)| pr_number)
-        .map(|n| n as u64))
+    Ok(row.and_then(|(pr_number,)| pr_number).map(|n| n as u64))
 }
 
 /// Record a horizontal lineage row linking `child_artifact_id` (the new PR
@@ -688,10 +693,7 @@ pub async fn find_issue_artifact_for_pr(
 
 /// Archive an artifact and return its workspace_id. Used by the PR-merged
 /// listener to terminate the originating issue artifact's lifecycle.
-pub async fn archive_artifact(
-    pool: &PgPool,
-    artifact_id: &str,
-) -> anyhow::Result<Option<String>> {
+pub async fn archive_artifact(pool: &PgPool, artifact_id: &str) -> anyhow::Result<Option<String>> {
     let row: Option<(String,)> = sqlx::query_as(
         "UPDATE artifacts SET state = 'archived', updated_at = NOW() \
           WHERE artifact_id = $1 AND state != 'archived' \

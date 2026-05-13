@@ -27,7 +27,6 @@
 //! events / artifacts / lineage) is owned by stiglab and the spine.
 
 pub mod anthropic;
-pub mod listeners;
 pub mod auth;
 pub mod auth_db;
 pub mod backfill;
@@ -41,6 +40,7 @@ pub mod gate;
 pub mod handlers;
 pub mod installation;
 pub mod installation_db;
+pub mod listeners;
 pub mod mcp;
 pub mod migrate;
 pub mod pat_db;
