@@ -481,8 +481,10 @@ export function ChatPage() {
         </div>
       </div>
 
-      {/* ── Right panel: workflow DAG preview ───────────────────────── */}
-      <WorkflowDAGPreview draft={workflowDraft} />
+      {/* ── Right panel: workflow DAG preview (desktop only) ────────── */}
+      <div className="hidden md:block">
+        <WorkflowDAGPreview draft={workflowDraft} />
+      </div>
     </div>
   )
 }
