@@ -55,13 +55,13 @@ jobs:
               # re-trigger the xtask job.
               - 'apps/dashboard/src/lib/api.ts'
               - 'apps/dashboard/src/lib/sse.ts'
-              # Spec #310 — check-tools-and-skills cross-references the
-              # MCP tool registry against the public skills bundle. The
-              # registry lives under crates/onsager-portal (already
-              # covered by `workspace`/path triggers); add the staging
-              # bundle dir and this workflow itself so a skill-only
-              # change still re-triggers the lint.
-              - 'public-skills/**'
+              # Spec #323 — check-tools-and-skills cross-references the
+              # MCP tool registry against the onsager-skills sibling repo.
+              # The registry lives under crates/onsager-portal (already
+              # covered by `workspace`/path triggers); add this workflow
+              # itself so workflow-level changes still re-trigger the lint.
+              # The bundle is cloned from onsager-ai/onsager-skills at run
+              # time, so there is no in-repo path to watch for it.
               - '.github/workflows/rust.yml'
 
   check:
@@ -105,10 +105,15 @@ jobs:
         run: cargo run -p xtask --quiet -- check-events
       - name: File-budget check (spec #261)
         run: cargo run -p xtask --quiet -- check-file-budget --mode=fail
-      - name: MCP tools ↔ public-skills cross-check (ADR 0007 / spec #310)
+      - name: Checkout onsager-skills (spec #323)
+        uses: actions/checkout@v4
+        with:
+          repository: onsager-ai/onsager-skills
+          path: onsager-skills
+      - name: MCP tools ↔ onsager-skills cross-check (ADR 0007 / spec #323)
         run: cargo run -p xtask --quiet -- check-tools-and-skills
         env:
-          ONSAGER_SKILLS_DIR: public-skills
+          ONSAGER_SKILLS_DIR: onsager-skills
       - name: Apply database migrations
         run: |
           for f in crates/onsager-spine/migrations/*.sql; do
