@@ -556,6 +556,19 @@ the same PR that introduces them.
   to outlive their intended window. Land the rename and the alias removal
   in the same PR; don't open a removal-date window. `lint-seams` hard-fails
   on new `serde(alias)` and on legacy type aliases.
+- **Denormalized external state.** When an external system (GitHub, Linear,
+  Slack, …) is the author of a field, copying it into the spine creates a
+  drift surface — every retitle, label edit, author transfer, body rewrite
+  is either a webhook we have to chase or a row that quietly goes stale.
+  Per spec #170, external-origin artifacts are **reference-only**: the
+  spine row carries identity (`external_ref`), *our* derived lifecycle
+  (`state`, `current_version`, `last_observed_at`), and *our* relationships
+  (lineage, governance verdicts, ising signals) — nothing the external
+  system owns. Provider-authored fields (title, body, labels, author)
+  are hydrated live by the dashboard through a portal proxy
+  (`crates/onsager-portal/src/handlers/live_data.rs`) backed by a short-
+  TTL per-installation cache (`proxy_cache.rs`). New external integrations
+  inherit this by default: ship a proxy, not a denormalizer.
 
 The strategy spec #131 captures the full reasoning and the six-lever plan
 that made these contracts enforced. The patterns above are now caught
