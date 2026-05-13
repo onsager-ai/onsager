@@ -579,6 +579,7 @@ pub struct ArtifactInfo {
     pub kind: String,
     pub name: Option<String>,
     pub workspace_id: String,
+    pub current_version: i32,
     /// `project_id` extracted from `metadata->>'project_id'` (set by
     /// `upsert_issue_artifact_ref` and forge's `insert_artifact_row`).
     pub project_id: Option<String>,
@@ -587,27 +588,30 @@ pub struct ArtifactInfo {
     pub issue_number: Option<i64>,
 }
 
+type ArtifactInfoRow = (
+    String,
+    String,
+    Option<String>,
+    String,
+    i32,
+    Option<serde_json::Value>,
+);
+
 /// Look up the artifact info for `artifact_id`. Returns `None` when the
 /// artifact does not exist.
 pub async fn find_artifact_info(
     pool: &PgPool,
     artifact_id: &str,
 ) -> anyhow::Result<Option<ArtifactInfo>> {
-    let row: Option<(
-        String,
-        String,
-        Option<String>,
-        String,
-        Option<serde_json::Value>,
-    )> = sqlx::query_as(
-        "SELECT artifact_id, kind, name, workspace_id, metadata \
+    let row: Option<ArtifactInfoRow> = sqlx::query_as(
+        "SELECT artifact_id, kind, name, workspace_id, current_version, metadata \
              FROM artifacts WHERE artifact_id = $1",
     )
     .bind(artifact_id)
     .fetch_optional(pool)
     .await?;
-    Ok(
-        row.map(|(artifact_id, kind, name, workspace_id, metadata)| {
+    Ok(row.map(
+        |(artifact_id, kind, name, workspace_id, current_version, metadata)| {
             let project_id = metadata
                 .as_ref()
                 .and_then(|m| m.get("project_id"))
@@ -622,11 +626,12 @@ pub async fn find_artifact_info(
                 kind,
                 name,
                 workspace_id,
+                current_version,
                 project_id,
                 issue_number,
             }
-        }),
-    )
+        },
+    ))
 }
 
 /// Check for an existing open PR for `(project_id, branch)` — used by the
@@ -661,8 +666,7 @@ pub async fn record_horizontal_lineage(
     sqlx::query(
         "INSERT INTO horizontal_lineage \
              (artifact_id, source_artifact_id, source_version, role) \
-         VALUES ($1, $2, $3, 'derived_from') \
-         ON CONFLICT DO NOTHING",
+         VALUES ($1, $2, $3, 'closes_issue')",
     )
     .bind(child_artifact_id)
     .bind(parent_artifact_id)
@@ -682,7 +686,7 @@ pub async fn find_issue_artifact_for_pr(
         "SELECT hl.source_artifact_id, a.current_version \
            FROM horizontal_lineage hl \
            JOIN artifacts a ON a.artifact_id = hl.source_artifact_id \
-          WHERE hl.artifact_id = $1 AND hl.role = 'derived_from' \
+          WHERE hl.artifact_id = $1 AND hl.role = 'closes_issue' \
           ORDER BY hl.id DESC LIMIT 1",
     )
     .bind(pr_artifact_id)

@@ -77,18 +77,20 @@ impl SessionPrOpener {
             return Ok(());
         };
 
-        // Empty branch pushed — error signal.
+        // Empty branch pushed — error signal. Resolve workspace_id via artifact
+        // lookup so the diagnostic event is scoped correctly; skip if unavailable.
         if branch.trim().is_empty() {
-            let workspace_id = event_artifact_id
-                .as_deref()
-                .and_then(|_aid| {
-                    // best-effort: we may not have workspace_id at this point;
-                    // use artifact lookup below if needed
-                    None::<String>
-                })
-                .unwrap_or_default();
-            self.emit_pr_open_failed(None, Some(&branch), &workspace_id, "empty_branch")
+            if let Some(ref art_id) = event_artifact_id
+                && let Ok(Some(art)) = db::find_artifact_info(&self.pool, art_id).await
+            {
+                self.emit_pr_open_failed(
+                    Some(art_id),
+                    Some(&branch),
+                    &art.workspace_id,
+                    "empty_branch",
+                )
                 .await;
+            }
             return Ok(());
         }
 
@@ -162,6 +164,7 @@ impl SessionPrOpener {
             self.record_lineage_and_link(
                 &pr_art.artifact_id,
                 issue_artifact_id,
+                art.current_version,
                 &session_id,
                 &branch,
                 project_id,
@@ -245,6 +248,7 @@ impl SessionPrOpener {
                 self.record_lineage_and_link(
                     &pr_art.artifact_id,
                     issue_artifact_id,
+                    art.current_version,
                     &session_id,
                     &branch,
                     project_id,
@@ -355,6 +359,7 @@ impl SessionPrOpener {
         self.record_lineage_and_link(
             &pr_art.artifact_id,
             issue_artifact_id,
+            art.current_version,
             &session_id,
             &branch,
             project_id,
@@ -399,18 +404,25 @@ impl SessionPrOpener {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn record_lineage_and_link(
         &self,
         pr_artifact_id: &str,
         issue_artifact_id: &str,
+        issue_version: i32,
         session_id: &str,
         branch: &str,
         project_id: &str,
         pr_number: u64,
     ) -> anyhow::Result<()> {
         // Horizontal lineage: PR artifact → issue artifact.
-        if let Err(e) =
-            db::record_horizontal_lineage(&self.pool, pr_artifact_id, issue_artifact_id, 1).await
+        if let Err(e) = db::record_horizontal_lineage(
+            &self.pool,
+            pr_artifact_id,
+            issue_artifact_id,
+            issue_version,
+        )
+        .await
         {
             tracing::warn!(error = %e, "failed to record horizontal lineage");
         }
@@ -490,6 +502,6 @@ mod tests {
     /// signature drift without needing a live DB.
     #[allow(dead_code)]
     fn _type_check_run_signature(pool: PgPool, store: EventStore) {
-        let _ = run(pool, store);
+        std::mem::drop(run(pool, store));
     }
 }

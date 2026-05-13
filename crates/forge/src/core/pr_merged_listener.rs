@@ -37,7 +37,7 @@ impl PrMergedHandler {
             "SELECT hl.source_artifact_id, a.workspace_id \
                FROM horizontal_lineage hl \
                JOIN artifacts a ON a.artifact_id = hl.source_artifact_id \
-              WHERE hl.artifact_id = $1 AND hl.role = 'derived_from' \
+              WHERE hl.artifact_id = $1 AND hl.role = 'closes_issue' \
               ORDER BY hl.id DESC LIMIT 1",
         )
         .bind(pr_artifact_id.as_str())
@@ -75,11 +75,12 @@ impl PrMergedHandler {
             actor: "forge".into(),
             ..Default::default()
         };
+        let stream_id = format!("forge:{issue_artifact_id}");
         if let Err(e) = self
             .store
             .append_ext(
                 &workspace_id,
-                &issue_artifact_id,
+                &stream_id,
                 "forge",
                 "artifact.archived",
                 serde_json::to_value(&event)?,
