@@ -23,6 +23,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 }
 
 function AppLayoutInner({ children }: { children: ReactNode }) {
+  const { fullBleed } = usePageHeaderState()
   return (
     // Constrain the shell to the viewport so the inner <main> can be the
     // only scroll container — body is overflow:hidden in index.css.
@@ -40,10 +41,16 @@ function AppLayoutInner({ children }: { children: ReactNode }) {
             <CommandPaletteTrigger />
           </div>
         </header>
-        {/* min-h-0 is required for flex-1 + overflow-y-auto to engage in a
-            flex column: flex items default to min-height: auto and would
-            otherwise grow to content height instead of scrolling. */}
-        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:p-6 md:pb-6">
+        {/* fullBleed pages (e.g. Chat) own their own scroll and spacing;
+            overflow-hidden + p-0 hands the entire area below the header
+            to the page. Standard pages get overflow-y-auto + padding. */}
+        <main
+          className={
+            fullBleed
+              ? "min-h-0 flex-1 overflow-hidden"
+              : "min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:p-6 md:pb-6"
+          }
+        >
           {children}
         </main>
       </SidebarInset>

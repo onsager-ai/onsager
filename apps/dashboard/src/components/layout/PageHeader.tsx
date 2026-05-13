@@ -31,6 +31,11 @@ export interface PageHeaderState {
   // Icon-only buttons rendered at the right of the mobile header.
   // Keep to ≤ 2 items; overflow into a `…` menu if a page needs more.
   actions?: ReactNode
+  // Pages that manage their own scroll (e.g. the split-panel chat
+  // surface) set this to true. AppLayout switches <main> from
+  // overflow-y-auto to overflow-hidden and removes its padding so the
+  // page can own the entire viewport below the header.
+  fullBleed?: boolean
 }
 
 interface PageHeaderSetters {
@@ -50,7 +55,8 @@ export function PageHeaderProvider({ children }: { children: ReactNode }) {
         setState((prev) =>
           prev.title === next.title &&
           prev.backTo === next.backTo &&
-          prev.actions === next.actions
+          prev.actions === next.actions &&
+          prev.fullBleed === next.fullBleed
             ? prev
             : next,
         ),
@@ -84,11 +90,11 @@ export function usePageHeaderState(): PageHeaderState {
 // eslint-disable-next-line react-refresh/only-export-components
 export function usePageHeader(state: PageHeaderState) {
   const setters = useContext(PageHeaderSetContext)
-  const { title, backTo, actions } = state
+  const { title, backTo, actions, fullBleed } = state
 
   const setHeaderCb = useCallback(
-    () => setters?.setHeader({ title, backTo, actions }),
-    [setters, title, backTo, actions],
+    () => setters?.setHeader({ title, backTo, actions, fullBleed }),
+    [setters, title, backTo, actions, fullBleed],
   )
 
   useEffect(() => {
