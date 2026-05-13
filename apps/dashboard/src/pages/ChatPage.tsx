@@ -468,7 +468,7 @@ interface ConversationFeedProps {
   turns: ChatTurn[]
   handleCommit: (turnId: string, callId: string, edits: Record<string, string>) => void
   handleReject: (turnId: string, callId: string) => void
-  feedEndRef: RefObject<HTMLDivElement>
+  feedEndRef: RefObject<HTMLDivElement | null>
 }
 
 function ConversationFeed({
