@@ -325,6 +325,19 @@ via a transient `git clone` of `onsager-ai/onsager-skills` (spec
 override, `just lint` clones the sibling into `target/onsager-skills/`
 automatically.
 
+**Shared skill editing.** Skills installed under `.claude/skills/` via
+`npx skills add onsager-ai/onsager-skills` are read-only copies — do not
+edit them directly. A `PreToolUse` hook (`.claude/hooks/check-skill-edit.sh`)
+blocks direct edits to any skill directory that carries a `.upstream-source`
+marker file. To change a shared skill:
+
+1. Edit it in `onsager-ai/onsager-skills`.
+2. Open a PR there, get it reviewed, and merge it.
+3. Re-run `npx skills add onsager-ai/onsager-skills` in this repo.
+
+Editing the installed copy is blocked by the hook and wrong — a future
+`npx skills add` run would silently overwrite the change.
+
 ## The seam rule (canonical)
 
 > HTTP APIs exist only at external boundaries:
