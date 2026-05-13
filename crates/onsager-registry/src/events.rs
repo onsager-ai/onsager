@@ -132,12 +132,10 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "artifact.archived",
             schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some(
-                "forge consumer in flight per spec #273; remains diagnostic-only until that PR lands",
-            ),
+            producers: &[Subsystem::Portal, Subsystem::Forge],
+            consumers: &[Subsystem::Ising],
+            diagnostic_only: false,
+            reason: None,
             description: "Artifact reached terminal state (archived).",
         },
         // -- Git lifecycle (onsager-portal webhooks) ------------------------
@@ -287,6 +285,17 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             description: "Dashboard cancel-session request from portal (spec #303); stiglab forwards a CancelSession to the session's agent node.",
+        },
+        EventDefinition {
+            kind: "portal.pr_open_failed",
+            schema_version: 1,
+            producers: &[Subsystem::Portal],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "observable in dashboard event timeline for operator troubleshooting when portal cannot open a PR for a completed session",
+            ),
+            description: "Portal failed to open a GitHub PR for a completed session (empty branch, GitHub API error, or missing App config).",
         },
         // -- Synodic events -------------------------------------------------
         // Per spec #285: the redundant `synodic.gate_evaluated` /

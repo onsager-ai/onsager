@@ -715,6 +715,11 @@ do not wait to be asked:
 
    This is the upstream answer to the bot's `<!-- pr-spec-sync:no-spec-link -->`
    reminder — answering it at PR creation keeps the bot silent.
+
+   **Always pass `body` as a plain inline string.** Never wrap it in shell
+   heredoc syntax (`$(cat <<'EOF'...EOF)`) — that is Bash substitution and
+   produces a literal `$(cat <<'EOF'...` in the PR description when passed
+   to an MCP tool parameter.
 3. Subscribe to PR activity so CI failures and review comments are auto-fixed.
 
 Skip this for branches that don't start with `claude/` (local/manual work).

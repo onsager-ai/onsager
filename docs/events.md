@@ -56,7 +56,7 @@ that requires a coordinated rollout.
 | `git` | onsager-portal (GitHub webhooks) | 4 |
 | `forge` | forge | 6 |
 | `stiglab` | stiglab | 4 |
-| `portal` | (unknown — update `stream_producer` in xtask) | 2 |
+| `portal` | (unknown — update `stream_producer` in xtask) | 3 |
 | `synodic` | synodic | 9 |
 | `ising` | ising | 6 |
 | `refract` | refract | 3 |
@@ -317,6 +317,20 @@ Dashboard task request from portal. Stiglab's `session_requested_listener` dispa
 | Field | Type | Description |
 |---|---|---|
 | `session_id` | `String` |  |
+
+### `portal.pr_open_failed`
+
+- Variant: `FactoryEventKind::PortalPrOpenFailed`
+- Stream: `portal`
+
+Portal failed to open a GitHub PR for a completed session (spec #273). Emitted as a diagnostic signal when the GitHub API call fails, the session pushed an empty branch, or the GitHub App is not configured. No retry is attempted inside the listener — the operator investigates via the dashboard event timeline.
+
+| Field | Type | Description |
+|---|---|---|
+| `artifact_id` | `Option<ArtifactId>` | Issue artifact the session was shaping, if known. _(optional)_ |
+| `branch` | `Option<String>` | Branch the session pushed to, if any. _(optional)_ |
+| `workspace_id` | `String` | Workspace the session belongs to. |
+| `reason` | `String` | Short reason code: `"empty_branch"`, `"github_api_error"`, `"no_installation"`, `"app_not_configured"`, etc. |
 
 ### `portal.session_cancel_requested`
 

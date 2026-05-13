@@ -96,6 +96,78 @@ impl CheckConclusion {
     }
 }
 
+/// Create a pull request. Returns `(pr_number, html_url)`.
+pub async fn create_pull_request(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    title: &str,
+    body: &str,
+    head: &str,
+    base: &str,
+) -> Result<(u64, String), GithubError> {
+    let url = format!("{GITHUB_API}/repos/{owner}/{repo}/pulls");
+    let payload = serde_json::json!({
+        "title": title,
+        "body": body,
+        "head": head,
+        "base": base,
+    });
+    let resp = client()
+        .post(&url)
+        .bearer_auth(token)
+        .json(&payload)
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(GithubError::from_response(resp).await);
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| GithubError::Decode(e.to_string()))?;
+    let number = v
+        .get("number")
+        .and_then(|n| n.as_u64())
+        .ok_or_else(|| GithubError::Decode("missing pr number".into()))?;
+    let html_url = v
+        .get("html_url")
+        .and_then(|u| u.as_str())
+        .unwrap_or_default()
+        .to_string();
+    Ok((number, html_url))
+}
+
+/// Find an open pull request whose head branch matches `head`. Returns
+/// `Some((pr_number, html_url))` when one exists; `None` otherwise.
+pub async fn find_open_pr_for_branch(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    head: &str,
+) -> Result<Option<(u64, String)>, GithubError> {
+    let url = format!(
+        "{GITHUB_API}/repos/{owner}/{repo}/pulls?state=open&head={owner}:{head}&per_page=1"
+    );
+    let resp = client().get(&url).bearer_auth(token).send().await?;
+    if !resp.status().is_success() {
+        return Err(GithubError::from_response(resp).await);
+    }
+    let list: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| GithubError::Decode(e.to_string()))?;
+    Ok(list.first().and_then(|pr| {
+        let number = pr.get("number")?.as_u64()?;
+        let url = pr
+            .get("html_url")
+            .and_then(|u| u.as_str())
+            .unwrap_or_default()
+            .to_string();
+        Some((number, url))
+    }))
+}
+
 /// Post a check run on a head SHA. Returns the created check-run id.
 pub async fn create_check_run(
     token: Option<&str>,

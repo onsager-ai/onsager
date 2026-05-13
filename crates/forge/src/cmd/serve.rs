@@ -584,6 +584,33 @@ pub fn run(database_url: &str, tick_ms: u64) {
             }
         });
 
+        // Spawn the git.pr_merged → archive listener (spec #273).
+        // Warm-start at max_event_id so boot doesn't replay all history.
+        let pr_merged_shared = shared.clone();
+        tokio::spawn(async move {
+            let store = {
+                let state = pr_merged_shared.read().await;
+                state.spine.clone()
+            };
+            let Some(store) = store else {
+                tracing::info!("forge: pr_merged listener disabled (no spine connection)");
+                return;
+            };
+            let since = match store.max_event_id().await {
+                Ok(cursor) => cursor,
+                Err(e) => {
+                    tracing::warn!(
+                        "forge: max_event_id lookup failed ({e}); starting pr_merged \
+                         listener from the beginning"
+                    );
+                    None
+                }
+            };
+            if let Err(e) = crate::core::pr_merged_listener::run(store, since).await {
+                tracing::error!("forge: pr_merged listener exited: {e}");
+            }
+        });
+
         // Run the HTTP server.
         axum::serve(listener, app).await.unwrap();
     });

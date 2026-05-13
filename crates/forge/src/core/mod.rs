@@ -9,6 +9,7 @@ pub mod kernel;
 pub mod pending;
 pub mod persistence;
 pub mod pipeline;
+pub mod pr_merged_listener;
 pub mod scheduler;
 pub mod session_listener;
 pub mod session_result_listener;
