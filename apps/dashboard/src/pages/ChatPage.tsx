@@ -66,25 +66,38 @@ interface ChatTurn {
 // ─── Serialization ──────────────────────────────────────────────────────────
 
 function hydrateTurns(stored: StoredTurn[]): ChatTurn[] {
-  return stored.map((s) => ({
-    id: s.id,
-    userMessage: { id: `${s.id}-u`, role: "user", content: s.userContent },
-    assistantMessage: s.assistantContent
-      ? { id: `${s.id}-a`, role: "assistant", content: s.assistantContent }
-      : undefined,
-    toolCalls: s.toolCalls.map((tc) => ({
-      id: tc.id,
-      turnId: s.id,
-      binding: findMcpTool(tc.toolName),
-      toolName: tc.toolName,
-      input: tc.input,
-      card: buildCardFor(tc.toolName, tc.input),
-      state: tc.state,
-      errorMessage: tc.errorMessage,
-      resultText: tc.resultText,
-    })),
-    error: s.error,
-  }))
+  return stored.flatMap((s) => {
+    if (!s || typeof s !== "object" || !s.id || !s.userContent) return []
+    const toolCalls = Array.isArray(s.toolCalls) ? s.toolCalls : []
+    return [
+      {
+        id: s.id,
+        userMessage: { id: `${s.id}-u`, role: "user" as const, content: s.userContent },
+        assistantMessage: s.assistantContent
+          ? { id: `${s.id}-a`, role: "assistant" as const, content: s.assistantContent }
+          : undefined,
+        toolCalls: toolCalls.flatMap((tc) => {
+          if (!tc || !tc.id || !tc.toolName) return []
+          const input: Record<string, unknown> =
+            tc.input && typeof tc.input === "object" ? (tc.input as Record<string, unknown>) : {}
+          return [
+            {
+              id: tc.id,
+              turnId: s.id,
+              binding: findMcpTool(tc.toolName),
+              toolName: tc.toolName,
+              input,
+              card: buildCardFor(tc.toolName, input),
+              state: (tc.state as HitlCardState) ?? "committed",
+              errorMessage: tc.errorMessage as string | undefined,
+              resultText: tc.resultText as string | undefined,
+            },
+          ]
+        }),
+        error: s.error,
+      },
+    ]
+  })
 }
 
 function dehydrateTurns(turns: ChatTurn[]): StoredTurn[] {
@@ -195,6 +208,24 @@ export function ChatPage() {
     return hydrateTurns(loadStoredTurns(chatStorageKey(user.id, workspace.id)))
   })
 
+  // Keep a stable ref so handleCommit can read the latest turns without
+  // capturing a stale closure. The ref is updated synchronously before
+  // any async work that depends on it.
+  const turnsRef = useRef<ChatTurn[]>(turns)
+  useEffect(() => {
+    turnsRef.current = turns
+  }, [turns])
+
+  // Re-hydrate when the user switches workspaces (storageKey changes).
+  // Skip the mount render — the useState initializer above already loaded
+  // from the initial storageKey.
+  const prevStorageKeyRef = useRef(storageKey)
+  useEffect(() => {
+    if (storageKey === prevStorageKeyRef.current) return
+    prevStorageKeyRef.current = storageKey
+    setTurns(storageKey ? hydrateTurns(loadStoredTurns(storageKey)) : [])
+  }, [storageKey])
+
   // Persist on every turn change.
   useEffect(() => {
     if (!storageKey) return
@@ -268,15 +299,28 @@ export function ChatPage() {
       const assistantMessage: ChatMessage | undefined = result.text
         ? { id: `${turnId}-a`, role: "assistant", content: result.text }
         : undefined
-      const newToolCalls: ToolCallEntry[] = result.toolCalls.map((tc) => ({
-        id: tc.id,
-        turnId,
-        binding: findMcpTool(tc.name),
-        toolName: tc.name,
-        input: tc.input,
-        card: buildCardFor(tc.name, tc.input),
-        state: isMutationTool(tc.name) ? "pending" : ("committing" as HitlCardState),
-      }))
+      const newToolCalls: ToolCallEntry[] = result.toolCalls.map((tc) => {
+        const isMutation = isMutationTool(tc.name)
+        const card = isMutation ? buildCardFor(tc.name, tc.input) : undefined
+        // A mutation tool that produces no card has no HITL path — mark failed
+        // immediately rather than leaving it stuck in `pending` forever.
+        const state: HitlCardState = isMutation
+          ? card
+            ? "pending"
+            : "failed"
+          : "committing"
+        return {
+          id: tc.id,
+          turnId,
+          binding: findMcpTool(tc.name),
+          toolName: tc.name,
+          input: tc.input,
+          card,
+          state,
+          errorMessage:
+            isMutation && !card ? "No card definition for this tool — cannot review." : undefined,
+        }
+      })
       setTurns((prev) => {
         const withSupersession = applySupersession(prev, newToolCalls)
         return withSupersession.map((t) =>
@@ -318,8 +362,15 @@ export function ChatPage() {
       setTurns((prev) =>
         updateCall(prev, turnId, callId, { state: "committing", errorMessage: undefined }),
       )
-      const target = findCall(turns, turnId, callId)
-      if (!target) return
+      // Read from the ref — not the closed-over `turns` — to avoid the
+      // stale-closure race between the state update above and the lookup here.
+      const target = findCall(turnsRef.current, turnId, callId)
+      if (!target) {
+        setTurns((prev) =>
+          updateCall(prev, turnId, callId, { state: "failed", errorMessage: "Tool call not found." }),
+        )
+        return
+      }
       const mergedArgs = { ...target.input, ...editedValues }
       try {
         const result = await mcpCallTool(target.toolName, mergedArgs)
@@ -337,7 +388,7 @@ export function ChatPage() {
         )
       }
     },
-    [turns],
+    [],
   )
 
   const handleReject = useCallback((turnId: string, callId: string) => {
@@ -387,7 +438,7 @@ export function ChatPage() {
             onKeyDown={onKeyDown}
             placeholder={
               isEmpty
-                ? "e.g. Design a workflow that runs on every issue comment."
+                ? "Describe a workflow, or pick an example above…"
                 : "Refine or ask a follow-up…"
             }
             rows={2}
@@ -421,10 +472,13 @@ export function ChatPage() {
 
 // ─── Empty state ─────────────────────────────────────────────────────────────
 
+// Locked copy per spec #289 Design § "Chat surface first-run / empty state".
+// Chip wording is revisable against real MCP tools (shape locked: three chips,
+// three archetypes — auto-merge / triage / scheduled).
 const EXAMPLE_CHIPS = [
-  "Create a workflow triggered by GitHub issue comments",
-  "List all my workflows",
-  "Show me recent runs and their status",
+  "Auto-merge PRs labeled `auto-merge` once CI is green.",
+  "Summarize newly-labeled issues and post to Slack.",
+  "Generate weekly release notes from merged PRs.",
 ]
 
 function EmptyState({ onChip }: { onChip: (text: string) => void }) {
@@ -436,8 +490,8 @@ function EmptyState({ onChip }: { onChip: (text: string) => void }) {
       <div className="flex flex-col gap-2">
         <h2 className="text-2xl font-bold tracking-tight">Design something.</h2>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Describe what you want to build. The agent will propose workflows,
-          runs, and changes — you review every step before anything is applied.
+          Describe what you want to automate. I&apos;ll propose a workflow, you
+          review it, and one click ships it.
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">
@@ -456,7 +510,8 @@ function EmptyState({ onChip }: { onChip: (text: string) => void }) {
       </div>
       <p className="max-w-xs text-xs text-muted-foreground">
         <Sparkles className="mr-1 inline h-3 w-3" />
-        Every change requires your approval before it&apos;s applied.
+        Cards along the way show what&apos;s about to change. Nothing ships
+        until you accept.
       </p>
     </div>
   )
@@ -478,9 +533,9 @@ function ConversationFeed({
   feedEndRef,
 }: ConversationFeedProps) {
   return (
-    <ol className="flex flex-col gap-4 pb-4">
+    <div className="flex flex-col gap-4 pb-4">
       {turns.map((turn) => (
-        <li key={turn.id} className="flex flex-col gap-2">
+        <div key={turn.id} className="flex flex-col gap-2">
           <UserBubble content={turn.userMessage.content} />
           {turn.assistantMessage ? (
             <AssistantBubble content={turn.assistantMessage.content} />
@@ -530,10 +585,10 @@ function ConversationFeed({
               {turn.error}
             </div>
           ) : null}
-        </li>
+        </div>
       ))}
       <div ref={feedEndRef} />
-    </ol>
+    </div>
   )
 }
 
