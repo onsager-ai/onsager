@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Onsager — Chat to Workflow</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/base16/one-dark-pro.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+<style>
+  :root {
+    --bg:        #0b0d11;
+    --surface:   #13161c;
+    --border:    #1e222d;
+    --border-hi: #2a2f3d;
+    --muted:     #4a5068;
+    --text:      #c8cdd8;
+    --text-hi:   #e8ecf4;
+    --accent:    #00d4aa;
+    --accent-dim:#00d4aa22;
+    /* gate kinds */
+    --agent:     #3b82f6;
+    --external:  #a855f7;
+    --governance:#f59e0b;
+    --approval:  #22c55e;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
+    font-family: 'Geist', sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  /* dot grid background */
+  .dot-grid {
+    background-image: radial-gradient(circle, #1e222d 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+
+  /* scrollbars */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+  /* streaming cursor */
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  .cursor::after { content:'▋'; color: var(--accent); animation: blink 0.9s step-end infinite; font-size: 0.85em; }
+
+  /* HITL card glow states */
+  @keyframes pulse-amber { 0%,100%{box-shadow:0 0 0 0 #f59e0b22} 50%{box-shadow:0 0 0 4px #f59e0b11} }
+  .hitl-pending { animation: pulse-amber 2.5s ease-in-out infinite; }
+
+  /* edge animation */
+  @keyframes dash { to { stroke-dashoffset: -20; } }
+  .edge-animated { stroke-dasharray: 5 4; animation: dash 0.6s linear infinite; }
+
+  /* fade-in for messages */
+  @keyframes fadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+  .msg-enter { animation: fadeUp 0.25s ease-out forwards; }
+
+  /* node hover */
+  .dag-node { transition: filter 0.15s; cursor: pointer; }
+  .dag-node:hover { filter: brightness(1.25); }
+
+  /* tab indicator */
+  .tab-active { color: var(--text-hi); border-bottom: 2px solid var(--accent); }
+  .tab-inactive { color: var(--muted); border-bottom: 2px solid transparent; }
+
+  /* code block overrides */
+  .hljs { background: #090b0f !important; border-radius: 6px; font-size: 12px; line-height: 1.6; }
+
+  /* collapse prose highlight */
+  mark { background: var(--accent-dim); color: var(--accent); padding: 0 3px; border-radius: 3px; }
+
+  /* info block */
+  .info-block { border-left: 2px solid var(--border-hi); padding-left: 10px; }
+
+  /* scrollable feed */
+  .feed { overflow-y: auto; overscroll-behavior: contain; }
+
+  /* button base */
+  .btn { display:inline-flex; align-items:center; gap:6px; padding: 5px 12px; border-radius: 5px;
+    font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid transparent;
+    transition: background 0.12s, border-color 0.12s, color 0.12s; white-space: nowrap; }
+  .btn-ghost { background: transparent; border-color: var(--border-hi); color: var(--muted); }
+  .btn-ghost:hover { border-color: var(--border-hi); color: var(--text); background: var(--border); }
+  .btn-accept { background: #16261f; border-color: #22c55e44; color: #4ade80; }
+  .btn-accept:hover { background: #1d3228; border-color: #22c55e88; }
+  .btn-reject { background: #26181b; border-color: #f8717144; color: #f87171; }
+  .btn-reject:hover { background: #2f1e21; border-color: #f8717188; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight:600; }
+  .btn-primary:hover { background: #00bfa0; }
+  .btn-primary:disabled { opacity:0.4; cursor:not-allowed; }
+
+  textarea { resize: none; outline: none; background: transparent; color: var(--text-hi); width:100%;
+    font-family: inherit; font-size: 13px; line-height: 1.5; }
+  textarea::placeholder { color: var(--muted); }
+
+  /* accepted/rejected states */
+  .hitl-accepted { border-color: #22c55e33 !important; }
+  .hitl-rejected { border-color: #f8717133 !important; opacity: 0.65; }
+
+  /* stage badge */
+  .badge { display:inline-flex; align-items:center; gap:4px; padding:2px 7px; border-radius:3px;
+    font-size: 10px; font-weight:500; font-family:'IBM Plex Mono',monospace; text-transform:uppercase;
+    letter-spacing:0.05em; }
+</style>
+</head>
+<body class="h-full">
+
+<!-- APP SHELL -->
+<div id="app" class="flex flex-col h-full">
+
+  <!-- TOPBAR -->
+  <header style="border-bottom:1px solid var(--border); background:var(--surface);"
+          class="flex items-center justify-between px-4 h-11 shrink-0">
+    <div class="flex items-center gap-3">
+      <!-- logo mark -->
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <circle cx="10" cy="10" r="9" stroke="#00d4aa" stroke-width="1.5"/>
+        <path d="M6 10h8M10 6v8" stroke="#00d4aa" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <span class="mono text-xs" style="color:var(--text-hi); letter-spacing:0.12em;">ONSAGER</span>
+      <span style="color:var(--border-hi)">·</span>
+      <span class="text-xs" style="color:var(--muted)">Chat</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="badge" style="background:#0d2a1e; color:var(--accent); border:1px solid #00d4aa22;">
+        <svg width="6" height="6" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill="#00d4aa"/></svg>
+        MCP · 11 tools
+      </span>
+    </div>
+  </header>
+
+  <!-- MOBILE TABS (hidden on desktop) -->
+  <div id="mobile-tabs" class="md:hidden flex shrink-0" style="border-bottom:1px solid var(--border); background:var(--surface);">
+    <button onclick="switchTab('chat')" id="tab-chat"
+      class="flex-1 tab-active py-2.5 text-xs font-medium transition-all" style="background:transparent;border:none;cursor:pointer;">
+      Chat
+    </button>
+    <button onclick="switchTab('dag')" id="tab-dag"
+      class="flex-1 tab-inactive py-2.5 text-xs font-medium transition-all" style="background:transparent;border:none;cursor:pointer;">
+      Workflow DAG
+    </button>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <div class="flex flex-1 min-h-0">
+
+    <!-- ═══════════════════════════════ LEFT PANEL: CHAT ═══════════════════════════════ -->
+    <div id="panel-chat" class="flex flex-col flex-1 md:flex-none min-h-0"
+         style="width:100%; border-right:1px solid var(--border);"
+         data-panel="chat">
+
+      <!-- conversation feed -->
+      <div id="feed" class="feed flex-1 min-h-0 px-4 py-5 space-y-5">
+
+        <!-- 1. User message -->
+        <div class="msg-enter flex justify-end">
+          <div class="max-w-xs rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-sm"
+               style="background:#1a2033; color:var(--text-hi); border:1px solid var(--border-hi);">
+            Create a workflow that auto-labels GitHub issues and runs an AI triage on them.
+          </div>
+        </div>
+
+        <!-- 2. Assistant streaming bubble -->
+        <div class="msg-enter flex gap-2.5">
+          <div class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5"
+               style="background:#0d1a15; border:1px solid #00d4aa33;">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <circle cx="6" cy="6" r="5" stroke="#00d4aa" stroke-width="1.2"/>
+              <path d="M3.5 6h5M6 3.5v5" stroke="#00d4aa" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="flex-1 text-sm leading-relaxed" style="color:var(--text);">
+            <p class="mb-2">Here's what I'll build for you:</p>
+            <ol class="list-decimal list-inside space-y-1 mb-3" style="color:var(--text);">
+              <li>A <mark>trigger</mark> that fires on new GitHub issues</li>
+              <li>An <mark>agent-session</mark> stage that classifies the issue</li>
+              <li>An <mark>external-check</mark> stage that applies labels via API</li>
+              <li>A <mark>manual-approval</mark> gate for escalations</li>
+            </ol>
+            <p class="mb-2">Let me propose this workflow — you can review the details below.</p>
+          </div>
+        </div>
+
+        <!-- 3. HITL card: constructive (propose_workflow) — PENDING -->
+        <div id="hitl-1" class="msg-enter ml-9 hitl-pending rounded-xl overflow-hidden transition-all"
+             style="border:1px solid #f59e0b44; background:var(--surface);">
+          <!-- card header -->
+          <div class="flex items-center justify-between px-4 py-2.5"
+               style="border-bottom:1px solid var(--border); background:#16120a;">
+            <div class="flex items-center gap-2">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <path d="M6.5 1.5v5l3 2" stroke="#f59e0b" stroke-width="1.3" stroke-linecap="round"/>
+                <circle cx="6.5" cy="6.5" r="5.5" stroke="#f59e0b" stroke-width="1.2"/>
+              </svg>
+              <span class="mono text-xs font-medium" style="color:#fbbf24;">propose_workflow</span>
+            </div>
+            <span class="badge" style="background:#16120a; color:#f59e0b; border:1px solid #f59e0b33;">
+              review required
+            </span>
+          </div>
+          <!-- card body -->
+          <div class="px-4 py-3 space-y-2.5">
+            <div>
+              <div class="mono text-xs mb-1" style="color:var(--muted);">name</div>
+              <div class="text-sm font-medium" style="color:var(--text-hi);">GitHub Issue Triage &amp; Auto-Label</div>
+            </div>
+            <div>
+              <div class="mono text-xs mb-1" style="color:var(--muted);">trigger</div>
+              <div class="flex items-center gap-1.5">
+                <span class="badge" style="background:#0e1520; color:#60a5fa; border:1px solid #3b82f622;">issues.opened</span>
+                <span class="text-xs" style="color:var(--muted);">onsager-ai/onsager</span>
+              </div>
+            </div>
+            <div>
+              <div class="mono text-xs mb-2" style="color:var(--muted);">stages (3)</div>
+              <div class="space-y-1.5">
+                <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-md"
+                     style="background:#0e1520; border:1px solid var(--border);">
+                  <span class="w-2 h-2 rounded-full shrink-0" style="background:var(--agent)"></span>
+                  <span class="text-xs" style="color:var(--text);">1 — AI classify &amp; summarise</span>
+                  <span class="mono text-xs ml-auto" style="color:var(--muted);">agent-session</span>
+                </div>
+                <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-md"
+                     style="background:#0e1520; border:1px solid var(--border);">
+                  <span class="w-2 h-2 rounded-full shrink-0" style="background:var(--external)"></span>
+                  <span class="text-xs" style="color:var(--text);">2 — Apply labels via GitHub API</span>
+                  <span class="mono text-xs ml-auto" style="color:var(--muted);">external-check</span>
+                </div>
+                <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-md"
+                     style="background:#0e1520; border:1px solid var(--border);">
+                  <span class="w-2 h-2 rounded-full shrink-0" style="background:var(--approval)"></span>
+                  <span class="text-xs" style="color:var(--text);">3 — Escalation approval</span>
+                  <span class="mono text-xs ml-auto" style="color:var(--muted);">manual-approval</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- card actions -->
+          <div class="flex items-center justify-between px-4 py-2.5"
+               style="border-top:1px solid var(--border);">
+            <button class="btn btn-ghost text-xs" onclick="editCard()">Edit</button>
+            <div class="flex gap-2">
+              <button class="btn btn-reject" onclick="rejectCard('hitl-1')">
+                <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                Reject
+              </button>
+              <button class="btn btn-accept" onclick="acceptCard('hitl-1')">
+                <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5l2.5 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Accept
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Info block: list_workflows result -->
+        <div class="msg-enter ml-9">
+          <div class="flex items-center gap-2 mb-2">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <circle cx="6" cy="6" r="5" stroke="#4a5068" stroke-width="1.2"/>
+              <path d="M6 5v4M6 3.5v.5" stroke="#4a5068" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+            <span class="mono text-xs" style="color:var(--muted);">list_workflows</span>
+          </div>
+          <div class="info-block text-xs space-y-1" style="color:var(--muted);">
+            <div>2 workflows in <span class="mono" style="color:var(--text);">onsager-ai</span> workspace</div>
+            <div class="mono" style="color:var(--text-hi);">→ PR Review Gate (active)</div>
+            <div class="mono" style="color:var(--text-hi);">→ Deploy Notification (paused)</div>
+          </div>
+        </div>
+
+        <!-- 5. HITL card: destructive variant -->
+        <div id="hitl-2" class="msg-enter ml-9 hitl-pending rounded-xl overflow-hidden"
+             style="border:1px solid #f8717144; background:var(--surface);">
+          <div class="flex items-center justify-between px-4 py-2.5"
+               style="border-bottom:1px solid var(--border); background:#1a0e0e;">
+            <div class="flex items-center gap-2">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <path d="M6.5 4v3M6.5 8.5v.5" stroke="#f87171" stroke-width="1.3" stroke-linecap="round"/>
+                <path d="M1.5 11L6.5 2l5 9H1.5z" stroke="#f87171" stroke-width="1.2" stroke-linejoin="round"/>
+              </svg>
+              <span class="mono text-xs font-medium" style="color:#f87171;">cancel_run</span>
+            </div>
+            <span class="badge" style="background:#1a0e0e; color:#f87171; border:1px solid #f8717133;">
+              destructive
+            </span>
+          </div>
+          <div class="px-4 py-3">
+            <p class="text-xs mb-2" style="color:var(--muted);">This will terminate the active run and mark it <span class="mono" style="color:#f87171;">cancelled</span>.</p>
+            <div class="mono text-xs px-2.5 py-1.5 rounded" style="background:#0f0a0a; color:#f87171; border:1px solid #f8717122;">
+              run_id: run_01JX4MN8KP2Q
+            </div>
+          </div>
+          <div class="flex items-center justify-end gap-2 px-4 py-2.5"
+               style="border-top:1px solid var(--border);">
+            <button class="btn btn-ghost" onclick="rejectCard('hitl-2')">Cancel</button>
+            <button class="btn btn-reject" onclick="acceptCard('hitl-2')">
+              <svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              Confirm Cancel Run
+            </button>
+          </div>
+        </div>
+
+        <!-- 6. Streaming message with code block -->
+        <div class="msg-enter flex gap-2.5">
+          <div class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5"
+               style="background:#0d1a15; border:1px solid #00d4aa33;">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <circle cx="6" cy="6" r="5" stroke="#00d4aa" stroke-width="1.2"/>
+              <path d="M3.5 6h5M6 3.5v5" stroke="#00d4aa" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="flex-1 text-sm leading-relaxed" style="color:var(--text);">
+            <p class="mb-2">Here's the stage prompt template for the classifier:</p>
+            <pre><code class="language-yaml rounded-lg" style="display:block;">name: classify-issue
+gate_kind: agent-session
+prompt: |
+  You are a GitHub issue triage assistant.
+  Analyze the issue below and output JSON:
+
+  {
+    "labels": ["bug" | "feature" | "question"],
+    "severity": "low" | "medium" | "high",
+    "summary": "one-line description"
+  }
+
+  Issue title: {{issue.title}}
+  Issue body: {{issue.body}}</code></pre>
+            <p class="mt-2 cursor">The governance stage will run if severity is</p>
+          </div>
+        </div>
+
+      </div><!-- /feed -->
+
+      <!-- PINNED COMPOSER -->
+      <div class="shrink-0 px-4 py-3" style="border-top:1px solid var(--border); background:var(--surface);">
+        <div class="flex gap-2 items-end rounded-xl px-3 py-2.5"
+             style="background:var(--bg); border:1px solid var(--border-hi);">
+          <textarea id="composer" rows="1" placeholder="Refine or ask a follow-up…"
+            oninput="autosize(this)" onkeydown="handleKey(event)"
+            style="min-height:20px; max-height:120px;"></textarea>
+          <button id="send-btn" class="btn btn-primary shrink-0" style="height:30px;" onclick="sendDemo()">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M10 6H2M7 3l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Send
+          </button>
+        </div>
+        <div class="flex items-center justify-between mt-1.5 px-0.5">
+          <span class="text-xs" style="color:var(--muted);">11 tools · claude-opus-4-7</span>
+          <span class="text-xs" style="color:var(--muted);">⏎ send · ⇧⏎ newline</span>
+        </div>
+      </div>
+
+    </div><!-- /chat panel -->
+
+    <!-- ═══════════════════════════════ RIGHT PANEL: DAG ═══════════════════════════════ -->
+    <div id="panel-dag" class="hidden md:flex flex-col min-h-0"
+         style="width: 58%; border-left:1px solid var(--border);"
+         data-panel="dag">
+
+      <!-- DAG header -->
+      <div class="flex items-center justify-between px-4 h-11 shrink-0"
+           style="border-bottom:1px solid var(--border); background:var(--surface);">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-medium" style="color:var(--text-hi);">Workflow Preview</span>
+          <span id="dag-status-badge" class="badge" style="background:var(--accent-dim); color:var(--accent); border:1px solid #00d4aa22;">
+            draft
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="mono text-xs" style="color:var(--muted);">GitHub Issue Triage</span>
+          <button class="btn btn-ghost" style="height:24px; font-size:11px;">Export</button>
+        </div>
+      </div>
+
+      <!-- DAG canvas -->
+      <div id="dag-canvas" class="dot-grid flex-1 min-h-0 overflow-auto relative"
+           style="background:var(--bg);">
+        <svg id="dag-svg" xmlns="http://www.w3.org/2000/svg"
+             style="width:100%; min-height:100%; overflow:visible; display:block;">
+
+          <defs>
+            <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#2a2f3d"/>
+            </marker>
+            <marker id="arrow-accent" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#00d4aa66"/>
+            </marker>
+          </defs>
+
+          <!-- ── EDGES ── -->
+          <!-- trigger → classify -->
+          <line x1="50%" y1="116" x2="50%" y2="180"
+                stroke="#2a2f3d" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <!-- classify → label -->
+          <line x1="50%" y1="276" x2="50%" y2="340"
+                stroke="#2a2f3d" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <!-- label → escalation -->
+          <line x1="50%" y1="436" x2="50%" y2="500"
+                stroke="#2a2f3d" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <!-- escalation → end -->
+          <line x1="50%" y1="596" x2="50%" y2="640"
+                stroke="#2a2f3d" stroke-width="1.5" marker-end="url(#arrow)"/>
+        </svg>
+
+        <!-- Nodes rendered as HTML on top of SVG background -->
+        <div style="position:absolute; top:0; left:0; right:0; display:flex; flex-direction:column; align-items:center; padding:40px 32px;">
+
+          <!-- TRIGGER NODE -->
+          <div class="dag-node" style="width:260px; margin-bottom:64px;" onclick="selectNode('trigger')">
+            <div class="rounded-xl overflow-hidden" style="border:1.5px solid #3b82f644; background:#0d1520;">
+              <div class="flex items-center gap-2 px-3 py-2"
+                   style="background:#0a1018; border-bottom:1px solid #3b82f622;">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M6 1l1.3 3.9H11L8.3 6.9l1 3.1L6 8l-3.3 2 1-3.1L1 4.9h3.7z"
+                        fill="#3b82f6" opacity="0.8"/>
+                </svg>
+                <span class="mono text-xs" style="color:#60a5fa;">trigger</span>
+                <span class="mono text-xs ml-auto" style="color:var(--muted);">issues.opened</span>
+              </div>
+              <div class="px-3 py-2.5 text-xs" style="color:var(--text);">
+                <div class="font-medium mb-1" style="color:var(--text-hi);">GitHub Issue Opened</div>
+                <div style="color:var(--muted);">onsager-ai/onsager · all labels</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- STAGE 1: agent-session -->
+          <div class="dag-node" style="width:260px; margin-bottom:64px;" onclick="selectNode('s1')">
+            <div class="rounded-xl overflow-hidden" style="border:1.5px solid #3b82f666; background:#0a1020;">
+              <div class="flex items-center gap-2 px-3 py-2"
+                   style="background:#080d1a; border-bottom:1px solid #3b82f633;">
+                <span class="w-2 h-2 rounded-full shrink-0" style="background:var(--agent)"></span>
+                <span class="mono text-xs" style="color:#93c5fd;">Stage 1</span>
+                <span class="badge ml-auto" style="background:#0e1830; color:#60a5fa; border:1px solid #3b82f633;">agent-session</span>
+              </div>
+              <div class="px-3 py-2.5 text-xs" style="color:var(--text);">
+                <div class="font-medium mb-1" style="color:var(--text-hi);">AI Classify &amp; Summarise</div>
+                <div style="color:var(--muted);">claude-opus-4-7 · max_tokens 512</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- STAGE 2: external-check -->
+          <div class="dag-node" style="width:260px; margin-bottom:64px;" onclick="selectNode('s2')">
+            <div class="rounded-xl overflow-hidden" style="border:1.5px solid #a855f766; background:#120a20;">
+              <div class="flex items-center gap-2 px-3 py-2"
+                   style="background:#0d0618; border-bottom:1px solid #a855f733;">
+                <span class="w-2 h-2 rounded-full shrink-0" style="background:var(--external)"></span>
+                <span class="mono text-xs" style="color:#c084fc;">Stage 2</span>
+                <span class="badge ml-auto" style="background:#180e2a; color:#c084fc; border:1px solid #a855f733;">external-check</span>
+              </div>
+              <div class="px-3 py-2.5 text-xs" style="color:var(--text);">
+                <div class="font-medium mb-1" style="color:var(--text-hi);">Apply GitHub Labels</div>
+                <div style="color:var(--muted);">POST /repos/:owner/:repo/issues/:n/labels</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- STAGE 3: manual-approval -->
+          <div class="dag-node" style="width:260px; margin-bottom:64px;" onclick="selectNode('s3')">
+            <div class="rounded-xl overflow-hidden" style="border:1.5px solid #22c55e66; background:#0a1a10;">
+              <div class="flex items-center gap-2 px-3 py-2"
+                   style="background:#061210; border-bottom:1px solid #22c55e33;">
+                <span class="w-2 h-2 rounded-full shrink-0" style="background:var(--approval)"></span>
+                <span class="mono text-xs" style="color:#86efac;">Stage 3</span>
+                <span class="badge ml-auto" style="background:#0c1e10; color:#4ade80; border:1px solid #22c55e33;">manual-approval</span>
+              </div>
+              <div class="px-3 py-2.5 text-xs" style="color:var(--text);">
+                <div class="font-medium mb-1" style="color:var(--text-hi);">Escalation Approval</div>
+                <div style="color:var(--muted);">Required when severity = high</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- END NODE -->
+          <div style="width:260px;">
+            <div class="rounded-xl flex items-center justify-center py-2.5 gap-2"
+                 style="border:1.5px solid var(--border-hi); background:var(--surface);">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <circle cx="6" cy="6" r="5" stroke="#4a5068" stroke-width="1.2"/>
+                <path d="M3.5 6l2 2 3-3.5" stroke="#4a5068" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span class="mono text-xs" style="color:var(--muted);">end</span>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /dag-canvas -->
+
+      <!-- DAG footer: legend -->
+      <div class="flex items-center gap-5 px-4 py-2 shrink-0"
+           style="border-top:1px solid var(--border); background:var(--surface);">
+        <span class="text-xs" style="color:var(--muted);">Gate kinds:</span>
+        <span class="flex items-center gap-1.5 text-xs" style="color:var(--muted);">
+          <span class="w-2 h-2 rounded-full" style="background:var(--agent)"></span>agent-session
+        </span>
+        <span class="flex items-center gap-1.5 text-xs" style="color:var(--muted);">
+          <span class="w-2 h-2 rounded-full" style="background:var(--external)"></span>external-check
+        </span>
+        <span class="flex items-center gap-1.5 text-xs" style="color:var(--muted);">
+          <span class="w-2 h-2 rounded-full" style="background:var(--governance)"></span>governance
+        </span>
+        <span class="flex items-center gap-1.5 text-xs" style="color:var(--muted);">
+          <span class="w-2 h-2 rounded-full" style="background:var(--approval)"></span>manual-approval
+        </span>
+      </div>
+
+    </div><!-- /dag panel -->
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- NODE DETAIL DRAWER (hidden initially) -->
+<div id="node-drawer" class="fixed bottom-0 left-0 right-0 md:left-auto md:top-0 md:bottom-0 md:w-72 z-50 transition-transform"
+     style="background:var(--surface); border-top:1px solid var(--border-hi); transform:translateY(100%);">
+  <div class="flex items-center justify-between px-4 py-3"
+       style="border-bottom:1px solid var(--border);">
+    <span id="drawer-title" class="text-sm font-medium" style="color:var(--text-hi);">Node Details</span>
+    <button class="btn btn-ghost" style="height:24px;font-size:11px;" onclick="closeDrawer()">✕</button>
+  </div>
+  <div id="drawer-body" class="p-4 text-xs space-y-3" style="color:var(--text);"></div>
+</div>
+
+<script>
+  // ── Syntax highlight ──────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+  });
+
+  // ── Autosize textarea ─────────────────────────────────────────────
+  function autosize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }
+
+  // ── Key handler ───────────────────────────────────────────────────
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDemo(); }
+  }
+
+  // ── Send demo ─────────────────────────────────────────────────────
+  function sendDemo() {
+    const ta = document.getElementById('composer');
+    const text = ta.value.trim();
+    if (!text) return;
+    ta.value = ''; ta.style.height = 'auto';
+
+    // User bubble — use textContent to avoid XSS from typed input
+    const feed = document.getElementById('feed');
+    const userDiv = document.createElement('div');
+    userDiv.className = 'msg-enter flex justify-end';
+    const bubble = document.createElement('div');
+    bubble.className = 'max-w-xs rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-sm';
+    bubble.style.cssText = 'background:#1a2033; color:var(--text-hi); border:1px solid var(--border-hi);';
+    bubble.textContent = text;
+    userDiv.appendChild(bubble);
+    feed.appendChild(userDiv);
+
+    // Streaming assistant reply
+    setTimeout(() => {
+      const msgs = [
+        "Got it. Updating the workflow to add a governance stage after the agent-session. This ensures high-severity issues route through your compliance check before labeling.",
+        "I've also tightened the prompt to output structured JSON so the external-check stage can read `labels` directly without parsing."
+      ];
+      const reply = msgs[Math.floor(Math.random() * msgs.length)];
+
+      const aDiv = document.createElement('div');
+      aDiv.className = 'msg-enter flex gap-2.5';
+      aDiv.innerHTML = `
+        <div class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5"
+             style="background:#0d1a15; border:1px solid #00d4aa33;">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <circle cx="6" cy="6" r="5" stroke="#00d4aa" stroke-width="1.2"/>
+            <path d="M3.5 6h5M6 3.5v5" stroke="#00d4aa" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="flex-1 text-sm leading-relaxed" style="color:var(--text);">
+          <span id="stream-target"></span><span class="cursor"></span>
+        </div>`;
+      feed.appendChild(aDiv);
+      feed.scrollTop = feed.scrollHeight;
+
+      streamText(document.getElementById('stream-target'), reply, () => {
+        // remove cursor after done
+        aDiv.querySelector('.cursor').remove();
+        feed.scrollTop = feed.scrollHeight;
+      });
+    }, 400);
+
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  // ── Streaming text animation ──────────────────────────────────────
+  function streamText(el, text, onDone, i = 0) {
+    if (i >= text.length) { onDone?.(); return; }
+    el.textContent += text[i];
+    el.closest('.feed')?.scrollTo({ top: 99999 });
+    setTimeout(() => streamText(el, text, onDone, i + 1), 18 + Math.random() * 14);
+  }
+
+  // ── HITL accept / reject ──────────────────────────────────────────
+  function acceptCard(id) {
+    const card = document.getElementById(id);
+    card.classList.remove('hitl-pending');
+    card.classList.add('hitl-accepted');
+    card.querySelector('.btn-accept')?.remove();
+    card.querySelector('.btn-reject')?.remove();
+    card.querySelector('.btn-ghost')?.remove();
+
+    const footer = card.querySelector('[style*="border-top"]');
+    footer.innerHTML = `<div class="flex items-center gap-1.5 text-xs" style="color:#4ade80;">
+      <svg width="11" height="11" viewBox="0 0 11 11"><path d="M1.5 5.5l2.5 3 5-6" stroke="#4ade80" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Accepted
+    </div>`;
+
+    // update DAG badge
+    document.getElementById('dag-status-badge').textContent = 'pending save';
+    document.getElementById('dag-status-badge').style.cssText = 'background:#1a2033; color:#60a5fa; border:1px solid #3b82f633;';
+  }
+
+  function rejectCard(id) {
+    const card = document.getElementById(id);
+    card.classList.remove('hitl-pending');
+    card.classList.add('hitl-rejected');
+    const footer = card.querySelector('[style*="border-top"]');
+    footer.innerHTML = `<div class="flex items-center gap-1.5 text-xs" style="color:#f87171;">
+      <svg width="11" height="11" viewBox="0 0 11 11"><path d="M2 2l7 7M9 2l-7 7" stroke="#f87171" stroke-width="1.4" stroke-linecap="round"/></svg>
+      Rejected
+    </div>`;
+  }
+
+  function editCard() {
+    alert('Edit mode: in production this would open an inline JSON editor.');
+  }
+
+  // ── Mobile tab switching ──────────────────────────────────────────
+  function switchTab(tab) {
+    const chatPanel = document.getElementById('panel-chat');
+    const dagPanel  = document.getElementById('panel-dag');
+    const tabChat   = document.getElementById('tab-chat');
+    const tabDag    = document.getElementById('tab-dag');
+
+    if (tab === 'chat') {
+      chatPanel.classList.remove('hidden'); chatPanel.classList.add('flex');
+      dagPanel.classList.add('hidden');    dagPanel.classList.remove('flex');
+      tabChat.className = 'flex-1 tab-active py-2.5 text-xs font-medium transition-all';
+      tabDag.className  = 'flex-1 tab-inactive py-2.5 text-xs font-medium transition-all';
+    } else {
+      dagPanel.classList.remove('hidden'); dagPanel.classList.add('flex');
+      chatPanel.classList.add('hidden');   chatPanel.classList.remove('flex');
+      tabDag.className  = 'flex-1 tab-active py-2.5 text-xs font-medium transition-all';
+      tabChat.className = 'flex-1 tab-inactive py-2.5 text-xs font-medium transition-all';
+    }
+    // fix tab styles (no background/border from btn)
+    [tabChat, tabDag].forEach(t => { t.style.background='transparent'; t.style.border='none'; });
+  }
+
+  // ── Desktop: fix panel widths ─────────────────────────────────────
+  function applyDesktopLayout() {
+    const chatPanel = document.getElementById('panel-chat');
+    const dagPanel  = document.getElementById('panel-dag');
+    if (window.innerWidth >= 768) {
+      chatPanel.style.width = '42%';
+      chatPanel.classList.remove('hidden');
+      chatPanel.classList.add('flex');
+      dagPanel.classList.remove('hidden');
+      dagPanel.classList.add('flex');
+    } else {
+      chatPanel.style.width = '100%';
+      dagPanel.classList.add('hidden');
+      dagPanel.classList.remove('flex');
+    }
+  }
+  window.addEventListener('resize', applyDesktopLayout);
+  applyDesktopLayout();
+
+  // ── Node detail drawer ─────────────────────────────────────────────
+  const nodeData = {
+    trigger: {
+      title: 'Trigger: issues.opened',
+      body: `<div class="space-y-2.5">
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">repository</div>
+          <div style="color:var(--text-hi);">onsager-ai/onsager</div></div>
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">event</div>
+          <div class="mono" style="color:#60a5fa;">issues.opened</div></div>
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">install_id</div>
+          <div class="mono" style="color:var(--text-hi);">58231940</div></div>
+      </div>`
+    },
+    s1: {
+      title: 'Stage 1 — Agent Session',
+      body: `<div class="space-y-2.5">
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">gate_kind</div>
+          <span class="badge" style="background:#0e1830;color:#60a5fa;border:1px solid #3b82f633;">agent-session</span></div>
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">model</div>
+          <div style="color:var(--text-hi);">claude-opus-4-7</div></div>
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">max_tokens</div>
+          <div class="mono" style="color:var(--text-hi);">512</div></div>
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">timeout</div>
+          <div class="mono" style="color:var(--text-hi);">30s</div></div>
+      </div>`
+    },
+    s2: {
+      title: 'Stage 2 — External Check',
+      body: `<div class="space-y-2.5">
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">gate_kind</div>
+          <span class="badge" style="background:#180e2a;color:#c084fc;border:1px solid #a855f733;">external-check</span></div>
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">endpoint</div>
+          <div class="mono" style="color:var(--text-hi); word-break:break-all;">POST /repos/{owner}/{repo}/issues/{n}/labels</div></div>
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">auth</div>
+          <div style="color:var(--text-hi);">GitHub App credential</div></div>
+      </div>`
+    },
+    s3: {
+      title: 'Stage 3 — Manual Approval',
+      body: `<div class="space-y-2.5">
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">gate_kind</div>
+          <span class="badge" style="background:#0c1e10;color:#4ade80;border:1px solid #22c55e33;">manual-approval</span></div>
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">condition</div>
+          <div class="mono" style="color:var(--text-hi);">severity == "high"</div></div>
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">assignee</div>
+          <div style="color:var(--text-hi);">workspace admins</div></div>
+        <div><div class="mono" style="color:var(--muted);margin-bottom:3px;">timeout</div>
+          <div class="mono" style="color:var(--text-hi);">48h</div></div>
+      </div>`
+    }
+  };
+
+  function selectNode(id) {
+    const data = nodeData[id];
+    if (!data) return;
+    document.getElementById('drawer-title').textContent = data.title;
+    document.getElementById('drawer-body').innerHTML = data.body;
+    const drawer = document.getElementById('node-drawer');
+    drawer.style.transform = 'translateY(0)';
+    drawer.style.borderRight = '1px solid var(--border-hi)';
+  }
+
+  function closeDrawer() {
+    document.getElementById('node-drawer').style.transform = 'translateY(100%)';
+  }
+</script>
+</body>
+</html>
