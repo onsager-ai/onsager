@@ -549,12 +549,15 @@ prompt: |
     if (!text) return;
     ta.value = ''; ta.style.height = 'auto';
 
-    // User bubble
+    // User bubble — use textContent to avoid XSS from typed input
     const feed = document.getElementById('feed');
     const userDiv = document.createElement('div');
     userDiv.className = 'msg-enter flex justify-end';
-    userDiv.innerHTML = `<div class="max-w-xs rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-sm"
-      style="background:#1a2033; color:var(--text-hi); border:1px solid var(--border-hi);">${text}</div>`;
+    const bubble = document.createElement('div');
+    bubble.className = 'max-w-xs rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-sm';
+    bubble.style.cssText = 'background:#1a2033; color:var(--text-hi); border:1px solid var(--border-hi);';
+    bubble.textContent = text;
+    userDiv.appendChild(bubble);
     feed.appendChild(userDiv);
 
     // Streaming assistant reply
