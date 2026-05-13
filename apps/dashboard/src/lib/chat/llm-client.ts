@@ -121,7 +121,7 @@ export async function runChatTurn(args: RunChatArgs): Promise<LlmTurn> {
           "workspace Settings → Credentials.",
       )
     }
-    throw new ApiError(err.error || res.statusText, res.status)
+    throw new ApiError(err.detail || err.error || res.statusText, res.status)
   }
 
   const resp: AnthropicResponse = await res.json()

@@ -195,6 +195,26 @@ impl ModelPricing {
     }
 }
 
+// ── Relay error ────────────────────────────────────────────────────
+
+/// Anthropic returned a non-2xx. Carries the upstream HTTP status and
+/// the (sanitized) response body so the handler can distinguish user-
+/// caused 4xx from provider 5xx and map them to appropriate HTTP status
+/// codes.
+#[derive(Debug)]
+pub struct AnthropicUpstreamError {
+    pub status: u16,
+    pub body: serde_json::Value,
+}
+
+impl std::fmt::Display for AnthropicUpstreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "anthropic API returned {}", self.status)
+    }
+}
+
+impl std::error::Error for AnthropicUpstreamError {}
+
 // ── Client ─────────────────────────────────────────────────────────
 
 pub struct AnthropicClient {
@@ -237,14 +257,19 @@ impl AnthropicClient {
             .context("anthropic relay request failed")?;
 
         if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+            let status = resp.status().as_u16();
+            // Parse as JSON for structured forwarding; fall back to a
+            // plain-string body so nothing is silently discarded.
+            let body = resp
+                .json::<serde_json::Value>()
+                .await
+                .unwrap_or_else(|_| serde_json::json!({}));
             tracing::warn!(
                 status = %status,
                 body = %body,
                 "anthropic relay: non-2xx"
             );
-            anyhow::bail!("anthropic API returned {status}");
+            return Err(AnthropicUpstreamError { status, body }.into());
         }
 
         resp.json::<serde_json::Value>()

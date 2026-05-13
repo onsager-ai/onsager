@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use sqlx::postgres::PgPool;
 
-use crate::anthropic::AnthropicClient;
+use crate::anthropic::{AnthropicClient, AnthropicUpstreamError};
 use crate::auth::{AuthUser, decrypt_credential};
 use crate::credential_db;
 use crate::state::AppState;
@@ -121,10 +121,37 @@ pub async fn create_chat_completion(
         }
     };
 
-    match client.forward(&body.request).await {
+    // Normalize before forwarding:
+    // - `stream` must be absent or false — relay always calls `resp.json()`.
+    // - `model` is passed through `resolve_model` to reject non-Claude ids
+    //   and expand aliases ("sonnet" → full id) consistently.
+    let mut req = body.request.clone();
+    if let Some(obj) = req.as_object_mut() {
+        obj.remove("stream");
+        let model_str = obj
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        let resolved = crate::anthropic::resolve_model(Some(model_str.as_str())).to_owned();
+        obj.insert("model".to_owned(), serde_json::json!(resolved));
+    }
+
+    match client.forward(&req).await {
         Ok(resp) => Json(resp).into_response(),
         Err(e) => {
-            tracing::warn!("anthropic relay error: {e}");
+            if let Some(upstream) = e.downcast_ref::<AnthropicUpstreamError>() {
+                // 4xx = caller error — return the upstream status + body
+                // verbatim so the dashboard can surface Anthropic's message.
+                // 5xx = provider error — map to 502 Bad Gateway.
+                let status = if upstream.status >= 400 && upstream.status < 500 {
+                    StatusCode::from_u16(upstream.status).unwrap_or(StatusCode::BAD_REQUEST)
+                } else {
+                    StatusCode::BAD_GATEWAY
+                };
+                return (status, Json(upstream.body.clone())).into_response();
+            }
+            tracing::warn!("anthropic relay transport error: {e}");
             (
                 StatusCode::BAD_GATEWAY,
                 Json(serde_json::json!({
@@ -167,5 +194,58 @@ mod tests {
         let body: ChatRelayBody = serde_json::from_value(raw).unwrap();
         assert_eq!(body.workspace_id, "ws-xyz");
         assert_eq!(body.request, serde_json::json!({}));
+    }
+
+    /// Guardrail: `stream` is stripped before forwarding.
+    #[test]
+    fn guardrail_strips_stream() {
+        let raw = serde_json::json!({
+            "workspace_id": "ws-1",
+            "model": "claude-opus-4-7",
+            "max_tokens": 256,
+            "stream": true,
+            "messages": [],
+        });
+        let body: ChatRelayBody = serde_json::from_value(raw).unwrap();
+        let mut req = body.request.clone();
+        if let Some(obj) = req.as_object_mut() {
+            obj.remove("stream");
+            let model_str = obj
+                .get("model")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned();
+            let resolved = crate::anthropic::resolve_model(Some(model_str.as_str())).to_owned();
+            obj.insert("model".to_owned(), serde_json::json!(resolved));
+        }
+        let obj = req.as_object().unwrap();
+        assert!(!obj.contains_key("stream"), "stream must be stripped");
+        assert_eq!(obj["model"], "claude-opus-4-7");
+    }
+
+    /// Guardrail: unknown model alias is replaced with the default.
+    #[test]
+    fn guardrail_normalizes_model() {
+        let raw = serde_json::json!({
+            "workspace_id": "ws-2",
+            "model": "gpt-4o",
+            "max_tokens": 512,
+            "messages": [],
+        });
+        let body: ChatRelayBody = serde_json::from_value(raw).unwrap();
+        let mut req = body.request.clone();
+        if let Some(obj) = req.as_object_mut() {
+            obj.remove("stream");
+            let model_str = obj
+                .get("model")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned();
+            let resolved = crate::anthropic::resolve_model(Some(model_str.as_str())).to_owned();
+            obj.insert("model".to_owned(), serde_json::json!(resolved));
+        }
+        let obj = req.as_object().unwrap();
+        // Non-Claude model id falls back to the default.
+        assert_eq!(obj["model"], crate::anthropic::DEFAULT_MODEL);
     }
 }
