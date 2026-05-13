@@ -218,6 +218,40 @@ impl AnthropicClient {
         })
     }
 
+    /// Forward a fully-formed Anthropic Messages API request body verbatim,
+    /// injecting only the auth header and the prompt-caching beta. Used by
+    /// the `/api/chat/completions` relay (spec #318) so the dashboard never
+    /// holds an API key.
+    pub async fn forward(&self, body: &serde_json::Value) -> Result<serde_json::Value> {
+        let url = format!("{}/messages", self.base_url);
+        let resp = self
+            .http
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("anthropic-beta", "prompt-caching-2024-07-31")
+            .header("content-type", "application/json")
+            .json(body)
+            .send()
+            .await
+            .context("anthropic relay request failed")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::warn!(
+                status = %status,
+                body = %body,
+                "anthropic relay: non-2xx"
+            );
+            anyhow::bail!("anthropic API returned {status}");
+        }
+
+        resp.json::<serde_json::Value>()
+            .await
+            .context("decode anthropic relay response")
+    }
+
     pub async fn messages(&self, req: &MessagesRequest<'_>) -> Result<MessagesResponse> {
         let url = format!("{}/messages", self.base_url);
         let resp = self

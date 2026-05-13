@@ -124,6 +124,27 @@ pub async fn delete_user_credential(
     Ok(())
 }
 
+/// Fetch the AES-256-GCM ciphertext for a named credential. Returns
+/// `None` when the credential does not exist. The caller is responsible
+/// for decrypting via `auth::decrypt_credential`.
+pub async fn get_user_credential_encrypted(
+    pool: &PgPool,
+    workspace_id: &str,
+    user_id: &str,
+    name: &str,
+) -> anyhow::Result<Option<String>> {
+    let row = sqlx::query_scalar::<_, String>(
+        "SELECT encrypted_value FROM user_credentials \
+         WHERE workspace_id = $1 AND user_id = $2 AND name = $3",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .bind(name)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
 /// Membership check — used by the credentials route's
 /// `require_workspace_access` helper. Reads from the spine-shared
 /// `workspace_members` table (still owned by stiglab's runtime
