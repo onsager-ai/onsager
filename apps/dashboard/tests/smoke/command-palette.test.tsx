@@ -44,6 +44,6 @@ describe("CommandPalette", () => {
       screen.getByPlaceholderText(/type a command or search/i),
     ).toBeInTheDocument()
     expect(screen.getByText(/new workflow/i)).toBeInTheDocument()
-    expect(screen.getByText(/factory overview/i)).toBeInTheDocument()
+    expect(screen.getByText(/^chat$/i)).toBeInTheDocument()
   })
 })

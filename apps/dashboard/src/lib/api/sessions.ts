@@ -4,8 +4,6 @@ import type { Node, Session, TaskRequest, SessionKind, User, SessionSpend, Spine
 export const sessions = {
   getNodes: (workspaceId: string) =>
     request<{ nodes: Node[] }>(`/nodes${scoped(workspaceId)}`),
-  getSessions: (workspaceId: string) =>
-    request<{ sessions: Session[] }>(`/sessions${scoped(workspaceId)}`),
   getSession: (id: string) => request<{ session: Session }>(`/sessions/${id}`),
   /**
    * Request cancellation of an in-flight session (#303). Best-effort —

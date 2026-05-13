@@ -4,7 +4,7 @@
 //! access goes through `crate::session_db` (PgPool).
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -86,34 +86,6 @@ fn rewrite_workspace_404_to_session(resp: Response) -> Response {
     resp
 }
 
-/// GET /api/sessions?workspace=W
-pub async fn list_sessions(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Query(q): Query<WorkspaceQuery>,
-) -> Response {
-    let workspace_id = q.workspace.trim().to_string();
-    if workspace_id.is_empty() {
-        return missing_workspace();
-    }
-    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workspace_id).await {
-        return r;
-    }
-    match session_db::list_sessions_for_user_in_workspace(
-        &state.pool,
-        &auth_user.user_id,
-        &workspace_id,
-    )
-    .await
-    {
-        Ok(sessions) => Json(serde_json::json!({ "sessions": sessions })).into_response(),
-        Err(e) => {
-            tracing::error!("failed to list sessions: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-        }
-    }
-}
-
 /// GET /api/sessions/:id
 pub async fn get_session(
     State(state): State<AppState>,
@@ -141,6 +113,7 @@ pub async fn get_session(
                     "prompt": session.prompt,
                     "output": output,
                     "working_dir": session.working_dir,
+                    "artifact_id": session.artifact_id,
                     "created_at": session.created_at,
                     "updated_at": session.updated_at,
                 }

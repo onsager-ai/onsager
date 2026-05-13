@@ -271,10 +271,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // inside each handler; the per-install GitHub token is minted fresh
         // (TTL-cached) for each uncached request.
         .route(
-            "/api/projects/{id}/issues",
-            get(live_data_handlers::list_project_issues),
-        )
-        .route(
             "/api/projects/{id}/issues/{number}",
             get(live_data_handlers::get_project_issue),
         )
@@ -295,10 +291,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // `session_requested_listener` dispatches to the agent WebSocket.
         // Post-Slice 6 the edge proxy (Caddy / vite) routes `/api/*` here
         // directly — no stiglab proxy layer.
-        .route(
-            "/api/sessions",
-            get(session_handlers::list_sessions),
-        )
         .route(
             "/api/sessions/{id}",
             get(session_handlers::get_session),
