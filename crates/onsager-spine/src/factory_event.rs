@@ -243,6 +243,25 @@ pub enum FactoryEventKind {
     /// agent node (spec #222 Follow-up 3).
     PortalSessionRequested { session_id: String },
 
+    /// Portal failed to open a GitHub PR for a completed session (spec #273).
+    /// Emitted as a diagnostic signal when the GitHub API call fails, the
+    /// session pushed an empty branch, or the GitHub App is not configured.
+    /// No retry is attempted inside the listener — the operator investigates
+    /// via the dashboard event timeline.
+    PortalPrOpenFailed {
+        /// Issue artifact the session was shaping, if known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        artifact_id: Option<ArtifactId>,
+        /// Branch the session pushed to, if any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
+        /// Workspace the session belongs to.
+        workspace_id: String,
+        /// Short reason code: `"empty_branch"`, `"github_api_error"`,
+        /// `"no_installation"`, `"app_not_configured"`, etc.
+        reason: String,
+    },
+
     /// Dashboard cancel-session request from portal (spec #303). Stiglab's
     /// `session_cancel_requested_listener` looks up the session's node and
     /// forwards a `ServerMessage::CancelSession` to the agent. Best-effort:
@@ -535,6 +554,7 @@ impl FactoryEventKind {
             Self::StiglabSessionAborted { .. } => "stiglab.session_aborted",
             Self::PortalSessionRequested { .. } => "portal.session_requested",
             Self::PortalSessionCancelRequested { .. } => "portal.session_cancel_requested",
+            Self::PortalPrOpenFailed { .. } => "portal.pr_open_failed",
             Self::SynodicGateVerdict { .. } => "synodic.gate_verdict",
             Self::SynodicEscalationStarted { .. } => "synodic.escalation_started",
             Self::SynodicEscalationResolved { .. } => "synodic.escalation_resolved",
@@ -582,9 +602,9 @@ impl FactoryEventKind {
             | Self::StiglabSessionResultReady { .. }
             | Self::StiglabSessionFailed { .. }
             | Self::StiglabSessionAborted { .. } => "stiglab",
-            Self::PortalSessionRequested { .. } | Self::PortalSessionCancelRequested { .. } => {
-                "portal"
-            }
+            Self::PortalSessionRequested { .. }
+            | Self::PortalSessionCancelRequested { .. }
+            | Self::PortalPrOpenFailed { .. } => "portal",
             Self::SynodicGateVerdict { .. }
             | Self::SynodicEscalationStarted { .. }
             | Self::SynodicEscalationResolved { .. }
@@ -636,6 +656,14 @@ impl FactoryEventKind {
             Self::StiglabSessionResultReady { artifact_id, .. } => artifact_id.to_string(),
             Self::PortalSessionRequested { session_id, .. }
             | Self::PortalSessionCancelRequested { session_id, .. } => session_id.clone(),
+            Self::PortalPrOpenFailed {
+                workspace_id,
+                branch,
+                ..
+            } => branch
+                .as_deref()
+                .map(|b| format!("portal:pr_open_failed:{b}"))
+                .unwrap_or_else(|| format!("portal:pr_open_failed:{workspace_id}")),
             Self::SynodicGateVerdict { gate_id, .. } => gate_id.clone(),
             Self::SynodicEscalationStarted { escalation_id, .. } => escalation_id.clone(),
             Self::SynodicEscalationResolved { escalation_id, .. } => escalation_id.clone(),

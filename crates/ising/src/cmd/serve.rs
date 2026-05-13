@@ -286,6 +286,18 @@ fn parse_forge_event(event_type: &str, data: &serde_json::Value) -> Option<Facto
                 outcome,
             })
         }
+        "artifact.archived" => {
+            let artifact_id = data.get("artifact_id")?.as_str()?;
+            let reason = data
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some(FactoryEventKind::ArtifactArchived {
+                artifact_id: ArtifactId::new(artifact_id),
+                reason,
+            })
+        }
         _ => None,
     }
 }

@@ -236,6 +236,10 @@ impl FactoryModel {
                 }
             }
 
+            FactoryEventKind::ArtifactArchived { artifact_id, .. } => {
+                self.artifacts.remove(artifact_id.as_str());
+            }
+
             _ => {}
         }
     }

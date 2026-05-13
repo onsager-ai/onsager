@@ -353,7 +353,22 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         app
     };
 
+    // Clone handles needed by background listeners before consuming state.
+    let listener_pool = state.pool.clone();
+    let listener_spine = state.spine.clone();
+
     let app = app.with_state(state);
+
+    // Spawn the session-completed → PR listener (spec #273). Runs as a
+    // background task; errors are logged and the task exits, but they never
+    // crash the HTTP server.
+    tokio::spawn(async move {
+        if let Err(e) =
+            crate::listeners::session_completed::run(listener_pool, listener_spine).await
+        {
+            tracing::error!("portal: session_completed listener exited: {e}");
+        }
+    });
 
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;
     tracing::info!(bind = %config.bind, "onsager-portal listening");
