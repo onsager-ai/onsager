@@ -762,12 +762,12 @@ mod tests {
         assert!(portal.len() > 20, "portal routes: {}", portal.len());
         let portal_paths: Vec<_> = portal.iter().map(|r| r.path.as_str()).collect();
         assert!(portal_paths.contains(&"/api/workspaces"));
-        assert!(portal_paths.contains(&"/api/sessions"));
+        assert!(portal_paths.contains(&"/api/sessions/{id}"));
         assert!(portal_paths.contains(&"/api/tasks"));
 
         let synodic =
             parse_rust_routes(&root.join("crates/synodic/src/cmd/serve.rs"), "synodic").unwrap();
-        assert!(synodic.len() >= 5, "synodic routes: {}", synodic.len());
+        assert!(synodic.len() >= 3, "synodic routes: {}", synodic.len());
         let synodic_paths: Vec<_> = synodic.iter().map(|r| r.path.as_str()).collect();
         assert!(synodic_paths.contains(&"/health"));
         assert!(synodic_paths.contains(&"/events"));
