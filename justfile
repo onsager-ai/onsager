@@ -33,14 +33,32 @@ test-ui:
 # ── Lint ─────────────────────────────────────────────────────────────
 lint: lint-rust lint-ui
 
-lint-rust:
+lint-rust: _check-tools-and-skills
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo run -p xtask --quiet -- gen-event-docs --check
     cargo run -p xtask --quiet -- lint-seams
     cargo run -p xtask --quiet -- check-api-contract
     cargo run -p xtask --quiet -- check-file-budget --mode=fail
-    ONSAGER_SKILLS_DIR=public-skills cargo run -p xtask --quiet -- check-tools-and-skills
+
+# Resolve the skills bundle then run check-tools-and-skills.
+# Override: ONSAGER_SKILLS_DIR=../onsager-skills just lint  (two-checkout local dev)
+# Default: clones/updates onsager-ai/onsager-skills into target/onsager-skills/
+_check-tools-and-skills:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "${ONSAGER_SKILLS_DIR:-}" ]; then
+        skills_dir="$ONSAGER_SKILLS_DIR"
+    else
+        skills_dir="target/onsager-skills"
+        mkdir -p "$(dirname "$skills_dir")"
+        if [ -d "$skills_dir/.git" ]; then
+            git -C "$skills_dir" fetch --quiet && git -C "$skills_dir" reset --quiet --hard origin/main
+        else
+            git clone --quiet https://github.com/onsager-ai/onsager-skills "$skills_dir"
+        fi
+    fi
+    ONSAGER_SKILLS_DIR="$skills_dir" cargo run -p xtask --quiet -- check-tools-and-skills
 
 lint-ui:
     pnpm --filter dashboard lint
