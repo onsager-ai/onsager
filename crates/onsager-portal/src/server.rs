@@ -8,7 +8,7 @@ use axum::routing::{any, delete, get, post, put};
 use crate::config::Config;
 use crate::gate::GateClient;
 use crate::handlers::{
-    agent_ws, auth as auth_handlers, credentials as credential_handlers,
+    agent_ws, auth as auth_handlers, chat as chat_handlers, credentials as credential_handlers,
     github_app as github_app_handlers, governance as governance_handlers,
     installations as installation_handlers, live_data as live_data_handlers,
     nodes as node_handlers, pats as pat_handlers, projects as project_handlers,
@@ -337,6 +337,13 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // `TELEGRAM_WEBHOOK_SECRET`, then routes the update to active
         // `TelegramWebhook` workflows.
         .route("/webhooks/telegram", post(telegram_webhook::handle))
+        // Chat relay (spec #318). Portal resolves the workspace
+        // `anthropic` credential and forwards the request body to
+        // Anthropic — the API key never reaches the browser.
+        .route(
+            "/api/chat/completions",
+            post(chat_handlers::create_chat_completion),
+        )
         // MCP server (ADR 0007 / #288). JSON-RPC 2.0 over HTTP — the
         // runtime-agnostic public contract for AI clients. Auth reuses
         // the `AuthUser` extractor (PAT or session); workspace-scoped

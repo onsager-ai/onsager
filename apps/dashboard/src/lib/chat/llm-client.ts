@@ -1,21 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk"
+import { API_BASE, ApiError } from "@/lib/api/client"
 import type { McpTool } from "@/lib/mcp-client"
 
-// Latest Claude model id per the claude-api skill (Opus 4.7). The
-// dashboard chat runs same-origin against `/mcp/messages` for tool
-// execution; the LLM call goes direct to Anthropic from the browser
-// (with `dangerouslyAllowBrowser`).
-//
-// **API-key source.** The key is read from `localStorage` at runtime
-// (`onsager.anthropic.apiKey`) — never from `import.meta.env.VITE_*`,
-// which Vite inlines into the build output and would leak the key
-// into every deployed dashboard bundle. The user pastes their key
-// into a settings UI / dev console; it stays in their browser. The
-// proper end-state is a portal-hosted Anthropic relay so the key
-// never touches the browser at all — filed as a follow-up.
+// Latest Claude model id per the claude-api skill (Opus 4.7).
 const DEFAULT_MODEL = "claude-opus-4-7"
 const MAX_TOKENS = 1024
-const API_KEY_STORAGE_KEY = "onsager.anthropic.apiKey"
 
 /**
  * One chat turn from the LLM. `text` is rendered as plain markdown;
@@ -43,12 +31,6 @@ export interface RunChatArgs {
   messages: LlmTurnMessage[]
   tools: McpTool[]
   workspaceId?: string
-  /**
-   * Optional override; defaults to `localStorage["onsager.anthropic.apiKey"]`.
-   * Never read from build-time env (`import.meta.env.VITE_*`) — that
-   * inlines the key into the bundle.
-   */
-  apiKey?: string
   /** Optional model override; defaults to the constant above. */
   model?: string
 }
@@ -73,59 +55,83 @@ const SYSTEM_PROMPT = [
   "  conversation, ask before guessing.",
 ].join("\n")
 
+/** Wire shape of one content block in the Anthropic response. */
+interface AnthropicContentBlock {
+  type: string
+  text?: string
+  id?: string
+  name?: string
+  input?: Record<string, unknown>
+}
+
+/** Minimal Anthropic Messages API response shape the relay returns. */
+interface AnthropicResponse {
+  content: AnthropicContentBlock[]
+}
+
 /**
- * Run one LLM turn. Returns the assistant text + any tool_use blocks.
- * Prompt caching is applied to the system prompt and tool definitions
- * (they are stable across turns within a session); message history
- * is not cached for v1.
+ * Run one LLM turn via the portal relay at `/api/chat/completions`.
+ * The API key never touches the browser — portal resolves it from the
+ * workspace `anthropic` credential (spec #318).
+ *
+ * Prompt caching is applied to the system prompt via `cache_control`;
+ * the relay injects the `anthropic-beta: prompt-caching-2024-07-31`
+ * header server-side.
  */
 export async function runChatTurn(args: RunChatArgs): Promise<LlmTurn> {
-  const apiKey = args.apiKey ?? readApiKey()
-  if (!apiKey) {
+  if (!args.workspaceId) {
     throw new LlmConfigError(
-      `Anthropic API key missing. Set it in your browser via ` +
-        `\`localStorage.setItem("${API_KEY_STORAGE_KEY}", "sk-ant-…")\` ` +
-        "and reload, or pass an explicit `apiKey` to the chat client. " +
-        "(The key is never read from build-time env vars, which would " +
-        "inline it into the dashboard bundle.)",
+      "No workspace selected. Open a workspace to use the chat assistant.",
     )
   }
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
 
   const tools = args.tools.map((t) => ({
     name: t.name,
     description: t.description,
-    input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
+    input_schema: t.inputSchema,
   }))
 
-  const resp = await client.messages.create({
-    model: args.model ?? DEFAULT_MODEL,
-    max_tokens: MAX_TOKENS,
-    system: [
-      {
-        type: "text",
-        text: SYSTEM_PROMPT,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    // `tools` shares the same cache block as the system prompt: when
-    // the tool list is unchanged across turns Anthropic returns a cache
-    // hit on the prefix. The cache_control marker on the last system
-    // block instructs the server to cache everything before the first
-    // user message in this request.
-    tools,
-    messages: args.messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    })),
+  const res = await fetch(`${API_BASE}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspace_id: args.workspaceId,
+      model: args.model ?? DEFAULT_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: [
+        {
+          type: "text",
+          text: SYSTEM_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+      tools,
+      messages: args.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+    }),
   })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    if (res.status === 422 && err.error === "anthropic_credential_missing") {
+      throw new LlmConfigError(
+        "Anthropic credential not set. Add an `anthropic` credential in " +
+          "workspace Settings → Credentials.",
+      )
+    }
+    throw new ApiError(err.detail || err.error || res.statusText, res.status)
+  }
+
+  const resp: AnthropicResponse = await res.json()
 
   let text = ""
   const toolCalls: LlmToolCall[] = []
   for (const block of resp.content) {
-    if (block.type === "text") {
+    if (block.type === "text" && block.text != null) {
       text += block.text
-    } else if (block.type === "tool_use") {
+    } else if (block.type === "tool_use" && block.id && block.name) {
       toolCalls.push({
         id: block.id,
         name: block.name,
@@ -134,10 +140,4 @@ export async function runChatTurn(args: RunChatArgs): Promise<LlmTurn> {
     }
   }
   return { text, toolCalls }
-}
-
-function readApiKey(): string | undefined {
-  if (typeof window === "undefined" || !window.localStorage) return undefined
-  const v = window.localStorage.getItem(API_KEY_STORAGE_KEY)
-  return v && v.trim() !== "" ? v : undefined
 }
