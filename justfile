@@ -51,8 +51,9 @@ _check-tools-and-skills:
         skills_dir="$ONSAGER_SKILLS_DIR"
     else
         skills_dir="target/onsager-skills"
+        mkdir -p "$(dirname "$skills_dir")"
         if [ -d "$skills_dir/.git" ]; then
-            git -C "$skills_dir" fetch --quiet && git -C "$skills_dir" reset --hard origin/main --quiet
+            git -C "$skills_dir" fetch --quiet && git -C "$skills_dir" reset --quiet --hard origin/main
         else
             git clone --quiet https://github.com/onsager-ai/onsager-skills "$skills_dir"
         fi
