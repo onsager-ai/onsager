@@ -567,14 +567,19 @@ the same PR that introduces them.
   system owns. Provider-authored fields (title, body, labels, author)
   are hydrated live by the dashboard through a portal proxy
   (`crates/onsager-portal/src/handlers/live_data.rs`) backed by a short-
-  TTL per-installation cache (`proxy_cache.rs`). New external integrations
-  inherit this by default: ship a proxy, not a denormalizer.
+  TTL process-local cache (`proxy_cache.rs`, keyed by project/resource,
+  shared across all installations in a replica). New external integrations
+  inherit this by default: ship a proxy, not a denormalizer. Enforced
+  today by review and `crates/onsager-portal/tests/reference_only_artifacts.rs`,
+  which pins the existing PR/issue helpers; a mechanical lint for new
+  external-origin write paths is a follow-up.
 
 The strategy spec #131 captures the full reasoning and the six-lever plan
-that made these contracts enforced. The patterns above are now caught
-mechanically by `lint-seams`, `check-api-contract`, and `check-events`;
-the bullets stay as a glossary of the failure modes those checks were
-designed against.
+that made these contracts enforced. The first five bullets above are now
+caught mechanically by `lint-seams`, `check-api-contract`, and
+`check-events`; the bullets stay as a glossary of the failure modes those
+checks were designed against. The denormalized-external-state bullet is
+the exception — review + contract test today, mechanical check pending.
 
 ## Workspace layout
 
