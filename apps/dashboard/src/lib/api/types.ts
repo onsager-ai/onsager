@@ -17,6 +17,7 @@ export interface Session {
   prompt: string;
   output: string | null;
   working_dir: string | null;
+  artifact_id: string | null;
   created_at: string;
   updated_at: string;
 }

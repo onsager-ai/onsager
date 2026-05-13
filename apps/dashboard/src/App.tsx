@@ -14,35 +14,11 @@ import { readLastUsedWorkspace, WorkspaceScope } from "@/lib/workspace"
 import { DevModeBanner } from "@/components/layout/DevModeBanner"
 import type { ReactNode } from "react"
 
-const FactoryOverviewPage = lazy(() =>
-  import("@/pages/FactoryOverviewPage").then((m) => ({ default: m.FactoryOverviewPage })),
-)
-const ArtifactsPage = lazy(() =>
-  import("@/pages/ArtifactsPage").then((m) => ({ default: m.ArtifactsPage })),
-)
-const IssuesPage = lazy(() =>
-  import("@/pages/IssuesPage").then((m) => ({ default: m.IssuesPage })),
-)
 const IssueDetailPage = lazy(() =>
   import("@/pages/IssueDetailPage").then((m) => ({ default: m.IssueDetailPage })),
 )
 const ArtifactDetailPage = lazy(() =>
   import("@/pages/ArtifactDetailPage").then((m) => ({ default: m.ArtifactDetailPage })),
-)
-const SpinePage = lazy(() =>
-  import("@/pages/SpinePage").then((m) => ({ default: m.SpinePage })),
-)
-const GovernancePage = lazy(() =>
-  import("@/pages/GovernancePage").then((m) => ({ default: m.GovernancePage })),
-)
-const SessionsPage = lazy(() =>
-  import("@/pages/SessionsPage").then((m) => ({ default: m.SessionsPage })),
-)
-const SessionDetailPage = lazy(() =>
-  import("@/pages/SessionDetailPage").then((m) => ({ default: m.SessionDetailPage })),
-)
-const NodesPage = lazy(() =>
-  import("@/pages/NodesPage").then((m) => ({ default: m.NodesPage })),
 )
 const WorkspacesPage = lazy(() =>
   import("@/pages/WorkspacesPage").then((m) => ({ default: m.WorkspacesPage })),
@@ -179,61 +155,33 @@ function BarePathRedirect() {
   return <Navigate to={`/workspaces/${active.slug}`} replace />
 }
 
-// Issue #82 first-run redirect: when an authed user with ≥1 workspace has
-// zero workflows and lands on a workspace overview, bounce them to that
-// workspace's workflows page once so the stepped hero can pitch the
-// factory. Dismissed for the rest of the session via sessionStorage so
-// they can navigate freely afterwards.
-const WORKFLOWS_ONBOARDING_SEEN_KEY = "onsager.workflows_onboarding_seen"
+// Builds an absolute workspace-scoped redirect from a relative suffix.
+// Used by the bookmark-preserving redirects (spec #306) so each redirect
+// doesn't have to thread the :workspace param manually.
+function WorkspaceRedirect({ to }: { to: string }) {
+  const { workspace } = useParams<{ workspace: string }>()
+  return <Navigate to={`/workspaces/${workspace}/${to}`} replace />
+}
 
-function WorkflowsFirstRunGate({ children }: { children: ReactNode }) {
-  const location = useLocation()
-  const params = useParams<{ workspace?: string }>()
-  const slug = params.workspace ?? ""
-
-  // Fire both queries in parallel — the old code chained `workflows` on
-  // `hasWorkspace`, which serialized two RTTs. The workflows endpoint is
-  // safe to call without a workspace (it filters by the current user's
-  // membership); we only *use* the result when `hasWorkspace` is true.
-  const { data: workspacesData } = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: api.listWorkspaces,
-    staleTime: 30_000,
+// Resolves a legacy `sessions/:id` bookmark to its run. Fetches the session
+// and redirects to /runs/:artifact_id when the session is linked to a run;
+// falls back to /workflows when the session has no run or isn't found.
+function SessionIdRedirect() {
+  const { workspace, id } = useParams<{ workspace: string; id: string }>()
+  const { data, isLoading } = useQuery({
+    queryKey: ["session", id],
+    queryFn: () => api.getSession(id!),
+    retry: 1,
+    staleTime: 0,
   })
-  const hasWorkspace = (workspacesData?.workspaces?.length ?? 0) > 0
 
-  const { data: workflowsData, isLoading: workflowsLoading } = useQuery({
-    queryKey: ["workflows", "user"],
-    queryFn: () => api.listWorkflowsForUser(),
-    staleTime: 30_000,
-  })
-  const workflowsCount = workflowsData?.workflows?.length ?? 0
+  if (isLoading) return null
 
-  const seen =
-    typeof window !== "undefined" &&
-    window.sessionStorage.getItem(WORKFLOWS_ONBOARDING_SEEN_KEY) === "1"
-
-  const onWorkflows = location.pathname.includes("/workflows")
-  const onWorkspaceOverview =
-    !!slug && location.pathname === `/workspaces/${slug}`
-
-  useEffect(() => {
-    if (onWorkflows && typeof window !== "undefined") {
-      window.sessionStorage.setItem(WORKFLOWS_ONBOARDING_SEEN_KEY, "1")
-    }
-  }, [onWorkflows])
-
-  if (
-    hasWorkspace &&
-    !workflowsLoading &&
-    workflowsCount === 0 &&
-    !seen &&
-    onWorkspaceOverview
-  ) {
-    return <Navigate to={`/workspaces/${slug}/workflows`} replace />
+  const artifactId = data?.session?.artifact_id
+  if (artifactId) {
+    return <Navigate to={`/workspaces/${workspace}/runs/${artifactId}`} replace />
   }
-
-  return <>{children}</>
+  return <Navigate to={`/workspaces/${workspace}/workflows`} replace />
 }
 
 function AppRoutes() {
@@ -285,80 +233,58 @@ function AppRoutes() {
                     path="/workspaces/:workspace/*"
                     element={
                       <WorkspaceScope>
-                        <WorkflowsFirstRunGate>
-                          <Routes>
-                            {/* `index` matches the parent's exact path.
-                                A nested `path="/"` is absolute and would
-                                never match `/workspaces/:workspace`. */}
-                            <Route
-                              index
-                              element={<LazyRoute><FactoryOverviewPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="chat"
-                              element={<LazyRoute><ChatPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="artifacts"
-                              element={<LazyRoute variant="list"><ArtifactsPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="artifacts/:id"
-                              element={<LazyRoute variant="detail"><ArtifactDetailPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="issues"
-                              element={<LazyRoute variant="list"><IssuesPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="issues/:projectId/:number"
-                              element={<LazyRoute variant="detail"><IssueDetailPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="spine"
-                              element={<LazyRoute variant="list"><SpinePage /></LazyRoute>}
-                            />
-                            <Route
-                              path="governance"
-                              element={<LazyRoute><GovernancePage /></LazyRoute>}
-                            />
-                            <Route
-                              path="sessions"
-                              element={<LazyRoute variant="list"><SessionsPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="sessions/:id"
-                              element={<LazyRoute variant="detail"><SessionDetailPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="nodes"
-                              element={<LazyRoute variant="list"><NodesPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="workflows"
-                              element={<LazyRoute variant="list"><WorkflowsPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="workflows/start"
-                              element={<LazyRoute><WorkflowStartPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="workflows/:id"
-                              element={<LazyRoute variant="detail"><WorkflowDetailPage /></LazyRoute>}
-                            />
-                            {/* Run detail hub (#303). Flat route — runs
-                                have unique IDs (artifact_id), so they
-                                don't need to be nested under workflow. */}
-                            <Route
-                              path="runs/:runId"
-                              element={<LazyRoute variant="detail"><RunDetailPage /></LazyRoute>}
-                            />
-                            <Route
-                              path="settings"
-                              element={<LazyRoute><WorkspaceSettingsPage /></LazyRoute>}
-                            />
-                          </Routes>
-                        </WorkflowsFirstRunGate>
+                        <Routes>
+                          {/* Bare workspace path → workflows (spec #306). */}
+                          <Route
+                            index
+                            element={<Navigate to="workflows" replace />}
+                          />
+                          <Route
+                            path="chat"
+                            element={<LazyRoute><ChatPage /></LazyRoute>}
+                          />
+                          {/* Bookmark redirects (spec #306). Preserves any
+                              in-the-wild URLs after top-level surfaces were
+                              demoted in the two-surface IA (#289). */}
+                          <Route path="sessions" element={<WorkspaceRedirect to="workflows" />} />
+                          <Route path="sessions/:id" element={<SessionIdRedirect />} />
+                          <Route path="artifacts" element={<WorkspaceRedirect to="workflows" />} />
+                          <Route path="spine" element={<WorkspaceRedirect to="workflows" />} />
+                          <Route path="governance" element={<WorkspaceRedirect to="settings#governance-audit" />} />
+                          <Route path="issues" element={<WorkspaceRedirect to="workflows" />} />
+                          <Route
+                            path="issues/:projectId/:number"
+                            element={<LazyRoute variant="detail"><IssueDetailPage /></LazyRoute>}
+                          />
+                          <Route path="nodes" element={<WorkspaceRedirect to="settings#infrastructure" />} />
+                          <Route
+                            path="artifacts/:id"
+                            element={<LazyRoute variant="detail"><ArtifactDetailPage /></LazyRoute>}
+                          />
+                          <Route
+                            path="workflows"
+                            element={<LazyRoute variant="list"><WorkflowsPage /></LazyRoute>}
+                          />
+                          <Route
+                            path="workflows/start"
+                            element={<LazyRoute><WorkflowStartPage /></LazyRoute>}
+                          />
+                          <Route
+                            path="workflows/:id"
+                            element={<LazyRoute variant="detail"><WorkflowDetailPage /></LazyRoute>}
+                          />
+                          {/* Run detail hub (#303). Flat route — runs
+                              have unique IDs (artifact_id), so they
+                              don't need to be nested under workflow. */}
+                          <Route
+                            path="runs/:runId"
+                            element={<LazyRoute variant="detail"><RunDetailPage /></LazyRoute>}
+                          />
+                          <Route
+                            path="settings"
+                            element={<LazyRoute><WorkspaceSettingsPage /></LazyRoute>}
+                          />
+                        </Routes>
                       </WorkspaceScope>
                     }
                   />

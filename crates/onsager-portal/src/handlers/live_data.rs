@@ -174,18 +174,6 @@ struct LivePull {
 // ── Dashboard-shaped response types ──────────────────────────────────────
 
 #[derive(Debug, Serialize)]
-struct LiveIssueRow {
-    number: u64,
-    title: String,
-    state: String,
-    html_url: String,
-    author: Option<String>,
-    labels: Vec<String>,
-    comments: u32,
-    updated_at: String,
-}
-
-#[derive(Debug, Serialize)]
 struct LiveIssueDetailRow {
     number: u64,
     title: String,
@@ -221,120 +209,11 @@ struct LivePullRow {
     updated_at: String,
 }
 
-// ── GET /api/projects/:id/issues ──────────────────────────────────────────
+// ── GET /api/projects/:id/issues (list) removed (spec #306) ─────────────
 
 #[derive(Debug, Deserialize, Default)]
 pub struct ListLiveQuery {
     pub state: Option<String>,
-}
-
-/// GET `/api/projects/:id/issues?state=open|closed|all`.
-pub async fn list_project_issues(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(project_id): Path<String>,
-    Query(filters): Query<ListLiveQuery>,
-) -> Response {
-    let project = match require_project_for_user(&state, &auth_user, &project_id).await {
-        Ok(p) => p,
-        Err(r) => return r,
-    };
-
-    let state_q = match normalize_state(filters.state.as_deref()) {
-        Ok(s) => s,
-        Err(r) => return r,
-    };
-    let cache_key = format!("issues:{project_id}:{state_q}");
-    if let Some(cached) = state.proxy_cache.get(&cache_key) {
-        return Json(cached).into_response();
-    }
-
-    let token = match installation_token_for(&state.pool, &project.github_app_installation_id).await
-    {
-        Ok(Some(t)) => t,
-        Ok(None) => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({ "error": "GitHub App not configured" })),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            tracing::error!("installation_token_for failed: {e}");
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({ "error": "GitHub auth failed" })),
-            )
-                .into_response();
-        }
-    };
-
-    let url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/issues?state={state_q}&per_page=100",
-        owner = project.repo_owner,
-        repo = project.repo_name,
-    );
-    let resp = match gh_client()
-        .get(&url)
-        .bearer_auth(&token.token)
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!("github issues fetch failed: {e}");
-            return Json(serde_json::json!({ "issues": [], "error": "github_unreachable" }))
-                .into_response();
-        }
-    };
-
-    if resp.status() == reqwest::StatusCode::FORBIDDEN
-        || resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
-    {
-        return Json(serde_json::json!({ "issues": [], "error": "rate_limited" })).into_response();
-    }
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let snippet = resp.text().await.unwrap_or_default();
-        tracing::warn!(%status, "github issues fetch non-2xx: {snippet}");
-        return (
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": "github API error" })),
-        )
-            .into_response();
-    }
-
-    let parsed: Vec<LiveIssue> = match resp.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("github issues parse failed: {e}");
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({ "error": "github response parse failed" })),
-            )
-                .into_response();
-        }
-    };
-
-    let rows: Vec<LiveIssueRow> = parsed
-        .into_iter()
-        .filter(|i| i.pull_request.is_none())
-        .map(|i| LiveIssueRow {
-            number: i.number,
-            title: i.title,
-            state: i.state,
-            html_url: i.html_url,
-            author: i.user.map(|u| u.login),
-            labels: i.labels.into_iter().map(|l| l.name).collect(),
-            comments: i.comments,
-            updated_at: i.updated_at,
-        })
-        .collect();
-
-    let body = serde_json::json!({ "issues": rows });
-    state.proxy_cache.put(cache_key, body.clone());
-    Json(body).into_response()
 }
 
 // ── GET /api/projects/:id/issues/:number ─────────────────────────────────

@@ -14,13 +14,13 @@ use axum::response::IntoResponse;
 use axum::routing::{get, patch};
 use axum::{Json, Router};
 use clap::Parser;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::core::engine_cache::EngineCache;
 use crate::core::storage::pool::{create_storage, resolve_database_url};
 use crate::core::storage::{
-    CreateGovernanceEvent, GovernanceEvent, GovernanceEventFilters, RuleProposal, Storage,
+    CreateGovernanceEvent, GovernanceEvent, GovernanceEventFilters, Storage,
 };
 
 /// Run the Synodic web server (dashboard + API)
@@ -126,18 +126,14 @@ impl ServeCmd {
             spine: spine.clone(),
         };
 
+        // `/stats`, `/rules`, `/rule-proposals*` removed in spec #306 —
+        // GovernancePage deleted; governance audit moved to Settings (#289 PR 5).
+        // `/gate` removed in Lever C phase 5 (#148) — forge calls synodic via
+        // the spine (`forge.gate_requested` → `synodic.gate_verdict`) instead.
         let api = Router::new()
             .route("/health", get(health))
             .route("/events", get(list_events).post(create_event))
-            .route("/events/{id}/resolve", patch(resolve_event))
-            .route("/stats", get(get_stats))
-            .route("/rules", get(list_rules))
-            // `/gate` removed in Lever C phase 5 (#148) — forge calls
-            // synodic via the spine (`forge.gate_requested` →
-            // `synodic.gate_verdict`) instead of HTTP.
-            // Rule proposal queue (issue #36 Step 2)
-            .route("/rule-proposals", get(list_rule_proposals))
-            .route("/rule-proposals/{id}/resolve", patch(resolve_rule_proposal));
+            .route("/events/{id}/resolve", patch(resolve_event));
 
         // Spawn the ising.rule_proposed listener on the shared spine
         // handle (issue #36 Step 2). A missing spine handle is non-fatal —
@@ -280,135 +276,6 @@ async fn resolve_event(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Serialize)]
-struct Stats {
-    total: usize,
-    unresolved: usize,
-    by_type: HashMap<String, usize>,
-    by_severity: HashMap<String, usize>,
-}
-
-async fn get_stats(State(store): State<Arc<dyn Storage>>) -> Result<Json<Stats>, AppError> {
-    let events = store
-        .get_governance_events(GovernanceEventFilters::default())
-        .await?;
-
-    let total = events.len();
-    let unresolved = events.iter().filter(|e| !e.resolved).count();
-
-    let mut by_type: HashMap<String, usize> = HashMap::new();
-    let mut by_severity: HashMap<String, usize> = HashMap::new();
-
-    for e in &events {
-        *by_type.entry(e.event_type.clone()).or_default() += 1;
-        *by_severity.entry(e.severity.clone()).or_default() += 1;
-    }
-
-    Ok(Json(Stats {
-        total,
-        unresolved,
-        by_type,
-        by_severity,
-    }))
-}
-
-#[derive(Serialize)]
-struct ApiRule {
-    name: String,
-    description: String,
-    pattern: String,
-    event_type: String,
-    severity: String,
-    category_id: String,
-    enabled: bool,
-}
-
-async fn list_rules(State(store): State<Arc<dyn Storage>>) -> Result<Json<Vec<ApiRule>>, AppError> {
-    let rules = store.get_rules(false).await?;
-    let categories = store.get_threat_categories().await?;
-
-    // Build a lookup from category_id → severity
-    let severity_map: HashMap<String, String> =
-        categories.into_iter().map(|c| (c.id, c.severity)).collect();
-
-    let api_rules: Vec<ApiRule> = rules
-        .into_iter()
-        .map(|r| {
-            let severity = severity_map
-                .get(&r.category_id)
-                .cloned()
-                .unwrap_or_else(|| "medium".to_string());
-            ApiRule {
-                name: r.id,
-                description: r.description,
-                pattern: r.condition_value,
-                event_type: r.condition_type,
-                severity,
-                category_id: r.category_id,
-                enabled: r.enabled,
-            }
-        })
-        .collect();
-
-    Ok(Json(api_rules))
-}
-
-// ---------------------------------------------------------------------------
-// Rule proposal queue (issue #36 Step 2)
-// ---------------------------------------------------------------------------
-
-async fn list_rule_proposals(
-    State(store): State<Arc<dyn Storage>>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<Vec<RuleProposal>>, AppError> {
-    let status = params.get("status").map(String::as_str);
-    let proposals = store.list_rule_proposals(status).await?;
-    Ok(Json(proposals))
-}
-
-#[derive(Deserialize)]
-struct ResolveProposalBody {
-    status: String,
-    notes: Option<String>,
-}
-
-async fn resolve_rule_proposal(
-    State(store): State<Arc<dyn Storage>>,
-    Path(id): Path<String>,
-    Json(body): Json<ResolveProposalBody>,
-) -> Result<StatusCode, AppError> {
-    if body.status != "approved" && body.status != "rejected" {
-        return Err(AppError::BadRequest(format!(
-            "status must be approved or rejected, got {}",
-            body.status
-        )));
-    }
-    match store
-        .resolve_rule_proposal(&id, &body.status, body.notes)
-        .await
-    {
-        Ok(()) => Ok(StatusCode::NO_CONTENT),
-        Err(e) => Err(classify_resolve_error(e)),
-    }
-}
-
-/// Turn the storage layer's combined "not found / already resolved" error
-/// string into the HTTP response the client expects. 404 when the id is
-/// absent, 409 when the row is already terminal, 400 for anything else.
-/// Matches the UX of the existing `/events/:id/resolve` endpoint, which
-/// distinguishes missing ids up front with a separate lookup.
-fn classify_resolve_error(err: anyhow::Error) -> AppError {
-    let msg = err.to_string();
-    let lower = msg.to_ascii_lowercase();
-    if lower.contains("not found") {
-        AppError::NotFound(msg)
-    } else if lower.contains("already resolved") {
-        AppError::Conflict(msg)
-    } else {
-        AppError::BadRequest(msg)
-    }
-}
-
 // `POST /api/escalations/{id}/propose-resolution` was the HTTP entry
 // point for issue #37's escalation-resolution-proposals flow; deleted
 // in #211 (no caller in-tree, and the
@@ -431,7 +298,6 @@ enum AppError {
     Internal(anyhow::Error),
     NotFound(String),
     BadRequest(String),
-    Conflict(String),
 }
 
 impl From<anyhow::Error> for AppError {
@@ -458,11 +324,6 @@ impl IntoResponse for AppError {
                 .into_response(),
             Self::BadRequest(msg) => (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": msg })),
-            )
-                .into_response(),
-            Self::Conflict(msg) => (
-                StatusCode::CONFLICT,
                 Json(serde_json::json!({ "error": msg })),
             )
                 .into_response(),

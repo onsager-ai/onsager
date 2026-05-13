@@ -8,17 +8,11 @@ import {
 } from "react"
 import { useNavigate } from "react-router-dom"
 import {
-  Activity,
   Building2,
-  Factory,
   GitBranch,
-  Inbox,
   MessageSquare,
-  Package,
   Search,
-  Server,
   Settings as SettingsIcon,
-  Shield,
   Terminal,
   Zap,
 } from "lucide-react"
@@ -124,9 +118,6 @@ function CommandPaletteDialog() {
     activeWorkspace
       ? `/workspaces/${activeWorkspace.slug}/${suffix}`
       : "/workspaces"
-  const overview = activeWorkspace
-    ? `/workspaces/${activeWorkspace.slug}`
-    : "/workspaces"
 
   return (
     <>
@@ -178,37 +169,9 @@ function CommandPaletteDialog() {
                 <GitBranch className="mr-2 h-4 w-4" />
                 Workflows
               </CommandItem>
-              <CommandItem keywords={["overview"]} onSelect={() => go(overview)}>
-                <Factory className="mr-2 h-4 w-4" />
-                Factory overview
-              </CommandItem>
               <CommandItem onSelect={() => go("/workspaces")}>
                 <Building2 className="mr-2 h-4 w-4" />
                 Workspaces
-              </CommandItem>
-              <CommandItem onSelect={() => go(scoped("issues"))}>
-                <Inbox className="mr-2 h-4 w-4" />
-                Issues
-              </CommandItem>
-              <CommandItem onSelect={() => go(scoped("artifacts"))}>
-                <Package className="mr-2 h-4 w-4" />
-                Artifacts
-              </CommandItem>
-              <CommandItem onSelect={() => go(scoped("spine"))}>
-                <Activity className="mr-2 h-4 w-4" />
-                Event spine
-              </CommandItem>
-              <CommandItem onSelect={() => go(scoped("governance"))}>
-                <Shield className="mr-2 h-4 w-4" />
-                Governance
-              </CommandItem>
-              <CommandItem onSelect={() => go(scoped("sessions"))}>
-                <Terminal className="mr-2 h-4 w-4" />
-                Sessions
-              </CommandItem>
-              <CommandItem onSelect={() => go(scoped("nodes"))}>
-                <Server className="mr-2 h-4 w-4" />
-                Nodes
               </CommandItem>
               <CommandItem onSelect={() => go("/settings")}>
                 <SettingsIcon className="mr-2 h-4 w-4" />
