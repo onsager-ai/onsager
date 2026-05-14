@@ -11,7 +11,7 @@
       "source": "onsager-ai/onsager-skills",
       "sourceType": "github",
       "skillPath": "skills/plan-dag/SKILL.md",
-      "computedHash": "ac6bba7a964bc92cf2756223e2593588a59e67c60fd0702f265d0dc2a7f76f56"
+      "computedHash": "de4868e3c23f0e5d128a9a8f1e52483674d05cf1f027132d16958d52859106a7"
     },
     "web-design-guidelines": {
       "source": "vercel-labs/agent-skills",
