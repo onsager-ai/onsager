@@ -29,8 +29,15 @@ ALTER TABLE workflows
 -- 2. Per-artifact pinned version. Nullable so existing rows survive the
 --    migration; new artifact registrations through the workflow
 --    activation path will populate it.
+--
+--    `ON DELETE SET NULL` mirrors the same posture migration 015 set on
+--    `artifacts.workflow_id`. Without it, deleting a workflow would
+--    cascade-delete its `workflow_versions` rows (FK from migration 022)
+--    which the artifacts FK would then refuse — recreating the FK-delete
+--    deadlock #233 fixed for the workflow-id column.
 ALTER TABLE artifacts
-    ADD COLUMN IF NOT EXISTS workflow_version_id TEXT REFERENCES workflow_versions(version_id);
+    ADD COLUMN IF NOT EXISTS workflow_version_id TEXT
+        REFERENCES workflow_versions(version_id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_artifacts_workflow_version
     ON artifacts (workflow_version_id);

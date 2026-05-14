@@ -427,7 +427,7 @@ pub async fn list_changes_for_workflow(
                 before_content, after_content, reason, created_at \
            FROM workflow_changes \
           WHERE workflow_id = $1 \
-          ORDER BY change_id DESC \
+          ORDER BY created_at DESC, change_id DESC \
           LIMIT $2",
     )
     .bind(workflow_id)

@@ -303,6 +303,7 @@ pub async fn delete_workflow(pool: &PgPool, workflow_id: &str) -> anyhow::Result
     sqlx::query(
         "UPDATE artifacts \
             SET workflow_id            = NULL, \
+                workflow_version_id    = NULL, \
                 current_stage_index    = NULL, \
                 workflow_parked_reason = NULL \
           WHERE workflow_id = $1",
