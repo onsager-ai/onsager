@@ -488,7 +488,7 @@ def render_png(ir, out_path):
         sys.exit("`dot -Tsvg` timed out after 10s.")
     if svg_res.returncode != 0:
         sys.stderr.write(svg_res.stderr)
-        sys.exit(svg_res.returncode)
+        sys.exit(svg_res.returncode or 1)
 
     try:
         png_res = subprocess.run(
@@ -499,7 +499,7 @@ def render_png(ir, out_path):
         sys.exit("svg-to-png.mjs timed out after 30s.")
     if png_res.returncode != 0:
         sys.stderr.write(png_res.stderr)
-        sys.exit(png_res.returncode)
+        sys.exit(png_res.returncode or 1)
     sys.stderr.write(png_res.stderr)
 
 
