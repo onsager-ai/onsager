@@ -21,11 +21,16 @@ CREATE TABLE IF NOT EXISTS workflow_library (
     version         INTEGER NOT NULL,
     workflow_json   JSONB NOT NULL,
     registered_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (spec_kind, version)
+    CONSTRAINT workflow_library_kind_version_unique UNIQUE (spec_kind, version)
 );
 
--- `latest()` picks `MAX(version)` per kind; an index ordered by
--- `(spec_kind, version DESC)` lets the planner answer that with a
--- straight index scan instead of a sort.
-CREATE INDEX IF NOT EXISTS idx_workflow_library_kind_version
-    ON workflow_library (spec_kind, version DESC);
+-- The named unique constraint above creates a btree index on
+-- `(spec_kind, version)`. Postgres can answer `WHERE spec_kind = $1
+-- ORDER BY version DESC LIMIT 1` by scanning that index backward, so
+-- a separate `version DESC` index would be redundant write/storage
+-- cost on every registration.
+--
+-- The substrate keys `DuplicateKind` off the constraint *name* (not
+-- the generic "unique violation" SQLSTATE) so unrelated future
+-- uniqueness constraints — e.g. the primary key on `id` — don't get
+-- misclassified.

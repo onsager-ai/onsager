@@ -147,44 +147,131 @@ async fn workflow_roundtrips_through_register_and_lookup() {
     cleanup(&pool, &kind).await;
 }
 
+/// Drive `register` through a deterministic collision on (kind, 1)
+/// so we observe its error-mapping path — not just the raw database
+/// constraint. The pattern: open a transaction that inserts at v=1
+/// but doesn't commit; in parallel, call `register` (which under
+/// READ COMMITTED can't see the uncommitted row, so its `MAX+1`
+/// also picks v=1 and its INSERT blocks on the unique constraint);
+/// then commit the blocker, which forces `register`'s INSERT to
+/// fail with the kind+version unique violation, which `register`
+/// must map to `WorkflowLibraryError::DuplicateKind`.
 #[tokio::test]
-async fn duplicate_kind_version_surfaces_as_error() {
+async fn register_maps_kind_version_collision_to_duplicate_kind() {
     let Some(url) = db_url() else {
         eprintln!("skipping: DATABASE_URL not set");
         return;
     };
     let pool = PgPool::connect(&url).await.unwrap();
-    let kind = unique_kind("sub04_dupe");
+    let kind = unique_kind("sub04_register_dupe");
     cleanup(&pool, &kind).await;
 
-    let lib = WorkflowLibrary::new(pool.clone());
-
-    // Land version 1 normally.
-    let w1 = sample_workflow("dupe_v1");
-    let v1 = lib.register(&kind, &w1).await.expect("register v1");
-    assert_eq!(v1, 1);
-
-    // Manufacture a colliding write at (kind, 1) directly — the
-    // unique constraint on (spec_kind, version) is what
-    // `DuplicateKind` maps in the public API. Doing this via raw SQL
-    // avoids depending on a race for determinism.
-    let json = serde_json::to_value(sample_workflow("dupe_v1_again")).unwrap();
-    let direct_err = sqlx::query(
+    // Blocker transaction: holds an uncommitted row at v=1.
+    let mut blocker = pool.begin().await.expect("begin blocker tx");
+    let blocker_json = serde_json::to_value(sample_workflow("blocker")).unwrap();
+    sqlx::query(
         "INSERT INTO workflow_library (id, spec_kind, version, workflow_json) \
          VALUES ($1, $2, 1, $3)",
     )
     .bind(uuid::Uuid::new_v4().to_string())
     .bind(&kind)
+    .bind(&blocker_json)
+    .execute(&mut *blocker)
+    .await
+    .expect("blocker insert");
+
+    // Spawn `register` from outside the blocker's transaction. Its
+    // SELECT MAX runs under a separate connection that sees no
+    // committed rows for this kind, computes `next = 1`, and tries
+    // to INSERT at (kind, 1) — which blocks on the unique constraint
+    // until the blocker commits.
+    let lib = WorkflowLibrary::new(pool.clone());
+    let kind_for_task = kind.clone();
+    let racer_workflow = sample_workflow("racer");
+    let racer = tokio::spawn(async move { lib.register(&kind_for_task, &racer_workflow).await });
+
+    // Give the spawned task a moment to enqueue its INSERT and hit
+    // the row lock. 200ms is generous on local Postgres; the test
+    // remains correct if it's longer.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Releasing the blocker commits its row at v=1; the racer's
+    // INSERT is now refused by the unique constraint.
+    blocker.commit().await.expect("commit blocker");
+
+    match racer.await.expect("join racer") {
+        Err(WorkflowLibraryError::DuplicateKind { kind: k, version }) => {
+            assert_eq!(k, kind);
+            // The error reports whatever version is now live — i.e.
+            // the blocker's v=1.
+            assert_eq!(version, 1);
+        }
+        other => panic!("expected DuplicateKind through register, got: {other:?}"),
+    }
+
+    cleanup(&pool, &kind).await;
+}
+
+/// An unrelated unique-constraint violation (the primary key on
+/// `id`) must NOT be reported as `DuplicateKind`. This pins
+/// `register`'s constraint-name check so future schema additions
+/// (more unique constraints on the table) don't get silently
+/// misclassified.
+#[tokio::test]
+async fn unrelated_unique_violation_does_not_surface_as_duplicate_kind() {
+    let Some(url) = db_url() else {
+        eprintln!("skipping: DATABASE_URL not set");
+        return;
+    };
+    let pool = PgPool::connect(&url).await.unwrap();
+    let kind = unique_kind("sub04_pk_dupe");
+    cleanup(&pool, &kind).await;
+
+    // Take a row id and pre-insert at v=99 to force a PK collision
+    // by re-inserting the same id from a separate path. We don't
+    // have a public hook to control `register`'s generated id, so we
+    // instead exercise the constraint directly and verify the error
+    // shape — confirming that `is_unique_violation()` alone would
+    // misclassify it.
+    let fixed_id = uuid::Uuid::new_v4().to_string();
+    let json = serde_json::to_value(sample_workflow("pk_dupe")).unwrap();
+
+    sqlx::query(
+        "INSERT INTO workflow_library (id, spec_kind, version, workflow_json) \
+         VALUES ($1, $2, 1, $3)",
+    )
+    .bind(&fixed_id)
+    .bind(&kind)
     .bind(&json)
     .execute(&pool)
     .await
-    .expect_err("second insert at (kind, 1) must violate UNIQUE");
+    .expect("seed row");
 
-    match direct_err {
-        sqlx::Error::Database(db_err) => assert!(
-            db_err.is_unique_violation(),
-            "expected unique violation, got: {db_err}"
-        ),
+    let err = sqlx::query(
+        "INSERT INTO workflow_library (id, spec_kind, version, workflow_json) \
+         VALUES ($1, $2, 2, $3)",
+    )
+    .bind(&fixed_id)
+    .bind(&kind)
+    .bind(&json)
+    .execute(&pool)
+    .await
+    .expect_err("duplicate id must violate PK");
+
+    match err {
+        sqlx::Error::Database(db_err) => {
+            assert!(
+                db_err.is_unique_violation(),
+                "expected unique violation, got: {db_err}"
+            );
+            // The constraint name on the PK is *not* the kind+version
+            // one — so register's match-guard would correctly skip it.
+            assert_ne!(
+                db_err.constraint(),
+                Some("workflow_library_kind_version_unique"),
+                "PK violation must not look like kind+version collision"
+            );
+        }
         other => panic!("expected Database error, got: {other:?}"),
     }
 

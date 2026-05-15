@@ -38,6 +38,14 @@ use crate::workflow::Workflow;
 use sqlx::PgPool;
 use thiserror::Error;
 
+/// Name of the `(spec_kind, version)` unique constraint on
+/// `workflow_library`. Declared in
+/// `crates/onsager-spine/migrations/027_workflow_library.sql`; matched
+/// against `sqlx::error::DatabaseError::constraint()` so unrelated
+/// uniqueness violations (e.g. the primary key on `id`) don't get
+/// misclassified as [`WorkflowLibraryError::DuplicateKind`].
+const KIND_VERSION_UNIQUE_CONSTRAINT: &str = "workflow_library_kind_version_unique";
+
 /// Errors returned by [`WorkflowLibrary`] operations.
 #[derive(Debug, Error)]
 pub enum WorkflowLibraryError {
@@ -113,7 +121,9 @@ impl WorkflowLibrary {
 
         match result {
             Ok(version) => Ok(version),
-            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+            Err(sqlx::Error::Database(db_err))
+                if db_err.constraint() == Some(KIND_VERSION_UNIQUE_CONSTRAINT) =>
+            {
                 // The race-loser does not know which version it lost
                 // — re-read the latest to report a useful error.
                 let current = self.latest_version(kind).await.unwrap_or(0);
