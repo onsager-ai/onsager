@@ -1,10 +1,16 @@
 # ADR 0002 — Process ↔ product isomorphism as design discipline
 
-- **Status**: Accepted (amended 2026-05-01 — see Amendment below)
+- **Status**: Superseded (2026-05-15) — see Superseded by below.
+  The 2026-05-01 amendment remains in effect for the historical
+  scope-down of the explicit five-primitive programme.
 - **Date**: 2026-04-19
 - **Tracking issues**: #40 (architectural review)
 - **Supersedes**: none
-- **Superseded by**: none
+- **Superseded by**: ADR 0013 (Observer as second substrate citizen)
+  — the in-substrate Observer is the operative mechanism for the
+  process/product loop ADR 0002 named in prose. ADR 0002's framing
+  remains useful as a design principle; the `Dev-process counterpart`
+  section in newer ADRs continues to reference it.
 
 ## Context
 

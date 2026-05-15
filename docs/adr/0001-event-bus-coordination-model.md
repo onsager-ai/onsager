@@ -1,10 +1,13 @@
 # ADR 0001 — Event bus is the coordination medium (Option A)
 
-- **Status**: Accepted
+- **Status**: Superseded (2026-05-15) — see Superseded by below
 - **Date**: 2026-04-19
 - **Tracking issues**: #27 (decision), #40 (architectural review)
 - **Supersedes**: none
-- **Superseded by**: none
+- **Superseded by**: ADR 0009 (three-layer pipeline) + ADR 0017
+  (Plan Compiler). The spine remains the runtime medium, but
+  coordination is now authored by the compiler/scheduler against an
+  Execution Plan, not directly by feature subsystems.
 
 ## Context
 
