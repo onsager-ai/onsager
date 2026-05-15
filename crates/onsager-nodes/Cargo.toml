@@ -12,10 +12,12 @@ onsager-substrate = { path = "../onsager-substrate" }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+typetag = "0.2"
 
 [dev-dependencies]
 tokio = { workspace = true }
