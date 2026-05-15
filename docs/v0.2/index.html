@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Onsager 0.2 Substrate · 可视化参考</title>
+<style>
+:root {
+  --text: #2c2c2a;
+  --text-secondary: #5f5e5a;
+  --text-tertiary: #888780;
+  --bg: #fafaf7;
+  --surface: #ffffff;
+  --border: rgba(0,0,0,0.08);
+  --border-strong: rgba(0,0,0,0.15);
+  --accent: #534ab7;
+  --code-bg: #f1efe8;
+  --teal: #0f6e56;
+  --coral: #993c1d;
+  --max-width: 920px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #d3d1c7; --text-secondary: #b4b2a9; --text-tertiary: #888780;
+    --bg: #1a1a18; --surface: #25251f;
+    --border: rgba(255,255,255,0.08); --border-strong: rgba(255,255,255,0.15);
+    --accent: #afa9ec; --code-bg: #2c2c2a;
+    --teal: #5dcaa5; --coral: #f0997b;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px; line-height: 1.7; -webkit-font-smoothing: antialiased; }
+.page { max-width: var(--max-width); margin: 0 auto; padding: 40px 24px 80px; }
+header.top { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 32px; }
+header.top h1 { font-size: 28px; font-weight: 500; margin: 0 0 8px; letter-spacing: -0.01em; }
+header.top .subtitle { color: var(--text-secondary); font-size: 14px; margin: 0; }
+.terminology { background: var(--code-bg); border-left: 3px solid var(--accent); padding: 14px 18px; margin: 0 0 32px; font-size: 14px; border-radius: 0 8px 8px 0; }
+.terminology strong { color: var(--accent); }
+nav.toc { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 48px; }
+nav.toc h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); margin: 0 0 12px; font-weight: 500; }
+nav.toc ol { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 24px; }
+nav.toc a { color: var(--text); text-decoration: none; font-size: 14px; display: block; padding: 4px 0; border-bottom: 1px solid transparent; transition: border-color 0.15s; }
+nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+nav.toc .num { color: var(--accent); font-weight: 500; margin-right: 8px; font-variant-numeric: tabular-nums; }
+section.diagram { margin-bottom: 64px; scroll-margin-top: 24px; }
+section.diagram h2 { font-size: 22px; font-weight: 500; margin: 0 0 8px; letter-spacing: -0.005em; }
+section.diagram .eyebrow { display: inline-block; color: var(--accent); font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+section.diagram p.context { color: var(--text-secondary); margin: 12px 0 24px; font-size: 15px; }
+section.diagram figure { margin: 0 0 24px; padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+section.diagram figure svg { display: block; width: 100%; height: auto; max-width: 680px; margin: 0 auto; }
+section.diagram .takeaways { background: var(--code-bg); border-radius: 8px; padding: 16px 20px; font-size: 14px; }
+section.diagram .takeaways h3 { font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary); margin: 0 0 10px; }
+section.diagram .takeaways ul { margin: 0; padding-left: 18px; }
+section.diagram .takeaways li { margin-bottom: 6px; line-height: 1.6; }
+section.diagram .takeaways li:last-child { margin-bottom: 0; }
+section.diagram code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace; font-size: 13px; color: var(--text); }
+section.diagram .det { color: var(--teal); font-weight: 500; }
+section.diagram .unc { color: var(--coral); font-weight: 500; }
+section.references { border-top: 1px solid var(--border); padding-top: 32px; margin-top: 64px; }
+section.references h2 { font-size: 20px; font-weight: 500; margin: 0 0 16px; }
+section.references ul { list-style: none; padding: 0; margin: 0; }
+section.references li { margin-bottom: 10px; font-size: 14px; }
+section.references a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; }
+section.references a:hover { border-bottom-color: var(--accent); }
+footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--text-tertiary); font-size: 12px; text-align: center; }
+@media (max-width: 680px) {
+  .page { padding: 24px 16px 60px; }
+  header.top h1 { font-size: 22px; }
+  section.diagram h2 { font-size: 18px; }
+  section.diagram figure { padding: 12px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="top">
+  <h1>Onsager 0.2 Substrate</h1>
+  <p class="subtitle">可视化参考 · 设计冻结 · 2026-05-15</p>
+</header>
+
+<div class="terminology">
+  <strong>术语：</strong> <strong>0.1</strong> = 当前 5 子系统代码状态（<code>forge</code> / <code>synodic</code> / <code>stiglab</code> / <code>ising</code> / <code>refract</code>），<strong>0.2</strong> = 本文档描述的 re-foundation 目标状态（<code>onsager-substrate</code> + <code>onsager-nodes</code> + <code>onsager-observers</code> + Plan Compiler）。
+</div>
+
+<nav class="toc">
+  <h2>目录</h2>
+  <ol>
+    <li><a href="#pipeline"><span class="num">01</span>Plan Compiler Pipeline</a></li>
+    <li><a href="#islands"><span class="num">02</span>N 个同构岛</a></li>
+    <li><a href="#provenance"><span class="num">03</span>Provenance 流</a></li>
+    <li><a href="#subworkflow"><span class="num">04</span>SubWorkflow 递归</a></li>
+    <li><a href="#observer"><span class="num">05</span>Observer 旁路</a></li>
+    <li><a href="#anatomy"><span class="num">06</span>全貌剖面图</a></li>
+  </ol>
+</nav>
+
+<section class="diagram" id="pipeline">
+  <span class="eyebrow">01 · 总览</span>
+  <h2>Plan Compiler Pipeline</h2>
+  <p class="context">
+    0.2 的三层 pipeline。Spec Plan（谁先做谁后做）+ Workflow Library（每种 kind 的标准流程）→ Plan Compiler 编译成 Execution Plan（不可变实例）→ Substrate 调度器执行产 artifact。整个 pipeline 跟数据库查询编译同构：Spec Plan = Logical Plan，Execution Plan = Physical Plan，Plan Compiler = Query Compiler，Substrate = Query Executor。
+  </p>
+  <figure><svg xmlns="http://www.w3.org/2000/svg" width="680" height="555" viewBox="0 0 680 555" font-family="-apple-system, system-ui, sans-serif">
+  <title>Plan Compiler: how Spec Plan + Workflow Library produce Execution Plan</title>
+  <desc>Spec Plan provides the outer skeleton with 3 specs (one design, two impl). Workflow Library provides inner templates (design_wf, impl_wf, review_wf — the last unused). Plan Compiler performs 3 operations: lookup workflow by spec kind, instantiate workflow into spec namespace, connect spec-level edges via exit/entry. The Execution Plan is the fractal product — Spec Plan structure becomes outer skeleton, Workflow Library content fills the interior.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- ============= ZONE 1: INPUTS ============= -->
+
+  <!-- Spec Plan -->
+  <rect x="20" y="20" width="310" height="185" rx="12" fill="#F1EFE8" fill-opacity="0.4" stroke="#888780" stroke-width="0.8"/>
+  <text x="175" y="42" text-anchor="middle" font-weight="500" font-size="14" fill="#444441">Spec Plan</text>
+  <text x="175" y="58" text-anchor="middle" font-size="11" fill="#5F5E5A">input: 谁先做谁后做</text>
+
+  <rect x="140" y="78" width="80" height="38" rx="6" fill="#E6F1FB" stroke="#185FA5"/>
+  <text x="180" y="94" text-anchor="middle" font-size="13" font-weight="500" fill="#0C447C">s1</text>
+  <text x="180" y="109" text-anchor="middle" font-size="11" fill="#185FA5">design</text>
+
+  <rect x="55" y="150" width="80" height="38" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="95" y="166" text-anchor="middle" font-size="13" font-weight="500" fill="#633806">s2</text>
+  <text x="95" y="181" text-anchor="middle" font-size="11" fill="#854F0B">impl</text>
+
+  <rect x="215" y="150" width="80" height="38" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="255" y="166" text-anchor="middle" font-size="13" font-weight="500" fill="#633806">s3</text>
+  <text x="255" y="181" text-anchor="middle" font-size="11" fill="#854F0B">impl</text>
+
+  <line x1="170" y1="116" x2="115" y2="150" stroke="#5F5E5A" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="190" y1="116" x2="235" y2="150" stroke="#5F5E5A" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- Workflow Library -->
+  <rect x="350" y="20" width="310" height="185" rx="12" fill="#F1EFE8" fill-opacity="0.4" stroke="#888780" stroke-width="0.8"/>
+  <text x="505" y="42" text-anchor="middle" font-weight="500" font-size="14" fill="#444441">Workflow Library</text>
+  <text x="505" y="58" text-anchor="middle" font-size="11" fill="#5F5E5A">input: 每种 kind 一个标准流程</text>
+
+  <!-- design_wf -->
+  <text x="358" y="91" font-size="11" font-weight="500" fill="#185FA5">design_wf</text>
+  <rect x="425" y="78" width="60" height="22" rx="4" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.8"/>
+  <text x="455" y="93" text-anchor="middle" font-size="11" fill="#0C447C">research</text>
+  <rect x="495" y="78" width="60" height="22" rx="4" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.8"/>
+  <text x="525" y="93" text-anchor="middle" font-size="11" fill="#0C447C">sketch</text>
+  <rect x="565" y="78" width="60" height="22" rx="4" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.8"/>
+  <text x="595" y="93" text-anchor="middle" font-size="11" fill="#0C447C">final</text>
+  <line x1="485" y1="89" x2="495" y2="89" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+  <line x1="555" y1="89" x2="565" y2="89" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+
+  <!-- impl_wf -->
+  <text x="358" y="136" font-size="11" font-weight="500" fill="#854F0B">impl_wf</text>
+  <rect x="425" y="123" width="50" height="22" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="450" y="138" text-anchor="middle" font-size="11" fill="#633806">prep</text>
+  <rect x="485" y="123" width="50" height="22" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="510" y="138" text-anchor="middle" font-size="11" fill="#633806">code</text>
+  <rect x="545" y="123" width="50" height="22" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="570" y="138" text-anchor="middle" font-size="11" fill="#633806">test</text>
+  <rect x="605" y="123" width="50" height="22" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="630" y="138" text-anchor="middle" font-size="11" fill="#633806">release</text>
+  <line x1="475" y1="134" x2="485" y2="134" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+  <line x1="535" y1="134" x2="545" y2="134" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+  <line x1="595" y1="134" x2="605" y2="134" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+
+  <!-- review_wf (faded — unused) -->
+  <text x="358" y="178" font-size="11" font-weight="500" fill="#0F6E56" opacity="0.45">review_wf</text>
+  <rect x="425" y="166" width="60" height="22" rx="4" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8" opacity="0.45"/>
+  <text x="455" y="181" text-anchor="middle" font-size="11" fill="#04342C" opacity="0.45">gather</text>
+  <rect x="495" y="166" width="60" height="22" rx="4" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8" opacity="0.45"/>
+  <text x="525" y="181" text-anchor="middle" font-size="11" fill="#04342C" opacity="0.45">assess</text>
+  <rect x="565" y="166" width="60" height="22" rx="4" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8" opacity="0.45"/>
+  <text x="595" y="181" text-anchor="middle" font-size="11" fill="#04342C" opacity="0.45">approve</text>
+  <line x1="485" y1="177" x2="495" y2="177" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)" opacity="0.35"/>
+  <line x1="555" y1="177" x2="565" y2="177" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)" opacity="0.35"/>
+  <text x="358" y="199" font-size="10" fill="#888780" font-style="italic">(unused this run)</text>
+
+  <!-- ============= ZONE 2: COMPILER ============= -->
+
+  <line x1="175" y1="205" x2="175" y2="225" stroke="#444441" stroke-width="1.5"/>
+  <line x1="505" y1="205" x2="505" y2="225" stroke="#444441" stroke-width="1.5"/>
+  <line x1="175" y1="225" x2="505" y2="225" stroke="#444441" stroke-width="1.5"/>
+  <line x1="340" y1="225" x2="340" y2="240" stroke="#444441" stroke-width="1.5"/>
+
+  <rect x="190" y="240" width="300" height="82" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.5"/>
+  <text x="340" y="260" text-anchor="middle" font-weight="500" font-size="13" fill="#26215C">Plan Compiler · deterministic</text>
+  <text x="210" y="280" font-size="11" fill="#3C3489">① lookup: workflow = library[spec.kind]</text>
+  <text x="210" y="297" font-size="11" fill="#3C3489">② instantiate: 复制 workflow 到 spec 命名空间</text>
+  <text x="210" y="314" font-size="11" fill="#3C3489">③ connect: spec 间依赖接 exit → entry</text>
+
+  <line x1="340" y1="322" x2="340" y2="345" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ============= ZONE 3: EXECUTION PLAN ============= -->
+
+  <rect x="20" y="345" width="640" height="200" rx="12" fill="#F1EFE8" fill-opacity="0.4" stroke="#888780" stroke-width="0.8"/>
+  <text x="340" y="367" text-anchor="middle" font-weight="500" font-size="14" fill="#444441">Execution Plan</text>
+  <text x="340" y="383" text-anchor="middle" font-size="11" fill="#5F5E5A">output: outer skeleton from Spec Plan × inner template from Workflow</text>
+
+  <!-- s1 instance -->
+  <rect x="225" y="395" width="230" height="45" rx="8" fill="#EEEDFE" fill-opacity="0.4" stroke="#7F77DD" stroke-dasharray="3 2"/>
+  <text x="240" y="410" font-size="11" font-weight="500" fill="#3C3489">s1</text>
+  <text x="260" y="410" font-size="10" fill="#534AB7">:: design_wf</text>
+  <rect x="245" y="415" width="60" height="20" rx="4" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.8"/>
+  <text x="275" y="428" text-anchor="middle" font-size="10" fill="#0C447C">research</text>
+  <rect x="315" y="415" width="60" height="20" rx="4" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.8"/>
+  <text x="345" y="428" text-anchor="middle" font-size="10" fill="#0C447C">sketch</text>
+  <rect x="385" y="415" width="60" height="20" rx="4" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.8"/>
+  <text x="415" y="428" text-anchor="middle" font-size="10" fill="#0C447C">final</text>
+  <line x1="305" y1="425" x2="315" y2="425" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+  <line x1="375" y1="425" x2="385" y2="425" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+
+  <!-- Spec-level edges from s1.final to s2/s3 prep -->
+  <line x1="415" y1="435" x2="415" y2="465" stroke="#3d3d3a" stroke-width="1.6"/>
+  <line x1="163" y1="465" x2="518" y2="465" stroke="#3d3d3a" stroke-width="1.6"/>
+  <line x1="163" y1="465" x2="163" y2="485" stroke="#3d3d3a" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="518" y1="465" x2="518" y2="485" stroke="#3d3d3a" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="425" y="458" font-size="10" fill="#3d3d3a" font-style="italic">spec dep: exit → entry</text>
+
+  <!-- s2 instance -->
+  <rect x="40" y="485" width="245" height="45" rx="8" fill="#EEEDFE" fill-opacity="0.4" stroke="#7F77DD" stroke-dasharray="3 2"/>
+  <text x="55" y="500" font-size="11" font-weight="500" fill="#3C3489">s2</text>
+  <text x="75" y="500" font-size="10" fill="#534AB7">:: impl_wf</text>
+  <rect x="50" y="505" width="50" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="75" y="518" text-anchor="middle" font-size="10" fill="#633806">prep</text>
+  <rect x="110" y="505" width="50" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="135" y="518" text-anchor="middle" font-size="10" fill="#633806">code</text>
+  <rect x="170" y="505" width="50" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="195" y="518" text-anchor="middle" font-size="10" fill="#633806">test</text>
+  <rect x="230" y="505" width="50" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="255" y="518" text-anchor="middle" font-size="10" fill="#633806">release</text>
+  <line x1="100" y1="515" x2="110" y2="515" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+  <line x1="160" y1="515" x2="170" y2="515" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+  <line x1="220" y1="515" x2="230" y2="515" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+
+  <!-- s3 instance -->
+  <rect x="395" y="485" width="245" height="45" rx="8" fill="#EEEDFE" fill-opacity="0.4" stroke="#7F77DD" stroke-dasharray="3 2"/>
+  <text x="410" y="500" font-size="11" font-weight="500" fill="#3C3489">s3</text>
+  <text x="430" y="500" font-size="10" fill="#534AB7">:: impl_wf</text>
+  <rect x="405" y="505" width="50" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="430" y="518" text-anchor="middle" font-size="10" fill="#633806">prep</text>
+  <rect x="465" y="505" width="50" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="490" y="518" text-anchor="middle" font-size="10" fill="#633806">code</text>
+  <rect x="525" y="505" width="50" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="550" y="518" text-anchor="middle" font-size="10" fill="#633806">test</text>
+  <rect x="585" y="505" width="50" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="610" y="518" text-anchor="middle" font-size="10" fill="#633806">release</text>
+  <line x1="455" y1="515" x2="465" y2="515" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+  <line x1="515" y1="515" x2="525" y2="515" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+  <line x1="575" y1="515" x2="585" y2="515" stroke="#888780" stroke-width="0.8" marker-end="url(#arrow)"/>
+
+</svg></figure>
+  <div class="takeaways">
+    <h3>怎么读</h3>
+    <ul>
+      <li>顶部两个输入并列：<strong>Spec Plan</strong>（项目唯一）+ <strong>Workflow Library</strong>（库可复用）</li>
+      <li><code>review_wf</code> 灰色淡显——库里有但这次没用，强调库的容量&gt;当前 plan 需求</li>
+      <li>Plan Compiler 三步明写：<code>lookup → instantiate → connect</code>，<em>无 LLM 介入</em></li>
+      <li>输出 Execution Plan：外层骨架=Spec Plan 依赖，内层节点=Workflow Library 模板复制</li>
+      <li>s2 和 s3 都用 <code>impl_wf</code> → 容器内结构完全一致（岛内同构，见下图）</li>
+    </ul>
+  </div>
+</section>
+
+<section class="diagram" id="islands">
+  <span class="eyebrow">02 · 简洁性原则</span>
+  <h2>N 个同构岛</h2>
+  <p class="context">
+    每种 spec kind 对应一个 workflow。同 kind 的 spec 共享同一个 workflow shape（岛内同构）；跨 kind 的 workflow 形状不同（岛间异构）。简洁性来自把变化都装在 spec 的 <code>kind</code> 字段——Plan Compiler 只需 lookup。统一 entry/exit 契约让跨岛连接像 function call 一样直接。
+  </p>
+  <figure><svg xmlns="http://www.w3.org/2000/svg" width="680" height="340" viewBox="0 0 680 340" font-family="-apple-system, system-ui, sans-serif">
+  <title>v0.5 final framework — N isomorphic islands with unified entry/exit contract</title>
+  <desc>One design spec uses design_workflow (research, sketch, review, final). Two implementation specs both use impl_workflow (prep, code, test, release). The two impl spec containers are structurally identical, demonstrating isomorphism within the impl island. Cross-island arrows go from design's exit node to each impl spec's entry, demonstrating the unified entry/exit contract.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- s_design spec container -->
+  <rect x="178" y="30" width="324" height="105" rx="12" fill="#EEEDFE" fill-opacity="0.5" stroke="#7F77DD" stroke-width="1" stroke-dasharray="5 3"/>
+  <text x="340" y="52" text-anchor="middle" font-size="14" font-weight="500" fill="#3C3489">s_design</text>
+  <text x="340" y="70" text-anchor="middle" font-size="12" fill="#534AB7">workflow: design_workflow</text>
+
+  <!-- design workflow nodes -->
+  <g>
+    <rect x="195" y="92" width="60" height="32" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+    <text x="225" y="112" text-anchor="middle" font-size="12" fill="#0C447C">research</text>
+  </g>
+  <g>
+    <rect x="265" y="92" width="60" height="32" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+    <text x="295" y="112" text-anchor="middle" font-size="12" fill="#0C447C">sketch</text>
+  </g>
+  <g>
+    <rect x="335" y="92" width="60" height="32" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+    <text x="365" y="112" text-anchor="middle" font-size="12" fill="#0C447C">review</text>
+  </g>
+  <g>
+    <rect x="405" y="92" width="60" height="32" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+    <text x="435" y="112" text-anchor="middle" font-size="12" fill="#0C447C">final</text>
+  </g>
+
+  <!-- design workflow internal arrows -->
+  <line x1="255" y1="108" x2="265" y2="108" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="325" y1="108" x2="335" y2="108" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="395" y1="108" x2="405" y2="108" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- Spec-level arrows: design.final fanning out to both impls -->
+  <line x1="435" y1="135" x2="435" y2="165" stroke="#3d3d3a" stroke-width="1.8"/>
+  <line x1="180" y1="165" x2="500" y2="165" stroke="#3d3d3a" stroke-width="1.8"/>
+  <line x1="180" y1="165" x2="180" y2="200" stroke="#3d3d3a" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <line x1="500" y1="165" x2="500" y2="200" stroke="#3d3d3a" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- s_impl_a spec container -->
+  <rect x="30" y="200" width="300" height="105" rx="12" fill="#EEEDFE" fill-opacity="0.5" stroke="#7F77DD" stroke-width="1" stroke-dasharray="5 3"/>
+  <text x="180" y="220" text-anchor="middle" font-size="14" font-weight="500" fill="#3C3489">s_impl_a</text>
+  <text x="180" y="238" text-anchor="middle" font-size="12" fill="#534AB7">workflow: impl_workflow</text>
+
+  <!-- impl_workflow nodes for s_impl_a -->
+  <g>
+    <rect x="45" y="262" width="55" height="32" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+    <text x="72" y="282" text-anchor="middle" font-size="12" fill="#633806">prep</text>
+  </g>
+  <g>
+    <rect x="110" y="262" width="55" height="32" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+    <text x="137" y="282" text-anchor="middle" font-size="12" fill="#633806">code</text>
+  </g>
+  <g>
+    <rect x="175" y="262" width="55" height="32" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+    <text x="202" y="282" text-anchor="middle" font-size="12" fill="#633806">test</text>
+  </g>
+  <g>
+    <rect x="240" y="262" width="65" height="32" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+    <text x="272" y="282" text-anchor="middle" font-size="12" fill="#633806">release</text>
+  </g>
+
+  <line x1="100" y1="278" x2="110" y2="278" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="165" y1="278" x2="175" y2="278" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="230" y1="278" x2="240" y2="278" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- s_impl_b spec container (structurally identical to s_impl_a) -->
+  <rect x="350" y="200" width="300" height="105" rx="12" fill="#EEEDFE" fill-opacity="0.5" stroke="#7F77DD" stroke-width="1" stroke-dasharray="5 3"/>
+  <text x="500" y="220" text-anchor="middle" font-size="14" font-weight="500" fill="#3C3489">s_impl_b</text>
+  <text x="500" y="238" text-anchor="middle" font-size="12" fill="#534AB7">workflow: impl_workflow</text>
+
+  <g>
+    <rect x="365" y="262" width="55" height="32" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+    <text x="392" y="282" text-anchor="middle" font-size="12" fill="#633806">prep</text>
+  </g>
+  <g>
+    <rect x="430" y="262" width="55" height="32" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+    <text x="457" y="282" text-anchor="middle" font-size="12" fill="#633806">code</text>
+  </g>
+  <g>
+    <rect x="495" y="262" width="55" height="32" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+    <text x="522" y="282" text-anchor="middle" font-size="12" fill="#633806">test</text>
+  </g>
+  <g>
+    <rect x="560" y="262" width="65" height="32" rx="6" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+    <text x="592" y="282" text-anchor="middle" font-size="12" fill="#633806">release</text>
+  </g>
+
+  <line x1="420" y1="278" x2="430" y2="278" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="485" y1="278" x2="495" y2="278" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="550" y1="278" x2="560" y2="278" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+
+</svg></figure>
+  <div class="takeaways">
+    <h3>怎么读</h3>
+    <ul>
+      <li>把 <code>s_impl_a</code> 和 <code>s_impl_b</code> 像素级对照：节点数、名字、位置、颜色、内部箭头——<strong>完全一致</strong>。这是岛内同构</li>
+      <li><code>s_design</code> 跟两个 impl 故意不同（研究/草图/评审/终稿 vs 准备/编码/测试/发布）。这是岛间异构</li>
+      <li>黑色粗箭头 = Spec Plan 依赖，从 design 的 exit（<code>final</code>）分叉给两个 impl 的 entry（<code>prep</code>）</li>
+      <li>跨岛连接靠<strong>统一 entry/exit 契约</strong>——任意 workflow 入出口都用 ArtifactId，跟 function signature 同构</li>
+    </ul>
+  </div>
+</section>
+
+<section class="diagram" id="provenance">
+  <span class="eyebrow">03 · 类型系统</span>
+  <h2>Provenance 流</h2>
+  <p class="context">
+    substrate 的"类型系统"。每条边携带 artifact 的 provenance 信息：<span class="det">Deterministic</span>（脚本/确定性来源）或 <span class="unc">Uncertain</span>（agent/LLM 来源）。Verify executor 是<strong>唯一允许把 Uncertain 升级成 Deterministic 的节点</strong>。下游边若声明 <code>requires_deterministic=true</code>，未经 Verify 的 Uncertain 上游无法连过去——substrate 拒绝加载。
+  </p>
+  <figure><svg xmlns="http://www.w3.org/2000/svg" width="680" height="320" viewBox="0 0 680 320" font-family="-apple-system, system-ui, sans-serif">
+  <title>Provenance flow through Verify executor</title>
+  <desc>Single spec workflow showing how Uncertain artifacts (from Agent executor) flow to a Verify node (run_tests) which converts them to Deterministic, then to downstream nodes. Edge color encodes the provenance flowing on it: teal for Deterministic, coral dashed for Uncertain.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <text x="340" y="28" text-anchor="middle" font-size="14" font-weight="500" fill="#3d3d3a">Provenance flow: Uncertain → Verify → Deterministic</text>
+
+  <text x="40" y="60" font-size="11" fill="#5F5E5A">Edge color:</text>
+  <line x1="110" y1="57" x2="150" y2="57" stroke="#1D9E75" stroke-width="2"/>
+  <text x="155" y="60" font-size="11" fill="#0F6E56">Deterministic</text>
+  <line x1="240" y1="57" x2="280" y2="57" stroke="#D85A30" stroke-width="2" stroke-dasharray="4 2"/>
+  <text x="285" y="60" font-size="11" fill="#993C1D">Uncertain</text>
+  <rect x="380" y="50" width="56" height="14" rx="3" fill="#EEEDFE" stroke="#7F77DD" stroke-width="1"/>
+  <text x="408" y="60" text-anchor="middle" font-size="10" fill="#26215C">Verify</text>
+  <text x="445" y="60" font-size="11" fill="#5F5E5A">= 唯一 provenance 升级机制</text>
+
+  <rect x="20" y="90" width="640" height="135" rx="12" fill="#F1EFE8" fill-opacity="0.3" stroke="#888780" stroke-dasharray="4 3"/>
+  <text x="40" y="108" font-size="12" font-weight="500" fill="#444441">s_impl :: impl_wf</text>
+
+  <rect x="50" y="130" width="80" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="90" y="151" text-anchor="middle" font-size="12" font-weight="500" fill="#633806">prep</text>
+  <text x="90" y="167" text-anchor="middle" font-size="9" fill="#854F0B">Script</text>
+  <text x="90" y="181" text-anchor="middle" font-size="10" fill="#0F6E56" font-weight="500">⇒ Det</text>
+
+  <rect x="190" y="130" width="80" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="230" y="151" text-anchor="middle" font-size="12" font-weight="500" fill="#633806">agent</text>
+  <text x="230" y="167" text-anchor="middle" font-size="9" fill="#854F0B">Agent</text>
+  <text x="230" y="181" text-anchor="middle" font-size="10" fill="#993C1D" font-weight="500">⇒ Unc</text>
+
+  <rect x="330" y="125" width="100" height="70" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.5"/>
+  <text x="380" y="143" text-anchor="middle" font-size="9" fill="#26215C" font-weight="500" font-style="italic">VERIFY</text>
+  <text x="380" y="160" text-anchor="middle" font-size="12" font-weight="500" fill="#26215C">run_tests</text>
+  <text x="380" y="175" text-anchor="middle" font-size="9" fill="#3C3489">Script (pytest)</text>
+  <text x="380" y="189" text-anchor="middle" font-size="10" fill="#0F6E56" font-weight="500">Unc ⇒ Det</text>
+
+  <rect x="490" y="130" width="80" height="60" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="530" y="151" text-anchor="middle" font-size="12" font-weight="500" fill="#633806">ship</text>
+  <text x="530" y="167" text-anchor="middle" font-size="9" fill="#854F0B">Script</text>
+  <text x="530" y="181" text-anchor="middle" font-size="10" fill="#0F6E56" font-weight="500">⇒ Det</text>
+
+  <line x1="130" y1="160" x2="190" y2="160" stroke="#1D9E75" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="270" y1="160" x2="330" y2="160" stroke="#D85A30" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+  <line x1="430" y1="160" x2="490" y2="160" stroke="#1D9E75" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="460" y="215" text-anchor="middle" font-size="9" font-style="italic" fill="#0F6E56">↑ requires_deterministic = true</text>
+
+  <text x="340" y="258" text-anchor="middle" font-size="12" font-weight="500" fill="#3d3d3a">Substrate kernel 不变量</text>
+  <text x="340" y="278" text-anchor="middle" font-size="11" fill="#5F5E5A">Uncertain artifact 不可流到 requires_deterministic 边</text>
+  <text x="340" y="296" text-anchor="middle" font-size="11" fill="#5F5E5A">Verify 是唯一允许把 provenance 升级的 executor 类型</text>
+</svg></figure>
+  <div class="takeaways">
+    <h3>怎么读</h3>
+    <ul>
+      <li>边的颜色 = 流过这条边的 provenance：<span class="det">绿色实线 Det</span> / <span class="unc">红色虚线 Unc</span></li>
+      <li><code>agent</code> 节点产 Uncertain（LLM 输出本质不确定）→ 出边变红</li>
+      <li><code>run_tests</code> 是 Verify（紫框）—— Uncertain 进，Deterministic 出，<strong>颜色变化点</strong></li>
+      <li><code>ship</code> 入边 <code>requires_deterministic=true</code>，加粗——如果 Verify 没通过，整条 Workflow 拒绝执行</li>
+      <li>这是 substrate <strong>5 条 kernel 不变量</strong>中最核心的两条（不变量 1 + 不变量 2）</li>
+    </ul>
+  </div>
+</section>
+
+<section class="diagram" id="subworkflow">
+  <span class="eyebrow">04 · 组合机制</span>
+  <h2>SubWorkflow 递归</h2>
+  <p class="context">
+    workflow 内部可以放 SubWorkflow 节点引用另一个 workflow——Beer recursion 在 substrate 层直接成立。外层 <code>code_review</code> 节点的 executor 是 SubWorkflow，引用 <code>review_wf</code>；运行时它展开为内层完整 workflow。同样结构可以无限嵌套：workflow → workflow → workflow ...
+  </p>
+  <figure><svg xmlns="http://www.w3.org/2000/svg" width="680" height="320" viewBox="0 0 680 320" font-family="-apple-system, system-ui, sans-serif">
+  <title>SubWorkflow recursion: workflow contains workflow</title>
+  <desc>Outer workflow feature_wf for s_feature contains 4 nodes: plan, develop, code_review, ship. code_review is a SubWorkflow executor referencing review_wf. When loaded, code_review expands to show its inner workflow with nodes gather, assess, approve. Beer recursion: same structure at every level — workflow IO is uniform regardless of nesting depth.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <text x="340" y="28" text-anchor="middle" font-size="14" font-weight="500" fill="#3d3d3a">SubWorkflow: workflow 引用 workflow (Beer 递归)</text>
+
+  <rect x="20" y="55" width="640" height="245" rx="12" fill="#F1EFE8" fill-opacity="0.3" stroke="#888780" stroke-dasharray="4 3"/>
+  <text x="40" y="74" font-size="12" font-weight="500" fill="#444441">s_feature :: feature_wf  (外层)</text>
+
+  <rect x="50" y="100" width="80" height="46" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="90" y="121" text-anchor="middle" font-size="12" font-weight="500" fill="#633806">plan</text>
+  <text x="90" y="137" text-anchor="middle" font-size="9" fill="#854F0B">Agent</text>
+
+  <rect x="150" y="100" width="80" height="46" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="190" y="121" text-anchor="middle" font-size="12" font-weight="500" fill="#633806">develop</text>
+  <text x="190" y="137" text-anchor="middle" font-size="9" fill="#854F0B">Agent</text>
+
+  <rect x="250" y="85" width="290" height="180" rx="8" fill="#EEEDFE" fill-opacity="0.5" stroke="#534AB7" stroke-width="1.5"/>
+  <text x="395" y="103" text-anchor="middle" font-size="10" fill="#26215C" font-weight="500" font-style="italic">SubWorkflow executor</text>
+  <text x="395" y="118" text-anchor="middle" font-size="12" font-weight="500" fill="#26215C">code_review</text>
+  <text x="395" y="132" text-anchor="middle" font-size="9" fill="#3C3489">workflow_ref: review_wf</text>
+
+  <rect x="265" y="150" width="260" height="100" rx="6" fill="#F1EFE8" fill-opacity="0.5" stroke="#888780" stroke-dasharray="3 2"/>
+  <text x="278" y="168" font-size="11" font-weight="500" fill="#444441">:: review_wf  (内层)</text>
+
+  <rect x="275" y="185" width="65" height="46" rx="5" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="307" y="206" text-anchor="middle" font-size="11" font-weight="500" fill="#633806">gather</text>
+  <text x="307" y="221" text-anchor="middle" font-size="9" fill="#854F0B">Agent</text>
+
+  <rect x="350" y="185" width="65" height="46" rx="5" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="382" y="206" text-anchor="middle" font-size="11" font-weight="500" fill="#633806">assess</text>
+  <text x="382" y="221" text-anchor="middle" font-size="9" fill="#854F0B">Agent</text>
+
+  <rect x="425" y="185" width="80" height="46" rx="5" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+  <text x="465" y="198" text-anchor="middle" font-size="8" fill="#26215C" font-weight="500" font-style="italic">VERIFY</text>
+  <text x="465" y="213" text-anchor="middle" font-size="11" font-weight="500" fill="#26215C">approve</text>
+  <text x="465" y="225" text-anchor="middle" font-size="9" fill="#3C3489">Human</text>
+
+  <line x1="340" y1="208" x2="350" y2="208" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="415" y1="208" x2="425" y2="208" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <rect x="560" y="100" width="80" height="46" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="600" y="121" text-anchor="middle" font-size="12" font-weight="500" fill="#633806">ship</text>
+  <text x="600" y="137" text-anchor="middle" font-size="9" fill="#854F0B">Script</text>
+
+  <line x1="130" y1="123" x2="150" y2="123" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="230" y1="123" x2="250" y2="123" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="540" y1="123" x2="560" y2="123" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <text x="340" y="287" text-anchor="middle" font-size="11" fill="#5F5E5A">同样结构可以无限嵌套: workflow → workflow → workflow ...</text>
+</svg></figure>
+  <div class="takeaways">
+    <h3>怎么读</h3>
+    <ul>
+      <li>外层 <code>feature_wf</code>：4 个节点的普通 workflow（<code>plan → develop → code_review → ship</code>）</li>
+      <li><code>code_review</code> 紫色框 = SubWorkflow executor，<code>workflow_ref: review_wf</code> 表明引用</li>
+      <li>内层 <code>review_wf</code> 是它自己的完整 workflow（<code>gather → assess → approve</code>），其中 <code>approve</code> 又是 Verify</li>
+      <li>内外两层是<strong>同一种 workflow 抽象</strong>——递归不是特殊机制，是统一接口的副产品</li>
+      <li>对应 Beer 的 <em>"contains, and is contained in"</em>——每一层都是 viable system</li>
+    </ul>
+  </div>
+</section>
+
+<section class="diagram" id="observer">
+  <span class="eyebrow">05 · 第二种公民</span>
+  <h2>Observer 旁路</h2>
+  <p class="context">
+    Observer 是 substrate 的第二种公民（除 Workflow 外）。它<strong>不在 Workflow 里</strong>，订阅 spine 事件流，异步产 QualitySignal / Insight / Alert。Observer 不阻塞主流程——它发现问题只能产 insight 让人决定，没法直接停 Workflow。映射 VSM S3*（audit channel）。Ising 现有 analyzer 全部归为 Observer instance。
+  </p>
+  <figure><svg xmlns="http://www.w3.org/2000/svg" width="680" height="380" viewBox="0 0 680 380" font-family="-apple-system, system-ui, sans-serif">
+  <title>Observer pattern: substrate citizen parallel to Workflow</title>
+  <desc>Workflow nodes emit events to spine event store as they execute. Observers subscribe to event patterns on spine, run continuously, and emit QualitySignals, Insights, or Alerts. Observers do not block or modify workflow execution — they are a parallel substrate citizen for audit and analysis. Maps to VSM S3* (audit channel).</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <text x="340" y="28" text-anchor="middle" font-size="14" font-weight="500" fill="#3d3d3a">Observer 旁路: substrate 第二种公民 (VSM S3*)</text>
+
+  <rect x="20" y="55" width="640" height="85" rx="8" fill="#F1EFE8" fill-opacity="0.3" stroke="#888780" stroke-dasharray="4 3"/>
+  <text x="35" y="73" font-size="11" font-weight="500" fill="#444441">Execution Plan · 主流程 (Workflow citizens)</text>
+
+  <rect x="60" y="90" width="80" height="40" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="100" y="108" text-anchor="middle" font-size="11" font-weight="500" fill="#633806">prep</text>
+  <text x="100" y="122" text-anchor="middle" font-size="9" fill="#854F0B">Script</text>
+
+  <rect x="200" y="90" width="80" height="40" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="240" y="108" text-anchor="middle" font-size="11" font-weight="500" fill="#633806">code</text>
+  <text x="240" y="122" text-anchor="middle" font-size="9" fill="#854F0B">Agent</text>
+
+  <rect x="340" y="90" width="80" height="40" rx="6" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.3"/>
+  <text x="380" y="102" text-anchor="middle" font-size="8" font-style="italic" fill="#26215C">VERIFY</text>
+  <text x="380" y="116" text-anchor="middle" font-size="11" font-weight="500" fill="#26215C">test</text>
+  <text x="380" y="127" text-anchor="middle" font-size="9" fill="#3C3489">Script</text>
+
+  <rect x="480" y="90" width="80" height="40" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="520" y="108" text-anchor="middle" font-size="11" font-weight="500" fill="#633806">release</text>
+  <text x="520" y="122" text-anchor="middle" font-size="9" fill="#854F0B">Script</text>
+
+  <line x1="140" y1="110" x2="200" y2="110" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="280" y1="110" x2="340" y2="110" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="420" y1="110" x2="480" y2="110" stroke="#888780" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <line x1="100" y1="130" x2="100" y2="172" stroke="#888780" stroke-width="0.8" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+  <line x1="240" y1="130" x2="240" y2="172" stroke="#888780" stroke-width="0.8" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+  <line x1="380" y1="130" x2="380" y2="172" stroke="#888780" stroke-width="0.8" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+  <line x1="520" y1="130" x2="520" y2="172" stroke="#888780" stroke-width="0.8" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+
+  <text x="595" y="155" font-size="9" font-style="italic" fill="#888780">emit events</text>
+
+  <rect x="20" y="177" width="640" height="38" rx="6" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+  <text x="340" y="200" text-anchor="middle" font-size="12" font-weight="500" fill="#0C447C">Spine — append-only event store</text>
+
+  <line x1="120" y1="215" x2="120" y2="252" stroke="#888780" stroke-width="0.8" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+  <line x1="340" y1="215" x2="340" y2="252" stroke="#888780" stroke-width="0.8" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+  <line x1="560" y1="215" x2="560" y2="252" stroke="#888780" stroke-width="0.8" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+
+  <text x="595" y="235" font-size="9" font-style="italic" fill="#888780">subscribe</text>
+
+  <rect x="40" y="257" width="160" height="72" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="120" y="276" text-anchor="middle" font-size="11" font-weight="500" fill="#633806">stuck_artifacts</text>
+  <text x="120" y="292" text-anchor="middle" font-size="9" fill="#854F0B">subscribes:</text>
+  <text x="120" y="304" text-anchor="middle" font-size="9" fill="#854F0B" font-family="monospace">artifact.state_*</text>
+  <text x="120" y="320" text-anchor="middle" font-size="9" fill="#0F6E56" font-weight="500">emits: QualitySignal</text>
+
+  <rect x="260" y="257" width="160" height="72" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="340" y="276" text-anchor="middle" font-size="11" font-weight="500" fill="#633806">gate_deny_rate</text>
+  <text x="340" y="292" text-anchor="middle" font-size="9" fill="#854F0B">subscribes:</text>
+  <text x="340" y="304" text-anchor="middle" font-size="9" fill="#854F0B" font-family="monospace">synodic.verdict</text>
+  <text x="340" y="320" text-anchor="middle" font-size="9" fill="#0F6E56" font-weight="500">emits: Insight</text>
+
+  <rect x="480" y="257" width="160" height="72" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="560" y="276" text-anchor="middle" font-size="11" font-weight="500" fill="#633806">retry_spike</text>
+  <text x="560" y="292" text-anchor="middle" font-size="9" fill="#854F0B">subscribes:</text>
+  <text x="560" y="304" text-anchor="middle" font-size="9" fill="#854F0B" font-family="monospace">stiglab.session_*</text>
+  <text x="560" y="320" text-anchor="middle" font-size="9" fill="#0F6E56" font-weight="500">emits: Alert</text>
+
+  <text x="340" y="354" text-anchor="middle" font-size="11" fill="#5F5E5A">Observer 不参与 Workflow 执行,异步读 spine,产 insight 不阻塞</text>
+  <text x="340" y="370" text-anchor="middle" font-size="11" fill="#5F5E5A">VSM 对应: Workflow = S1/S2/S3 (操作),  Observer = S3* (审计)</text>
+</svg></figure>
+  <div class="takeaways">
+    <h3>怎么读</h3>
+    <ul>
+      <li>实线（横向）= Workflow 主流程，靠 artifact 串</li>
+      <li>虚线（纵向）= 事件流——所有节点 fire-and-forget 把执行事件 emit 到 spine</li>
+      <li>spine 是 append-only event store，<strong>不阻塞</strong> Workflow emit</li>
+      <li>3 个 Observer 各订阅不同 pattern（<code>subscribes</code> 字段），产不同输出（<code>emits</code> 字段）</li>
+      <li>VSM 对应：Workflow = S1/S2/S3（操作），Observer = S3*（审计，<em>audits, doesn't manage</em>）</li>
+    </ul>
+  </div>
+</section>
+
+<section class="diagram" id="anatomy">
+  <span class="eyebrow">06 · 综合</span>
+  <h2>全貌剖面图</h2>
+  <p class="context">
+    把上面 5 张图全部装进一个具体运行实例。Spec Plan 有 2 个 spec（一 design 一 impl），Plan Compiler 编译产 Execution Plan，里面 s_impl 包含 SubWorkflow（review）展开成内层 workflow，内层有 Verify（approve）把 Uncertain 升级成 Deterministic。所有节点 emit 事件到 spine，3 个 Observer 旁路读。5 个紫色 callout 串起来。
+  </p>
+  <figure><svg xmlns="http://www.w3.org/2000/svg" width="680" height="790" viewBox="0 0 680 790" font-family="-apple-system, system-ui, sans-serif">
+  <title>v0.5 Substrate complete anatomy</title>
+  <desc>Comprehensive v0.5 substrate diagram showing Spec Plan plus Workflow Library compiled by Plan Compiler into Execution Plan with provenance-colored edges, SubWorkflow nesting, Verify nodes, plus Spine event store and Observer sidechannel.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <text x="340" y="25" text-anchor="middle" font-size="15" font-weight="500" fill="#3d3d3a">v0.5 Substrate · 全貌剖面图</text>
+
+  <text x="40" y="52" font-size="10" fill="#5F5E5A">Edges:</text>
+  <line x1="80" y1="49" x2="105" y2="49" stroke="#1D9E75" stroke-width="2"/>
+  <text x="110" y="52" font-size="10" fill="#0F6E56">Deterministic</text>
+  <line x1="175" y1="49" x2="200" y2="49" stroke="#D85A30" stroke-width="2" stroke-dasharray="3 2"/>
+  <text x="205" y="52" font-size="10" fill="#993C1D">Uncertain</text>
+  <line x1="270" y1="49" x2="295" y2="49" stroke="#888780" stroke-width="0.8" stroke-dasharray="2 2"/>
+  <text x="300" y="52" font-size="10" fill="#888780">event / subscribe</text>
+  <rect x="405" y="44" width="38" height="12" rx="2" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="447" y="52" font-size="10" fill="#854F0B">Execute</text>
+  <rect x="500" y="44" width="38" height="12" rx="2" fill="#EEEDFE" stroke="#534AB7"/>
+  <text x="542" y="52" font-size="10" fill="#26215C">Verify / SubWorkflow</text>
+
+  <rect x="20" y="68" width="305" height="130" rx="10" fill="#F1EFE8" fill-opacity="0.4" stroke="#888780" stroke-width="0.8"/>
+  <text x="172" y="86" text-anchor="middle" font-weight="500" font-size="12" fill="#444441">Spec Plan</text>
+
+  <rect x="130" y="100" width="80" height="32" rx="6" fill="#E6F1FB" stroke="#185FA5"/>
+  <text x="170" y="115" text-anchor="middle" font-size="11" font-weight="500" fill="#0C447C">s_design</text>
+  <text x="170" y="126" text-anchor="middle" font-size="9" fill="#185FA5">kind: design</text>
+
+  <rect x="130" y="153" width="80" height="32" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="170" y="168" text-anchor="middle" font-size="11" font-weight="500" fill="#633806">s_impl</text>
+  <text x="170" y="179" text-anchor="middle" font-size="9" fill="#854F0B">kind: impl</text>
+
+  <line x1="170" y1="132" x2="170" y2="153" stroke="#5F5E5A" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <circle cx="55" cy="123" r="10" fill="#534AB7"/>
+  <text x="55" y="127" text-anchor="middle" font-size="11" font-weight="500" fill="white">1</text>
+
+  <rect x="345" y="68" width="315" height="130" rx="10" fill="#F1EFE8" fill-opacity="0.4" stroke="#888780" stroke-width="0.8"/>
+  <text x="502" y="86" text-anchor="middle" font-weight="500" font-size="12" fill="#444441">Workflow Library</text>
+
+  <text x="355" y="108" font-size="10" font-weight="500" fill="#185FA5">design_wf</text>
+  <rect x="415" y="98" width="50" height="20" rx="4" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.8"/>
+  <text x="440" y="111" text-anchor="middle" font-size="10" fill="#0C447C">research</text>
+  <rect x="473" y="98" width="46" height="20" rx="4" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.8"/>
+  <text x="496" y="111" text-anchor="middle" font-size="10" fill="#0C447C">sketch</text>
+  <rect x="527" y="98" width="42" height="20" rx="4" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.8"/>
+  <text x="548" y="111" text-anchor="middle" font-size="10" fill="#0C447C">final</text>
+  <line x1="465" y1="108" x2="473" y2="108" stroke="#888780" stroke-width="0.6" marker-end="url(#arrow)"/>
+  <line x1="519" y1="108" x2="527" y2="108" stroke="#888780" stroke-width="0.6" marker-end="url(#arrow)"/>
+
+  <text x="355" y="140" font-size="10" font-weight="500" fill="#854F0B">impl_wf</text>
+  <rect x="415" y="130" width="42" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="436" y="143" text-anchor="middle" font-size="10" fill="#633806">prep</text>
+  <rect x="465" y="130" width="42" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="486" y="143" text-anchor="middle" font-size="10" fill="#633806">code</text>
+  <rect x="515" y="130" width="68" height="20" rx="4" fill="#EEEDFE" stroke="#534AB7" stroke-width="1"/>
+  <text x="549" y="143" text-anchor="middle" font-size="9" fill="#26215C">review SubWf</text>
+  <rect x="591" y="130" width="42" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="612" y="143" text-anchor="middle" font-size="10" fill="#633806">ship</text>
+  <line x1="457" y1="140" x2="465" y2="140" stroke="#888780" stroke-width="0.6" marker-end="url(#arrow)"/>
+  <line x1="507" y1="140" x2="515" y2="140" stroke="#888780" stroke-width="0.6" marker-end="url(#arrow)"/>
+  <line x1="583" y1="140" x2="591" y2="140" stroke="#888780" stroke-width="0.6" marker-end="url(#arrow)"/>
+
+  <text x="355" y="172" font-size="10" font-weight="500" fill="#534AB7">review_wf</text>
+  <rect x="415" y="162" width="48" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="439" y="175" text-anchor="middle" font-size="10" fill="#633806">gather</text>
+  <rect x="471" y="162" width="48" height="20" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.8"/>
+  <text x="495" y="175" text-anchor="middle" font-size="10" fill="#633806">assess</text>
+  <rect x="527" y="162" width="58" height="20" rx="4" fill="#EEEDFE" stroke="#534AB7" stroke-width="1"/>
+  <text x="556" y="175" text-anchor="middle" font-size="9" fill="#26215C">approve V</text>
+  <line x1="463" y1="172" x2="471" y2="172" stroke="#888780" stroke-width="0.6" marker-end="url(#arrow)"/>
+  <line x1="519" y1="172" x2="527" y2="172" stroke="#888780" stroke-width="0.6" marker-end="url(#arrow)"/>
+
+  <line x1="170" y1="198" x2="170" y2="220" stroke="#444441" stroke-width="1.5"/>
+  <line x1="500" y1="198" x2="500" y2="220" stroke="#444441" stroke-width="1.5"/>
+  <line x1="170" y1="220" x2="500" y2="220" stroke="#444441" stroke-width="1.5"/>
+  <line x1="335" y1="220" x2="335" y2="235" stroke="#444441" stroke-width="1.5"/>
+
+  <rect x="200" y="235" width="270" height="56" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.5"/>
+  <text x="335" y="254" text-anchor="middle" font-weight="500" font-size="12" fill="#26215C">Plan Compiler</text>
+  <text x="335" y="270" text-anchor="middle" font-size="10" fill="#3C3489">lookup → instantiate → connect</text>
+  <text x="335" y="284" text-anchor="middle" font-size="9" font-style="italic" fill="#534AB7">deterministic, 无 LLM 介入</text>
+
+  <circle cx="490" cy="248" r="10" fill="#534AB7"/>
+  <text x="490" y="252" text-anchor="middle" font-size="11" font-weight="500" fill="white">2</text>
+
+  <line x1="335" y1="291" x2="335" y2="312" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="20" y="315" width="640" height="305" rx="10" fill="#F1EFE8" fill-opacity="0.4" stroke="#888780" stroke-width="0.8"/>
+  <text x="340" y="335" text-anchor="middle" font-weight="500" font-size="13" fill="#444441">Execution Plan · 运行中</text>
+
+  <rect x="200" y="350" width="280" height="58" rx="8" fill="#EEEDFE" fill-opacity="0.4" stroke="#7F77DD" stroke-width="0.8" stroke-dasharray="3 2"/>
+  <text x="215" y="367" font-size="10" font-weight="500" fill="#3C3489">s_design :: design_wf</text>
+
+  <rect x="225" y="374" width="65" height="28" rx="5" fill="#E6F1FB" stroke="#185FA5"/>
+  <text x="257" y="387" text-anchor="middle" font-size="10" font-weight="500" fill="#0C447C">research</text>
+  <text x="257" y="397" text-anchor="middle" font-size="8" fill="#185FA5">Script</text>
+  <rect x="310" y="374" width="65" height="28" rx="5" fill="#E6F1FB" stroke="#185FA5"/>
+  <text x="342" y="387" text-anchor="middle" font-size="10" font-weight="500" fill="#0C447C">sketch</text>
+  <text x="342" y="397" text-anchor="middle" font-size="8" fill="#185FA5">Script</text>
+  <rect x="395" y="374" width="65" height="28" rx="5" fill="#E6F1FB" stroke="#185FA5"/>
+  <text x="427" y="387" text-anchor="middle" font-size="10" font-weight="500" fill="#0C447C">final</text>
+  <text x="427" y="397" text-anchor="middle" font-size="8" fill="#185FA5">Script</text>
+
+  <line x1="290" y1="388" x2="310" y2="388" stroke="#1D9E75" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="375" y1="388" x2="395" y2="388" stroke="#1D9E75" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <line x1="340" y1="408" x2="340" y2="438" stroke="#1D9E75" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="350" y="427" font-size="9" font-style="italic" fill="#0F6E56">spec dep · Det</text>
+
+  <rect x="30" y="445" width="620" height="170" rx="8" fill="#EEEDFE" fill-opacity="0.4" stroke="#7F77DD" stroke-width="0.8" stroke-dasharray="3 2"/>
+  <text x="45" y="462" font-size="10" font-weight="500" fill="#3C3489">s_impl :: impl_wf</text>
+
+  <rect x="50" y="475" width="65" height="38" rx="5" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="82" y="491" text-anchor="middle" font-size="10" font-weight="500" fill="#633806">prep</text>
+  <text x="82" y="503" text-anchor="middle" font-size="8" fill="#854F0B">Script ⇒Det</text>
+
+  <rect x="135" y="475" width="65" height="38" rx="5" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="167" y="491" text-anchor="middle" font-size="10" font-weight="500" fill="#633806">code</text>
+  <text x="167" y="503" text-anchor="middle" font-size="8" fill="#993C1D">Agent ⇒Unc</text>
+
+  <rect x="220" y="460" width="300" height="140" rx="8" fill="#EEEDFE" fill-opacity="0.45" stroke="#534AB7" stroke-width="1.5"/>
+  <text x="370" y="475" text-anchor="middle" font-size="9" fill="#26215C" font-weight="500" font-style="italic">SubWorkflow → review_wf</text>
+  <text x="370" y="489" text-anchor="middle" font-size="11" font-weight="500" fill="#26215C">review</text>
+
+  <rect x="235" y="500" width="62" height="36" rx="5" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="266" y="515" text-anchor="middle" font-size="10" font-weight="500" fill="#633806">gather</text>
+  <text x="266" y="527" text-anchor="middle" font-size="8" fill="#993C1D">Agent ⇒Unc</text>
+
+  <rect x="313" y="500" width="62" height="36" rx="5" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="344" y="515" text-anchor="middle" font-size="10" font-weight="500" fill="#633806">assess</text>
+  <text x="344" y="527" text-anchor="middle" font-size="8" fill="#993C1D">Agent ⇒Unc</text>
+
+  <rect x="391" y="500" width="112" height="36" rx="5" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.5"/>
+  <text x="447" y="511" text-anchor="middle" font-size="8" fill="#26215C" font-style="italic" font-weight="500">VERIFY</text>
+  <text x="447" y="523" text-anchor="middle" font-size="10" font-weight="500" fill="#26215C">approve</text>
+  <text x="447" y="533" text-anchor="middle" font-size="8" fill="#0F6E56">Human · Unc⇒Det</text>
+
+  <line x1="297" y1="518" x2="313" y2="518" stroke="#D85A30" stroke-width="1.5" stroke-dasharray="4 2" marker-end="url(#arrow)"/>
+  <line x1="375" y1="518" x2="391" y2="518" stroke="#D85A30" stroke-width="1.5" stroke-dasharray="4 2" marker-end="url(#arrow)"/>
+
+  <text x="370" y="565" text-anchor="middle" font-size="9" fill="#26215C" font-style="italic">SubWorkflow exit provenance = approve output = Det</text>
+
+  <circle cx="240" cy="475" r="10" fill="#534AB7"/>
+  <text x="240" y="479" text-anchor="middle" font-size="11" font-weight="500" fill="white">3</text>
+
+  <circle cx="487" cy="490" r="10" fill="#534AB7"/>
+  <text x="487" y="494" text-anchor="middle" font-size="11" font-weight="500" fill="white">4</text>
+
+  <rect x="540" y="475" width="65" height="38" rx="5" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="572" y="491" text-anchor="middle" font-size="10" font-weight="500" fill="#633806">ship</text>
+  <text x="572" y="503" text-anchor="middle" font-size="8" fill="#854F0B">Script ⇒Det</text>
+
+  <line x1="115" y1="494" x2="135" y2="494" stroke="#1D9E75" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="200" y1="494" x2="220" y2="494" stroke="#D85A30" stroke-width="2" stroke-dasharray="4 2" marker-end="url(#arrow)"/>
+  <line x1="520" y1="494" x2="540" y2="494" stroke="#1D9E75" stroke-width="2.8" marker-end="url(#arrow)"/>
+
+  <text x="530" y="588" text-anchor="middle" font-size="9" font-style="italic" fill="#0F6E56">requires_Det</text>
+  <line x1="530" y1="580" x2="530" y2="513" stroke="#0F6E56" stroke-width="0.6" stroke-dasharray="2 2"/>
+
+  <line x1="82" y1="513" x2="82" y2="638" stroke="#888780" stroke-width="0.7" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+  <line x1="167" y1="513" x2="167" y2="638" stroke="#888780" stroke-width="0.7" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+  <line x1="370" y1="600" x2="370" y2="638" stroke="#888780" stroke-width="0.7" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+  <line x1="572" y1="513" x2="572" y2="638" stroke="#888780" stroke-width="0.7" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+
+  <rect x="20" y="638" width="640" height="32" rx="6" fill="#E6F1FB" stroke="#185FA5"/>
+  <text x="340" y="658" text-anchor="middle" font-size="11" font-weight="500" fill="#0C447C">Spine — append-only event store</text>
+
+  <line x1="120" y1="670" x2="120" y2="700" stroke="#888780" stroke-width="0.7" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+  <line x1="340" y1="670" x2="340" y2="700" stroke="#888780" stroke-width="0.7" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+  <line x1="560" y1="670" x2="560" y2="700" stroke="#888780" stroke-width="0.7" stroke-dasharray="2 2" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="700" width="160" height="62" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="120" y="717" text-anchor="middle" font-size="10" font-weight="500" fill="#633806">stuck_artifacts</text>
+  <text x="120" y="731" text-anchor="middle" font-size="9" fill="#854F0B" font-family="monospace">artifact.state_*</text>
+  <text x="120" y="748" text-anchor="middle" font-size="9" fill="#0F6E56" font-weight="500">→ QualitySignal</text>
+
+  <rect x="260" y="700" width="160" height="62" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="340" y="717" text-anchor="middle" font-size="10" font-weight="500" fill="#633806">gate_deny_rate</text>
+  <text x="340" y="731" text-anchor="middle" font-size="9" fill="#854F0B" font-family="monospace">synodic.verdict</text>
+  <text x="340" y="748" text-anchor="middle" font-size="9" fill="#0F6E56" font-weight="500">→ Insight</text>
+
+  <rect x="480" y="700" width="160" height="62" rx="6" fill="#FAEEDA" stroke="#854F0B"/>
+  <text x="560" y="717" text-anchor="middle" font-size="10" font-weight="500" fill="#633806">retry_spike</text>
+  <text x="560" y="731" text-anchor="middle" font-size="9" fill="#854F0B" font-family="monospace">stiglab.session_*</text>
+  <text x="560" y="748" text-anchor="middle" font-size="9" fill="#0F6E56" font-weight="500">→ Alert</text>
+
+  <circle cx="384" cy="700" r="10" fill="#534AB7"/>
+  <text x="384" y="704" text-anchor="middle" font-size="11" font-weight="500" fill="white">5</text>
+
+  <text x="40" y="782" font-size="10" fill="#5F5E5A"><tspan font-weight="500" fill="#534AB7">① </tspan>Spec Plan = 外层骨架</text>
+  <text x="180" y="782" font-size="10" fill="#5F5E5A"><tspan font-weight="500" fill="#534AB7">② </tspan>Deterministic 编译</text>
+  <text x="315" y="782" font-size="10" fill="#5F5E5A"><tspan font-weight="500" fill="#534AB7">③ </tspan>SubWorkflow 嵌套</text>
+  <text x="440" y="782" font-size="10" fill="#5F5E5A"><tspan font-weight="500" fill="#534AB7">④ </tspan>Verify 升级点</text>
+  <text x="555" y="782" font-size="10" fill="#5F5E5A"><tspan font-weight="500" fill="#534AB7">⑤ </tspan>Observer 旁路</text>
+</svg></figure>
+  <div class="takeaways">
+    <h3>5 个 callout 对应 0.2 5 个核心机制</h3>
+    <ul>
+      <li><strong>①</strong> Spec Plan 外层骨架——谁先做谁后做（人决定）</li>
+      <li><strong>②</strong> Plan Compiler 编译——deterministic 3 步算法</li>
+      <li><strong>③</strong> SubWorkflow 嵌套——同一接口无限递归</li>
+      <li><strong>④</strong> Verify 升级点——唯一允许 <span class="unc">Unc</span> → <span class="det">Det</span></li>
+      <li><strong>⑤</strong> Observer 旁路——substrate 第二种公民，VSM S3*</li>
+    </ul>
+  </div>
+</section>
+
+<section class="references">
+  <h2>关联资源</h2>
+  <ul>
+    <li>KB 笔记：<a href="https://www.notion.so/360d79199ca6810fa8eed47f03498bf8">DAG substrate 替代叙事（0.2 设计终态，Stable）</a></li>
+    <li>GH issue series：<code>onsager-ai/onsager</code> · milestone <code>0.2-refoundation</code>（待创建）</li>
+    <li>ADR 0009-0018：待写（issue ADR-01）</li>
+    <li>当前代码状态：<code>0.1.0</code>（5 子系统，无 tag，待 cut <code>v0.1.0</code> 后 bump <code>0.2.0-alpha.1</code>）</li>
+  </ul>
+</section>
+
+<footer>
+  Onsager 0.2 substrate design · Generated 2026-05-15
+</footer>
+
+</div>
+</body>
+</html>
