@@ -1760,6 +1760,9 @@ dependencies = [
  "onsager-artifact",
  "serde",
  "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
  "typetag",
  "uuid",
 ]
