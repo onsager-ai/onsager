@@ -1,0 +1,13 @@
+[package]
+name = "onsager-substrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "0.2 substrate kernel — Workflow / Node / Edge data model and the Executor trait."
+
+[dependencies]
+onsager-artifact = { path = "../onsager-artifact" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+typetag = "0.2"

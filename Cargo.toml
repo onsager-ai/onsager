@@ -4,6 +4,7 @@ members = [
     "crates/onsager-artifact",
     "crates/onsager-registry",
     "crates/onsager-spine",
+    "crates/onsager-substrate",
     "crates/onsager",
     "crates/onsager-github",
     "crates/onsager-portal",
