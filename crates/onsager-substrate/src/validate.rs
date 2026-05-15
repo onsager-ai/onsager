@@ -75,7 +75,7 @@ pub fn validate_workflow(
     let emits = EmitsIndex::build(workflow, &producers);
 
     check_invariant_1_requires_deterministic(workflow, &producers, &emits, &mut violations);
-    check_invariant_2_uncertain_is_contagious(workflow, &producers, &mut violations);
+    check_invariant_2_uncertain_is_contagious(workflow, &emits, &mut violations);
     check_invariant_3_output_spec_matches(workflow, &producers, &emits, &mut violations);
     check_invariant_4_subworkflow_resolves(workflow, library, &mut violations);
     check_invariant_5_single_writer(workflow, &mut violations);
@@ -117,57 +117,94 @@ impl<'w> ProducerIndex<'w> {
     }
 }
 
-/// Maps `node_id → emitted Provenance`, computed per the invariant 2
-/// rule: max-uncertainty of declared + all inputs for non-Verify
-/// executors; declared verbatim for Verify.
+/// Per-node provenance context computed during validation. Holds the
+/// input provenances, the executor's `declared_provenance(inputs)`,
+/// and the *emitted* provenance after the invariant 2 propagation
+/// rule (max-uncertainty for non-Verify executors; `declared`
+/// verbatim for Verify).
 ///
-/// Entry edges contribute `Provenance::external_deterministic()`,
-/// since the workflow does not yet carry an EntrySpec to override
-/// that default.
+/// Both invariant 1 (downstream `requires_deterministic`) and
+/// invariant 3 (workflow `OutputSpec`) read `emitted`; invariant 2
+/// reads `inputs` + `declared` to detect a non-Verify executor
+/// claiming Deterministic over an Uncertain input.
+struct NodeContext {
+    inputs: Vec<Provenance>,
+    declared: Provenance,
+    emitted: Provenance,
+}
+
+/// Maps `node_id → NodeContext`. Built via DFS with memoization so
+/// the result is independent of `workflow.nodes` order — a consumer
+/// listed before its producer still observes the producer's actual
+/// emitted provenance.
+///
+/// Entry edges (no producer node in this workflow) contribute
+/// `Provenance::external_deterministic()`. Cycles in the workflow's
+/// node graph (a node transitively consuming its own output) are
+/// broken at the back-edge with the same External default; full
+/// cycle detection in the node graph is not in this issue's scope.
 struct EmitsIndex {
-    by_node: HashMap<NodeId, Provenance>,
+    by_node: HashMap<NodeId, NodeContext>,
 }
 
 impl EmitsIndex {
     fn build(workflow: &Workflow, producers: &ProducerIndex<'_>) -> Self {
         let mut by_node = HashMap::new();
         for node in &workflow.nodes {
-            let inputs = collect_input_provenances(node, producers, &by_node);
-            let declared = node.executor.declared_provenance(&inputs);
-            let emitted = if is_verify(node.executor.as_ref()) {
-                declared
-            } else {
-                propagate_max_uncertainty(declared, &inputs)
-            };
-            by_node.insert(node.id, emitted);
+            let mut on_stack = HashSet::new();
+            compute_emit(node, producers, &mut by_node, &mut on_stack);
         }
         Self { by_node }
     }
 
     fn emitted_by(&self, node_id: NodeId) -> Option<Provenance> {
-        self.by_node.get(&node_id).copied()
+        self.by_node.get(&node_id).map(|ctx| ctx.emitted)
+    }
+
+    fn context_of(&self, node_id: NodeId) -> Option<&NodeContext> {
+        self.by_node.get(&node_id)
     }
 }
 
-fn collect_input_provenances(
-    node: &Node,
-    producers: &ProducerIndex<'_>,
-    emits_so_far: &HashMap<NodeId, Provenance>,
-) -> Vec<Provenance> {
-    node.inputs
+fn compute_emit<'w>(
+    node: &'w Node,
+    producers: &ProducerIndex<'w>,
+    memo: &mut HashMap<NodeId, NodeContext>,
+    on_stack: &mut HashSet<NodeId>,
+) -> Provenance {
+    if let Some(ctx) = memo.get(&node.id) {
+        return ctx.emitted;
+    }
+    if !on_stack.insert(node.id) {
+        // Back-edge in the node graph; fall back to External so the
+        // outer recursion still terminates. The unresolved-cycle
+        // edges are not the validator's concern in this issue.
+        return Provenance::external_deterministic();
+    }
+    let inputs: Vec<Provenance> = node
+        .inputs
         .iter()
         .map(|input| match producers.producer_of(input.edge_id) {
-            Some(producer) => emits_so_far
-                .get(&producer.id)
-                .copied()
-                // Producer not yet visited (cyclic graph or
-                // out-of-order). Fall back to External
-                // deterministic; cycle-detection in the workflow
-                // graph is not in this issue's scope.
-                .unwrap_or_else(Provenance::external_deterministic),
+            Some(producer) => compute_emit(producer, producers, memo, on_stack),
             None => Provenance::external_deterministic(),
         })
-        .collect()
+        .collect();
+    let declared = node.executor.declared_provenance(&inputs);
+    let emitted = if is_verify(node.executor.as_ref()) {
+        declared
+    } else {
+        propagate_max_uncertainty(declared, &inputs)
+    };
+    on_stack.remove(&node.id);
+    memo.insert(
+        node.id,
+        NodeContext {
+            inputs,
+            declared,
+            emitted,
+        },
+    );
+    emitted
 }
 
 fn propagate_max_uncertainty(declared: Provenance, inputs: &[Provenance]) -> Provenance {
@@ -230,19 +267,16 @@ fn check_invariant_1_requires_deterministic(
 
 fn check_invariant_2_uncertain_is_contagious(
     workflow: &Workflow,
-    producers: &ProducerIndex<'_>,
+    emits: &EmitsIndex,
     violations: &mut Vec<InvariantViolation>,
 ) {
-    // Use a temporary emits-so-far map so each node's declaration is
-    // checked against the same upstream view EmitsIndex would see —
-    // we cannot reuse EmitsIndex itself because it already collapses
-    // declared into the propagated value for non-Verify executors.
-    let mut upstream: HashMap<NodeId, Provenance> = HashMap::new();
     for node in &workflow.nodes {
-        let inputs = collect_input_provenances(node, producers, &upstream);
-        let declared = node.executor.declared_provenance(&inputs);
-        let any_uncertain_input = inputs.iter().any(Provenance::is_uncertain);
-        if any_uncertain_input && !is_verify(node.executor.as_ref()) && !declared.is_uncertain() {
+        let Some(ctx) = emits.context_of(node.id) else {
+            continue;
+        };
+        let any_uncertain_input = ctx.inputs.iter().any(Provenance::is_uncertain);
+        if any_uncertain_input && !is_verify(node.executor.as_ref()) && !ctx.declared.is_uncertain()
+        {
             violations.push(InvariantViolation {
                 invariant: 2,
                 nodes: vec![node.id],
@@ -254,14 +288,6 @@ fn check_invariant_2_uncertain_is_contagious(
                 ),
             });
         }
-        upstream.insert(
-            node.id,
-            if is_verify(node.executor.as_ref()) {
-                declared
-            } else {
-                propagate_max_uncertainty(declared, &inputs)
-            },
-        );
     }
 }
 
@@ -426,15 +452,14 @@ fn check_invariant_5_single_writer(workflow: &Workflow, violations: &mut Vec<Inv
     }
     for (artifact_id, entries) in writers {
         let distinct_nodes: HashSet<NodeId> = entries.iter().map(|(n, _)| *n).collect();
-        if distinct_nodes.len() > 1 {
+        let distinct_count = distinct_nodes.len();
+        if distinct_count > 1 {
             violations.push(InvariantViolation {
                 invariant: 5,
                 nodes: distinct_nodes.into_iter().collect(),
                 edges: entries.iter().map(|(_, e)| *e).collect(),
                 message: format!(
-                    "artifact {} has {} distinct producer nodes; each artifact must have a single writer",
-                    artifact_id,
-                    entries.len(),
+                    "artifact {artifact_id} has {distinct_count} distinct producer nodes; each artifact must have a single writer",
                 ),
             });
         }
@@ -982,5 +1007,63 @@ mod tests {
         assert!(invariants.contains(&1), "expected invariant 1: {err:?}");
         assert!(invariants.contains(&2), "expected invariant 2: {err:?}");
         assert!(invariants.contains(&5), "expected invariant 5: {err:?}");
+    }
+
+    // -----------------------------------------------------------------
+    // Order-independence: the validator must compute emitted
+    // provenance via DFS, not by `workflow.nodes` position, so a
+    // consumer listed before its producer still sees the producer's
+    // actual emit. Regression for the Copilot review on
+    // EmitsIndex::build (PR #371).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn invariant_1_detects_violation_when_consumer_listed_before_producer() {
+        // Chain: Agent (Uncertain) ──edge_b──> NoOp (propagates)
+        // ──edge_a(req_det=true)──> Terminal. The middle NoOp's
+        // emit depends on the Agent's emit; a position-dependent
+        // EmitsIndex with NoOp visited before Agent would fall back
+        // to External-Deterministic for NoOp's input, mark NoOp as
+        // emitting Deterministic, and silently miss the invariant 1
+        // violation on edge_a.
+        let edge_b = make_edge(false, "art_b");
+        let edge_a = make_edge(true, "art_a");
+        let agent_id = NodeId::generate();
+        let noop_id = NodeId::generate();
+        let terminal_id = NodeId::generate();
+        let w = Workflow {
+            // Consumers listed before their producers.
+            nodes: vec![
+                Node {
+                    id: terminal_id,
+                    executor: Box::new(NoOpExecutor),
+                    inputs: vec![EdgeRef::new(edge_a.id)],
+                    outputs: vec![],
+                },
+                Node {
+                    id: noop_id,
+                    executor: Box::new(NoOpExecutor),
+                    inputs: vec![EdgeRef::new(edge_b.id)],
+                    outputs: vec![EdgeRef::new(edge_a.id)],
+                },
+                Node {
+                    id: agent_id,
+                    executor: Box::new(AlwaysUncertainExecutor),
+                    inputs: vec![],
+                    outputs: vec![EdgeRef::new(edge_b.id)],
+                },
+            ],
+            edges: vec![edge_b, edge_a.clone()],
+            output_specs: vec![],
+        };
+        let err = validate_workflow(&w, &()).unwrap_err();
+        let v1: Vec<_> = err.iter().filter(|v| v.invariant == 1).collect();
+        assert_eq!(
+            v1.len(),
+            1,
+            "out-of-order workflow must still detect invariant 1: {err:?}",
+        );
+        assert!(v1[0].nodes.contains(&noop_id));
+        assert_eq!(v1[0].edges, vec![edge_a.id]);
     }
 }
