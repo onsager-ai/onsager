@@ -3,7 +3,7 @@ name = "onsager-substrate"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "0.2 substrate kernel — Workflow / Node / Edge data model and the Executor trait."
+description = "0.2 substrate kernel — Workflow / Node / Edge data model, Executor trait, and the Workflow Library."
 
 [dependencies]
 onsager-artifact = { path = "../onsager-artifact" }
@@ -11,3 +11,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 typetag = "0.2"
+sqlx = { workspace = true, features = ["runtime-tokio", "tls-rustls", "postgres", "json"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
