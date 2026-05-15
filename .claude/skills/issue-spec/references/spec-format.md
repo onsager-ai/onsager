@@ -1,59 +1,59 @@
 # Spec Format Reference
 
-Section-by-section guide for writing lean-spec style GitHub issue specs on Onsager. Based on the [lean-spec SDD methodology](https://github.com/codervisor/lean-spec), adapted to use GitHub issues as the sole spec medium.
+Section-by-section guide for writing lean-spec style GitHub issue specs. Based on the [lean-spec SDD methodology](https://github.com/codervisor/lean-spec), adapted to use GitHub issues as the sole spec medium.
+
+This reference is repo-agnostic. Consumer repos overlay their area-label taxonomy, custom body sections (e.g. Provider impact, Schema impact), and additional principles via their `CLAUDE.md` and `*-dev-process` / `*-pre-push` / `*-pr-lifecycle` sister skills — read those first.
 
 ## Metadata via GitHub Issue Features
 
 No YAML frontmatter — all metadata lives in native GitHub features:
 
-| lean-spec field | GitHub equivalent | Example |
-|----------------|-------------------|---------|
-| `status` | Labels | `draft`, `planned`, `in-progress` |
-| `priority` | Labels | `priority:high` |
-| `tags` | Labels | `area:stiglab`, `feat` |
-| `depends_on` | Issue body reference | `depends on #42` |
-| `parent/child` | Sub-issues | Created via `mcp__github__sub_issue_write` |
-| `assignee` | Issue assignee | `@username` |
-| `created/updated` | Issue timestamps | Automatic |
-| `transitions` | Issue timeline | Automatic audit trail |
+| lean-spec field    | GitHub equivalent     | Example                                      |
+|--------------------|-----------------------|----------------------------------------------|
+| `status`           | Labels                | `draft`, `planned`, `in-progress`            |
+| `priority`         | Labels                | `priority:high`                              |
+| `tags`             | Labels                | `area:<subsystem>`, `feat`                   |
+| `depends_on`       | Issue body reference  | `depends on #42`                             |
+| `parent/child`     | Sub-issues            | Created via `mcp__github__sub_issue_write`   |
+| `assignee`         | Issue assignee        | `@username`                                  |
+| `created/updated`  | Issue timestamps      | Automatic                                    |
+| `transitions`      | Issue timeline        | Automatic audit trail                        |
 
 ### Label Taxonomy
 
 Apply labels when creating the issue:
 
 **Required:**
+
 - `spec` — marks this as a spec issue (always present)
 
 **Type** (pick one):
+
 - `feat` — new capability
 - `fix` — bug fix
 - `refactor` — restructuring without behavior change
 - `perf` — performance improvement
 
-**Area** (pick one or more, aligned with `crates/` and `apps/`):
-- `area:spine` — `onsager-spine` (event bus client library)
-- `area:forge` — production line / artifact lifecycle
-- `area:ising` — continuous improvement engine
-- `area:stiglab` — agent session orchestration
-- `area:synodic` — agent governance
-- `area:portal` — edge subsystem (public HTTP, OAuth, webhooks, credentials)
-- `area:dashboard` — React UI under `apps/dashboard`
-- `area:onsager` — the `onsager` dispatcher CLI
-- `area:infra` — CI, migrations, docker-compose, justfile, workflows
-- `area:docs` — README, CLAUDE.md, specs
+**Area** (pick one or more):
 
-Respect the architectural invariant: a spec that crosses subsystem boundaries (other than via the spine event bus) must be split into per-subsystem child specs with a shared parent.
+Drawn from the consumer repo's area taxonomy — read the repo's `*-dev-process` sister skill (or `CLAUDE.md`) for the canonical list. Examples observed across consumer repos: `area:spine`, `area:dashboard`, `area:cli`, `area:ui`, `area:provider`, `area:schema`, `area:runtime`, `area:judge`, `area:docs`, `area:infra`. Respect each repo's architectural invariants when picking the area: a spec that crosses two areas should usually be split into per-area child specs with a shared parent.
 
 **Priority** (pick one):
+
 - `priority:critical` — blocks other work, needs immediate attention
 - `priority:high` — important, should be next
 - `priority:medium` — default
 - `priority:low` — nice to have
 
 **Status** (pick one, update as lifecycle progresses):
+
 - `draft` — initial state, AI-generated, human review pending
 - `planned` — human reviewed, decisions made, ready for implementation
 - `in-progress` — actively being worked on (PR open)
+
+**Cross-cutting (consumer-repo overlay):**
+
+Some consumer repos define additional discoverability labels for cross-cutting concerns — e.g. `provider-impact` for specs that touch a provider seam, `schema-impact` for schema changes, `i18n` for user-visible string changes, `trivial` (PR-only) for specs-not-required. Apply the ones that exist in the target repo; the repo's CLAUDE.md / sister skill is authoritative.
 
 ### Status Lifecycle
 
@@ -62,13 +62,14 @@ open + draft  →  open + planned  →  open + in-progress  →  closed
 ```
 
 The `draft → planned` transition is the **human-AI alignment gate**. Only a human moves a spec to `planned` — this confirms:
+
 - Open questions are resolved
 - Design approach is approved
 - Scope and priority are accepted
 
-`planned → in-progress` happens automatically when a PR referencing the issue is opened (via `.github/workflows/pr-spec-sync.yml`).
+`planned → in-progress` happens **automatically** on PR open in repos that ship a `pr-spec-sync.yml` workflow, and **manually** in repos that don't. Check the repo's `*-pr-lifecycle` sister skill.
 
-`in-progress → closed` happens automatically on PR merge with a `Closes #N` keyword. `Part of #N` PRs don't close the parent; the merger ticks the parent's Plan checkboxes manually (see `onsager-pr-lifecycle`).
+`in-progress → closed` happens automatically on PR merge with a `Closes #N` keyword. `Part of #N` PRs don't close the parent; the merger ticks the parent's Plan checkboxes manually.
 
 ## Sections
 
@@ -76,7 +77,8 @@ The `draft → planned` transition is the **human-AI alignment gate**. Only a hu
 
 **Purpose**: Why does this work matter? What problem does it solve?
 
-**Good overview** (note: prose, list items, and blockquote lines are *not* hard-wrapped — GitHub renders single newlines as `<br>` in issue bodies; see SKILL.md step 2):
+**Good overview** (note: prose, list items, and blockquote lines are *not* hard-wrapped — GitHub renders single newlines as `<br>` in issue bodies):
+
 ```markdown
 ## Overview
 
@@ -84,6 +86,7 @@ Sessions in `WAITING_INPUT` state can hang indefinitely if the user disconnects.
 ```
 
 **Bad overview:**
+
 ```markdown
 ## Overview
 
@@ -93,6 +96,7 @@ Add a timeout feature to sessions.
 The bad version says *what* but not *why*. The AI has no context to make tradeoff decisions during implementation.
 
 **Guidelines:**
+
 - 2-4 sentences. Problem → impact → what we need.
 - Reference specific code/behavior when possible.
 - Don't describe the solution here — that's Design's job.
@@ -102,6 +106,7 @@ The bad version says *what* but not *why*. The AI has no context to make tradeof
 **Purpose**: How should this work? What's the technical approach?
 
 **Write intent, not implementation:**
+
 ```markdown
 ## Design
 
@@ -114,11 +119,12 @@ The timeout duration is server-configurable via environment variable. Per-sessio
 ```
 
 **Guidelines:**
+
 - Describe data flow, state changes, API surface — not line-by-line code.
 - Include what's explicitly **out of scope** to prevent scope creep.
 - If design is complex, create child sub-issues for subsections.
 - Reference existing architecture when relevant.
-- Cross-subsystem designs must route through the spine event bus, not direct imports.
+- Respect the consumer repo's architectural invariants (e.g. event-bus seam rules, provider-agnostic core, holistic verification). The repo's `CLAUDE.md` is authoritative.
 
 ### Plan
 
@@ -127,9 +133,9 @@ The timeout duration is server-configurable via environment variable. Per-sessio
 ```markdown
 ## Plan
 
-- [ ] Add `STIGLAB_SESSION_TIMEOUT` env var to server config (default: 30m)
+- [ ] Add `SESSION_TIMEOUT` env var to server config (default: 30m)
 - [ ] Implement per-session inactivity timer in `SessionManager`
-- [ ] Add `SessionTimeoutWarning` event type to `stiglab`
+- [ ] Add `SessionTimeoutWarning` event type
 - [ ] Emit warning event 5 minutes before timeout
 - [ ] Transition `WaitingInput → Failed` on timeout expiry
 - [ ] Preserve session output on timeout (no data deletion)
@@ -137,11 +143,12 @@ The timeout duration is server-configurable via environment variable. Per-sessio
 ```
 
 **Guidelines:**
+
 - Each item starts with a verb: Add, Implement, Update, Remove, Fix.
 - Items should be small enough to verify in isolation.
 - Order reflects implementation sequence.
 - If a plan has more than ~10 items, the spec is too big — split into sub-issues.
-- Checkboxes serve as progress tracking on the issue itself; tick them manually as `Part of #N` PRs merge (see `onsager-pr-lifecycle`).
+- Checkboxes serve as progress tracking on the issue itself; tick them manually as `Part of #N` PRs merge (see the repo's `*-pr-lifecycle` sister skill).
 
 ### Test
 
@@ -151,7 +158,7 @@ The timeout duration is server-configurable via environment variable. Per-sessio
 ## Test
 
 - [ ] Unit test: config parses valid duration strings, rejects invalid
-- [ ] Unit test: timer resets on WebSocket message
+- [ ] Unit test: timer resets on incoming message
 - [ ] Integration test: session transitions to Failed after timeout
 - [ ] Integration test: warning event emitted 5 minutes before timeout
 - [ ] Integration test: session output preserved after timeout
@@ -159,10 +166,12 @@ The timeout duration is server-configurable via environment variable. Per-sessio
 ```
 
 **Guidelines:**
+
 - Each test item maps to one or more plan items.
 - Specify test type: unit, integration, manual, type check, lint.
 - Include negative cases: "rejects invalid", "does not delete".
 - For manual tests, describe what to check — not exact click paths.
+- Consumer repos may require additional test classes (e.g. i18n locale parity, schema validation) — read the repo's CLAUDE.md / sister skill.
 
 ### Alignment
 
@@ -174,7 +183,7 @@ The timeout duration is server-configurable via environment variable. Per-sessio
 ### Human decides
 - [ ] Timeout default value (proposed: 30m)
 - [ ] Whether to show UI warning (toast vs. banner)
-- [ ] Behavior on network partition (agent disconnects mid-timeout)
+- [ ] Behavior on network partition
 
 ### AI implements
 - [ ] Config parsing and validation
@@ -186,12 +195,10 @@ The timeout duration is server-configurable via environment variable. Per-sessio
 ### Open questions
 > Should timed-out sessions be retryable, or must the user create a new task?
 > Impact: changes whether final state is `Failed` or `Pending`.
-
-> What happens to the agent process when a session times out?
-> Impact: affects data preservation and distributed consistency.
 ```
 
 **Guidelines:**
+
 - Every Plan item maps to exactly one of: "Human decides" or "AI implements."
 - Human items are decisions/tradeoffs. AI items are execution.
 - Open questions block implementation — they must be resolved (via issue comments) before the `draft → planned` label transition.
@@ -205,52 +212,53 @@ The timeout duration is server-configurable via environment variable. Per-sessio
 ## Notes
 
 - Considered per-session timeout overrides via API, but deferred to keep scope small. Can add in a follow-up spec.
-- The timeout timer approach uses `tokio::time::sleep` per session. At 100+ concurrent sessions this may need optimization (timer wheel).
-- Related: #23 (session state machine), #31 (node heartbeat)
+- The timeout timer approach uses a per-session async timer. At 100+ concurrent sessions this may need optimization.
+- Related: #23, #31
 ```
 
 **Guidelines:**
+
 - Tradeoffs considered and why you chose this approach.
 - Performance or scalability concerns for future reference.
 - Links to related issues, PRs, or external resources.
 - Keep it brief — notes are context, not a second design section.
 - Omit this section entirely if there's nothing to note.
 
-## User-facing vocabulary
+### Consumer-repo overlay sections
 
-When a spec touches a user-facing surface (dashboard pages, button
-copy, public API field names, route segments, user-visible docs),
-use the canonical 4 nouns: **Workflow**, **Run**, **Artifact**,
-**Stage**. Spec #286 / root `CLAUDE.md` § "User-facing vocabulary"
-demote everything else (`shaping`, `bundle`, `sealed`, `gate`,
-`verdict`, `governance`, `session`, `node`, `issue`, `spec`) to
-internal-only or surface-internal — they stay rich in Rust /
-migration / spine vocabulary but never surface to users at the top
-level. Internal/seam vocabulary stays distinct per the audit's
-"keep distinct" findings; this rule only governs what users see.
+Some consumer repos require additional sections in the issue body. Apply the ones that exist in the target repo:
+
+- **`## Provider impact`** (lean-spec) — required whenever a change touches the provider abstraction or anything crossing the markdown / github backend seam. Captures types added/removed/renamed, trait changes, per-backend semantics, migration path, breaking?-flag.
+- **`## Schema impact`** (Duhem) — required whenever a change touches the Verification Definition format, action-type catalog, runtime expressions, judge semantics, or any externally observable contract. Captures fields added/removed/renamed, semantics changes, migration path for in-flight definitions, breaking?-flag.
+- **`## Worked example`** (Duhem) — required when a spec introduces or modifies user-visible product surface. A minimal Verification Definition (or link to one) that exercises the surface end-to-end.
+- **Reach plan items** (Onsager) — when a spec introduces a new user-facing primitive, the Plan must include nav entry, first-run flow, empty-state CTAs, and auth gating.
+
+The repo's CLAUDE.md / sister skill is authoritative for which extras it requires. Drop a section only if the change provably doesn't touch its surface.
 
 ## Context Economy Rules
 
 Smaller specs produce better results — for both AI implementation and human review:
 
-| Issue body size | Action |
-|----------------|--------|
-| < 500 tokens | Good for bug fixes and small changes |
-| 500–2000 tokens | Standard spec — covers most features |
-| > 2000 tokens | **Split into parent + sub-issues** |
+| Issue body size | Action                                            |
+|-----------------|---------------------------------------------------|
+| < 500 tokens    | Good for bug fixes and small changes              |
+| 500–2000 tokens | Standard spec — covers most features              |
+| > 2000 tokens   | **Split into parent + sub-issues**                |
 
 **How to split:**
+
 1. Create a parent issue with Overview + high-level Plan listing the children.
 2. Create child issues via `mcp__github__sub_issue_write`, one per independent concern.
 3. Each child has its own Design, Plan, Test, Alignment sections.
 4. Parent tracks overall progress; children track individual concerns.
 
 **Example:**
+
 ```
-#50 spec(stiglab): session lifecycle improvements      ← parent
-  ├── #51 spec(stiglab): session timeout mechanism     ← sub-issue
-  ├── #52 spec(stiglab): session retry on failure      ← sub-issue
-  └── #53 spec(dashboard): timeout warning indicator   ← sub-issue
+#50 spec(<area>): umbrella feature                ← parent
+  ├── #51 spec(<area>): concern A                 ← sub-issue
+  ├── #52 spec(<area>): concern B                 ← sub-issue
+  └── #53 spec(<other-area>): UI surface for A+B  ← sub-issue
 ```
 
 ## Title Convention
@@ -259,9 +267,11 @@ Smaller specs produce better results — for both AI implementation and human re
 spec(<area>): <short description in imperative mood>
 ```
 
-Examples:
+`<area>` is one of the consumer repo's `area:*` labels with the `area:` prefix dropped. Examples across consumer repos:
+
 - `spec(stiglab): add session timeout for idle sessions`
-- `spec(stiglab): handle WebSocket reconnection gracefully`
+- `spec(provider): github provider — issue CRUD via MCP`
+- `spec(schema): add api/observe action type`
 - `spec(dashboard): show real-time node heartbeat status`
-- `spec(forge): retry failed synodic verdict dispatch`
-- `spec(spine): add backpressure on events_ext ingestion`
+- `spec(judge): three-state verdict aggregation rules`
+- `spec(infra): pin CI action versions to SHAs`
