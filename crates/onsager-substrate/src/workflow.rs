@@ -10,7 +10,7 @@
 //! for why `Node` carries `Box<dyn Executor>` instead of a closed
 //! `NodeKind` enum.
 
-use onsager_artifact::{ArtifactId, NodeId};
+use onsager_artifact::{ArtifactId, NodeId, Provenance};
 use serde::{Deserialize, Serialize};
 
 use crate::executor::Executor;
@@ -23,10 +23,36 @@ use crate::ids::EdgeId;
 /// (SUB-04, #351). The library row carries the `WorkflowId` and
 /// version; the `Workflow` struct itself is the *content* — the shape
 /// the Plan Compiler instantiates.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Workflow {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    /// Workflow-level output slots — each entry names an exit edge
+    /// and the provenance the workflow promises to deliver on it.
+    /// Invariant 3 (ADR 0018) checks the actual emitted provenance
+    /// on each named edge equals the declaration; a workflow may
+    /// declare zero outputs, in which case invariant 3 is a no-op.
+    ///
+    /// `EntrySpec` (the inbound counterpart from ADR 0015) is not
+    /// yet modeled — entry edges, identified as edges with no
+    /// producer node in this workflow, are treated by the validator
+    /// as `Deterministic { source: External }` per the default in
+    /// `Provenance::external_deterministic`.
+    #[serde(default)]
+    pub output_specs: Vec<OutputSpec>,
+}
+
+/// A declared workflow output slot.
+///
+/// Pairs an exit `EdgeId` with the `Provenance` the workflow
+/// promises to deliver on it. Validated by invariant 3 (ADR 0018):
+/// the actual emitted provenance flowing into `edge_id` (computed
+/// from the producer node's executor + inputs per invariant 2) must
+/// equal `provenance`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputSpec {
+    pub edge_id: EdgeId,
+    pub provenance: Provenance,
 }
 
 /// A node in a workflow template.
@@ -109,6 +135,7 @@ mod tests {
                     requires_deterministic: false,
                 },
             ],
+            output_specs: vec![],
         }
     }
 
@@ -169,13 +196,36 @@ mod tests {
 
     #[test]
     fn empty_workflow_roundtrips() {
-        let w = Workflow {
-            nodes: vec![],
-            edges: vec![],
-        };
+        let w = Workflow::default();
         let json = serde_json::to_value(&w).unwrap();
         let roundtrip: Workflow = serde_json::from_value(json).unwrap();
         assert!(roundtrip.nodes.is_empty());
         assert!(roundtrip.edges.is_empty());
+        assert!(roundtrip.output_specs.is_empty());
+    }
+
+    #[test]
+    fn workflow_output_specs_default_empty_on_deserialize() {
+        // Wire form predating OutputSpec must still deserialize.
+        let json = serde_json::json!({"nodes": [], "edges": []});
+        let w: Workflow = serde_json::from_value(json).unwrap();
+        assert!(w.output_specs.is_empty());
+    }
+
+    #[test]
+    fn workflow_output_specs_roundtrip() {
+        let edge_id = EdgeId::generate();
+        let spec = OutputSpec {
+            edge_id,
+            provenance: Provenance::external_deterministic(),
+        };
+        let w = Workflow {
+            nodes: vec![],
+            edges: vec![],
+            output_specs: vec![spec],
+        };
+        let json = serde_json::to_value(&w).unwrap();
+        let roundtrip: Workflow = serde_json::from_value(json).unwrap();
+        assert_eq!(roundtrip.output_specs, vec![spec]);
     }
 }
