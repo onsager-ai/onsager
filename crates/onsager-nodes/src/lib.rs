@@ -1,0 +1,36 @@
+//! # onsager-nodes
+//!
+//! The runtime half of the executor catalog — the `async` side of the
+//! `Executor` trait, the [`ExecutorRegistry`] that holds one instance
+//! per executor kind, and a `dispatch(...)` helper that takes a
+//! substrate `Node` and runs its executor.
+//!
+//! See:
+//! - [ADR 0012](../../../docs/adr/0012-executor-catalog-replaces-nodekind.md)
+//!   — why nodes carry `Box<dyn Executor>` instead of a closed
+//!   `NodeKind` enum, and the flat-crate convention for executor
+//!   implementations.
+//! - The static / serializable half of the trait lives in
+//!   [`onsager_substrate::Executor`] — `executor_kind()` /
+//!   `declared_provenance()` for workflow validation and serde
+//!   round-trips. This crate's [`Executor`] is the runtime sibling: it
+//!   shares the same `executor_kind()` string (that's how dispatch
+//!   resolves a node to its runtime), and adds `async fn execute(..)`.
+//!
+//! Subsequent issues (EXE-02 through EXE-06) land concrete executors
+//! — Script, Agent, Verify, Human, SubWorkflow — as flat sibling
+//! modules here.
+
+pub mod context;
+pub mod dispatch;
+pub mod error;
+pub mod executor;
+pub mod registry;
+pub mod spine;
+
+pub use context::{ExecutorContext, ExecutorOutputs};
+pub use dispatch::dispatch;
+pub use error::ExecutorError;
+pub use executor::{Executor, NoOpExecutor};
+pub use registry::ExecutorRegistry;
+pub use spine::{SpineClient, SpineError};

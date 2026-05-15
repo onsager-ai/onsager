@@ -1682,6 +1682,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "onsager-nodes"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "async-trait",
+ "onsager-artifact",
+ "onsager-substrate",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "onsager-portal"
 version = "0.2.0-alpha.1"
 dependencies = [
