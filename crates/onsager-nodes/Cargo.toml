@@ -1,0 +1,17 @@
+[package]
+name = "onsager-nodes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Runtime Executor catalog — the async half of the Executor trait plus the dispatch registry."
+
+[dependencies]
+onsager-artifact = { path = "../onsager-artifact" }
+onsager-substrate = { path = "../onsager-substrate" }
+
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
