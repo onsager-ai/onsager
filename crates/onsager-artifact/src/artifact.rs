@@ -8,6 +8,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::provenance::{NodeId, Provenance};
+
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
@@ -303,6 +305,21 @@ pub struct Artifact {
     pub current_stage_index: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_parked_reason: Option<String>,
+
+    // Provenance (ADR 0010, issue #348).
+    //
+    // `provenance` records whether this artifact was produced by a
+    // deterministic process (script, external system-of-record, Verify
+    // certification) or an uncertain one (LLM, human edit, composed
+    // from uncertain parents). `produced_by_node` identifies the
+    // Execution Plan node that emitted it; `None` for legacy /
+    // externally-ingested rows that predate the workflow runtime.
+    // Both fields carry serde defaults so pre-#348 wire payloads
+    // round-trip as `Deterministic { source: External }` / `None`.
+    #[serde(default)]
+    pub provenance: Provenance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub produced_by_node: Option<NodeId>,
 }
 
 impl Artifact {
@@ -348,6 +365,8 @@ impl Artifact {
             workflow_id: None,
             current_stage_index: None,
             workflow_parked_reason: None,
+            provenance: Provenance::external_deterministic(),
+            produced_by_node: None,
         }
     }
 }
@@ -359,6 +378,7 @@ impl Artifact {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provenance::SourceTag;
 
     #[test]
     fn artifact_id_format() {
@@ -494,6 +514,62 @@ mod tests {
             10_000,
             "expected 10 000 unique IDs, got duplicates"
         );
+    }
+
+    #[test]
+    fn new_artifact_defaults_to_external_deterministic_provenance() {
+        let art = Artifact::new(Kind::Document, "spec", "marvin", "system", vec![]);
+        assert_eq!(
+            art.provenance,
+            Provenance::Deterministic {
+                source: SourceTag::External
+            }
+        );
+        assert!(art.produced_by_node.is_none());
+    }
+
+    #[test]
+    fn artifact_roundtrips_provenance_through_serde() {
+        let mut art = Artifact::new(Kind::Code, "agent-edit", "marvin", "stiglab", vec![]);
+        art.provenance = Provenance::Uncertain {
+            source: SourceTag::Agent,
+        };
+        art.produced_by_node = Some(NodeId::generate());
+
+        let json = serde_json::to_value(&art).unwrap();
+        let roundtrip: Artifact = serde_json::from_value(json).unwrap();
+        assert_eq!(roundtrip.provenance, art.provenance);
+        assert_eq!(roundtrip.produced_by_node, art.produced_by_node);
+    }
+
+    #[test]
+    fn pre_provenance_payload_defaults_on_deserialize() {
+        // Wire payload from a pre-#348 producer — no provenance /
+        // produced_by_node fields at all. Must deserialize with the
+        // back-compat defaults rather than erroring.
+        let json = serde_json::json!({
+            "artifact_id": "art_01HXYZABC123DEFGHJKMNPQRST",
+            "kind": "code",
+            "name": "legacy",
+            "created_at": "2025-01-01T00:00:00Z",
+            "created_by": "system",
+            "owner": "marvin",
+            "consumers": [],
+            "state": "draft",
+            "current_version": 0,
+            "versions": [],
+            "vertical_lineage": [],
+            "horizontal_lineage": [],
+            "quality_signals": [],
+        });
+        let art: Artifact = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            art.provenance,
+            Provenance::Deterministic {
+                source: SourceTag::External
+            }
+        );
+        assert!(art.produced_by_node.is_none());
     }
 
     #[test]
