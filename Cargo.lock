@@ -754,7 +754,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "forge"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1323,7 +1323,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "ising"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1626,11 +1626,11 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "onsager"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 
 [[package]]
 name = "onsager-artifact"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "chrono",
  "serde",
@@ -1640,7 +1640,7 @@ dependencies = [
 
 [[package]]
 name = "onsager-github"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1662,7 +1662,7 @@ dependencies = [
 
 [[package]]
 name = "onsager-portal"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1697,7 +1697,7 @@ dependencies = [
 
 [[package]]
 name = "onsager-registry"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1714,7 +1714,7 @@ dependencies = [
 
 [[package]]
 name = "onsager-spine"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1734,7 +1734,7 @@ dependencies = [
 
 [[package]]
 name = "onsager-trigger"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2053,7 +2053,7 @@ dependencies = [
 
 [[package]]
 name = "refract"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2736,7 +2736,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stiglab"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2814,7 +2814,7 @@ dependencies = [
 
 [[package]]
 name = "synodic"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3954,7 +3954,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "base64",
