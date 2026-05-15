@@ -40,6 +40,8 @@
 use onsager_artifact::{Provenance, SourceTag};
 use serde::{Deserialize, Serialize};
 
+use crate::ids::WorkflowId;
+
 /// What a node does when the scheduler reaches it.
 ///
 /// Object-safe by design: no generic methods, no `Self: Sized` clauses.
@@ -67,6 +69,18 @@ pub trait Executor: std::fmt::Debug + Send + Sync {
     /// return the max-uncertainty of `inputs` themselves; Verify
     /// returns `Deterministic`.
     fn declared_provenance(&self, inputs: &[Provenance]) -> Provenance;
+
+    /// If this executor is a SubWorkflow (ADR 0011), the `WorkflowId`
+    /// it references. Default `None` covers every executor that is
+    /// not a SubWorkflow.
+    ///
+    /// Invariant 4 (ADR 0018) uses this to verify the reference
+    /// resolves in the `WorkflowLibrary` and that the resolution
+    /// graph is acyclic. The SubWorkflow executor itself (EXE-06,
+    /// #358) is the only implementor expected to override this.
+    fn subworkflow_ref(&self) -> Option<WorkflowId> {
+        None
+    }
 }
 
 /// A no-op executor — declares deterministic output, performs nothing.

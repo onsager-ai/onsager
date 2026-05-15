@@ -19,10 +19,14 @@
 
 pub mod executor;
 pub mod ids;
+pub mod library;
+pub mod validate;
 pub mod workflow;
 
 pub use executor::*;
 pub use ids::*;
+pub use library::*;
+pub use validate::*;
 pub use workflow::*;
 
 // Re-exports for downstream convenience — anyone working with a
