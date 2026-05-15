@@ -6,6 +6,12 @@ project does not yet publish numbered releases.
 
 ## [Unreleased]
 
+### Changed
+- Begin 0.2 substrate re-foundation (see milestone `0.2-refoundation`)
+- Workspace version bumped to `0.2.0-alpha.1`
+
+## [0.1.0] - 2026-05-15
+
 ### Added
 - **Stiglab + Railway**: cross-env SSO delegation so per-PR preview
   environments can piggy-back off prod's single registered GitHub
@@ -461,3 +467,7 @@ project does not yet publish numbered releases.
 - Root `README.md` and `apps/dashboard/README.md` rewritten to match the
   current monorepo layout (forge, ising) and `just dev` workflow.
 - Outdated specs archived; spec indexes updated.
+
+### Frozen
+- Final state of 5-subsystem era: forge / synodic / stiglab / ising / refract
+- This is the last release of the pre-substrate code
