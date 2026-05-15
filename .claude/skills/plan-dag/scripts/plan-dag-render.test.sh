@@ -119,6 +119,47 @@ for tgt in tb ascii; do
     assert_eq "stdin $tgt matches file-arg" "$tmp/stdin.$tgt" "$EXP/happy.$tgt"
 done
 
+echo "--as=png smoke (skipped without node + Playwright Chromium)"
+if command -v node >/dev/null 2>&1; then
+    png_out="$tmp/happy.png"
+    "$SCRIPT" "$FIX/happy.json" --as=png --out "$png_out" >"$tmp/png.out" 2>"$tmp/png.err"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        if grep -q 'cannot load Playwright' "$tmp/png.err"; then
+            printf '  skip --as=png (Playwright not installed)\n'
+        else
+            fail=$((fail + 1))
+            printf '  FAIL --as=png exited %d\n' "$rc"
+            sed 's/^/    /' < "$tmp/png.err"
+        fi
+    elif [ ! -s "$png_out" ]; then
+        fail=$((fail + 1))
+        printf '  FAIL --as=png produced empty output\n'
+    elif ! head -c 8 "$png_out" | grep -q 'PNG'; then
+        fail=$((fail + 1))
+        printf '  FAIL --as=png output is not a PNG\n'
+    else
+        pass=$((pass + 1))
+        printf '  ok  --as=png produced a PNG\n'
+    fi
+
+    # Also confirm --as=png errors clearly when --out is missing.
+    "$SCRIPT" "$FIX/happy.json" --as=png >"$tmp/png-noout.out" 2>"$tmp/png-noout.err"
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        fail=$((fail + 1))
+        printf '  FAIL --as=png without --out should fail, got 0\n'
+    elif ! grep -q 'requires --out' "$tmp/png-noout.err"; then
+        fail=$((fail + 1))
+        printf '  FAIL --as=png without --out: stderr missing guidance\n'
+    else
+        pass=$((pass + 1))
+        printf '  ok  --as=png without --out fails with guidance\n'
+    fi
+else
+    printf '  skip --as=png (node not on PATH)\n'
+fi
+
 echo "auto-fallback (dot not on PATH → --as=ascii)"
 py3="$(command -v python3)"
 PATH="" "$py3" "$SCRIPT" "$FIX/happy.json" > "$tmp/fallback.out" 2>"$tmp/fallback.err"
