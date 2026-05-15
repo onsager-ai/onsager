@@ -19,13 +19,14 @@
 //!
 //! Subsequent issues (EXE-02 through EXE-06) land concrete executors
 //! — Script, Agent, Verify, Human, SubWorkflow — as flat sibling
-//! modules here.
+//! modules here. EXE-02 (#354) lands [`script::ScriptExecutor`].
 
 pub mod context;
 pub mod dispatch;
 pub mod error;
 pub mod executor;
 pub mod registry;
+pub mod script;
 pub mod spine;
 
 pub use context::{ExecutorContext, ExecutorOutputs};
@@ -33,4 +34,5 @@ pub use dispatch::dispatch;
 pub use error::ExecutorError;
 pub use executor::{Executor, NoOpExecutor};
 pub use registry::ExecutorRegistry;
+pub use script::{INLINE_URI_PREFIX, ScriptExecutor, decode_inline_body};
 pub use spine::{SpineClient, SpineError};
