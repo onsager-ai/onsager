@@ -13,9 +13,9 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use sqlx::postgres::PgPool;
 
-use crate::anthropic::{AnthropicClient, AnthropicUpstreamError};
 use crate::auth::{AuthUser, decrypt_credential};
 use crate::credential_db;
+use crate::runtime::{AnthropicRelay, ChatRuntime, ChatRuntimeError};
 use crate::state::AppState;
 
 async fn require_workspace_access(
@@ -113,10 +113,10 @@ pub async fn create_chat_completion(
         }
     };
 
-    let client = match AnthropicClient::new(api_key) {
-        Ok(c) => c,
+    let runtime: Box<dyn ChatRuntime> = match AnthropicRelay::new(api_key) {
+        Ok(r) => Box::new(r),
         Err(e) => {
-            tracing::error!("failed to build anthropic client: {e}");
+            tracing::error!("failed to build anthropic relay: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -137,21 +137,21 @@ pub async fn create_chat_completion(
         obj.insert("model".to_owned(), serde_json::json!(resolved));
     }
 
-    match client.forward(&req).await {
+    match runtime.chat(&req).await {
         Ok(resp) => Json(resp).into_response(),
-        Err(e) => {
-            if let Some(upstream) = e.downcast_ref::<AnthropicUpstreamError>() {
-                // 4xx = caller error — return the upstream status + body
-                // verbatim so the dashboard can surface Anthropic's message.
-                // 5xx = provider error — map to 502 Bad Gateway.
-                let status = if upstream.status >= 400 && upstream.status < 500 {
-                    StatusCode::from_u16(upstream.status).unwrap_or(StatusCode::BAD_REQUEST)
-                } else {
-                    StatusCode::BAD_GATEWAY
-                };
-                return (status, Json(upstream.body.clone())).into_response();
-            }
-            tracing::warn!("anthropic relay transport error: {e}");
+        Err(ChatRuntimeError::Upstream { status, body }) => {
+            // 4xx = caller error — return the upstream status + body
+            // verbatim so the dashboard can surface Anthropic's message.
+            // 5xx = provider error — map to 502 Bad Gateway.
+            let mapped = if (400..500).contains(&status) {
+                StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST)
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            (mapped, Json(body)).into_response()
+        }
+        Err(ChatRuntimeError::Transport(e)) => {
+            tracing::warn!("chat runtime transport error: {e}");
             (
                 StatusCode::BAD_GATEWAY,
                 Json(serde_json::json!({

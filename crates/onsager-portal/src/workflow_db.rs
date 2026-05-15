@@ -124,6 +124,16 @@ pub async fn insert_workflow_with_stages(
     .await
     .context("insert spine workflows row")?;
 
+    // Materialize stage rows + collect snapshot inputs in one pass so
+    // the v1 `workflow_versions` row below carries the same shape
+    // migration 025's backfill produces for pre-existing workflows.
+    let mut snapshot_stages: Vec<(
+        i32,
+        String,
+        Option<&'static str>,
+        serde_json::Value,
+        serde_json::Value,
+    )> = Vec::with_capacity(stages.len());
     for stage in stages {
         let (target_state, gates) = translate_stage(stage.gate_kind, &stage.params);
         sqlx::query(
@@ -140,7 +150,68 @@ pub async fn insert_workflow_with_stages(
         .execute(&mut *tx)
         .await
         .context("insert spine workflow_stages row")?;
+        snapshot_stages.push((
+            stage.seq,
+            stage.gate_kind.to_string(),
+            target_state,
+            gates,
+            stage.params.clone(),
+        ));
     }
+
+    // v1 version + audit row. Spec #337: every workflow is a versioned
+    // artifact, and the initial version is published with the same
+    // content the active read path serves today. The id is the same
+    // deterministic shape migration 025's backfill uses
+    // (`wfv_<workflow_id>`), so a backfilled v1 and a freshly-created
+    // v1 are byte-equivalent for the same input.
+    let version_id = crate::workflow_version_db::v1_version_id(&workflow.id);
+    let stage_refs: Vec<(
+        i32,
+        &str,
+        Option<&str>,
+        &serde_json::Value,
+        &serde_json::Value,
+    )> = snapshot_stages
+        .iter()
+        .map(|(o, n, t, g, p)| (*o, n.as_str(), *t, g, p))
+        .collect();
+    let snapshot = crate::workflow_version_db::build_snapshot(workflow, &stage_refs);
+    sqlx::query(
+        "INSERT INTO workflow_versions ( \
+            version_id, workflow_id, version_label, content, \
+            parent_version_id, state, created_by, created_at, published_at \
+         ) VALUES ($1, $2, 'v1', $3, NULL, 'published', $4, $5, $5)",
+    )
+    .bind(&version_id)
+    .bind(&workflow.id)
+    .bind(&snapshot)
+    .bind(&workflow.created_by)
+    .bind(workflow.created_at)
+    .execute(&mut *tx)
+    .await
+    .context("insert v1 workflow_versions row")?;
+
+    sqlx::query("UPDATE workflows SET active_version_id = $1 WHERE workflow_id = $2")
+        .bind(&version_id)
+        .bind(&workflow.id)
+        .execute(&mut *tx)
+        .await
+        .context("point workflows.active_version_id at v1")?;
+
+    sqlx::query(
+        "INSERT INTO workflow_changes ( \
+            workflow_id, version_id, actor, action, \
+            before_content, after_content, reason \
+         ) VALUES ($1, $2, $3, 'publish', NULL, $4, 'initial publish')",
+    )
+    .bind(&workflow.id)
+    .bind(&version_id)
+    .bind(&workflow.created_by)
+    .bind(&snapshot)
+    .execute(&mut *tx)
+    .await
+    .context("insert initial workflow_changes row")?;
 
     tx.commit().await?;
     Ok(())
@@ -232,6 +303,7 @@ pub async fn delete_workflow(pool: &PgPool, workflow_id: &str) -> anyhow::Result
     sqlx::query(
         "UPDATE artifacts \
             SET workflow_id            = NULL, \
+                workflow_version_id    = NULL, \
                 current_stage_index    = NULL, \
                 workflow_parked_reason = NULL \
           WHERE workflow_id = $1",
