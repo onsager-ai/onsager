@@ -44,10 +44,14 @@ emitted provenance must be `Deterministic`. Verify executors are the
 only nodes allowed to flip the upstream from Uncertain to
 Deterministic (ADR 0010).
 
-**Invariant 2 — Uncertain is contagious via emits_provenance.** A
-node's emitted provenance is the max-uncertainty of its declared
-output provenance and all input provenances. Implementations cannot
-silently downgrade Uncertain to Deterministic; only Verify can.
+**Invariant 2 — Uncertain is contagious via emits_provenance.** For
+non-Verify executors, a node's emitted provenance is the
+max-uncertainty of its declared output provenance and all input
+provenances; an Uncertain input forces an Uncertain output regardless
+of declaration. Verify executors are the sole exception: their
+emitted provenance is `Deterministic` (the script-backed check
+upgrades the input). No other executor may downgrade Uncertain to
+Deterministic.
 
 **Invariant 3 — Workflow OutputSpec matches actual provenance.** A
 workflow declares the provenance of its outputs (via `OutputSpec`).
@@ -123,8 +127,8 @@ defect class, check at the right moment, fail loudly.
 
 ## Adoption checklist
 
-- [ ] `validate_workflow` in `crates/onsager-substrate/src/validate.
-      rs` (SUB-03, #350).
+- [ ] `validate_workflow` in `crates/onsager-substrate/src/validate.rs`
+      (SUB-03, #350).
 - [ ] One check function per invariant.
 - [ ] One positive + one negative test per invariant (10 tests
       minimum).

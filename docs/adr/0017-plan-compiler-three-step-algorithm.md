@@ -5,9 +5,11 @@
 - **Identity impact**: yes
 - **Tracking issues**: #347 (ADR-01), #352 (SUB-05)
 - **Supersedes**: ADR 0001 (event bus is the coordination medium) —
-  partial; the bus remains, but the compiler now produces the
-  Execution Plan that drives every emission, replacing direct
-  authoring of coordination by feature subsystems
+  partial, jointly with ADR 0009. The bus remains, but the compiler
+  now produces the Execution Plan that drives every emission,
+  replacing direct authoring of coordination by feature subsystems.
+  ADR 0009 names the layers; ADR 0017 names the algorithm that
+  compiles between them.
 - **Superseded by**: none
 
 This ADR carries `Identity impact: yes` because it names *how* the
@@ -116,8 +118,8 @@ moving the kind taxonomy.
 
 ## Adoption checklist
 
-- [ ] `compile` function in `crates/onsager-substrate/src/compiler.
-      rs` (SUB-05, #352).
+- [ ] `compile` function in `crates/onsager-substrate/src/compiler.rs`
+      (SUB-05, #352).
 - [ ] `Workflow::instantiate(spec)` — fresh UUIDs, spec-scoped
       namespace.
 - [ ] `ExecutionPlan::connect` — exit/entry wiring with type-check.

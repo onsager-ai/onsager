@@ -4,7 +4,12 @@
 - **Date**: 2026-05-15
 - **Identity impact**: yes
 - **Tracking issues**: #347 (ADR-01), #352 (SUB-05 Plan Compiler), #359 (RUN-01)
-- **Supersedes**: ADR 0001 (event bus is the coordination medium) — partial; spine remains the runtime medium, but the *coordination shape* is now the three-layer pipeline below, not direct stigmergic emission from feature-specific subsystems
+- **Supersedes**: ADR 0001 (event bus is the coordination medium) —
+  partial, jointly with ADR 0017. The spine remains the runtime
+  medium, but the *coordination shape* is now the three-layer
+  pipeline below, not direct stigmergic emission from feature-specific
+  subsystems. ADR 0009 names the layers; ADR 0017 names the algorithm
+  that compiles between them.
 - **Superseded by**: none
 
 This ADR carries `Identity impact: yes` because it reframes commitment 1

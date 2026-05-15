@@ -79,9 +79,10 @@ match the old NodeKind enforced.
   trait methods (or `where Self: Sized` everywhere). For v1 the
   signature above is enough.
 - **Registry must be populated correctly.** A workflow referencing an
-  unregistered executor fails at compile time (invariant 5-adjacent
-  check at executor lookup); the registry is the single point of
-  failure for "did you remember to register your executor."
+  unregistered executor fails at compile time via executor-registry
+  lookup (a pre-flight check separate from the five kernel invariants
+  in ADR 0018); the registry is the single point of failure for "did
+  you remember to register your executor."
 
 ### Neutral
 

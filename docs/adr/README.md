@@ -11,7 +11,7 @@ see [`../architecture.md`](../architecture.md).
 
 | # | Title | Status |
 |---|---|---|
-| [0001](0001-event-bus-coordination-model.md) | Event bus is the coordination medium (Option A) | Superseded (2026-05-15) by ADR 0009 + ADR 0017 |
+| [0001](0001-event-bus-coordination-model.md) | Event bus is the coordination medium (Option A) | Superseded (2026-05-15) by ADR 0009 + ADR 0017 — migration completed via ADR 0004 Lever C |
 | [0002](0002-process-product-isomorphism.md) | Process ↔ product isomorphism as design discipline | Superseded (2026-05-15) by ADR 0013 — framing kept as design principle |
 | [0003](0003-deliverable-and-registry-backed-kinds.md) | Deliverable as the workflow-run output; registry-backed artifact kinds | Accepted (2026-04-22) — v1 partially landed under #100 |
 | [0004](0004-tighten-the-seams.md) | Tighten the seams: HTTP at external boundaries, spine for everything internal | Superseded (2026-05-15) by ADR 0018 — code-level seam levers remain in force |
