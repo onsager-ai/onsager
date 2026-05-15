@@ -22,8 +22,6 @@
 
 use std::collections::HashMap;
 
-use onsager_artifact::ArtifactId;
-
 use crate::ids::EdgeId;
 use crate::library::WorkflowLibrary;
 use crate::spec_plan::{SpecDep, SpecId, SpecPlan, SpecPlanError};
@@ -102,11 +100,29 @@ pub enum CompileError {
         to_kind: String,
     },
 
+    /// Two or more `SpecDep`s target the same downstream spec. ADR
+    /// 0015 fixes v1 at single-entry / single-exit per workflow, so
+    /// fan-in into the same entry slot is out of scope; widening the
+    /// IO model is a follow-up rather than a silent compile.
+    #[error(
+        "spec '{to}' has multiple incoming deps ({}) but v1 workflows \
+         declare a single entry slot — split the workflow or merge upstream \
+         specs", format_spec_ids(.from)
+    )]
+    MultipleIncomingDeps { to: SpecId, from: Vec<SpecId> },
+
     /// The merged Execution Plan failed one or more kernel invariants
     /// (ADR 0018). The wrapped vector is every violation found in
     /// one pass.
     #[error("Execution Plan failed kernel invariants: {} violation(s)", .0.len())]
     Invariant(Vec<InvariantViolation>),
+}
+
+fn format_spec_ids(ids: &[SpecId]) -> String {
+    ids.iter()
+        .map(SpecId::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Compile a Spec Plan against a Workflow Library.
@@ -137,13 +153,30 @@ pub fn compile(
 
     // Step 3 — connect. Build a per-spec entry rewrite map: for each
     // dep `from -> to`, point every reference to `to`'s entry
-    // edge_id at `from`'s exit edge_id. We support v1's
-    // single-entry / single-exit by wiring the first entry/exit pair
-    // declared on each side; multi-IO is left for a follow-up.
+    // edge_id at `from`'s exit edge_id. v1 fixes single-entry /
+    // single-exit per ADR 0015, so we reject the second incoming
+    // dep into any given spec rather than silently overwriting the
+    // first wiring.
     let mut rewrites: HashMap<EdgeId, EdgeId> = HashMap::new();
     let mut effective_entries: HashMap<SpecId, Vec<EdgeId>> = HashMap::new();
     for (spec_id, (_, inst)) in &instantiated {
         effective_entries.insert(spec_id.clone(), inst.entry_edges.clone());
+    }
+
+    // Detect fan-in (multiple `from` specs targeting the same `to`)
+    // up-front so the error names every offending upstream, not just
+    // the second one we happened to reach.
+    let mut incoming: HashMap<SpecId, Vec<SpecId>> = HashMap::new();
+    for SpecDep { from, to } in &spec_plan.deps {
+        incoming.entry(to.clone()).or_default().push(from.clone());
+    }
+    for (to, froms) in &incoming {
+        if froms.len() > 1 {
+            return Err(CompileError::MultipleIncomingDeps {
+                to: to.clone(),
+                from: froms.clone(),
+            });
+        }
     }
 
     for SpecDep { from, to } in &spec_plan.deps {
@@ -187,10 +220,13 @@ pub fn compile(
     }
 
     // Merge into the flat plan, applying entry-edge rewrites and
-    // dropping the now-redundant entry edge rows.
+    // dropping the now-redundant entry edge rows. Single-writer
+    // enforcement is delegated to invariant 5 in step 4, so this
+    // loop preserves every surviving edge verbatim — duplicate
+    // artifact ids surface as a kernel-invariant violation rather
+    // than a silent compile-time merge.
     let mut nodes: Vec<Node> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
-    let mut seen_artifacts: HashMap<ArtifactId, usize> = HashMap::new();
     let mut spec_index: HashMap<SpecId, SpecSlot> = HashMap::new();
 
     // Iterate in spec_plan.specs declaration order so the resulting
@@ -218,15 +254,6 @@ pub fn compile(
                 // Dropped: this entry edge is now the upstream exit.
                 continue;
             }
-            // Drop duplicates produced when the same artifact id
-            // surfaces twice across spec subgraphs (it shouldn't,
-            // since artifact ids are spec-namespaced — but the
-            // single-writer rule is invariant 5's job, not ours).
-            if seen_artifacts.contains_key(&edge.artifact_id) {
-                edges.push(edge);
-                continue;
-            }
-            seen_artifacts.insert(edge.artifact_id.clone(), edges.len());
             edges.push(edge);
         }
 
@@ -265,7 +292,7 @@ mod tests {
     use crate::ids::{EdgeId, WorkflowId};
     use crate::spec_plan::SpecRef;
     use crate::workflow::{Edge, EdgeRef, EntrySpec, Node, OutputSpec, Workflow};
-    use onsager_artifact::{NodeId, Provenance};
+    use onsager_artifact::{ArtifactId, NodeId, Provenance};
     use std::collections::HashMap;
 
     /// Tiny in-memory library for tests — owns the workflows and
@@ -694,5 +721,65 @@ mod tests {
             matches!(err, CompileError::NoEntry { .. }),
             "expected NoEntry error, got: {err:?}",
         );
+    }
+
+    // ---------------------------------------------------------------
+    // Multi-incoming dep into a single spec is rejected explicitly,
+    // not silently merged. v1 is single-entry per ADR 0015 — fan-in
+    // exceeds the contract, and silently overwriting the rewrite
+    // map (last-write-wins) would corrupt the wiring while leaving
+    // the spec_index back-pointer inconsistent with the merged
+    // node's actual inputs.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn multiple_incoming_deps_into_same_spec_are_rejected() {
+        let mut lib = TestLibrary::new();
+        lib.register("passthrough", passthrough_workflow());
+        lib.register("sink", sink_workflow());
+
+        // Diamond bottom: a→c and b→c — c receives two upstream deps.
+        let plan = SpecPlan {
+            specs: vec![
+                SpecRef {
+                    id: SpecId::new("a"),
+                    kind: "passthrough".to_string(),
+                    inputs: Default::default(),
+                },
+                SpecRef {
+                    id: SpecId::new("b"),
+                    kind: "passthrough".to_string(),
+                    inputs: Default::default(),
+                },
+                SpecRef {
+                    id: SpecId::new("c"),
+                    kind: "sink".to_string(),
+                    inputs: Default::default(),
+                },
+            ],
+            deps: vec![
+                SpecDep {
+                    from: SpecId::new("a"),
+                    to: SpecId::new("c"),
+                },
+                SpecDep {
+                    from: SpecId::new("b"),
+                    to: SpecId::new("c"),
+                },
+            ],
+        };
+        let err = compile(&plan, &lib).unwrap_err();
+        match err {
+            CompileError::MultipleIncomingDeps { to, from } => {
+                assert_eq!(to, SpecId::new("c"));
+                let froms: std::collections::HashSet<_> = from.iter().cloned().collect();
+                assert_eq!(
+                    froms,
+                    std::collections::HashSet::from([SpecId::new("a"), SpecId::new("b")]),
+                    "error should name every offending upstream spec",
+                );
+            }
+            other => panic!("expected MultipleIncomingDeps, got {other:?}"),
+        }
     }
 }
