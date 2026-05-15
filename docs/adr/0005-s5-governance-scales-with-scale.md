@@ -1,6 +1,10 @@
 # ADR 0005 — S5 governance scales with scale
 
-- **Status**: Accepted
+- **Status**: Accepted (partial-keep, 2026-05-15) — the S5 governance
+  scaling framing remains the operative meta-rule for how identity
+  commitments evolve. The factory-internal "process ↔ product" wiring
+  it cites moves to the ADR 0009..0018 substrate; the governance-
+  scaling content here is unaffected.
 - **Date**: 2026-05-05
 - **Identity impact**: yes
 - **Tracking issues**: #249

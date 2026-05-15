@@ -1,12 +1,18 @@
 # ADR 0004 — Tighten the seams: HTTP at external boundaries, spine for everything internal
 
-- **Status**: Accepted
+- **Status**: Superseded (2026-05-15) — see Superseded by below.
+  The six landed levers (lints in `xtask/`) remain in force and
+  continue to guard cross-subsystem code-level discipline; the
+  substrate's *internal* correctness contract moves to ADR 0018.
 - **Date**: 2026-04-26
 - **Tracking issues**: #131 (parent spec) with children for each
   lever (A: PR #144 / completed; B–F: opened concurrently with this
   ADR)
 - **Supersedes**: none
-- **Superseded by**: none
+- **Superseded by**: ADR 0018 (five kernel invariants). ADR 0004's
+  six-lever surface continues to enforce code-level seams; ADR 0018
+  enforces substrate-internal correctness (provenance, SubWorkflow
+  resolution, single-writer, OutputSpec).
 
 ## Context
 

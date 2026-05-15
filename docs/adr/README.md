@@ -11,14 +11,24 @@ see [`../architecture.md`](../architecture.md).
 
 | # | Title | Status |
 |---|---|---|
-| [0001](0001-event-bus-coordination-model.md) | Event bus is the coordination medium (Option A) | Accepted (2026-04-19) — migration completed via ADR 0004 Lever C |
-| [0002](0002-process-product-isomorphism.md) | Process ↔ product isomorphism as design discipline | Accepted (2026-04-19, amended 2026-05-01) |
+| [0001](0001-event-bus-coordination-model.md) | Event bus is the coordination medium (Option A) | Superseded (2026-05-15) by ADR 0009 + ADR 0017 |
+| [0002](0002-process-product-isomorphism.md) | Process ↔ product isomorphism as design discipline | Superseded (2026-05-15) by ADR 0013 — framing kept as design principle |
 | [0003](0003-deliverable-and-registry-backed-kinds.md) | Deliverable as the workflow-run output; registry-backed artifact kinds | Accepted (2026-04-22) — v1 partially landed under #100 |
-| [0004](0004-tighten-the-seams.md) | Tighten the seams: HTTP at external boundaries, spine for everything internal | Accepted (2026-04-26, amended 2026-04-30) — all six levers landed (2026-04-30) |
-| [0005](0005-s5-governance-scales-with-scale.md) | S5 governance scales with scale | Accepted (2026-05-05) — `Identity impact: yes` |
+| [0004](0004-tighten-the-seams.md) | Tighten the seams: HTTP at external boundaries, spine for everything internal | Superseded (2026-05-15) by ADR 0018 — code-level seam levers remain in force |
+| [0005](0005-s5-governance-scales-with-scale.md) | S5 governance scales with scale | Accepted (partial-keep 2026-05-15) — `Identity impact: yes` |
 | [0006](0006-edge-dispatcher-as-the-public-boundary.md) | Edge dispatcher as the public boundary | Accepted (2026-05-11, originally proposed 2026-05-09; amended 2026-05-09 by ADR 0008) — `Identity impact: no` |
 | [0007](0007-tools-and-skills-as-the-public-contract.md) | Tools and skills as the public contract | Accepted (2026-05-11, originally proposed 2026-05-09) — `Identity impact: no` — MCP backend slice landed |
 | [0008](0008-portal-owns-the-agent-control-plane.md) | Portal owns the agent control plane | Accepted (2026-05-11, originally proposed 2026-05-09) — `Identity impact: no` |
+| [0009](0009-three-layer-pipeline.md) | Three-layer pipeline: Spec Plan + Workflow + Execution Plan | Accepted (2026-05-15) — `Identity impact: yes` |
+| [0010](0010-provenance-as-substrate-first-class.md) | Provenance as substrate first-class | Accepted (2026-05-15) — `Identity impact: yes` |
+| [0011](0011-subworkflow-implements-vsm-recursion.md) | SubWorkflow implements VSM recursion | Accepted (2026-05-15) — `Identity impact: no` |
+| [0012](0012-executor-catalog-replaces-nodekind.md) | Executor catalog replaces NodeKind | Accepted (2026-05-15) — `Identity impact: no` |
+| [0013](0013-observer-as-second-substrate-citizen.md) | Observer as second substrate citizen | Accepted (2026-05-15) — `Identity impact: yes` |
+| [0014](0014-onsager-refract-boundary.md) | Onsager–Refract boundary: Refract leaves the monorepo | Accepted (2026-05-15) — `Identity impact: no` |
+| [0015](0015-spec-plan-as-dag-external-contract.md) | Spec Plan as DAG-shaped external contract | Accepted (2026-05-15) — `Identity impact: no` |
+| [0016](0016-workflow-library-n-isomorphic-islands.md) | Workflow Library: N isomorphic islands | Accepted (2026-05-15) — `Identity impact: no` |
+| [0017](0017-plan-compiler-three-step-algorithm.md) | Plan Compiler: three-step algorithm | Accepted (2026-05-15) — `Identity impact: yes` |
+| [0018](0018-five-kernel-invariants.md) | Five kernel invariants: static validation on workflow load | Accepted (2026-05-15) — `Identity impact: yes` |
 
 ## How to add an ADR
 
