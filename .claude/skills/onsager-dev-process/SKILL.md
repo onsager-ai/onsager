@@ -253,10 +253,10 @@ transitions. Plan-item ticks on merge are manual; the
   anything a user must create to use) must scope in navigation entry,
   first-run flow, empty-state CTAs, and auth gating in the *same* spec.
   Deferring the surface to a follow-up ships dead code in the interim
-  and usually costs more overall. See `issue-spec`'s
-  [reach-checklist](../issue-spec/references/reach-checklist.md).
-  The cheap option (ship CRUD behind a hidden Settings card) is almost
-  always the wrong one.
+  and usually costs more overall. See
+  [reach-checklist](references/reach-checklist.md) for the per-spec
+  Plan items this implies. The cheap option (ship CRUD behind a hidden
+  Settings card) is almost always the wrong one.
 
 ## Delegation map
 
