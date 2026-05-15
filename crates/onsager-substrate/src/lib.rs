@@ -26,19 +26,30 @@
 //! (#351) gives it a sqlx-backed implementation so the Plan Compiler
 //! (SUB-05, #352) can resolve `kind → Workflow` at runtime.
 
+pub mod compiler;
 pub mod executor;
 pub mod ids;
 pub mod library;
+pub mod spec_plan;
 pub mod validate;
 pub mod workflow;
 pub mod workflow_library;
 
+pub use compiler::*;
 pub use executor::*;
 pub use ids::*;
-pub use library::*;
+pub use spec_plan::*;
 pub use validate::*;
 pub use workflow::*;
 pub use workflow_library::*;
+
+// `library::WorkflowLibrary` (the lookup trait) is intentionally
+// not glob-re-exported — it shares its name with
+// `workflow_library::WorkflowLibrary` (the persisted struct).
+// Rust keeps both accessible via their qualified paths; the trait
+// is also available as `WorkflowLookup` for callers that want a
+// short name without ambiguity.
+pub use library::WorkflowLibrary as WorkflowLookup;
 
 // Re-exports for downstream convenience — anyone working with a
 // substrate `Workflow` will reach for provenance + artifact identity in

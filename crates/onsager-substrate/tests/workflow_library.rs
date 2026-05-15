@@ -44,6 +44,8 @@ fn sample_workflow(label: &str) -> Workflow {
                 requires_deterministic: false,
             },
         ],
+        entry_specs: vec![],
+        output_specs: vec![],
     }
 }
 

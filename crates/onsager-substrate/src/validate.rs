@@ -602,6 +602,7 @@ mod tests {
                 outputs: vec![EdgeRef::new(edge_out.id)],
             }],
             edges: vec![edge_out],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         validate_workflow(&w, &()).unwrap();
@@ -632,6 +633,7 @@ mod tests {
                 },
             ],
             edges: vec![agent_out],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         let err = validate_workflow(&w, &()).unwrap_err();
@@ -673,6 +675,7 @@ mod tests {
                 },
             ],
             edges: vec![agent_out, verify_out],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         validate_workflow(&w, &()).unwrap();
@@ -702,6 +705,7 @@ mod tests {
                 },
             ],
             edges: vec![agent_out, script_out],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         let err = validate_workflow(&w, &()).unwrap_err();
@@ -741,6 +745,7 @@ mod tests {
                 outputs: vec![EdgeRef::new(out_edge.id)],
             }],
             edges: vec![out_edge],
+            entry_specs: vec![],
             output_specs: vec![spec],
         };
         validate_workflow(&w, &()).unwrap();
@@ -764,6 +769,7 @@ mod tests {
                 outputs: vec![EdgeRef::new(out_edge.id)],
             }],
             edges: vec![out_edge.clone()],
+            entry_specs: vec![],
             output_specs: vec![spec],
         };
         let err = validate_workflow(&w, &()).unwrap_err();
@@ -798,6 +804,7 @@ mod tests {
                 outputs: vec![],
             }],
             edges: vec![],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         validate_workflow(&w, &lib).unwrap();
@@ -815,6 +822,7 @@ mod tests {
                 outputs: vec![],
             }],
             edges: vec![],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         let err = validate_workflow(&w, &()).unwrap_err();
@@ -847,6 +855,7 @@ mod tests {
                     outputs: vec![],
                 }],
                 edges: vec![],
+                entry_specs: vec![],
                 output_specs: vec![],
             },
         );
@@ -860,6 +869,7 @@ mod tests {
                     outputs: vec![],
                 }],
                 edges: vec![],
+                entry_specs: vec![],
                 output_specs: vec![],
             },
         );
@@ -874,6 +884,7 @@ mod tests {
                 outputs: vec![],
             }],
             edges: vec![],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         let err = validate_workflow(&root, &lib).unwrap_err();
@@ -910,6 +921,7 @@ mod tests {
                 },
             ],
             edges: vec![edge_a, edge_b],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         validate_workflow(&w, &()).unwrap();
@@ -947,6 +959,7 @@ mod tests {
                 },
             ],
             edges: vec![edge_a, edge_b],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         let err = validate_workflow(&w, &()).unwrap_err();
@@ -1000,6 +1013,7 @@ mod tests {
                 },
             ],
             edges: vec![agent_out, script_out],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         let err = validate_workflow(&w, &()).unwrap_err();
@@ -1054,6 +1068,7 @@ mod tests {
                 },
             ],
             edges: vec![edge_b, edge_a.clone()],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         let err = validate_workflow(&w, &()).unwrap_err();

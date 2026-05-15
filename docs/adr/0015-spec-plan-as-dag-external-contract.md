@@ -112,11 +112,20 @@ the dev-process compiler check.
 
 ## Adoption checklist
 
-- [ ] `SpecPlan`, `SpecRef`, `SpecDep` types in `onsager-substrate`
-      (SUB-02, #349).
-- [ ] DAG / cycle validation on Spec Plan load.
-- [ ] Unified `EntrySpec` / `OutputSpec` on `Workflow` (SUB-02).
-- [ ] Compile-time IO type matching (SUB-05, #352).
+- [x] `SpecPlan`, `SpecRef`, `SpecDep` types in `onsager-substrate`
+      (`crate::spec_plan`). Originally scoped to SUB-02 (#349); the
+      types landed alongside the Plan Compiler in SUB-05 (#352)
+      because the compiler is their first consumer.
+- [x] DAG / cycle validation on Spec Plan load —
+      `SpecPlan::validate` reports duplicate ids, dangling refs,
+      and cycles before any library lookup.
+- [x] Unified `EntrySpec` / `OutputSpec` on `Workflow` — `EntrySpec`
+      added in SUB-05 (#352) alongside the existing `OutputSpec`
+      from SUB-02 (#349).
+- [x] Structural IO check at compile time — `NoExit` / `NoEntry`
+      errors when a spec dep targets a workflow slot that doesn't
+      exist. Artifact-level type matching deferred until the kind
+      taxonomy stabilizes.
 - [ ] MCP tool `submit_spec_plan` derives schema from `SpecPlan` via
       schemars (per ADR 0007 SSOT principle).
 

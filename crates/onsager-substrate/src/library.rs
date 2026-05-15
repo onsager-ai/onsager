@@ -11,15 +11,33 @@
 use crate::ids::WorkflowId;
 use crate::workflow::Workflow;
 
-/// Lookup surface the validator needs from the workflow library.
+/// Lookup surface the validator and Plan Compiler share for the
+/// workflow library.
 ///
 /// Implementors must return a stable reference for the lifetime of
 /// the lookup; the validator holds the borrow only as long as it
 /// needs to walk the workflow.
+///
+/// Two lookup paths are exposed:
+/// - [`WorkflowLibrary::get`] resolves an internal `WorkflowId` —
+///   the validator uses it for invariant 4 (SubWorkflow refs).
+/// - [`WorkflowLibrary::by_kind`] resolves a Spec Plan `kind` string
+///   — the Plan Compiler uses it to instantiate one workflow per
+///   `SpecRef` (ADR 0017 step 1). Defaults to `None` so existing
+///   validator-only impls (e.g. the unit type, fixture libraries)
+///   continue to compile; compile against such an impl will fail
+///   with `MissingKind` as soon as a real spec is offered, which is
+///   the correct behavior.
 pub trait WorkflowLibrary {
     /// Fetch a workflow by id, or `None` if no workflow is
     /// registered under that id.
     fn get(&self, id: WorkflowId) -> Option<&Workflow>;
+
+    /// Fetch the latest workflow registered under `spec_kind`. The
+    /// Plan Compiler treats `None` as a hard `CompileError::MissingKind`.
+    fn by_kind(&self, _spec_kind: &str) -> Option<&Workflow> {
+        None
+    }
 }
 
 /// Empty library — every lookup returns `None`.
