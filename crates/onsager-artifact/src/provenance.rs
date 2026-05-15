@@ -1,7 +1,7 @@
 //! Provenance — substrate first-class type tracking whether an
 //! artifact was produced deterministically or by an uncertain process.
 //!
-//! See [ADR 0010](../../../../docs/adr/0010-provenance-as-substrate-first-class.md).
+//! See [ADR 0010](../../../docs/adr/0010-provenance-as-substrate-first-class.md).
 //!
 //! The kernel question this answers: given an artifact, what must be
 //! true for a downstream consumer to trust it as deterministic? The
