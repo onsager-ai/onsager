@@ -1690,10 +1690,12 @@ dependencies = [
  "chrono",
  "onsager-artifact",
  "onsager-substrate",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "typetag",
 ]
 
 [[package]]

@@ -28,6 +28,7 @@ pub mod executor;
 pub mod registry;
 pub mod script;
 pub mod spine;
+pub mod verify;
 
 pub use context::{ExecutorContext, ExecutorOutputs};
 pub use dispatch::dispatch;
@@ -36,3 +37,4 @@ pub use executor::{Executor, NoOpExecutor};
 pub use registry::ExecutorRegistry;
 pub use script::{INLINE_URI_PREFIX, ScriptExecutor, decode_inline_body};
 pub use spine::{SpineClient, SpineError};
+pub use verify::{Check, FailPolicy, VERIFY_KIND, VerifyExecutor};
