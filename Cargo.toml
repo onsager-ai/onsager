@@ -38,7 +38,7 @@ schemars = { version = "0.8", features = ["chrono"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 cron = "0.15"
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
 # Error handling
 thiserror = "2"

@@ -118,13 +118,23 @@ moving the kind taxonomy.
 
 ## Adoption checklist
 
-- [ ] `compile` function in `crates/onsager-substrate/src/compiler.rs`
+- [x] `compile` function in `crates/onsager-substrate/src/compiler.rs`
       (SUB-05, #352).
-- [ ] `Workflow::instantiate(spec)` — fresh UUIDs, spec-scoped
-      namespace.
-- [ ] `ExecutionPlan::connect` — exit/entry wiring with type-check.
-- [ ] Determinism property test (compile twice → identical output).
-- [ ] Compile errors carry offending IDs.
+- [x] `Workflow::instantiate(spec)` — fresh UUIDs, spec-scoped
+      namespace. Implemented as deterministic UUID v5 derivation
+      from a stable namespace seed plus `SpecId`, so "fresh" here
+      means *unique per spec* without the v4 randomness that would
+      break the determinism property test.
+- [x] `ExecutionPlan::connect` — exit/entry wiring with structural
+      check. Surfaces `NoExit` / `NoEntry` errors when a spec lacks
+      the IO slot the dep references; richer artifact-level type
+      matching is deferred until the kind taxonomy stabilizes.
+- [x] Determinism property test (compile twice → identical output) —
+      `compiler::tests::compile_is_deterministic_across_runs`.
+- [x] Compile errors carry offending IDs — `MissingKind` names the
+      `SpecId` + kind; `NoExit` / `NoEntry` name both endpoints;
+      kernel-invariant violations surface offending node/edge IDs
+      via `InvariantViolation` per ADR 0018.
 
 ## Out of scope
 
