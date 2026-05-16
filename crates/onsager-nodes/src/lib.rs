@@ -27,6 +27,7 @@ pub mod dispatch;
 pub mod error;
 pub mod executor;
 pub mod registry;
+pub mod scheduler;
 pub mod script;
 pub mod spine;
 pub mod verify;
@@ -40,6 +41,10 @@ pub use dispatch::dispatch;
 pub use error::ExecutorError;
 pub use executor::{Executor, NoOpExecutor};
 pub use registry::ExecutorRegistry;
+pub use scheduler::{
+    EVENT_NODE_COMPLETED, EVENT_NODE_FAILED, EVENT_NODE_READY, EVENT_NODE_RUNNING,
+    InMemoryPlanStore, NodeState, PlanId, PlanStore, PlanStoreError, Scheduler, SchedulerError,
+};
 pub use script::{INLINE_URI_PREFIX, ScriptExecutor, decode_inline_body};
 pub use spine::{SpineClient, SpineError};
 pub use verify::{Check, FailPolicy, VERIFY_KIND, VerifyExecutor};
