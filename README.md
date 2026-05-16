@@ -18,10 +18,14 @@ direct calls.
      (edge)
 ```
 
-Refract — the Spec Plan author — lives in its own repo at
-[`onsager-ai/onsager-refract`](https://github.com/onsager-ai/onsager-refract)
-(see [ADR 0014](docs/adr/0014-onsager-refract-boundary.md)) and submits
-Spec Plans through the portal's MCP surface, not as a sibling crate.
+Refract — the Spec Plan author — lives in its own repo per
+[ADR 0014](docs/adr/0014-onsager-refract-boundary.md). The ADR
+boundary has Refract submit Spec Plans through the portal's MCP
+surface; the specific MCP tools (`submit_spec_plan`, `update_spec`, …)
+are listed in ADR 0014's adoption checklist as follow-up work, not
+yet exposed by the in-tree MCP registry. See
+[`docs/related-work/refract.md`](docs/related-work/refract.md) for
+the current state of the migration.
 
 The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md)):
 

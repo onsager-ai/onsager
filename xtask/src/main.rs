@@ -554,7 +554,7 @@ fn stream_producer(stream: &str) -> &'static str {
         "stiglab" => "stiglab",
         "synodic" => "synodic",
         "ising" => "ising",
-        "refract" => "onsager-refract (external repo, ADR 0014)",
+        "refract" => "onsager-portal (via MCP submissions from external onsager-refract, ADR 0014)",
         "workflow" => "stiglab (trigger) / forge (stage)",
         "registry" => "synodic (catalog crud)",
         "gate" => "onsager-portal (GitHub) / forge (manual)",
