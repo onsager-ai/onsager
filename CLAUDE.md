@@ -20,7 +20,7 @@ its production discipline.
 - **Artifacts are the unit of meaning.** Every persistent, lifecycle-bearing
   object in the factory is an artifact — internal-authored ones (specs,
   designs) and external-referenced ones (PRs, Issues) alike. Factory
-  subsystems (Forge, Refract, Synodic, Ising) operate on artifacts; events
+  subsystems (Forge, Stiglab, Synodic, Ising) operate on artifacts; events
   are state-change notifications, not first-class entities. Scope: factory
   only — products of the factory have their own ontology.
 - **Specs are ground truth, code is downstream.** When spec and code

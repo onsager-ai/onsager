@@ -27,13 +27,12 @@ or `<name>` (for known subsystems) is a valid subcommand.
 KNOWN SUBCOMMANDS:
     forge       Production line — drives artifacts through their lifecycle
     ising       Continuous improvement engine — observes and surfaces insights
-    refract     Intent decomposer — expands high-level intents into artifacts
     stiglab     Distributed AI agent session orchestration
     synodic     AI agent governance
     trigger     Fire or replay workflow triggers (manual / replay)
 ";
 
-const KNOWN: &[&str] = &["forge", "ising", "refract", "stiglab", "synodic", "trigger"];
+const KNOWN: &[&str] = &["forge", "ising", "stiglab", "synodic", "trigger"];
 
 fn main() {
     let args: Vec<String> = env::args().collect();
