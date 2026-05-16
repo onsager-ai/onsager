@@ -21,6 +21,7 @@
 //! — Script, Agent, Verify, Human, SubWorkflow — as flat sibling
 //! modules here. EXE-02 (#354) lands [`script::ScriptExecutor`].
 
+pub mod agent;
 pub mod context;
 pub mod dispatch;
 pub mod error;
@@ -30,6 +31,10 @@ pub mod script;
 pub mod spine;
 pub mod verify;
 
+pub use agent::{
+    AgentExecutor, AgentRequest, AgentResponse, AgentRunError, AgentRunner, StubAgentRunner,
+    UnconfiguredRunner,
+};
 pub use context::{ExecutorContext, ExecutorOutputs};
 pub use dispatch::dispatch;
 pub use error::ExecutorError;
