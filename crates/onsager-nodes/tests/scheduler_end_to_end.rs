@@ -1,4 +1,4 @@
-//! End-to-end: Spec Plan → compile → schedule.
+//! End-to-end: Spec Plan → compile → schedule → artifacts persisted.
 //!
 //! RUN-01 (#359) verification line:
 //!
@@ -13,12 +13,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use onsager_artifact::{Artifact, ArtifactId, NodeId, Provenance};
+use onsager_artifact::{Artifact, ArtifactId, Kind, NodeId, Provenance};
 use onsager_nodes::{
-    ExecutorRegistry, InMemoryPlanStore, PlanId, PlanStore, Scheduler, SpineClient, SpineError,
+    Executor, ExecutorContext, ExecutorError, ExecutorOutputs, ExecutorRegistry, InMemoryPlanStore,
+    NodeState, PlanId, PlanStore, Scheduler, SpineClient, SpineError,
 };
 use onsager_substrate::compiler::compile;
-use onsager_substrate::executor::NoOpExecutor as SubstrateNoOp;
 use onsager_substrate::ids::{EdgeId, WorkflowId};
 use onsager_substrate::library::WorkflowLibrary;
 use onsager_substrate::spec_plan::{SpecDep, SpecId, SpecPlan, SpecRef};
@@ -37,8 +37,36 @@ impl SpineClient for StubSpine {
     }
 }
 
-/// Tiny test library — same shape as the one in
-/// `onsager-substrate/src/compiler.rs` tests.
+/// Producer executor — emits exactly one declared artifact so the
+/// e2e test can prove that `PlanStore::get_artifact` reads back what
+/// the executor produced.
+///
+/// Registers under the `noop` kind so it overrides the default
+/// `NoOpExecutor`, which is what the substrate-side `passthrough_workflow`
+/// nodes carry.
+#[derive(Debug)]
+struct ProducerExecutor {
+    name: &'static str,
+}
+
+#[async_trait]
+impl Executor for ProducerExecutor {
+    fn executor_kind(&self) -> &'static str {
+        "noop"
+    }
+    fn declared_provenance(&self, _: &[Provenance]) -> Provenance {
+        Provenance::external_deterministic()
+    }
+    async fn execute(&self, _: ExecutorContext) -> Result<ExecutorOutputs, ExecutorError> {
+        let art = Artifact::new(Kind::Document, self.name, "marvin", "test", vec![]);
+        // The scheduler reconciles the artifact's id with the edge's
+        // ArtifactId at persist time, so we don't have to thread it
+        // through here.
+        let id = art.artifact_id.clone();
+        Ok(ExecutorOutputs::single(id, art))
+    }
+}
+
 struct TestLibrary {
     by_id: std::collections::HashMap<WorkflowId, Workflow>,
     by_kind: std::collections::HashMap<String, WorkflowId>,
@@ -67,14 +95,15 @@ impl WorkflowLibrary for TestLibrary {
     }
 }
 
-/// `(entry) → [NoOp] → (exit)`
+/// `(entry) → [NoOp] → (exit)` — substrate-side workflow whose nodes
+/// the e2e test will dispatch through a `ProducerExecutor` runtime.
 fn passthrough_workflow() -> Workflow {
     let entry = EdgeId::generate();
     let exit = EdgeId::generate();
     Workflow {
         nodes: vec![Node {
             id: NodeId::generate(),
-            executor: Box::new(SubstrateNoOp),
+            executor: Box::new(onsager_substrate::executor::NoOpExecutor),
             inputs: vec![EdgeRef::new(entry)],
             outputs: vec![EdgeRef::new(exit)],
         }],
@@ -99,8 +128,10 @@ fn passthrough_workflow() -> Workflow {
 }
 
 #[tokio::test]
-async fn spec_plan_compile_schedule_runs_all_nodes() {
-    // Spec Plan: two passthrough specs, s1 → s2.
+async fn spec_plan_compile_schedule_materializes_artifacts() {
+    // Spec Plan: two passthrough specs, s1 → s2. Each instantiates
+    // one node, namespaced by spec id; the compiler rewires s2's
+    // entry to s1's exit edge.
     let mut lib = TestLibrary::new();
     lib.register("passthrough", passthrough_workflow());
 
@@ -126,9 +157,16 @@ async fn spec_plan_compile_schedule_runs_all_nodes() {
     let exec_plan = compile(&plan, &lib).expect("compile must succeed");
     assert_eq!(exec_plan.nodes.len(), 2);
 
+    // Wire a producer executor under the `noop` kind so each node
+    // actually emits an artifact.
+    let mut registry = ExecutorRegistry::new();
+    registry.register(Arc::new(ProducerExecutor {
+        name: "passthrough-output",
+    }));
+    let store = Arc::new(InMemoryPlanStore::new());
     let scheduler = Scheduler::new(
-        Arc::new(ExecutorRegistry::with_noop()),
-        Arc::new(InMemoryPlanStore::new()) as Arc<dyn PlanStore>,
+        Arc::new(registry),
+        Arc::clone(&store) as Arc<dyn PlanStore>,
         Arc::new(StubSpine) as Arc<dyn SpineClient>,
     );
     let plan_id = PlanId::generate();
@@ -137,10 +175,42 @@ async fn spec_plan_compile_schedule_runs_all_nodes() {
         .await
         .expect("schedule must succeed");
 
-    // Every node terminal == Completed.
-    let states = scheduler.store.node_states(&plan_id).await.unwrap();
+    // Every node terminated Completed.
+    let states = store.node_states(&plan_id).await.unwrap();
     assert_eq!(states.len(), 2);
     for s in states.values() {
-        assert_eq!(*s, onsager_nodes::NodeState::Completed);
+        assert_eq!(*s, NodeState::Completed);
+    }
+
+    // RUN-01 verification: artifacts created in spine. Each node's
+    // declared output edge carries a namespaced ArtifactId; the
+    // scheduler persisted one artifact under each, reconciled to
+    // that edge's id.
+    let mut output_edges: Vec<&ArtifactId> = exec_plan
+        .edges
+        .iter()
+        .filter(|e| {
+            exec_plan
+                .nodes
+                .iter()
+                .any(|n| n.outputs.iter().any(|o| o.edge_id == e.id))
+        })
+        .map(|e| &e.artifact_id)
+        .collect();
+    output_edges.sort_by_key(|id| id.as_str().to_string());
+    assert_eq!(output_edges.len(), 2);
+
+    for art_id in &output_edges {
+        let materialized = store
+            .get_artifact(&plan_id, art_id)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("expected artifact materialized at {art_id}"));
+        // The scheduler reconciles the persisted artifact's own id
+        // with the edge's id — body and key agree.
+        assert_eq!(
+            &materialized.artifact_id, *art_id,
+            "persisted artifact's id must equal the edge's ArtifactId",
+        );
     }
 }

@@ -354,7 +354,22 @@ impl Scheduler {
             }
         }
 
-        let pending = state.values().filter(|s| !s.is_terminal()).count();
+        // Two distinct exits to surface:
+        // - any node Failed (either before this run or from a prior
+        //   one we recovered) — even if we didn't dispatch it, the
+        //   plan is not Ok;
+        // - any non-terminal node still pending — we made no further
+        //   progress, the plan is stuck.
+        if let Some((failed_id, _)) = state.iter().find(|(_, s)| **s == NodeState::Failed) {
+            return Err(SchedulerError::NodeFailed {
+                node_id: *failed_id,
+                source: ExecutorError::failed("recovered failed state from prior run"),
+            });
+        }
+        let pending = state
+            .values()
+            .filter(|s| **s != NodeState::Completed)
+            .count();
         if pending > 0 {
             return Err(SchedulerError::Stuck { pending });
         }
@@ -453,18 +468,38 @@ impl Scheduler {
         node: &Node,
         outputs: crate::context::ExecutorOutputs,
     ) -> Result<(), SchedulerError> {
-        // The executor returns artifacts in the same order it declared
-        // its output edges. v1 trusts the executor on this — a future
-        // contract test can pin it.
-        for (i, (_, artifact)) in outputs.artifacts.into_iter().enumerate() {
-            let Some(output_ref) = node.outputs.get(i) else {
-                continue;
-            };
+        // Contract: an executor returns *at most* one artifact per
+        // declared output edge, in declaration order. Side-effect-
+        // only executors (NoOp) legitimately return zero; surface
+        // *extra* outputs as a bug (silently dropping them hid
+        // executor wiring mistakes). v1 leaves "Completed with
+        // fewer artifacts than declared" as the executor's
+        // contract with its downstream consumers — see the reply
+        // on #381 line 462 for the trade-off.
+        if outputs.artifacts.len() > node.outputs.len() {
+            return Err(SchedulerError::NodeFailed {
+                node_id: node.id,
+                source: ExecutorError::failed(format!(
+                    "executor returned {} artifact(s) but node declares only {} output edge(s)",
+                    outputs.artifacts.len(),
+                    node.outputs.len(),
+                )),
+            });
+        }
+        for (i, (_, mut artifact)) in outputs.artifacts.into_iter().enumerate() {
+            let output_ref = node.outputs[i];
             let edge = plan
                 .edges
                 .iter()
                 .find(|e| e.id == output_ref.edge_id)
                 .expect("compile-time validation guarantees every output edge resolves");
+            // Align the artifact's own id with the edge's
+            // (compile-time-namespaced) ArtifactId so the persisted
+            // key and the artifact body agree. Existing executors
+            // (Script, Verify) generate fresh ULIDs in
+            // `Artifact::new`; the scheduler is the only layer that
+            // knows the edge mapping, so reconciliation happens here.
+            artifact.artifact_id = edge.artifact_id.clone();
             self.store
                 .put_artifact(plan_id, &edge.artifact_id, artifact)
                 .await
@@ -687,59 +722,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stuck_plan_surfaces_as_error() {
-        // Build a plan with an unresolvable input: node B's input
-        // references an edge that no node produces (synthetic — this
-        // would normally be a validator catch). The scheduler must
-        // surface this as `Stuck` rather than silently loop.
-        let dangling_edge = EdgeId::generate();
-        let edge_out = EdgeId::generate();
-        let lonely = SubstrateNode {
-            id: NodeId::generate(),
-            executor: Box::new(onsager_substrate::executor::NoOpExecutor),
-            inputs: vec![EdgeRef::new(dangling_edge)],
-            outputs: vec![EdgeRef::new(edge_out)],
-        };
-        // Mark the input as a producer for a *different* completed
-        // node so it counts as internal-not-completed. Cheat by
-        // claiming a non-existent producer node id.
-        let phantom_producer = NodeId::generate();
-        let phantom = SubstrateNode {
-            id: phantom_producer,
-            executor: Box::new(onsager_substrate::executor::NoOpExecutor),
-            inputs: vec![],
-            outputs: vec![EdgeRef::new(dangling_edge)],
-        };
-        let plan = ExecutionPlan {
-            nodes: vec![phantom, lonely],
-            edges: vec![
-                Edge {
-                    id: dangling_edge,
-                    artifact_id: ArtifactId::new("dangling"),
-                    requires_deterministic: false,
-                },
-                Edge {
-                    id: edge_out,
-                    artifact_id: ArtifactId::new("out"),
-                    requires_deterministic: false,
-                },
-            ],
-            spec_index: HashMap::new(),
-        };
-
-        // Pre-mark the phantom producer as Failed so the scheduler
-        // can't make progress on its dependent.
+    async fn pre_existing_failed_node_surfaces_as_node_failed() {
+        // Recovery scenario: a prior run left a node Failed. On
+        // re-run, the scheduler must NOT report Ok just because no
+        // dispatchable work remains — it must surface the persisted
+        // failure (Copilot review on #381, line 359).
         let (scheduler, store, _) = fresh_scheduler();
+        let plan = linear_plan();
         let plan_id = PlanId::generate();
+        let a_id = plan.nodes[0].id;
         store
-            .set_node_state(&plan_id, phantom_producer, NodeState::Failed)
+            .set_node_state(&plan_id, a_id, NodeState::Failed)
             .await
             .unwrap();
 
         let err = scheduler.run(&plan_id, &plan).await.unwrap_err();
         assert!(
-            matches!(err, SchedulerError::Stuck { pending: 1 }),
-            "expected Stuck {{ pending: 1 }}, got: {err:?}",
+            matches!(err, SchedulerError::NodeFailed { node_id, .. } if node_id == a_id),
+            "expected NodeFailed(a), got: {err:?}",
         );
     }
 }
