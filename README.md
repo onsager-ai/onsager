@@ -12,11 +12,16 @@ direct calls.
 ```
                        onsager-spine  (event bus library)
                               │
-        ┌─────────┬───────────┼───────────┬──────────┬──────────┐
-        │         │           │           │          │          │
-     portal    forge       stiglab     synodic     ising     refract
-     (edge)                                                  (decomposer)
+        ┌─────────┬───────────┼───────────┬──────────┐
+        │         │           │           │          │
+     portal    forge       stiglab     synodic     ising
+     (edge)
 ```
+
+Refract — the Spec Plan author — lives in its own repo at
+[`onsager-ai/onsager-refract`](https://github.com/onsager-ai/onsager-refract)
+(see [ADR 0014](docs/adr/0014-onsager-refract-boundary.md)) and submits
+Spec Plans through the portal's MCP surface, not as a sibling crate.
 
 The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md)):
 
@@ -27,7 +32,7 @@ The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md
    migration is staged under [#220](https://github.com/onsager-ai/onsager/issues/220) /
    [#222](https://github.com/onsager-ai/onsager/issues/222).
 2. **Internal coordination.** Factory subsystems (`forge`, `stiglab`,
-   `synodic`, `ising`, `refract`) coordinate **exclusively** via the spine —
+   `synodic`, `ising`) coordinate **exclusively** via the spine —
    no sibling-subsystem HTTP, no cross-subsystem Cargo deps. The `onsager`
    dispatcher has zero business deps and discovers subsystem binaries on
    `PATH`.
@@ -52,7 +57,11 @@ and the ADRs under [`docs/adr/`](docs/adr/).
 | `stiglab`        | Distributed AI agent session orchestration                                       |
 | `synodic`        | AI agent governance — gates, verdicts, escalations                               |
 | `ising`          | Continuous improvement — observes the spine and surfaces insights                |
-| `refract`        | Intent decomposer — expands a high-level intent into an artifact tree            |
+
+Refract (the Spec Plan author) lives outside the monorepo at
+[`onsager-ai/onsager-refract`](https://github.com/onsager-ai/onsager-refract);
+see [ADR 0014](docs/adr/0014-onsager-refract-boundary.md) and
+[`docs/related-work/refract.md`](docs/related-work/refract.md).
 
 Library crates (`onsager-{artifact, warehouse, delivery, registry, github}`)
 are typed shared building blocks consumed by the subsystems above.

@@ -59,7 +59,7 @@ that requires a coordinated rollout.
 | `portal` | (unknown — update `stream_producer` in xtask) | 3 |
 | `synodic` | synodic | 9 |
 | `ising` | ising | 6 |
-| `refract` | refract | 3 |
+| `refract` | onsager-refract (external repo, ADR 0014) | 3 |
 | `workflow` | stiglab (trigger) / forge (stage) | 3 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
 | `gate` | onsager-portal (GitHub) / forge (manual) | 2 |
@@ -550,7 +550,7 @@ Ising finished catching up from a lag position.
 
 ## `refract` events
 
-Producer subsystem: **refract**.
+Producer subsystem: **onsager-refract (external repo, ADR 0014)**.
 
 ### `refract.intent_submitted`
 

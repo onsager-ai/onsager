@@ -18,7 +18,6 @@ onsager-artifact = { path = "../onsager-artifact" }
 onsager-github = { path = "../onsager-github" }
 onsager-registry = { path = "../onsager-registry" }
 onsager-spine = { path = "../onsager-spine" }
-refract = { path = "../refract" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

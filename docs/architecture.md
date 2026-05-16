@@ -20,18 +20,22 @@ zero business deps that discovers subsystem binaries on `PATH`.
 ```
                        onsager-spine  (event bus library)
                               │
-        ┌─────────┬───────────┼───────────┬──────────┬──────────┐
-        │         │           │           │          │          │
-     portal    forge       stiglab     synodic     ising     refract
-     (edge)                                                  (decomposer)
+        ┌─────────┬───────────┼───────────┬──────────┐
+        │         │           │           │          │
+     portal    forge       stiglab     synodic     ising
+     (edge)
 ```
 
 - **Edge subsystem:** `portal` — the only subsystem permitted to host public
   HTTP routes (dashboard API, GitHub webhooks, OAuth, credentials).
-- **Factory subsystems:** `forge`, `stiglab`, `synodic`, `ising`, `refract` —
-  AI-native concerns. Coordinate exclusively via the spine.
+- **Factory subsystems:** `forge`, `stiglab`, `synodic`, `ising` — AI-native
+  concerns. Coordinate exclusively via the spine.
 - **Library plane:** `onsager-{spine, artifact, warehouse, delivery, registry,
   github}` — typed shared building blocks. No runtime of their own.
+- **External Spec Plan author:** Refract — lives in its own repo
+  (`onsager-ai/onsager-refract`, [ADR 0014](adr/0014-onsager-refract-boundary.md))
+  and submits Spec Plans through the portal's MCP surface, not as a sibling
+  crate. See [`docs/related-work/refract.md`](related-work/refract.md).
 
 The dashboard (`apps/dashboard/`) is a single React app surfacing every
 subsystem.
@@ -46,7 +50,7 @@ The seam rule is the canonical architectural invariant. It has two clauses:
 > The external HTTP boundary is owned by `portal` (the edge subsystem).
 >
 > **Clause 2 — internal coordination.**
-> Factory subsystems (`forge`, `stiglab`, `synodic`, `ising`, `refract`)
+> Factory subsystems (`forge`, `stiglab`, `synodic`, `ising`)
 > coordinate **exclusively** via the spine: events on the bus + reads against
 > shared spine tables. No subsystem makes HTTP calls to another subsystem.
 > No subsystem imports another subsystem's crate.
@@ -75,7 +79,11 @@ flight" below.
 | [`stiglab`](../crates/stiglab/) | Distributed AI agent session orchestration; today still hosts most external HTTP | [crates/stiglab/.claude/](../crates/stiglab/.claude/) |
 | [`synodic`](../crates/synodic/) | AI agent governance (gates, verdicts, escalations) | [crates/synodic/.claude/](../crates/synodic/.claude/) |
 | [`ising`](../crates/ising/) | Continuous improvement — observes spine, surfaces insights, proposes rules | — |
-| [`refract`](../crates/refract/) | Intent decomposer — expands a high-level intent into an artifact tree | — |
+
+Refract — the Spec Plan author — lives outside the monorepo at
+[`onsager-ai/onsager-refract`](https://github.com/onsager-ai/onsager-refract)
+per [ADR 0014](adr/0014-onsager-refract-boundary.md); see
+[`related-work/refract.md`](related-work/refract.md).
 
 Library crates (no runtime; consumed by subsystems):
 
@@ -95,7 +103,6 @@ Subsystem ↔ support-crate dependencies (canonical):
 - `stiglab` → `onsager-{artifact, spine}`
 - `synodic` → `onsager-{artifact, spine}`
 - `ising`   → `onsager-{artifact, spine}`
-- `refract` → `onsager-{artifact, spine}`
 - `portal`  → `onsager-{artifact, spine, github, registry}` — never depends on a sibling subsystem
 
 ## What's enforced, mechanically

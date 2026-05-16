@@ -7,11 +7,10 @@
 //! - `active`: strips stale items (closed-but-unmerged PRs, closed issues)
 //!   so a long-tail repo doesn't spend its cap on year-old chatter.
 //! - `refract`: ranks the candidate set with a local priority heuristic
-//!   (open-before-closed, more labels first) — the in-tree placeholder for
-//!   the future LLM-backed scorer. Today it does NOT dispatch through the
-//!   `refract` crate's intent decomposer; the crate is carried as a
-//!   dependency so the scorer can land additively without a call-site
-//!   refactor (issue #58 / #60 §Backfill).
+//!   (open-before-closed, more labels first) — a placeholder for the future
+//!   LLM-backed scorer. The decomposer itself now lives in the external
+//!   `onsager-ai/onsager-refract` repo (ADR 0014); a real scorer will reach
+//!   it via the MCP `submit_spec_plan` tool, not an in-tree call.
 //!
 //! Output shape is a `BackfillReport` summarizing per-strategy counts so
 //! the CLI can print a single JSON blob the dashboard can later render.
@@ -92,10 +91,9 @@ pub async fn run(
         ),
         Strategy::Refract => {
             // Placeholder ranking: open-before-closed, more-labelled first.
-            // The real LLM-backed scorer slots in here without changing the
-            // portal call site — today there is no `refract` crate API
-            // doing prioritization; the dependency is pre-wired so the
-            // scorer lands additively.
+            // The real LLM-backed scorer lives in the external Refract repo
+            // (ADR 0014); it will reach the portal via the MCP
+            // `submit_spec_plan` tool, not a direct call.
             (
                 refract_prioritize_issues(issues, cap),
                 refract_prioritize_pulls(pulls, cap),

@@ -1715,7 +1715,6 @@ dependencies = [
  "onsager-github",
  "onsager-registry",
  "onsager-spine",
- "refract",
  "regex",
  "reqwest",
  "ring",
@@ -2101,24 +2100,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f450ad9c3b1da563fb6948a8e0fb0fb9269711c9c73d9ea1de5058c79c8d643a"
 dependencies = [
  "bitflags",
-]
-
-[[package]]
-name = "refract"
-version = "0.2.0-alpha.1"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "onsager-artifact",
- "onsager-spine",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "ulid",
 ]
 
 [[package]]
