@@ -487,6 +487,7 @@ mod tests {
                 },
             ],
             edges: vec![agent_out, verify_out],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         // Pass: invariant 1 holds because Verify emits Deterministic
@@ -544,6 +545,7 @@ mod tests {
                 },
             ],
             edges: vec![agent_out],
+            entry_specs: vec![],
             output_specs: vec![],
         };
         let err = validate_workflow(&w, &()).unwrap_err();
