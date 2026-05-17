@@ -17,15 +17,18 @@
 //!   shares the same `executor_kind()` string (that's how dispatch
 //!   resolves a node to its runtime), and adds `async fn execute(..)`.
 //!
-//! Subsequent issues (EXE-02 through EXE-06) land concrete executors
-//! — Script, Agent, Verify, Human, SubWorkflow — as flat sibling
-//! modules here. EXE-02 (#354) lands [`script::ScriptExecutor`].
+//! The concrete executors named by ADR 0012 — Script (EXE-02, #354),
+//! Agent (EXE-03, #355), Verify (EXE-04, #356), SubWorkflow (EXE-05,
+//! #357), and Human (EXE-06, #358) — live as flat sibling modules
+//! here. Each registers its runtime side with [`ExecutorRegistry`] at
+//! startup and serializes its substrate side via [`typetag`].
 
 pub mod agent;
 pub mod context;
 pub mod dispatch;
 pub mod error;
 pub mod executor;
+pub mod human;
 pub mod registry;
 pub mod scheduler;
 pub mod script;
@@ -40,6 +43,10 @@ pub use context::{ExecutorContext, ExecutorOutputs};
 pub use dispatch::dispatch;
 pub use error::ExecutorError;
 pub use executor::{Executor, NoOpExecutor};
+pub use human::{
+    ApprovalDecision, ApprovalSource, ApprovalSourceError, HUMAN_KIND, HumanExecutor,
+    StubApprovalSource, UnconfiguredApprovalSource,
+};
 pub use registry::ExecutorRegistry;
 pub use scheduler::{
     EVENT_NODE_COMPLETED, EVENT_NODE_FAILED, EVENT_NODE_STARTED, InMemoryPlanStore, NodeState,
