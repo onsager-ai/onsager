@@ -42,6 +42,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::Utc;
 use onsager_artifact::{Artifact, ArtifactVersion, ContentRef, Kind, Provenance, SourceTag};
+use onsager_substrate::executor::Executor as SubstrateExecutor;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use crate::context::{ExecutorContext, ExecutorOutputs};
@@ -72,7 +74,7 @@ pub fn decode_inline_body(uri: &str) -> Option<Vec<u8>> {
 /// [`crate::dispatch`] path is a follow-up (RUN-01, #359). Today the
 /// scheduler can build a `ScriptExecutor` instance and invoke
 /// `execute` on it directly.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScriptExecutor {
     /// Argv: `command[0]` is the program, the rest are arguments.
     /// Empty argv is rejected at execute time with
@@ -112,6 +114,31 @@ impl ScriptExecutor {
     pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
         self.env = env;
         self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Substrate side (sync, serializable) — what nodes carry on the wire.
+//
+// Matches the Agent / Verify shape: the same struct implements both the
+// substrate trait (typetag round-trip + kernel invariant checks) and
+// the runtime trait (async execute). The kernel discriminates Script
+// from non-Script via `executor_kind() == "script"`; provenance is
+// always `Deterministic { source: Script }` regardless of inputs,
+// with invariant 2 promoting it to the max-uncertainty of the inputs
+// at validate time per ADR 0018.
+// ---------------------------------------------------------------------------
+
+#[typetag::serde(name = "script")]
+impl SubstrateExecutor for ScriptExecutor {
+    fn executor_kind(&self) -> &'static str {
+        "script"
+    }
+
+    fn declared_provenance(&self, _inputs: &[Provenance]) -> Provenance {
+        Provenance::Deterministic {
+            source: SourceTag::Script,
+        }
     }
 }
 
@@ -218,17 +245,25 @@ mod tests {
 
     #[test]
     fn executor_kind_is_script() {
-        assert_eq!(ScriptExecutor::new(["true"]).executor_kind(), "script");
+        let exec = ScriptExecutor::new(["true"]);
+        assert_eq!(Executor::executor_kind(&exec), "script");
+        assert_eq!(SubstrateExecutor::executor_kind(&exec), "script");
     }
 
     #[test]
     fn declared_provenance_is_deterministic_script_with_no_inputs() {
         let exec = ScriptExecutor::new(["true"]);
         assert_eq!(
-            exec.declared_provenance(&[]),
+            Executor::declared_provenance(&exec, &[]),
             Provenance::Deterministic {
                 source: SourceTag::Script,
             }
+        );
+        // Substrate side must agree — the kernel invariant checks
+        // and the runtime executor share the same provenance contract.
+        assert_eq!(
+            SubstrateExecutor::declared_provenance(&exec, &[]),
+            Executor::declared_provenance(&exec, &[]),
         );
     }
 
@@ -242,7 +277,7 @@ mod tests {
             source: SourceTag::Agent,
         }];
         assert_eq!(
-            exec.declared_provenance(&inputs),
+            Executor::declared_provenance(&exec, &inputs),
             Provenance::Deterministic {
                 source: SourceTag::Script,
             }
