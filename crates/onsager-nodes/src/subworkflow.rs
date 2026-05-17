@@ -454,6 +454,7 @@ mod tests {
 
     fn ctx_for(node_id: NodeId, inputs: Vec<(ArtifactId, Artifact)>) -> ExecutorContext {
         ExecutorContext {
+            plan_id: PlanId::generate(),
             node_id,
             inputs,
             spine: Arc::new(MockSpine::default()),
@@ -467,6 +468,7 @@ mod tests {
         workflow_ref: WorkflowId,
     ) -> ExecutorContext {
         ExecutorContext {
+            plan_id: PlanId::generate(),
             node_id,
             inputs,
             spine: Arc::new(MockSpine::default()),
