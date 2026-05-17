@@ -31,16 +31,25 @@ use onsager_spine::{EventMetadata, EventStore};
 /// Substrate-scheduler [`SpineClient`] backed by the real spine event
 /// store. Every emit writes one `events_ext` row in the `substrate`
 /// namespace.
+///
+/// `workspace_id` scopes the indexed `events_ext.workspace_id` column
+/// so dashboard queries can isolate runs per tenant. The bare
+/// constructor pins it to `"default"`; production wiring threads each
+/// fire's workflow-row workspace through [`Self::with_workspace`] so
+/// node lifecycle events stay queryable per workspace alongside the
+/// triggering fire (Copilot review feedback on PR #390).
 #[derive(Clone)]
 pub struct SpineEventStoreClient {
     store: EventStore,
     actor: String,
+    workspace_id: String,
 }
 
 impl std::fmt::Debug for SpineEventStoreClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SpineEventStoreClient")
             .field("actor", &self.actor)
+            .field("workspace_id", &self.workspace_id)
             .finish_non_exhaustive()
     }
 }
@@ -50,6 +59,17 @@ impl SpineEventStoreClient {
         Self {
             store,
             actor: actor.into(),
+            workspace_id: "default".to_string(),
+        }
+    }
+
+    /// Build a workspace-scoped clone. The new client emits every
+    /// event under `workspace_id`; the original is left untouched.
+    pub fn with_workspace(&self, workspace_id: impl Into<String>) -> Self {
+        Self {
+            store: self.store.clone(),
+            actor: self.actor.clone(),
+            workspace_id: workspace_id.into(),
         }
     }
 }
@@ -73,7 +93,7 @@ impl SpineClient for SpineEventStoreClient {
         };
         self.store
             .append_ext(
-                "default",
+                &self.workspace_id,
                 &stream_id,
                 "substrate",
                 kind,
