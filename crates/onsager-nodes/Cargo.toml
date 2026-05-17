@@ -21,4 +21,4 @@ typetag = "0.2"
 uuid = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
