@@ -25,14 +25,13 @@ Subcommands are discovered on PATH. Any executable named `onsager-<name>`
 or `<name>` (for known subsystems) is a valid subcommand.
 
 KNOWN SUBCOMMANDS:
-    forge       Production line — drives artifacts through their lifecycle
     ising       Continuous improvement engine — observes and surfaces insights
     stiglab     Distributed AI agent session orchestration
     synodic     AI agent governance
     trigger     Fire or replay workflow triggers (manual / replay)
 ";
 
-const KNOWN: &[&str] = &["forge", "ising", "stiglab", "synodic", "trigger"];
+const KNOWN: &[&str] = &["ising", "stiglab", "synodic", "trigger"];
 
 fn main() {
     let args: Vec<String> = env::args().collect();
