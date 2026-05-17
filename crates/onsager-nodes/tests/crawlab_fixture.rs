@@ -430,21 +430,82 @@ async fn crawlab_brownfield_pipeline_runs_end_to_end() {
         "publish's entry should be wired to ingest's exit after compile",
     );
 
-    // ---- act -------------------------------------------------------------
-    let mut registry = ExecutorRegistry::new();
-    // Each executor instance in the compiled plan carries its own
-    // configuration (Script argv, Agent runner, Verify checks).
-    // The registry dispatches by `executor_kind`; the runtime
-    // instances we register here are the canonical handlers per
-    // kind. The scheduler's `dispatch` resolves a node to one of
-    // these and the executor reads its own config off the node's
-    // boxed `executor` (see `crates/onsager-nodes/src/dispatch.rs`).
+    // Sanity-check that the per-node configuration survives `Workflow::instantiate`'s
+    // serde round-trip (the Plan Compiler re-serializes each executor
+    // to deep-copy it). Without this, a regression that loses the
+    // node-level command / prompt / checks would still let the
+    // registry-dispatch path produce green output — silently passing.
     //
-    // Subtle: today's dispatch picks the *registry* instance, not the
-    // node's per-instance config — meaning all Script nodes share one
-    // ScriptExecutor and all Agent nodes share one runner. That's an
-    // RUN-02-era limitation (#360); for this fixture we register one
-    // canonical instance per kind that satisfies every node's needs.
+    // Today (RUN-01 / #381), the scheduler dispatches by `executor_kind`
+    // and runs the *registry* instance instead of the node's; threading
+    // per-node config through dispatch is RUN-02 (#360). Until then,
+    // the compile-side guarantee that node config round-trips is the
+    // best mechanical assertion we can make.
+    let kinds: Vec<&str> = exec_plan
+        .nodes
+        .iter()
+        .map(|n| n.executor.executor_kind())
+        .collect();
+    assert!(
+        kinds.contains(&"script") && kinds.contains(&"agent") && kinds.contains(&"verify"),
+        "compiled plan should carry all three executor kinds (got: {kinds:?})",
+    );
+    let script_nodes: Vec<&Node> = exec_plan
+        .nodes
+        .iter()
+        .filter(|n| n.executor.executor_kind() == "script")
+        .collect();
+    assert_eq!(
+        script_nodes.len(),
+        2,
+        "two Script nodes (inventory + publish) survive compile",
+    );
+    // Serialize each Script node's executor and check the configured
+    // command landed in the compiled plan — proves the per-node config
+    // is preserved through `Workflow::instantiate`'s deep copy.
+    let scripted_commands: Vec<String> = script_nodes
+        .iter()
+        .map(|n| serde_json::to_value(&n.executor).unwrap()["command"].to_string())
+        .collect();
+    assert!(
+        scripted_commands
+            .iter()
+            .any(|c| c.contains("crawlab/main.go")),
+        "inventory Script's argv must survive compile (got: {scripted_commands:?})",
+    );
+    assert!(
+        scripted_commands
+            .iter()
+            .any(|c| c.contains("published: crawlab onboarding report")),
+        "publish Script's argv must survive compile (got: {scripted_commands:?})",
+    );
+    let verify_node = exec_plan
+        .nodes
+        .iter()
+        .find(|n| n.executor.executor_kind() == "verify")
+        .expect("verify node lives in the compiled plan");
+    let verify_json = serde_json::to_value(&verify_node.executor).unwrap();
+    let check_names: Vec<String> = verify_json["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        check_names,
+        vec!["crawlab-smoke".to_string(), "crawlab-lint".to_string()],
+        "Verify's check list must survive compile",
+    );
+
+    // ---- act -------------------------------------------------------------
+    // Today's `dispatch` (RUN-01) resolves a node to *the registry's*
+    // instance for that kind — not to the node's own boxed executor
+    // (see `crates/onsager-nodes/src/dispatch.rs`). Threading per-node
+    // configuration through dispatch is RUN-02 (#360). The compile-
+    // side assertions above prove the node-level config survives
+    // instantiation; here we register one canonical handler per kind
+    // that the scheduler actually invokes during this run.
+    let mut registry = ExecutorRegistry::new();
     registry.register(Arc::new(ScriptExecutor::new([
         "sh",
         "-c",

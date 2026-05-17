@@ -8,13 +8,14 @@
 //!
 //! # Provenance
 //!
-//! Declared provenance is always `Deterministic { source: Script }`,
-//! regardless of inputs. The kernel's invariant 2 (ADR 0018) still
-//! applies — a Script node consuming an `Uncertain` input emits
-//! `Uncertain` per the max-uncertainty rule — but the executor itself
-//! does not upgrade or downgrade its declared output. Only Verify
-//! (EXE-04) is allowed to upgrade `Uncertain` upstream into
-//! `Deterministic` downstream.
+//! Default declared provenance is `Deterministic { source: Script }`.
+//! When any input is `Uncertain`, the declared provenance propagates
+//! the worst input's source — matching `NoOpExecutor`'s pattern. The
+//! kernel's invariant 2 (ADR 0018) rejects any non-Verify executor
+//! that *declares* Deterministic while consuming an Uncertain input,
+//! so a Script node downstream of an Agent must declare Uncertain or
+//! the workflow fails validation. Only Verify (EXE-04) is allowed to
+//! upgrade `Uncertain` upstream into `Deterministic` downstream.
 //!
 //! # Sandboxing
 //!
@@ -129,16 +130,31 @@ impl ScriptExecutor {
 // at validate time per ADR 0018.
 // ---------------------------------------------------------------------------
 
+/// Compute the declared provenance for a Script node.
+///
+/// Default: `Deterministic { source: Script }`. If any input is
+/// `Uncertain`, propagate the worst input's source — non-Verify
+/// executors must declare Uncertain when consuming Uncertain, or the
+/// kernel's invariant 2 (ADR 0018) rejects the workflow. Mirrors the
+/// pattern `NoOpExecutor` uses.
+fn declared_provenance_for(inputs: &[Provenance]) -> Provenance {
+    inputs
+        .iter()
+        .copied()
+        .find(Provenance::is_uncertain)
+        .unwrap_or(Provenance::Deterministic {
+            source: SourceTag::Script,
+        })
+}
+
 #[typetag::serde(name = "script")]
 impl SubstrateExecutor for ScriptExecutor {
     fn executor_kind(&self) -> &'static str {
         "script"
     }
 
-    fn declared_provenance(&self, _inputs: &[Provenance]) -> Provenance {
-        Provenance::Deterministic {
-            source: SourceTag::Script,
-        }
+    fn declared_provenance(&self, inputs: &[Provenance]) -> Provenance {
+        declared_provenance_for(inputs)
     }
 }
 
@@ -148,10 +164,8 @@ impl Executor for ScriptExecutor {
         "script"
     }
 
-    fn declared_provenance(&self, _inputs: &[Provenance]) -> Provenance {
-        Provenance::Deterministic {
-            source: SourceTag::Script,
-        }
+    fn declared_provenance(&self, inputs: &[Provenance]) -> Provenance {
+        declared_provenance_for(inputs)
     }
 
     async fn execute(&self, ctx: ExecutorContext) -> Result<ExecutorOutputs, ExecutorError> {
@@ -268,20 +282,143 @@ mod tests {
     }
 
     #[test]
-    fn declared_provenance_ignores_uncertain_inputs() {
-        // The executor *declares* Deterministic regardless of inputs.
-        // Kernel invariant 2 separately propagates max-uncertainty at
-        // emit time; that's not this trait's job.
+    fn declared_provenance_propagates_uncertain_inputs() {
+        // A non-Verify executor that declares Deterministic over an
+        // Uncertain input fails the kernel's invariant 2 (ADR 0018),
+        // so Script propagates the worst input's source — the
+        // executor never tries to claim more than its inputs warrant.
         let exec = ScriptExecutor::new(["true"]);
         let inputs = [Provenance::Uncertain {
             source: SourceTag::Agent,
         }];
+        let declared = Executor::declared_provenance(&exec, &inputs);
+        assert!(declared.is_uncertain());
+        assert_eq!(declared.source(), SourceTag::Agent);
+        // Substrate side must agree — invariant 2 is a static check
+        // against the substrate executor's declared_provenance.
+        assert_eq!(
+            SubstrateExecutor::declared_provenance(&exec, &inputs),
+            declared,
+        );
+    }
+
+    #[test]
+    fn declared_provenance_stays_deterministic_with_deterministic_inputs() {
+        // Mixed deterministic inputs leave the declared output
+        // deterministic. The propagation rule only fires on Uncertain.
+        let exec = ScriptExecutor::new(["true"]);
+        let inputs = [
+            Provenance::Deterministic {
+                source: SourceTag::External,
+            },
+            Provenance::Deterministic {
+                source: SourceTag::Composed,
+            },
+        ];
         assert_eq!(
             Executor::declared_provenance(&exec, &inputs),
             Provenance::Deterministic {
                 source: SourceTag::Script,
-            }
+            },
         );
+    }
+
+    #[test]
+    fn script_executor_roundtrips_as_substrate_trait_object() {
+        // Sibling test to Agent / Verify's round-trip checks (see
+        // agent.rs `agent_executor_serializes_with_kind_discriminator`
+        // and verify.rs `verify_executor_roundtrips_as_substrate_trait_object`).
+        // Without this, a regression in the Script wire format
+        // (kind tag, command field, env map) would only surface in
+        // downstream consumers.
+        let mut env = HashMap::new();
+        env.insert("ONSAGER_TEST".to_string(), "marvin".to_string());
+        let original: Box<dyn SubstrateExecutor> = Box::new(
+            ScriptExecutor::new(["echo", "hello"])
+                .with_env(env)
+                .with_timeout_secs(42),
+        );
+
+        let json = serde_json::to_value(&original).unwrap();
+        assert_eq!(json["kind"], "script");
+        assert_eq!(
+            json["command"],
+            serde_json::json!(["echo".to_string(), "hello".to_string()]),
+        );
+        assert_eq!(json["timeout_secs"], serde_json::json!(42));
+        assert_eq!(json["env"]["ONSAGER_TEST"], "marvin");
+
+        let roundtrip: Box<dyn SubstrateExecutor> = serde_json::from_value(json).unwrap();
+        assert_eq!(roundtrip.executor_kind(), "script");
+        assert_eq!(
+            roundtrip.declared_provenance(&[]),
+            Provenance::Deterministic {
+                source: SourceTag::Script,
+            },
+        );
+    }
+
+    #[test]
+    fn substrate_workflow_with_script_after_agent_clears_invariant_2() {
+        // Regression: an earlier draft of the substrate impl always
+        // returned Deterministic, which trips invariant 2 for any
+        // Script downstream of an Agent (the kernel rejects non-Verify
+        // executors that declare Deterministic while consuming
+        // Uncertain). The propagating impl avoids that, so a workflow
+        // shaped `Agent → Script` validates cleanly.
+        use onsager_artifact::NodeId;
+        use onsager_substrate::ids::EdgeId;
+        use onsager_substrate::validate::validate_workflow;
+        use onsager_substrate::workflow::{Edge, EdgeRef, Node, Workflow};
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Debug, Default, Serialize, Deserialize)]
+        struct AgentStub;
+
+        #[typetag::serde(name = "test-script-after-agent-stub")]
+        impl SubstrateExecutor for AgentStub {
+            fn executor_kind(&self) -> &'static str {
+                "test-script-after-agent-stub"
+            }
+            fn declared_provenance(&self, _inputs: &[Provenance]) -> Provenance {
+                Provenance::Uncertain {
+                    source: SourceTag::Agent,
+                }
+            }
+        }
+
+        let agent_out = Edge {
+            id: EdgeId::generate(),
+            artifact_id: onsager_artifact::ArtifactId::new("art_agent"),
+            // requires_deterministic is intentionally false — the
+            // test isolates invariant 2 from invariant 1.
+            requires_deterministic: false,
+        };
+        let script_out = Edge {
+            id: EdgeId::generate(),
+            artifact_id: onsager_artifact::ArtifactId::new("art_script"),
+            requires_deterministic: false,
+        };
+        let w = Workflow {
+            nodes: vec![
+                Node {
+                    id: NodeId::generate(),
+                    executor: Box::new(AgentStub),
+                    inputs: vec![],
+                    outputs: vec![EdgeRef::new(agent_out.id)],
+                },
+                Node {
+                    id: NodeId::generate(),
+                    executor: Box::new(ScriptExecutor::new(["true"])),
+                    inputs: vec![EdgeRef::new(agent_out.id)],
+                    outputs: vec![EdgeRef::new(script_out.id)],
+                },
+            ],
+            edges: vec![agent_out, script_out],
+            entry_specs: vec![],
+            output_specs: vec![],
+        };
+        validate_workflow(&w, &()).expect("Agent → Script must clear invariant 2");
     }
 
     #[tokio::test]
