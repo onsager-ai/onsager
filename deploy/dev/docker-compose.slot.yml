@@ -118,6 +118,27 @@ services:
       cargo watch -q -w crates/synodic -w crates/onsager-spine -w crates/onsager-artifact
       -x 'run -p synodic -- serve'
 
+  # Substrate scheduler (RUN-03, #386). Listens on the spine for
+  # `trigger.fired` events, compiles each into an `ExecutionPlan`,
+  # and runs it through `onsager_nodes::Scheduler`. No HTTP surface —
+  # coordination is via the event bus only. A manual fire
+  # (`onsager trigger fire ...`) drives the scheduler end-to-end.
+  scheduler:
+    <<: *rust-dev
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
+      SCHEDULER_ACTOR: substrate-scheduler-slot
+      RUST_LOG: ${RUST_LOG:-info}
+    command: >
+      cargo watch -q -w crates/onsager-scheduler -w crates/onsager-nodes
+      -w crates/onsager-substrate -w crates/onsager-spine
+      -x 'run -p onsager-scheduler -- serve'
+
   # Edge subsystem (ADR 0006 / ADR 0008). Owns every external /api/*
   # route and is the route owner for /agent/ws — terminates the
   # WebSocket and proxies bytes to stiglab over the dev network.
