@@ -6,15 +6,23 @@
 //!
 //! ## Supported shapes
 //!
-//! | Pattern             | Matches                                              |
-//! |---------------------|------------------------------------------------------|
-//! | `"*"`               | every event                                          |
-//! | `"artifact.*"`      | every `event_type` starting with `"artifact."`       |
-//! | `"node.completed"`  | exact match only                                     |
+//! | Pattern             | Matches                                                     |
+//! |---------------------|-------------------------------------------------------------|
+//! | `"*"`               | every event                                                 |
+//! | `"<prefix>.*"`      | every `event_type` starting with `"<prefix>."` (any depth)  |
+//! | `"node.completed"`  | exact match only                                            |
+//!
+//! `<prefix>.*` is a **prefix** match, not a single-segment match —
+//! `artifact.*` matches `artifact.state_changed`, `artifact.sealed`,
+//! AND `artifact.deeply.nested.foo`. The trailing dot in the
+//! comparison is solely to enforce the namespace boundary (`node.*`
+//! must not match `nodemap.touched`); it does not constrain depth
+//! beyond that. Observers that need single-segment semantics or
+//! more sophisticated matching should branch on the parsed
+//! [`FactoryEvent`](onsager_spine::FactoryEvent) inside `on_event`.
 //!
 //! No mid-string wildcards (`"a.*.b"`), no character classes, no
-//! escapes — observers that need that can match the parsed
-//! [`FactoryEvent`](onsager_spine::FactoryEvent) inside `on_event`.
+//! escapes.
 //!
 //! ## Why glob, not regex
 //!
@@ -52,9 +60,11 @@ impl EventPattern {
             // "*" — every event matches.
             "*" => true,
             // "<prefix>.*" — every event whose type starts with "<prefix>.".
-            // The trailing dot in the comparison prevents "node.*" from
-            // matching a hypothetical "nodemap" (which it shouldn't —
-            // they're different namespaces).
+            // Multi-segment by design: "artifact.*" matches both
+            // "artifact.state_changed" and "artifact.deeply.nested".
+            // The trailing dot in the comparison enforces the namespace
+            // boundary (so "node.*" does not match "nodemap.touched")
+            // but does not constrain depth past it.
             p if p.ends_with(".*") => {
                 let prefix = &p[..p.len() - 1]; // strip just the "*", keep the "."
                 event_type.starts_with(prefix)

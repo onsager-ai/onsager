@@ -95,8 +95,11 @@ pub struct Insight {
     /// Free-form observation text. Rendered as the headline in the
     /// dashboard.
     pub observation: String,
-    /// `0.0..=1.0` — observer's self-reported confidence. Consumers
-    /// may filter by threshold.
+    /// `0.0..=1.0` — observer's self-reported confidence. Construct
+    /// via [`Insight::new`] (or one of the typed-confidence ctors)
+    /// to get clamping; constructing the struct directly with a
+    /// stray value is allowed but the dashboard treats anything
+    /// outside `0..=1` (and NaN / ±∞) as `0.0`.
     pub confidence: f64,
     /// `events.id` rows that support this insight. Observers should
     /// include at least the triggering event id so the dashboard can
@@ -166,14 +169,28 @@ impl AlertSeverity {
 impl Insight {
     /// Convenience: bare-minimum insight from an observation and
     /// confidence. Evidence and tagging stay empty.
+    ///
+    /// `confidence` is clamped into `0.0..=1.0`. NaN / ±∞ collapse
+    /// to `0.0` so the dashboard's "filter by threshold" reads stay
+    /// well-defined. Producers that need to know the raw value was
+    /// rejected should validate at the call site.
     pub fn new(observation: impl Into<String>, confidence: f64) -> Self {
         Self {
             observation: observation.into(),
-            confidence,
+            confidence: clamp_confidence(confidence),
             evidence_event_ids: Vec::new(),
             about_artifact_id: None,
             tag: None,
         }
+    }
+}
+
+/// Clamp `c` into `0.0..=1.0`. NaN / ±∞ collapse to `0.0`.
+fn clamp_confidence(c: f64) -> f64 {
+    if !c.is_finite() {
+        0.0
+    } else {
+        c.clamp(0.0, 1.0)
     }
 }
 
@@ -270,6 +287,16 @@ mod tests {
         } else {
             panic!("expected QualitySignal variant");
         }
+    }
+
+    #[test]
+    fn insight_new_clamps_confidence() {
+        assert_eq!(Insight::new("ok", 0.5).confidence, 0.5);
+        assert_eq!(Insight::new("low", -0.4).confidence, 0.0);
+        assert_eq!(Insight::new("high", 1.7).confidence, 1.0);
+        assert_eq!(Insight::new("nan", f64::NAN).confidence, 0.0);
+        assert_eq!(Insight::new("inf", f64::INFINITY).confidence, 0.0);
+        assert_eq!(Insight::new("ninf", f64::NEG_INFINITY).confidence, 0.0);
     }
 
     #[test]

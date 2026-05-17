@@ -33,6 +33,7 @@ use onsager_observers::{
     ObserverRuntime, SpineEvent,
 };
 use onsager_spine::{EventMetadata, EventStore, FactoryEvent, FactoryEventKind};
+use tokio::sync::oneshot;
 
 /// Observer that counts events whose payload artifact_id starts with
 /// `tag`. Cross-test isolation is payload-side, not pattern-side,
@@ -165,10 +166,12 @@ async fn observer_receives_matching_event_and_persists_output() {
         },
     );
 
-    let handle = tokio::spawn(async move { runtime.run().await });
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let handle = tokio::spawn(async move { runtime.run_with_ready(Some(ready_tx)).await });
 
-    // Give the subscription a moment to attach.
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Wait for the subscription to actually attach — replaces the
+    // flaky 200ms sleep.
+    ready_rx.await.unwrap();
 
     let event_id = write_artifact_state_changed(&event_store, &tag)
         .await
@@ -229,21 +232,30 @@ async fn observer_ignores_non_matching_event() {
             tag: tag.clone(),
         },
     );
-    let handle = tokio::spawn(async move { runtime.run().await });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let handle = tokio::spawn(async move { runtime.run_with_ready(Some(ready_tx)).await });
+    ready_rx.await.unwrap();
 
     let event_id = write_artifact_registered(&event_store, &tag).await.unwrap();
 
-    // Give the runtime time to *not* fire.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let rows = output_store
-        .list_by_observer(&observer_id, 10)
-        .await
-        .unwrap();
+    // After the runtime is ready and the event has been written,
+    // poll briefly — if the runtime were going to fire wrongly it
+    // would have spawned a task in the same event-loop tick that
+    // pulled the notification off pg_notify, so a short bounded
+    // poll is enough.
+    for _ in 0..3 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let rows = output_store
+            .list_by_observer(&observer_id, 10)
+            .await
+            .unwrap();
+        assert!(
+            rows.is_empty(),
+            "non-matching event must not produce output, got: {:?}",
+            rows
+        );
+    }
     handle.abort();
-
-    assert_eq!(rows.len(), 0, "non-matching event must not produce output");
     assert_eq!(
         seen.load(Ordering::SeqCst),
         0,
@@ -275,8 +287,9 @@ async fn slow_observer_does_not_block_event_writer() {
             tag: tag.clone(),
         },
     );
-    let handle = tokio::spawn(async move { runtime.run().await });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let handle = tokio::spawn(async move { runtime.run_with_ready(Some(ready_tx)).await });
+    ready_rx.await.unwrap();
 
     // Time how long it takes to write the event onto the spine.
     let writer_start = Instant::now();

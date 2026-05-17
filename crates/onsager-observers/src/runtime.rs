@@ -12,19 +12,38 @@
 //!    one `tokio::spawn` per (observer, event), so a slow observer
 //!    never blocks another observer or the substrate scheduler.
 //!
-//! ## Single-task-per-observer ordering
+//! ## Per-observer concurrency
 //!
-//! Each observer instance lives behind a `tokio::sync::Mutex`. Two
-//! events matching the same observer therefore run *in order* —
-//! event A finishes before event B is processed by that observer —
-//! even though A and B may interleave with other observers'
-//! processing. Observers from each other are fully parallel.
+//! Each observer instance lives behind a `tokio::sync::Mutex`. At
+//! most one `on_event` call to a given observer runs at a time —
+//! observers can safely keep `&mut self` state without external
+//! locking. Across different observers, dispatches run fully in
+//! parallel.
+//!
+//! **Ordering note.** Per-observer calls are serialized but not
+//! guaranteed FIFO in `event_id` order: `tokio::sync::Mutex` does
+//! not promise FIFO wakeup, so two events arriving close in time
+//! may be processed by one observer in either order. Observers that
+//! genuinely need monotonic ordering must inspect `event_id` /
+//! `created_at` themselves; for the v1 audit use case the
+//! at-most-one-at-a-time guarantee is what callers depend on.
+//!
+//! ## Backpressure
+//!
+//! By default the runtime subscribes via [`EventStore::subscribe`],
+//! which is unbounded — fine for the audit workload most observers
+//! produce, but a slow observer behind dozens of registered
+//! observers can grow memory unboundedly. Use
+//! [`ObserverRuntime::with_capacity`] to switch to
+//! [`EventStore::subscribe_bounded`] with a fixed-capacity channel;
+//! the substrate writer will block once the buffer fills, applying
+//! backpressure upstream rather than buffering forever.
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use onsager_spine::{EventNotification, EventStore, FactoryEvent};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 
 use crate::observer::{Observer, SpineEvent};
 use crate::pattern::EventPattern;
@@ -52,6 +71,10 @@ pub struct ObserverRuntime {
     event_store: EventStore,
     output_store: ObserverOutputStore,
     observers: Vec<Registered>,
+    /// `Some(n)` switches the spine subscription to the
+    /// bounded variant with capacity `n`; `None` keeps the unbounded
+    /// default. See [`ObserverRuntime::with_capacity`].
+    capacity: Option<usize>,
 }
 
 impl ObserverRuntime {
@@ -61,7 +84,19 @@ impl ObserverRuntime {
             event_store,
             output_store,
             observers: Vec::new(),
+            capacity: None,
         }
+    }
+
+    /// Switch the spine subscription to the bounded variant with the
+    /// given channel capacity. The substrate writer blocks once the
+    /// buffer fills, applying backpressure upstream — appropriate
+    /// when observers are expected to lag (large fan-outs, slow DB
+    /// writes). Without this, the runtime uses
+    /// [`EventStore::subscribe`] (unbounded).
+    pub fn with_capacity(mut self, capacity: usize) -> Self {
+        self.capacity = Some(capacity);
+        self
     }
 
     /// Register one observer under a stable id. Chainable.
@@ -102,17 +137,55 @@ impl ObserverRuntime {
     /// Run the subscription loop. Only returns when the underlying
     /// `pg_notify` channel closes or the spine fails.
     pub async fn run(self) -> Result<()> {
-        let mut rx = self
-            .event_store
-            .subscribe()
-            .await
-            .context("subscribe to spine pg_notify")?;
+        self.run_with_ready(None).await
+    }
+
+    /// Like [`run`](Self::run), but signals on `ready` once the spine
+    /// subscription is attached and the fan-out loop is about to
+    /// consume its first notification. Tests use this to wait for
+    /// readiness deterministically instead of sleeping a fixed
+    /// duration. Dropping the receiver is fine — the runtime simply
+    /// proceeds.
+    pub async fn run_with_ready(self, ready: Option<oneshot::Sender<()>>) -> Result<()> {
+        let mut rx_unbounded;
+        let mut rx_bounded;
+        let recv: &mut dyn AnyReceiver = match self.capacity {
+            None => {
+                rx_unbounded = self
+                    .event_store
+                    .subscribe()
+                    .await
+                    .context("subscribe to spine pg_notify")?;
+                &mut rx_unbounded
+            }
+            Some(cap) => {
+                rx_bounded = self
+                    .event_store
+                    .subscribe_bounded(cap)
+                    .await
+                    .context("subscribe_bounded to spine pg_notify")?;
+                &mut rx_bounded
+            }
+        };
+
+        // Subscription is attached — let any awaiter know.
+        if let Some(tx) = ready {
+            let _ = tx.send(());
+        }
 
         let registered: Arc<Vec<Registered>> = Arc::new(self.observers);
         let event_store = self.event_store;
         let output_store = self.output_store;
 
-        while let Some(notification) = rx.recv().await {
+        while let Some(notification) = recv.recv().await {
+            // Cheap pre-filter: observers see core spine events only
+            // (`events_ext` carries subsystem-private payloads that are
+            // not `FactoryEvent`-shaped). Doing this once here saves
+            // one `tokio::spawn` + one `SELECT FROM events WHERE id` per
+            // observer per ignored notification.
+            if notification.table != "events" {
+                continue;
+            }
             // Dispatch each matching observer in its own task so a
             // slow observer cannot back up the channel.
             for obs in registered.iter() {
@@ -179,8 +252,40 @@ fn any_pattern_matches(patterns: &[EventPattern], event_type: &str) -> bool {
     patterns.iter().any(|p| p.matches(event_type))
 }
 
+/// Trait abstracting over `mpsc::UnboundedReceiver` and `mpsc::Receiver`
+/// so [`ObserverRuntime::run_with_ready`] can drive either kind of
+/// channel through one loop.
+#[async_trait::async_trait]
+trait AnyReceiver: Send {
+    async fn recv(&mut self) -> Option<EventNotification>;
+}
+
+#[async_trait::async_trait]
+impl AnyReceiver for tokio::sync::mpsc::UnboundedReceiver<EventNotification> {
+    async fn recv(&mut self) -> Option<EventNotification> {
+        tokio::sync::mpsc::UnboundedReceiver::recv(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl AnyReceiver for tokio::sync::mpsc::Receiver<EventNotification> {
+    async fn recv(&mut self) -> Option<EventNotification> {
+        tokio::sync::mpsc::Receiver::recv(self).await
+    }
+}
+
 /// Per-task work: fetch the spine row, lock the observer, dispatch,
 /// persist outputs.
+///
+/// **Error visibility.** Failures here (`get_event_by_id` returning
+/// `None`, JSON parse failures, etc.) are surfaced only via
+/// `tracing::error!` today; the event drops out of the observer's
+/// view with no `observer_outputs` row. Promoting these to a typed
+/// dead-letter (synthetic `Alert` keyed to `triggered_by_event_id`
+/// or a `tokio_metrics`-style counter) is tracked as a follow-up to
+/// #361 — the right shape is a substrate-wide decision (it applies
+/// equally to scheduler-side parse failures) and is out of scope
+/// for OBS-01.
 async fn dispatch_one(
     observer_id: &str,
     observer: Arc<Mutex<Box<dyn Observer>>>,
@@ -188,11 +293,11 @@ async fn dispatch_one(
     event_store: EventStore,
     output_store: ObserverOutputStore,
 ) -> Result<()> {
-    // Observers see core spine events only — `events_ext` carries
-    // subsystem-private extension payloads, not factory events.
-    if notification.table != "events" {
-        return Ok(());
-    }
+    debug_assert_eq!(
+        notification.table, "events",
+        "dispatch_one should only see core spine events; \
+         run_with_ready filters events_ext before fan-out"
+    );
 
     let record = event_store
         .get_event_by_id(notification.id)
