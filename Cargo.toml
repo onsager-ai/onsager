@@ -6,6 +6,7 @@ members = [
     "crates/onsager-spine",
     "crates/onsager-substrate",
     "crates/onsager-nodes",
+    "crates/onsager-observers",
     "crates/onsager",
     "crates/onsager-github",
     "crates/onsager-portal",
