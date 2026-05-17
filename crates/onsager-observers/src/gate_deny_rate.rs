@@ -94,6 +94,12 @@ impl Observer for GateDenyRateObserver {
         ]
     }
 
+    fn hydration_window(&self) -> Option<Duration> {
+        // Match the analyzer's sliding window — see the sibling
+        // [`GateOverrideObserver::hydration_window`] for rationale.
+        Some(self.config.window)
+    }
+
     async fn on_event(&mut self, event: &SpineEvent) -> Vec<ObserverOutput> {
         match &event.payload.event {
             FactoryEventKind::ArtifactRegistered {

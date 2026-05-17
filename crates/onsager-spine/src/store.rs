@@ -251,6 +251,70 @@ impl EventStore {
         .await
     }
 
+    /// Range-scan core events for replay / hydration. Returns rows
+    /// where `created_at >= since` and `id <= max_id`, ordered by `id
+    /// ASC` so callers can fold them through stateful consumers in
+    /// the same order they were originally written.
+    ///
+    /// When `event_types` is `Some`, only rows whose `event_type` is
+    /// in the list are returned (`event_type = ANY($types)`). When
+    /// `None`, no event-type filter is applied — every row in the
+    /// `[since, max_id]` window is returned.
+    ///
+    /// Designed for the `onsager-observers` hydration path
+    /// (spec #392): on startup an observer needs the historical
+    /// events it would have seen had it been online over its
+    /// lookback window, *before* the live `pg_notify` stream takes
+    /// over. The `max_id` cutoff lets the caller capture a stable
+    /// upper bound (via [`max_event_id`](Self::max_event_id)) and
+    /// then skip live notifications with `id <= max_id` to avoid
+    /// double-dispatching events that arrived between subscribe and
+    /// hydration.
+    ///
+    /// This is read-only and unbounded in result-set size; callers
+    /// scope it via the window and the event-type filter.
+    pub async fn query_events_for_replay(
+        &self,
+        since: DateTime<Utc>,
+        max_id: i64,
+        event_types: Option<&[String]>,
+    ) -> Result<Vec<EventRecord>, sqlx::Error> {
+        match event_types {
+            Some(types) => {
+                sqlx::query_as::<_, EventRecord>(
+                    r#"
+                    SELECT id, stream_id, stream_type, event_type, data, metadata, sequence, created_at, correlation_id
+                    FROM events
+                    WHERE created_at >= $1
+                      AND id <= $2
+                      AND event_type = ANY($3)
+                    ORDER BY id ASC
+                    "#,
+                )
+                .bind(since)
+                .bind(max_id)
+                .bind(types)
+                .fetch_all(&self.pool)
+                .await
+            }
+            None => {
+                sqlx::query_as::<_, EventRecord>(
+                    r#"
+                    SELECT id, stream_id, stream_type, event_type, data, metadata, sequence, created_at, correlation_id
+                    FROM events
+                    WHERE created_at >= $1
+                      AND id <= $2
+                    ORDER BY id ASC
+                    "#,
+                )
+                .bind(since)
+                .bind(max_id)
+                .fetch_all(&self.pool)
+                .await
+            }
+        }
+    }
+
     /// Return the highest id present in either `events` or `events_ext`,
     /// or `None` if both tables are empty. Callers use this as a
     /// warm-start cursor so a [`Listener`] with `with_since` skips

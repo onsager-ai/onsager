@@ -105,6 +105,15 @@ impl Observer for GateOverrideObserver {
         ]
     }
 
+    fn hydration_window(&self) -> Option<Duration> {
+        // Match the analyzer's own sliding window so the runtime
+        // replays exactly what `prune_old` keeps live. The
+        // artifact-id → kind index is rebuilt from registrations in
+        // the same window — verdicts whose registration is older
+        // than `window` would drop out of grouping anyway.
+        Some(self.config.window)
+    }
+
     async fn on_event(&mut self, event: &SpineEvent) -> Vec<ObserverOutput> {
         match &event.payload.event {
             FactoryEventKind::ArtifactRegistered {

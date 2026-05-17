@@ -95,6 +95,10 @@ impl Observer for PrChurnObserver {
         ]
     }
 
+    fn hydration_window(&self) -> Option<Duration> {
+        Some(self.config.window)
+    }
+
     async fn on_event(&mut self, event: &SpineEvent) -> Vec<ObserverOutput> {
         match &event.payload.event {
             FactoryEventKind::GitPrOpened {
