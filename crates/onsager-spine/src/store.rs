@@ -266,10 +266,12 @@ impl EventStore {
     /// events it would have seen had it been online over its
     /// lookback window, *before* the live `pg_notify` stream takes
     /// over. The `max_id` cutoff lets the caller capture a stable
-    /// upper bound (via [`max_event_id`](Self::max_event_id)) and
-    /// then skip live notifications with `id <= max_id` to avoid
-    /// double-dispatching events that arrived between subscribe and
-    /// hydration.
+    /// upper bound (via [`max_core_event_id`](Self::max_core_event_id)
+    /// — *not* [`max_event_id`](Self::max_event_id), which mixes in
+    /// `events_ext.id` and would let a newer extension event mask a
+    /// newer core event) and then skip live notifications with `id
+    /// <= max_id` to avoid double-dispatching events that arrived
+    /// between subscribe and hydration.
     ///
     /// This is read-only and unbounded in result-set size; callers
     /// scope it via the window and the event-type filter.
@@ -319,6 +321,13 @@ impl EventStore {
     /// or `None` if both tables are empty. Callers use this as a
     /// warm-start cursor so a [`Listener`] with `with_since` skips
     /// backfill over history it doesn't need to replay.
+    ///
+    /// **Not appropriate as a `query_events_for_replay` cutoff.**
+    /// Because the result mixes in `events_ext.id`, a higher extension
+    /// id can mask a newer-but-lower core-table id — consumers that
+    /// de-dup against the result would skip live `events` rows that
+    /// arrived after the cutoff. Use
+    /// [`max_core_event_id`](Self::max_core_event_id) for that path.
     pub async fn max_event_id(&self) -> Result<Option<i64>, sqlx::Error> {
         let row: (Option<i64>,) = sqlx::query_as(
             "SELECT GREATEST( \
@@ -328,6 +337,22 @@ impl EventStore {
         )
         .fetch_one(&self.pool)
         .await?;
+        Ok(row.0)
+    }
+
+    /// Return the highest id present in the core `events` table only,
+    /// or `None` if the table is empty.
+    ///
+    /// Paired with [`query_events_for_replay`](Self::query_events_for_replay):
+    /// the cutoff has to come from the same table the replay query
+    /// reads, otherwise a higher `events_ext.id` could trick a
+    /// consumer that uses the combined max
+    /// ([`max_event_id`](Self::max_event_id)) into skipping live core
+    /// rows that arrived after subscribe.
+    pub async fn max_core_event_id(&self) -> Result<Option<i64>, sqlx::Error> {
+        let row: (Option<i64>,) = sqlx::query_as("SELECT MAX(id) FROM events")
+            .fetch_one(&self.pool)
+            .await?;
         Ok(row.0)
     }
 

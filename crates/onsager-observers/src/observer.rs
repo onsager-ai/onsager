@@ -67,12 +67,17 @@ pub trait Observer: Send + Sync {
     async fn on_event(&mut self, event: &SpineEvent) -> Vec<ObserverOutput>;
 
     /// Lookback window the runtime should replay through this
-    /// observer on startup, before attaching the live `pg_notify`
-    /// subscription. Returning `Some(d)` opts in: the runtime fetches
-    /// events written in the last `d` and dispatches them through
-    /// `on_event` to rebuild observer state (artifact-id → kind
-    /// indices, sliding-window buffers, …) that would otherwise be
-    /// empty after a process restart.
+    /// observer on startup, before the runtime signals ready and
+    /// begins consuming live `pg_notify` notifications. (The
+    /// subscription itself is attached *first* so notifications are
+    /// buffered while hydration runs; the runtime then skips the
+    /// buffered notifications that hydration already covered. See
+    /// [`ObserverRuntime::run_with_ready`](crate::ObserverRuntime::run_with_ready)
+    /// for the full sequence.) Returning `Some(d)` opts in: the
+    /// runtime fetches events written in the last `d` and dispatches
+    /// them through `on_event` to rebuild observer state (artifact-id
+    /// → kind indices, sliding-window buffers, …) that would otherwise
+    /// be empty after a process restart.
     ///
     /// Outputs produced during hydration are **suppressed** — the
     /// runtime drops everything `on_event` returns while replaying

@@ -1,6 +1,6 @@
 //! End-to-end hydration tests for `onsager-observers` (spec #392).
 //!
-//! Three scenarios, all DATABASE_URL-gated so they no-op in CI when
+//! Four scenarios, all DATABASE_URL-gated so they no-op in CI when
 //! no Postgres is available:
 //!
 //! 1. **Restart correctness** — write an `artifact.registered` event,
@@ -13,11 +13,16 @@
 //!    runtime starts must NOT cause `observer_outputs` rows to be
 //!    written. Output suppression is the key correctness rule from
 //!    the spec.
-//! 3. **Window is bounded** — events older than the observer's
-//!    declared `hydration_window` are not replayed even if they
-//!    matched.
+//! 3. **Negative control: no hydration → verdicts drop** — an
+//!    observer wrapped to advertise `hydration_window() -> None`
+//!    returns to the cold-start failure mode the spec calls out —
+//!    post-restart verdicts no longer group by kind.
+//! 4. **Cutoff-skip / no double-dispatch** — events with `id <=
+//!    cutoff_id` that arrived before subscribe must be replayed
+//!    exactly once (via hydration), never re-dispatched off the
+//!    live channel.
 //!
-//! All three reuse the cross-test isolation trick from
+//! All four reuse the cross-test isolation trick from
 //! `runtime_e2e.rs`: every test tags its events with a unique
 //! per-run ULID and filters payload-side, so multiple tests can
 //! share the same spine without contaminating each other.
@@ -242,23 +247,22 @@ async fn hydration_does_not_emit_outputs_for_replayed_events() {
     cleanup(&event_store, &observer_id, &event_ids).await;
 }
 
-/// Hydration window is bounded: an artifact registered LONG before
-/// the runtime starts (older than the observer's window) must NOT
-/// be replayed, so live verdicts referencing it drop out of
-/// grouping. We force the bound by registering with a configured
-/// 1-minute window and writing the registration "now" — the test
-/// instead uses a *custom-configured* observer whose hydration
-/// window is shorter than the live verdict timing, then asserts
-/// the observer's kind index stays empty.
+/// Negative control: an observer that opts OUT of hydration falls
+/// back to the cold-start failure mode the spec calls out — an
+/// artifact registered before the runtime starts is invisible to
+/// post-restart verdicts, so the override-rate insight never fires
+/// even when the same verdict sequence would trip it on a hydrated
+/// observer (test #1 above).
 ///
-/// We can't easily backdate `created_at` (the spine sets it), so
-/// the strategy here is the inverse: configure the observer with a
-/// 0-second hydration window (effectively no hydration), then
-/// write a registration before the runtime starts and assert that
-/// post-runtime verdicts do NOT trip the rate (because the kind
-/// index never got the registration). This is the "without
-/// hydration, restart drops verdicts" failure mode the spec calls
-/// out — it's the negative-control for the first test.
+/// We can't easily backdate `created_at` to prove the *bounded
+/// window* directly (the spine sets `created_at`, and registering
+/// "now" is always inside any reasonable hydration window). Instead
+/// we pin the bound's complement: a wrapper observer that returns
+/// `hydration_window() -> None` makes the runtime skip replay
+/// through it entirely — equivalent to the case where the
+/// registration was older than the declared window. Post-runtime
+/// verdicts then drop out of grouping because the kind index never
+/// got the registration.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn hydration_window_zero_means_no_replay_and_verdicts_drop() {
     let Some(db_url) = std::env::var("DATABASE_URL").ok() else {
@@ -276,18 +280,19 @@ async fn hydration_window_zero_means_no_replay_and_verdicts_drop() {
         .await
         .unwrap();
 
-    // Build an observer with a `window` of 1 nanosecond so any
-    // historical event falls outside the hydration window. We do
-    // NOT change the analyzer's live window (the analyzer's
-    // sliding-window prune uses `config.window`, so a 1ns window
-    // would also break live grouping). Instead we use a custom
-    // wrapper observer for this scenario.
+    // The wrapper below advertises `hydration_window() -> None` so
+    // the runtime skips replaying history through it even though
+    // the wrapped `GateOverrideObserver` would have benefited.
+    // Direct opt-out is the cleanest negative control — using a 1ns
+    // window would also break the analyzer's live `prune_old`
+    // (which keys off the SAME `config.window`), conflating two
+    // failure modes.
     use async_trait::async_trait;
     use onsager_observers::{EventPattern, Observer, ObserverOutput, SpineEvent};
 
-    /// Wraps a real observer but advertises a zero hydration
-    /// window — so the runtime skips replaying through it even
-    /// though the inner observer would have benefited.
+    /// Wraps a real observer but advertises no hydration window —
+    /// so the runtime skips replaying through it even though the
+    /// inner observer would have benefited.
     struct NoHydrate(GateOverrideObserver);
 
     #[async_trait]

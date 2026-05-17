@@ -225,11 +225,17 @@ impl ObserverRuntime {
         // (subscribe started first, channel is buffering). Events
         // with id <= cutoff are hydrated below and skipped when the
         // live loop sees them.
+        //
+        // We read `max_core_event_id` (core `events` only) — *not*
+        // `max_event_id`, which mixes in `events_ext.id`. A higher
+        // `events_ext.id` could otherwise mask a newer-but-lower
+        // `events.id` and cause the live loop to skip live core
+        // rows below the inflated cutoff.
         let cutoff_id = self
             .event_store
-            .max_event_id()
+            .max_core_event_id()
             .await
-            .context("read max_event_id for hydration cutoff")?
+            .context("read max_core_event_id for hydration cutoff")?
             .unwrap_or(0);
 
         // Replay history through hydrating observers. Outputs are
@@ -339,9 +345,15 @@ impl ObserverRuntime {
     /// Events should be supplied in `event_id` ASC order; the runtime
     /// dispatches them as-is and observers that depend on monotonic
     /// ordering rely on the caller's ordering.
+    ///
+    /// A single hydration reference timestamp is captured up front
+    /// (`Utc::now()`) and used to evaluate every per-observer window
+    /// — so the in/out decision for an event near the window
+    /// boundary does not depend on how long replay takes.
     pub async fn hydrate_from_events(&self, history: Vec<SpineEvent>) {
+        let hydration_now = chrono::Utc::now();
         for event in history {
-            dispatch_hydration(&self.observers, &event).await;
+            dispatch_hydration(&self.observers, &event, hydration_now).await;
         }
     }
 }
@@ -383,8 +395,18 @@ fn hydration_event_type_filter(observers: &[&Registered]) -> Option<Vec<String>>
 /// where that rule is enforced — observers don't need to know
 /// whether they're being hydrated, and the same `on_event`
 /// implementation handles both modes.
-async fn dispatch_hydration(observers: &[Registered], event: &SpineEvent) {
-    let now = chrono::Utc::now();
+///
+/// `hydration_now` is the single reference timestamp captured at
+/// the start of the hydration phase. Threading it through (rather
+/// than reading `Utc::now()` per event) keeps the in/out boundary
+/// of each observer's window stable regardless of how long replay
+/// takes, and identical to the lower bound used for the spine
+/// query.
+async fn dispatch_hydration(
+    observers: &[Registered],
+    event: &SpineEvent,
+    hydration_now: chrono::DateTime<chrono::Utc>,
+) {
     for obs in observers {
         let Some(window) = obs.hydration_window else {
             // Observer didn't opt into hydration. Live-only — its
@@ -396,7 +418,7 @@ async fn dispatch_hydration(observers: &[Registered], event: &SpineEvent) {
         // window does not get re-fed events older than it cares
         // about even if a sibling observer requested a longer
         // window.
-        if event.created_at < now - window {
+        if event.created_at < hydration_now - window {
             continue;
         }
         if !any_pattern_matches(&obs.patterns, &event.event_type) {
@@ -436,12 +458,20 @@ async fn hydrate_observers(
     // the union of declared windows". Per-observer windows are still
     // honored at dispatch time (`dispatch_hydration` re-checks each
     // event's age against each observer's own window).
+    //
+    // `hydration_now` is captured ONCE up front and reused for both
+    // the query lower bound AND each per-observer in-window check
+    // in `dispatch_hydration`. Without this, a long-running replay
+    // could pull rows close to the query boundary that then get
+    // skipped at dispatch (or vice versa) — the in/out decision
+    // would depend on wall-clock drift during hydration.
     let max_window = hydrating
         .iter()
         .filter_map(|o| o.hydration_window)
         .max()
         .expect("at least one hydrating observer");
-    let since = chrono::Utc::now() - max_window;
+    let hydration_now = chrono::Utc::now();
+    let since = hydration_now - max_window;
     let event_types = hydration_event_type_filter(&hydrating);
 
     let rows = event_store
@@ -470,7 +500,7 @@ async fn hydrate_observers(
             payload,
             created_at: record.created_at,
         };
-        dispatch_hydration(observers, &spine_event).await;
+        dispatch_hydration(observers, &spine_event, hydration_now).await;
         dispatched += 1;
     }
     tracing::info!(
@@ -800,7 +830,7 @@ mod tests {
             ev(12, "artifact.archived", Duration::seconds(5)),
         ];
         for e in history {
-            dispatch_hydration(&observers, &e).await;
+            dispatch_hydration(&observers, &e, chrono::Utc::now()).await;
         }
 
         let ids = seen.lock().unwrap().clone();
@@ -828,6 +858,7 @@ mod tests {
         dispatch_hydration(
             &observers,
             &ev(10, "artifact.registered", Duration::minutes(5)),
+            chrono::Utc::now(),
         )
         .await;
         assert!(seen.lock().unwrap().is_empty());
@@ -851,9 +882,11 @@ mod tests {
             obs,
         )];
 
+        let hydration_now = chrono::Utc::now();
         dispatch_hydration(
             &observers,
             &ev(10, "artifact.registered", Duration::hours(2)),
+            hydration_now,
         )
         .await;
         assert!(seen.lock().unwrap().is_empty());
@@ -862,6 +895,7 @@ mod tests {
         dispatch_hydration(
             &observers,
             &ev(11, "artifact.registered", Duration::minutes(10)),
+            hydration_now,
         )
         .await;
         assert_eq!(seen.lock().unwrap().clone(), vec![11]);
@@ -886,6 +920,7 @@ mod tests {
         dispatch_hydration(
             &observers,
             &ev(10, "artifact.registered", Duration::minutes(5)),
+            chrono::Utc::now(),
         )
         .await;
         assert!(seen.lock().unwrap().is_empty());
@@ -913,10 +948,12 @@ mod tests {
             obs,
         )];
 
+        let hydration_now = chrono::Utc::now();
         for i in 0..5 {
             dispatch_hydration(
                 &observers,
                 &ev(20 + i, "artifact.registered", Duration::minutes(1)),
+                hydration_now,
             )
             .await;
         }
