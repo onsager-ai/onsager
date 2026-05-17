@@ -1,0 +1,23 @@
+[package]
+name = "onsager-observers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "0.2 substrate observers — non-blocking S3* audit channel. Observers subscribe to spine events, run analysis off the hot path, and emit QualitySignal / Insight / Alert outputs to the observer_outputs table. ADR 0013, spec #361."
+
+[dependencies]
+onsager-artifact = { path = "../onsager-artifact" }
+onsager-spine = { path = "../onsager-spine" }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio", "tls-rustls", "postgres", "json", "chrono"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+ulid = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
