@@ -415,10 +415,18 @@ impl Scheduler {
         node: &Node,
         state: &mut HashMap<NodeId, NodeState>,
     ) -> Result<(), SchedulerError> {
-        // Ready is purely internal — persisted so a restart can tell
-        // "queued but not yet running" apart from "never seen", but no
-        // spine event. `node.started` (below) is the first user-visible
-        // signal that a node has begun execution.
+        // Ready is purely internal — persisted as a marker that this
+        // dispatch reached the registry-lookup step, then immediately
+        // overwritten by Running before the executor is invoked. No
+        // spine event. `node.started` (below) is the first
+        // user-visible signal that a node has begun execution.
+        //
+        // Restart behavior: `run()` resets every non-terminal state
+        // (`Ready` / `Running`) to `Pending` on recovery — both are
+        // treated as "interrupted, re-dispatch" rather than
+        // distinguishable states. The persisted transitions are
+        // mainly an audit trail for diagnostics today; a future
+        // resume-mid-flight executor would key off them.
         state.insert(node.id, NodeState::Ready);
         self.store
             .set_node_state(plan_id, node.id, NodeState::Ready)
@@ -434,6 +442,7 @@ impl Scheduler {
 
         let inputs = self.gather_inputs(plan_id, node, plan).await?;
         let ctx = ExecutorContext {
+            plan_id: plan_id.clone(),
             node_id: node.id,
             inputs,
             spine: Arc::clone(&self.spine),

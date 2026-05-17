@@ -12,6 +12,7 @@ use std::sync::Arc;
 use onsager_artifact::{Artifact, ArtifactId, NodeId};
 
 use crate::SpineClient;
+use crate::scheduler::PlanId;
 
 /// What an executor receives when the runtime invokes it.
 ///
@@ -21,6 +22,13 @@ use crate::SpineClient;
 /// `Executor::execute`.
 #[derive(Debug)]
 pub struct ExecutorContext {
+    /// Identifier for the Execution Plan run this dispatch belongs
+    /// to. Threaded onto every substrate lifecycle event the executor
+    /// emits (`agent.session_*`, `synodic.verdict`) so consumers can
+    /// correlate them back to a specific run — without it the spine
+    /// envelope's `stream_id` (`plan:<plan_id>:<node_id>`) collapses
+    /// across runs.
+    pub plan_id: PlanId,
     /// The node whose executor this is — identifies the producer for
     /// downstream `Artifact::produced_by_node` tagging.
     pub node_id: NodeId,
@@ -82,6 +90,7 @@ mod tests {
     #[test]
     fn context_is_constructible_with_mock_spine() {
         let ctx = ExecutorContext {
+            plan_id: PlanId::generate(),
             node_id: NodeId::generate(),
             inputs: vec![],
             spine: Arc::new(MockSpine::default()),

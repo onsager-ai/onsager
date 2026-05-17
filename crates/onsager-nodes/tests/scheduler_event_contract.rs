@@ -202,6 +202,29 @@ async fn script_agent_verify_emits_full_substrate_contract() {
         .map(|(_, p)| p)
         .collect();
     assert_eq!(verdicts.len(), 1, "expected one synodic.verdict emit");
+
+    // -- Executor-side emits MUST carry the real plan_id (not the
+    // empty-string regression the v1 implementation had before
+    // `ExecutorContext::plan_id` was wired in). Otherwise
+    // `FactoryEventKind::stream_id()` collapses across runs and
+    // consumers can't correlate verdicts / session events to a
+    // specific plan.
+    for kind in &[
+        se::KIND_AGENT_SESSION_STARTED,
+        se::KIND_AGENT_SESSION_COMPLETED,
+        se::KIND_SYNODIC_VERDICT,
+    ] {
+        let payload = emitted
+            .iter()
+            .find(|(k, _)| k == *kind)
+            .map(|(_, p)| p)
+            .unwrap_or_else(|| panic!("expected one emit for {kind}"));
+        assert_eq!(
+            payload["plan_id"],
+            plan_id.as_str(),
+            "executor-side emit for `{kind}` must carry the scheduler's plan_id, got: {payload}",
+        );
+    }
     assert_eq!(verdicts[0]["passed"], true);
     assert!(verdicts[0]["check_results"].is_array());
 

@@ -63,7 +63,7 @@ that requires a coordinated rollout.
 | `workflow` | stiglab (trigger) / substrate scheduler (stage) | 3 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
 | `gate` | onsager-portal (GitHub) / substrate scheduler (manual) | 2 |
-| `substrate` | (unknown — update `stream_producer` in xtask) | 10 |
+| `substrate` | substrate scheduler (onsager-nodes) + executor catalog (RUN-02, #360) | 10 |
 
 Each section below covers one stream. Inside a section, every event lists its wire `event_type` string, the Rust variant name, the variant's doc comment, and a payload field table (where the field's own doc comment is the description).
 
@@ -693,7 +693,7 @@ A manual-approval gate received a signal (e.g. the PR was merged). Forge's manua
 
 ## `substrate` events
 
-Producer subsystem: **(unknown — update `stream_producer` in xtask)**.
+Producer subsystem: **substrate scheduler (onsager-nodes) + executor catalog (RUN-02, #360)**.
 
 ### `node.started`
 

@@ -246,20 +246,17 @@ impl Executor for AgentExecutor {
             user_prompt: render_user_prompt(&ctx),
         };
 
-        // RUN-02 (#360) lifecycle events. `plan_id` is unknown at the
-        // executor surface — the scheduler owns it; the executor
-        // contributes the session-level signals it alone knows about.
-        // Carry an empty `plan_id` until the executor context grows a
-        // `plan_id` field (follow-up); the dashboard run timeline keys
-        // by `(stream_id == plan:<plan>:<node>)`, which still works
-        // because `stream_id` is derived spine-side from the typed
-        // variant — node-level correlation by `node_id` is preserved.
+        // RUN-02 (#360) lifecycle events. `plan_id` comes off
+        // `ExecutorContext`, populated by the scheduler so the
+        // spine envelope's `stream_id` (`plan:<plan>:<node>`)
+        // correlates verdicts back to a specific run.
+        let plan_id = ctx.plan_id.as_str().to_string();
         let session_id = Uuid::new_v4().to_string();
         emit_event(
             &ctx,
             se::KIND_AGENT_SESSION_STARTED,
             &se::AgentSessionStarted {
-                plan_id: String::new(),
+                plan_id: plan_id.clone(),
                 node_id: ctx.node_id,
                 session_id: session_id.clone(),
                 model: self.model.clone(),
@@ -274,7 +271,7 @@ impl Executor for AgentExecutor {
                     &ctx,
                     se::KIND_AGENT_SESSION_FAILED,
                     &se::AgentSessionFailed {
-                        plan_id: String::new(),
+                        plan_id: plan_id.clone(),
                         node_id: ctx.node_id,
                         session_id: session_id.clone(),
                         error: e.to_string(),
@@ -289,7 +286,7 @@ impl Executor for AgentExecutor {
             &ctx,
             se::KIND_AGENT_SESSION_COMPLETED,
             &se::AgentSessionCompleted {
-                plan_id: String::new(),
+                plan_id,
                 node_id: ctx.node_id,
                 session_id,
                 // Token usage is not surfaced through `AgentResponse`
@@ -322,14 +319,22 @@ impl Executor for AgentExecutor {
     }
 }
 
-/// Best-effort spine emit for an executor lifecycle event. Failures
-/// are logged via the spine adapter (the scheduler's `warn!` path)
-/// rather than propagated — a missed lifecycle event must not stall
-/// the actual execution. `serde_json::to_value` on a substrate event
-/// struct cannot fail (only string keys, no NaN floats).
+/// Best-effort spine emit for an executor lifecycle event. A failed
+/// emit logs a warning and is not propagated — a missed lifecycle
+/// event must not stall the actual execution (the artifact still
+/// materializes; the dashboard timeline just loses one row).
+/// `serde_json::to_value` on a substrate event struct cannot fail
+/// (only string keys, no NaN floats).
 async fn emit_event<T: serde::Serialize>(ctx: &ExecutorContext, kind: &str, payload: &T) {
     let payload = serde_json::to_value(payload).expect("substrate event payload must serialize");
-    let _ = ctx.spine.emit(kind, payload).await;
+    if let Err(e) = ctx.spine.emit(kind, payload).await {
+        tracing::warn!(
+            plan = %ctx.plan_id,
+            node = %ctx.node_id,
+            kind,
+            "agent executor spine emit failed: {e}",
+        );
+    }
 }
 
 /// Render upstream artifacts into a single user-side prompt body. The
@@ -363,6 +368,7 @@ mod tests {
 
     fn empty_ctx() -> ExecutorContext {
         ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
             node_id: NodeId::generate(),
             inputs: Vec::new(),
             spine: Arc::new(MockSpine::default()),
@@ -423,6 +429,7 @@ mod tests {
         let exec = agent_with_stub("the agent said hello");
         let node_id = NodeId::generate();
         let ctx = ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
             node_id,
             inputs: Vec::new(),
             spine: Arc::new(MockSpine::default()),
@@ -469,6 +476,7 @@ mod tests {
         let input_id = ArtifactId::new("art_input_1");
         let input_art = Artifact::new(Kind::Document, "upstream", "owner", "test", Vec::new());
         let ctx = ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
             node_id: NodeId::generate(),
             inputs: vec![(input_id.clone(), input_art)],
             spine: Arc::new(MockSpine::default()),
@@ -632,6 +640,7 @@ mod tests {
 
         let node_id = NodeId::generate();
         let ctx = ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
             node_id,
             inputs: Vec::new(),
             spine: Arc::new(MockSpine::default()),

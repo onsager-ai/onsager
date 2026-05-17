@@ -558,6 +558,7 @@ fn stream_producer(stream: &str) -> &'static str {
         "workflow" => "stiglab (trigger) / substrate scheduler (stage)",
         "registry" => "synodic (catalog crud)",
         "gate" => "onsager-portal (GitHub) / substrate scheduler (manual)",
+        "substrate" => "substrate scheduler (onsager-nodes) + executor catalog (RUN-02, #360)",
         _ => "(unknown — update `stream_producer` in xtask)",
     }
 }
