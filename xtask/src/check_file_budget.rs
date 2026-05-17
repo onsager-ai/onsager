@@ -518,7 +518,7 @@ mod tests {
     #[test]
     fn prod_classification() {
         assert!(is_prod_source(Path::new(
-            "crates/forge/src/core/pipeline.rs"
+            "crates/stiglab/src/core/pipeline.rs"
         )));
         assert!(!is_prod_source(Path::new(
             "crates/foo/tests/integration.rs"

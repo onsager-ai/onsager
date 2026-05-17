@@ -26,10 +26,18 @@ use serde::Serialize;
 /// other external boundary that writes to the spine without being one of
 /// the four core subsystems. It exists so events whose only producer is a
 /// webhook receiver still satisfy the "every event has a producer" check.
+///
+/// `Substrate` is the 0.2 production-line role (`onsager-substrate` +
+/// `onsager-nodes`) that replaces the deprecated 0.1 `Forge` crate
+/// (spec #363). The substrate scheduler dispatches executors and drives
+/// artifacts through their lifecycle. `Substrate` is intentionally not
+/// in [`SCANNED`] yet — the emit/listener call sites move in over RUN-02
+/// (spec #360); until then the manifest tracks the forward intent so
+/// downstream consumer-side checks remain wired.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Subsystem {
-    Forge,
+    Substrate,
     Stiglab,
     Synodic,
     Ising,
@@ -39,7 +47,7 @@ pub enum Subsystem {
 impl Subsystem {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Forge => "forge",
+            Self::Substrate => "substrate",
             Self::Stiglab => "stiglab",
             Self::Synodic => "synodic",
             Self::Ising => "ising",
@@ -49,9 +57,10 @@ impl Subsystem {
 
     /// Subsystems that own source under `crates/<name>/` and whose emit /
     /// listener call sites the CI check scans. `Portal` is excluded: its
-    /// emitters live outside the workspace's lint surface.
-    pub const SCANNED: &'static [Subsystem] =
-        &[Self::Forge, Self::Stiglab, Self::Synodic, Self::Ising];
+    /// emitters live outside the workspace's lint surface. `Substrate`
+    /// is excluded until RUN-02 (spec #360) ports the emit/listener call
+    /// sites that used to live in `crates/forge/`.
+    pub const SCANNED: &'static [Subsystem] = &[Self::Stiglab, Self::Synodic, Self::Ising];
 }
 
 /// One row of the event-type registry manifest.
@@ -114,7 +123,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "artifact.registered",
             schema_version: 1,
-            producers: &[Subsystem::Forge],
+            producers: &[Subsystem::Substrate],
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
@@ -123,7 +132,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "artifact.state_changed",
             schema_version: 1,
-            producers: &[Subsystem::Forge],
+            producers: &[Subsystem::Substrate],
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
@@ -132,7 +141,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "artifact.archived",
             schema_version: 1,
-            producers: &[Subsystem::Portal, Subsystem::Forge],
+            producers: &[Subsystem::Portal, Subsystem::Substrate],
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
@@ -152,7 +161,7 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "git.ci_completed",
             schema_version: 1,
             producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Forge],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "A CI check finished for a PR.",
@@ -161,7 +170,7 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "git.pr_merged",
             schema_version: 1,
             producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Forge, Subsystem::Ising],
+            consumers: &[Subsystem::Substrate, Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
             description: "A PR was merged.",
@@ -170,7 +179,7 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "git.pr_closed",
             schema_version: 1,
             producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Forge],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "A PR was closed without merging.",
@@ -179,7 +188,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "forge.shaping_dispatched",
             schema_version: 1,
-            producers: &[Subsystem::Forge],
+            producers: &[Subsystem::Substrate],
             consumers: &[Subsystem::Stiglab],
             diagnostic_only: false,
             reason: None,
@@ -188,7 +197,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "forge.shaping_returned",
             schema_version: 1,
-            producers: &[Subsystem::Forge],
+            producers: &[Subsystem::Substrate],
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
@@ -197,7 +206,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "forge.gate_requested",
             schema_version: 1,
-            producers: &[Subsystem::Forge],
+            producers: &[Subsystem::Substrate],
             consumers: &[Subsystem::Synodic],
             diagnostic_only: false,
             reason: None,
@@ -206,7 +215,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "forge.gate_verdict",
             schema_version: 1,
-            producers: &[Subsystem::Forge],
+            producers: &[Subsystem::Substrate],
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
@@ -215,8 +224,8 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "forge.insight_observed",
             schema_version: 1,
-            producers: &[Subsystem::Forge],
-            consumers: &[Subsystem::Forge],
+            producers: &[Subsystem::Substrate],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "Insight forwarded to the scheduling kernel.",
@@ -224,7 +233,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "forge.decision_made",
             schema_version: 1,
-            producers: &[Subsystem::Forge],
+            producers: &[Subsystem::Substrate],
             consumers: &[],
             diagnostic_only: true,
             reason: Some("diagnostic trace of forge scheduling kernel; no downstream action"),
@@ -235,7 +244,7 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "stiglab.session_completed",
             schema_version: 1,
             producers: &[Subsystem::Stiglab],
-            consumers: &[Subsystem::Forge],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "A session finished successfully; carries optional artifact_id, token usage, branch, and PR number.",
@@ -244,7 +253,7 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "stiglab.session_result_ready",
             schema_version: 1,
             producers: &[Subsystem::Stiglab],
-            consumers: &[Subsystem::Forge],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "Full session ShapingResult ready for Forge to act on (replaces POST /api/shaping response). Renamed from stiglab.shaping_result_ready per spec #285.",
@@ -253,7 +262,7 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "stiglab.session_failed",
             schema_version: 1,
             producers: &[Subsystem::Stiglab],
-            consumers: &[Subsystem::Forge],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "A session terminated with an error.",
@@ -306,7 +315,7 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "synodic.gate_verdict",
             schema_version: 1,
             producers: &[Subsystem::Synodic],
-            consumers: &[Subsystem::Forge],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "Full GateVerdict in response to forge.gate_requested (replaces POST /api/gate response).",
@@ -397,7 +406,7 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "ising.insight_emitted",
             schema_version: 1,
             producers: &[Subsystem::Ising],
-            consumers: &[Subsystem::Forge],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "Machine-readable signal emitted on the spine for other subsystems to consume.",
@@ -480,8 +489,8 @@ pub const EVENTS: EventManifest = EventManifest {
             //   `workflow_run.completed` / Telegram receivers (#240),
             //   the `onsager trigger fire` CLI and the dashboard
             //   "Run now" / replay endpoints (#241).
-            producers: &[Subsystem::Stiglab, Subsystem::Forge, Subsystem::Portal],
-            consumers: &[Subsystem::Forge],
+            producers: &[Subsystem::Stiglab, Subsystem::Substrate, Subsystem::Portal],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "A trigger fired (webhook / schedule / event / manual).",
@@ -503,7 +512,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "stage.entered",
             schema_version: 1,
-            producers: &[Subsystem::Forge],
+            producers: &[Subsystem::Substrate],
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in workflow run timeline"),
@@ -515,7 +524,7 @@ pub const EVENTS: EventManifest = EventManifest {
         EventDefinition {
             kind: "stage.advanced",
             schema_version: 1,
-            producers: &[Subsystem::Forge],
+            producers: &[Subsystem::Substrate],
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in workflow run timeline"),
@@ -533,7 +542,7 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             // Portal owns the GitHub webhook ingress as of #222 Slice 1.
             producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Forge],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "A GitHub check_suite/check_run/status arrived for a tracked PR.",
@@ -543,7 +552,7 @@ pub const EVENTS: EventManifest = EventManifest {
             schema_version: 1,
             // Portal owns the GitHub webhook ingress as of #222 Slice 1.
             producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Forge],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             description: "A manual-approval gate received a signal (e.g. PR merged).",
@@ -620,7 +629,7 @@ mod tests {
         let def = EVENTS
             .lookup("forge.shaping_dispatched")
             .expect("known kind");
-        assert!(def.producers.contains(&Subsystem::Forge));
+        assert!(def.producers.contains(&Subsystem::Substrate));
         assert!(def.consumers.contains(&Subsystem::Stiglab));
         assert!(EVENTS.lookup("does.not_exist").is_none());
     }

@@ -118,21 +118,6 @@ services:
       cargo watch -q -w crates/synodic -w crates/onsager-spine -w crates/onsager-artifact
       -x 'run -p synodic -- serve'
 
-  forge:
-    <<: *rust-dev
-    depends_on:
-      db:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    environment:
-      FORGE_PORT: "3003"
-      DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
-      RUST_LOG: ${RUST_LOG:-info}
-    command: >
-      cargo watch -q -w crates/forge -w crates/onsager-spine -w crates/onsager-artifact
-      -x 'run -p forge -- serve'
-
   # Edge subsystem (ADR 0006 / ADR 0008). Owns every external /api/*
   # route and is the route owner for /agent/ws — terminates the
   # WebSocket and proxies bytes to stiglab over the dev network.
@@ -182,7 +167,6 @@ services:
     depends_on:
       - stiglab
       - synodic
-      - forge
       - portal
       - dashboard
     volumes:

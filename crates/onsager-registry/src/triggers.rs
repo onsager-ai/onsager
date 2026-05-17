@@ -35,9 +35,10 @@ use crate::events::Subsystem;
 /// The split mirrors the spec's four categories:
 ///
 /// - **Event** — internal event-bus signals (`spine_event`, `pg_notify`,
-///   `outbox_row`). Producer is always forge.
+///   `outbox_row`). Producer is always the substrate scheduler
+///   (`onsager-substrate`), inherited from forge in spec #363.
 /// - **Schedule** — time-based fires (`cron`, `delay`, `interval`).
-///   Producer is always forge.
+///   Producer is always the substrate scheduler.
 /// - **Request** — external HTTP requests (webhooks: GitHub, Telegram,
 ///   …). Producer is the edge subsystem hosting the receiver (stiglab
 ///   today; portal once #222 lands).
@@ -163,21 +164,21 @@ pub const TRIGGERS: TriggerManifest = TriggerManifest {
         // -- Schedule (#238) -----------------------------------------------
         TriggerDefinition {
             kind_tag: "cron",
-            producer: Subsystem::Forge,
+            producer: Subsystem::Substrate,
             category: TriggerCategory::Schedule,
             ui_kind: TriggerUiKind::Cron,
             description: "Fires on a cron schedule (5- or 6-field expression, optional timezone).",
         },
         TriggerDefinition {
             kind_tag: "delay",
-            producer: Subsystem::Forge,
+            producer: Subsystem::Substrate,
             category: TriggerCategory::Schedule,
             ui_kind: TriggerUiKind::Delay,
             description: "Fires once after a fixed delay measured from the workflow's activation.",
         },
         TriggerDefinition {
             kind_tag: "interval",
-            producer: Subsystem::Forge,
+            producer: Subsystem::Substrate,
             category: TriggerCategory::Schedule,
             ui_kind: TriggerUiKind::Interval,
             description: "Fires periodically at a fixed interval (in seconds).",
@@ -185,21 +186,21 @@ pub const TRIGGERS: TriggerManifest = TriggerManifest {
         // -- Event (#239) --------------------------------------------------
         TriggerDefinition {
             kind_tag: "spine_event",
-            producer: Subsystem::Forge,
+            producer: Subsystem::Substrate,
             category: TriggerCategory::Event,
             ui_kind: TriggerUiKind::SpineEvent,
             description: "Fires when a spine FactoryEventKind matches; optional JSON filter.",
         },
         TriggerDefinition {
             kind_tag: "pg_notify",
-            producer: Subsystem::Forge,
+            producer: Subsystem::Substrate,
             category: TriggerCategory::Event,
             ui_kind: TriggerUiKind::PgNotify,
             description: "Fires on a Postgres NOTIFY channel; optional JSON filter on the payload.",
         },
         TriggerDefinition {
             kind_tag: "outbox_row",
-            producer: Subsystem::Forge,
+            producer: Subsystem::Substrate,
             category: TriggerCategory::Event,
             ui_kind: TriggerUiKind::Outbox,
             description: "Polls an outbox table for new rows matching a WHERE clause.",

@@ -132,11 +132,6 @@ dev: dev-infra
     echo "==> Starting synodic on :3001..."
     PORT=3001 cargo run -p synodic -- serve &
 
-    echo "==> Starting forge on :3003..."
-    DATABASE_URL="postgres://onsager:onsager@localhost:5432/onsager" \
-    FORGE_PORT=3003 \
-        cargo run -p forge -- serve &
-
     echo "==> Starting dashboard on :5173..."
     pnpm --filter dashboard dev &
 
@@ -146,7 +141,6 @@ dev: dev-infra
     echo "  Stiglab:    http://localhost:3000"
     echo "  Synodic:    http://localhost:3001"
     echo "  Portal:     http://localhost:3002"
-    echo "  Forge:      http://localhost:3003"
     echo "  Postgres:   postgres://onsager:onsager@localhost:5432/onsager"
     echo ""
     echo "Press Ctrl+C to stop all services."
@@ -169,9 +163,6 @@ dev-down:
 # ── Dev (individual services) ────────────────────────────────────────
 dev-dashboard:
     pnpm --filter dashboard dev
-
-dev-forge:
-    cargo run -p forge -- serve --database-url "${DATABASE_URL}"
 
 dev-ising:
     cargo run -p ising -- serve --database-url "${DATABASE_URL}"
@@ -257,7 +248,6 @@ deploy: deploy-build deploy-up
 # ── Install from source ──────────────────────────────────────────────
 install:
     cargo install --path crates/onsager
-    cargo install --path crates/forge
     cargo install --path crates/ising
     cargo install --path crates/stiglab
     cargo install --path crates/synodic

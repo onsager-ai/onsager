@@ -14,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       onsager-spine: ${{ steps.filter.outputs.onsager-spine }}
-      forge: ${{ steps.filter.outputs.forge }}
       ising: ${{ steps.filter.outputs.ising }}
       stiglab: ${{ steps.filter.outputs.stiglab }}
       synodic: ${{ steps.filter.outputs.synodic }}
@@ -32,9 +31,6 @@ jobs:
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
             onsager-spine:
-              - 'crates/onsager-spine/**'
-            forge:
-              - 'crates/forge/**'
               - 'crates/onsager-spine/**'
             ising:
               - 'crates/ising/**'
@@ -69,7 +65,6 @@ jobs:
     if: |
       needs.changes.outputs.workspace == 'true' ||
       needs.changes.outputs.onsager-spine == 'true' ||
-      needs.changes.outputs.forge == 'true' ||
       needs.changes.outputs.ising == 'true' ||
       needs.changes.outputs.stiglab == 'true' ||
       needs.changes.outputs.synodic == 'true' ||

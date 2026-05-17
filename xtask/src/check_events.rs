@@ -11,7 +11,7 @@
 //!    `reason`).
 //! 3. **Emit call sites match producers**: every `append_ext(_, _,
 //!    "<event_type>", ...)` literal under
-//!    `crates/{forge,stiglab,synodic,ising}/src/` references an event
+//!    `crates/{stiglab,synodic,ising}/src/` references an event
 //!    whose manifest `producers` list includes that subsystem.
 //! 4. **Listener call sites match consumers**: every
 //!    `notification.event_type [!=|==] "<event_type>"` filter under the
@@ -502,22 +502,22 @@ mod tests {
             errs
         }
         assert_eq!(
-            declared_ok(&[Subsystem::Forge], &[], false, None),
+            declared_ok(&[Subsystem::Substrate], &[], false, None),
             vec!["neither real nor diagnostic-only"]
         );
         assert_eq!(
-            declared_ok(&[Subsystem::Forge], &[], true, None),
+            declared_ok(&[Subsystem::Substrate], &[], true, None),
             vec!["neither real nor diagnostic-only"],
             "diagnostic_only without reason must fail"
         );
         assert_eq!(
-            declared_ok(&[Subsystem::Forge], &[], true, Some("")),
+            declared_ok(&[Subsystem::Substrate], &[], true, Some("")),
             vec!["neither real nor diagnostic-only"],
             "empty reason must fail"
         );
         assert_eq!(
             declared_ok(
-                &[Subsystem::Forge],
+                &[Subsystem::Substrate],
                 &[],
                 true,
                 Some("rendered in dashboard")
@@ -525,7 +525,7 @@ mod tests {
             Vec::<&str>::new()
         );
         assert_eq!(
-            declared_ok(&[], &[Subsystem::Forge], false, None),
+            declared_ok(&[], &[Subsystem::Substrate], false, None),
             vec!["no producer"]
         );
     }
@@ -537,12 +537,13 @@ mod tests {
     #[test]
     fn emit_outside_manifest_producers_is_flagged() {
         let kind = "forge.shaping_dispatched";
-        let line = format!("spine.append_ext(stream, \"forge\", \"{kind}\", data, &m, None)");
+        let line = format!("spine.append_ext(stream, \"substrate\", \"{kind}\", data, &m, None)");
         let hits = find_event_type_literals(&line);
         assert_eq!(hits, vec![kind.to_string()]);
         let def = def_for(kind).unwrap();
         // Pretending stiglab emits forge.shaping_dispatched: must NOT be
-        // in producers (real producer is forge).
+        // in producers (real producer is the substrate scheduler after
+        // spec #363; forge crate deleted).
         assert!(!def.producers.contains(&Subsystem::Stiglab));
     }
 
@@ -556,9 +557,9 @@ mod tests {
         let parsed = parse_event_type_filter(&line).expect("filter parses");
         assert_eq!(parsed, kind);
         let def = def_for(kind).unwrap();
-        // Real consumer is forge — synodic must not appear.
+        // Real consumer is the substrate scheduler — synodic must not appear.
         assert!(!def.consumers.contains(&Subsystem::Synodic));
-        assert!(def.consumers.contains(&Subsystem::Forge));
+        assert!(def.consumers.contains(&Subsystem::Substrate));
     }
 
     /// Synthetic: a `FactoryEventKind` variant missing from the

@@ -5,13 +5,13 @@
 //! 1. **Coverage** — every `onsager_spine::TriggerKind` variant has a
 //!    manifest entry keyed by its snake-case `kind_tag()` mapping.
 //! 2. **Both ends declared** — every manifest entry names a producer.
-//!    (Trigger consumers are universally `forge::trigger_subscriber`,
-//!    so a separate consumer list would be busywork; we instead assert
-//!    the consumer wire-up exists statically as part of forge.)
+//!    (Trigger consumers are universally the substrate scheduler's
+//!    trigger subscriber, so a separate consumer list would be busywork.)
 //! 3. **Producer category match** — schedule and event kinds must be
-//!    produced by `forge` (since their adapters live in forge);
-//!    `manual` / `replay` are produced by `portal` (CLI + portal HTTP
-//!    endpoints once #222 lands).
+//!    produced by the substrate scheduler (`onsager-substrate`), the
+//!    0.2 replacement for the forge scheduler / event-trigger
+//!    listeners (spec #363); `manual` / `replay` are produced by
+//!    `portal` (CLI + portal HTTP endpoints).
 //!
 //! Coverage is parsed via `syn` from
 //! `crates/onsager-spine/src/trigger.rs` — same approach as
@@ -245,13 +245,13 @@ fn check_both_ends_declared(errors: &mut Vec<String>) {
 fn check_producer_category_matches(errors: &mut Vec<String>) {
     for t in TRIGGERS.triggers {
         let expected: &[Subsystem] = match t.category {
-            // Schedule producers live in forge (the scheduler module).
-            TriggerCategory::Schedule => &[Subsystem::Forge],
+            // Schedule producers live in the substrate scheduler.
+            TriggerCategory::Schedule => &[Subsystem::Substrate],
             // Event producers — internal event-bus signals — live
-            // exclusively in forge (the event-trigger listeners). No
-            // Stiglab fallback: a webhook receiver is a Request, not
-            // an Event.
-            TriggerCategory::Event => &[Subsystem::Forge],
+            // in the substrate scheduler (the event-trigger
+            // listeners). No Stiglab fallback: a webhook receiver
+            // is a Request, not an Event.
+            TriggerCategory::Event => &[Subsystem::Substrate],
             // Request producers — external HTTP receivers — live in
             // the edge subsystem hosting the route. Today that's
             // stiglab; once #222 promotes portal it moves there.
