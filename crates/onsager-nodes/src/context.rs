@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use onsager_artifact::{Artifact, ArtifactId, NodeId};
+use onsager_substrate::ids::WorkflowId;
 
 use crate::SpineClient;
 
@@ -31,6 +32,20 @@ pub struct ExecutorContext {
     /// Port for emitting events and reading other artifacts. Shared
     /// across executors in a run.
     pub spine: Arc<dyn SpineClient>,
+    /// `Some(workflow_id)` if the node's substrate-side executor is a
+    /// SubWorkflow (its
+    /// [`onsager_substrate::executor::Executor::subworkflow_ref`]
+    /// returned `Some`); `None` otherwise.
+    ///
+    /// The dispatch path uses `ExecutorRegistry` lookup keyed on the
+    /// executor kind string, which means the registered runtime
+    /// instance is shared across every node of that kind — per-node
+    /// configuration on the substrate-side executor is invisible to
+    /// the runtime instance. For SubWorkflow (EXE-05, #357) the per-
+    /// node `workflow_ref` is the whole point of the node, so the
+    /// scheduler reads it off the substrate executor and threads it
+    /// through here. Other executors ignore the field.
+    pub subworkflow_ref: Option<WorkflowId>,
 }
 
 /// What an executor returns to the runtime.
@@ -85,7 +100,9 @@ mod tests {
             node_id: NodeId::generate(),
             inputs: vec![],
             spine: Arc::new(MockSpine::default()),
+            subworkflow_ref: None,
         };
         assert!(ctx.inputs.is_empty());
+        assert!(ctx.subworkflow_ref.is_none());
     }
 }

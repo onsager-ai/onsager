@@ -416,6 +416,12 @@ impl Scheduler {
             node_id: node.id,
             inputs,
             spine: Arc::clone(&self.spine),
+            // Read the per-node SubWorkflow ref off the substrate
+            // executor — the registered runtime executor only sees
+            // the kind string via dispatch, so this is how the
+            // SubWorkflow runtime (#357) learns which workflow to
+            // run for *this* node.
+            subworkflow_ref: node.executor.subworkflow_ref(),
         };
         match dispatch(&self.registry, node, ctx).await {
             Ok(outputs) => {

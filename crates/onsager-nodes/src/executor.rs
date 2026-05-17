@@ -103,6 +103,7 @@ mod tests {
             node_id: NodeId::generate(),
             inputs: vec![],
             spine: Arc::new(MockSpine::default()),
+            subworkflow_ref: None,
         }
     }
 

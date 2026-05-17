@@ -120,6 +120,7 @@ mod tests {
             node_id: NodeId::generate(),
             inputs: vec![],
             spine: Arc::new(MockSpine::default()),
+            subworkflow_ref: None,
         };
         let outputs = exec.execute(ctx).await.unwrap();
         assert!(outputs.artifacts.is_empty());
