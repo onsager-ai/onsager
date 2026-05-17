@@ -27,6 +27,7 @@
 //! (SUB-05, #352) can resolve `kind → Workflow` at runtime.
 
 pub mod compiler;
+pub mod events;
 pub mod executor;
 pub mod ids;
 pub mod library;
@@ -42,6 +43,12 @@ pub use spec_plan::*;
 pub use validate::*;
 pub use workflow::*;
 pub use workflow_library::*;
+
+// `events` is intentionally NOT glob-re-exported: many struct names
+// (`NodeStarted`, `NodeFailed`, `TokenUsage`, `VerifyCheckResult`)
+// would shadow the spine-side `FactoryEventKind` variants and the
+// `onsager-spine::TokenUsage` re-export when both crates are in scope.
+// Reach them via the qualified module path: `onsager_substrate::events`.
 
 // `library::WorkflowLibrary` (the lookup trait) is intentionally
 // not glob-re-exported — it shares its name with

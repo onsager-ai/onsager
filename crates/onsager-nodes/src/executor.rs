@@ -100,6 +100,7 @@ mod tests {
 
     fn empty_ctx() -> ExecutorContext {
         ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
             node_id: NodeId::generate(),
             inputs: vec![],
             spine: Arc::new(MockSpine::default()),

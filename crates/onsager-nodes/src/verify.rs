@@ -31,6 +31,7 @@
 
 use async_trait::async_trait;
 use onsager_artifact::{Artifact, ArtifactId, Kind, NodeId, Provenance, SourceTag};
+use onsager_substrate::events as se;
 use onsager_substrate::executor::Executor as SubstrateExecutor;
 use serde::{Deserialize, Serialize};
 
@@ -184,6 +185,43 @@ impl RuntimeExecutor for VerifyExecutor {
     }
 
     async fn execute(&self, ctx: ExecutorContext) -> Result<ExecutorOutputs, ExecutorError> {
+        let check_results: Vec<se::VerifyCheckResult> = self
+            .checks
+            .iter()
+            .map(|c| se::VerifyCheckResult {
+                name: c.name().to_string(),
+                passed: c.must_pass(),
+            })
+            .collect();
+        let passed = check_results.iter().all(|c| c.passed);
+
+        // RUN-02 (#360): emit `synodic.verdict` for every verify
+        // execution — pass or fail, escalate or deny. The dashboard
+        // run timeline keys off this event, not the wrapped
+        // `Err(ExecutorError)`. `plan_id` comes off the scheduler-
+        // populated `ExecutorContext` so the spine envelope's
+        // `stream_id` (`plan:<plan>:<node>`) correlates the verdict
+        // back to a specific run.
+        let verdict = se::SynodicVerdict {
+            plan_id: ctx.plan_id.as_str().to_string(),
+            node_id: ctx.node_id,
+            passed,
+            check_results,
+        };
+        let payload = serde_json::to_value(&verdict).expect("verdict must serialize");
+        if let Err(e) = ctx.spine.emit(se::KIND_SYNODIC_VERDICT, payload).await {
+            // Best-effort: a dropped verdict must not stall the run
+            // (the attestation artifact still materializes), but a
+            // silent drop hides why the dashboard timeline is missing
+            // a row. Log the failure with enough context to find it.
+            tracing::warn!(
+                plan = %ctx.plan_id,
+                node = %ctx.node_id,
+                kind = se::KIND_SYNODIC_VERDICT,
+                "verify executor spine emit failed: {e}",
+            );
+        }
+
         let failures: Vec<String> = self
             .checks
             .iter()
@@ -232,6 +270,7 @@ mod tests {
 
     fn ctx_with_inputs(inputs: Vec<(ArtifactId, Artifact)>) -> ExecutorContext {
         ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
             node_id: NodeId::generate(),
             inputs,
             spine: Arc::new(MockSpine::default()),

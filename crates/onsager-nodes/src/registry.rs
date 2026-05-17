@@ -117,6 +117,7 @@ mod tests {
         let registry = ExecutorRegistry::with_noop();
         let exec = registry.get("noop").expect("registered");
         let ctx = ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
             node_id: NodeId::generate(),
             inputs: vec![],
             spine: Arc::new(MockSpine::default()),

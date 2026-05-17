@@ -42,8 +42,8 @@ pub use error::ExecutorError;
 pub use executor::{Executor, NoOpExecutor};
 pub use registry::ExecutorRegistry;
 pub use scheduler::{
-    EVENT_NODE_COMPLETED, EVENT_NODE_FAILED, EVENT_NODE_READY, EVENT_NODE_RUNNING,
-    InMemoryPlanStore, NodeState, PlanId, PlanStore, PlanStoreError, Scheduler, SchedulerError,
+    EVENT_NODE_COMPLETED, EVENT_NODE_FAILED, EVENT_NODE_STARTED, InMemoryPlanStore, NodeState,
+    PlanId, PlanStore, PlanStoreError, Scheduler, SchedulerError,
 };
 pub use script::{INLINE_URI_PREFIX, ScriptExecutor, decode_inline_body};
 pub use spine::{SpineClient, SpineError};
