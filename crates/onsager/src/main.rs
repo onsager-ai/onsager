@@ -25,14 +25,16 @@ Subcommands are discovered on PATH. Any executable named `onsager-<name>`
 or `<name>` (for known subsystems) is a valid subcommand.
 
 KNOWN SUBCOMMANDS:
-    ising       Continuous improvement engine — observes and surfaces insights
     scheduler   Substrate scheduler — hosts trigger.fired → Plan Compiler → executor dispatch
     stiglab     Distributed AI agent session orchestration
     synodic     AI agent governance
     trigger     Fire or replay workflow triggers (manual / replay)
 ";
 
-const KNOWN: &[&str] = &["ising", "scheduler", "stiglab", "synodic", "trigger"];
+// `ising` was removed from the known dispatcher set in spec #362
+// (OBS-02): its analyzers moved to `onsager-observers` and the
+// remaining binary is a deprecation stub, not an active subsystem.
+const KNOWN: &[&str] = &["scheduler", "stiglab", "synodic", "trigger"];
 
 fn main() {
     let args: Vec<String> = env::args().collect();

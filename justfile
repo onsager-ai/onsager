@@ -169,9 +169,6 @@ dev-down:
 dev-dashboard:
     pnpm --filter dashboard dev
 
-dev-ising:
-    cargo run -p ising -- serve --database-url "${DATABASE_URL}"
-
 dev-portal port="3002":
     DATABASE_URL="${DATABASE_URL:-postgres://onsager:onsager@localhost:5432/onsager}" \
     PORTAL_BIND="0.0.0.0:{{port}}" \
@@ -257,7 +254,6 @@ deploy: deploy-build deploy-up
 # ── Install from source ──────────────────────────────────────────────
 install:
     cargo install --path crates/onsager
-    cargo install --path crates/ising
     cargo install --path crates/onsager-scheduler
     cargo install --path crates/stiglab
     cargo install --path crates/synodic

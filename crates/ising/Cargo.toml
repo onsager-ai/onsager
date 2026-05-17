@@ -3,7 +3,7 @@ name = "ising"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Continuous improvement engine — observes the factory and surfaces insights"
+description = "Deprecated 0.1 continuous-improvement engine. Detection logic moved to onsager-observers per spec #362 (OBS-02); this crate is a stub awaiting full retirement."
 
 [lib]
 name = "ising"
@@ -13,18 +13,7 @@ path = "src/lib.rs"
 name = "ising"
 path = "src/main.rs"
 
+# Dependencies trimmed in spec #362 — the analyzer engine, FactoryModel,
+# and InsightEmitter all moved to onsager-observers, so this stub no
+# longer needs serde / sqlx / tracing / spine / artifact / clap.
 [dependencies]
-onsager-artifact = { path = "../onsager-artifact" }
-onsager-spine = { path = "../onsager-spine" }
-
-serde = { workspace = true }
-serde_json = { workspace = true }
-chrono = { workspace = true }
-uuid = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-async-trait = { workspace = true }
-clap = { workspace = true }

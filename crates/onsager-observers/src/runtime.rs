@@ -129,6 +129,28 @@ impl ObserverRuntime {
         self
     }
 
+    /// Register every observer that ships with the crate. Picks
+    /// stable ids (`obs.<analyzer>`) that the runtime persists onto
+    /// every emitted output's row; deployments that want a different
+    /// shape should call [`register`](Self::register) directly.
+    ///
+    /// The set mirrors the analyzers Ising shipped in 0.1 (`#362` /
+    /// OBS-02): gate-override rate, gate-deny rate, shape-retry
+    /// spike, PR churn. Each uses its `Default` configuration; pass
+    /// a custom `Config` via [`register`](Self::register) for
+    /// non-default tuning.
+    pub fn default_observers(self) -> Self {
+        use crate::gate_deny_rate::GateDenyRateObserver;
+        use crate::gate_override::GateOverrideObserver;
+        use crate::pr_churn::PrChurnObserver;
+        use crate::shape_retry::ShapeRetryObserver;
+
+        self.register("obs.gate_override", GateOverrideObserver::default())
+            .register("obs.gate_deny_rate", GateDenyRateObserver::default())
+            .register("obs.shape_retry_spike", ShapeRetryObserver::default())
+            .register("obs.pr_churn", PrChurnObserver::default())
+    }
+
     /// Number of registered observers. Mostly useful for tests.
     pub fn observer_count(&self) -> usize {
         self.observers.len()
@@ -357,6 +379,48 @@ mod tests {
                 0.5,
             ))]
         }
+    }
+
+    #[test]
+    fn default_observers_declare_expected_subscriptions() {
+        // Each ported analyzer should subscribe to its inputs without
+        // panicking on construction; this also pins the subscription
+        // shape so a future rename doesn't silently break the event
+        // fan-out without test coverage.
+        use crate::gate_deny_rate::GateDenyRateObserver;
+        use crate::gate_override::GateOverrideObserver;
+        use crate::pr_churn::PrChurnObserver;
+        use crate::shape_retry::ShapeRetryObserver;
+
+        let gate_override = GateOverrideObserver::default()
+            .subscriptions()
+            .into_iter()
+            .map(|p| p.as_str().to_owned())
+            .collect::<Vec<_>>();
+        assert!(gate_override.contains(&"forge.gate_verdict".to_string()));
+        assert!(gate_override.contains(&"artifact.registered".to_string()));
+
+        let gate_deny = GateDenyRateObserver::default()
+            .subscriptions()
+            .into_iter()
+            .map(|p| p.as_str().to_owned())
+            .collect::<Vec<_>>();
+        assert!(gate_deny.contains(&"forge.gate_verdict".to_string()));
+
+        let retry = ShapeRetryObserver::default()
+            .subscriptions()
+            .into_iter()
+            .map(|p| p.as_str().to_owned())
+            .collect::<Vec<_>>();
+        assert!(retry.contains(&"forge.shaping_returned".to_string()));
+
+        let churn = PrChurnObserver::default()
+            .subscriptions()
+            .into_iter()
+            .map(|p| p.as_str().to_owned())
+            .collect::<Vec<_>>();
+        assert!(churn.contains(&"git.pr_opened".to_string()));
+        assert!(churn.contains(&"git.pr_merged".to_string()));
     }
 
     #[test]

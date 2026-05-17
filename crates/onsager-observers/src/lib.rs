@@ -51,16 +51,24 @@
 //! 4. **Output is typed** — `ObserverOutput` is a closed enum; the
 //!    dashboard renders the three variants uniformly.
 
+pub mod gate_deny_rate;
+pub mod gate_override;
 pub mod observer;
 pub mod output;
 pub mod pattern;
+pub mod pr_churn;
 pub mod runtime;
+pub mod shape_retry;
 pub mod store;
 
+pub use gate_deny_rate::{GateDenyRateConfig, GateDenyRateObserver};
+pub use gate_override::{GateOverrideConfig, GateOverrideObserver};
 pub use observer::{Observer, SpineEvent};
 pub use output::{Alert, AlertSeverity, Insight, ObserverOutput, ObserverOutputKind};
 pub use pattern::EventPattern;
+pub use pr_churn::{PrChurnConfig, PrChurnObserver};
 pub use runtime::ObserverRuntime;
+pub use shape_retry::{ShapeRetryConfig, ShapeRetryObserver};
 pub use store::{ObserverOutputRecord, ObserverOutputStore, StoreError};
 
 // Convenience re-export so callers building outputs don't have to
