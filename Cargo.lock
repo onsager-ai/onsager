@@ -1705,6 +1705,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "onsager-scheduler"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "onsager-artifact",
+ "onsager-nodes",
+ "onsager-spine",
+ "onsager-substrate",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "onsager-spine"
 version = "0.2.0-alpha.1"
 dependencies = [

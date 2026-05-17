@@ -26,12 +26,13 @@ or `<name>` (for known subsystems) is a valid subcommand.
 
 KNOWN SUBCOMMANDS:
     ising       Continuous improvement engine — observes and surfaces insights
+    scheduler   Substrate scheduler — hosts trigger.fired → Plan Compiler → executor dispatch
     stiglab     Distributed AI agent session orchestration
     synodic     AI agent governance
     trigger     Fire or replay workflow triggers (manual / replay)
 ";
 
-const KNOWN: &[&str] = &["ising", "stiglab", "synodic", "trigger"];
+const KNOWN: &[&str] = &["ising", "scheduler", "stiglab", "synodic", "trigger"];
 
 fn main() {
     let args: Vec<String> = env::args().collect();

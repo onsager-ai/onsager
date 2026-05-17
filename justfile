@@ -132,6 +132,10 @@ dev: dev-infra
     echo "==> Starting synodic on :3001..."
     PORT=3001 cargo run -p synodic -- serve &
 
+    echo "==> Starting onsager-scheduler (substrate scheduler)..."
+    DATABASE_URL="postgres://onsager:onsager@localhost:5432/onsager" \
+        cargo run -p onsager-scheduler -- serve &
+
     echo "==> Starting dashboard on :5173..."
     pnpm --filter dashboard dev &
 
@@ -141,6 +145,7 @@ dev: dev-infra
     echo "  Stiglab:    http://localhost:3000"
     echo "  Synodic:    http://localhost:3001"
     echo "  Portal:     http://localhost:3002"
+    echo "  Scheduler:  spine listener (no HTTP port)"
     echo "  Postgres:   postgres://onsager:onsager@localhost:5432/onsager"
     echo ""
     echo "Press Ctrl+C to stop all services."
@@ -171,6 +176,10 @@ dev-portal port="3002":
     DATABASE_URL="${DATABASE_URL:-postgres://onsager:onsager@localhost:5432/onsager}" \
     PORTAL_BIND="0.0.0.0:{{port}}" \
         cargo run -p onsager-portal -- serve
+
+dev-scheduler:
+    DATABASE_URL="${DATABASE_URL:-postgres://onsager:onsager@localhost:5432/onsager}" \
+        cargo run -p onsager-scheduler -- serve
 
 dev-stiglab:
     cargo run -p stiglab -- server
@@ -249,6 +258,7 @@ deploy: deploy-build deploy-up
 install:
     cargo install --path crates/onsager
     cargo install --path crates/ising
+    cargo install --path crates/onsager-scheduler
     cargo install --path crates/stiglab
     cargo install --path crates/synodic
 

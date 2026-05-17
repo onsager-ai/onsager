@@ -9,6 +9,7 @@ members = [
     "crates/onsager",
     "crates/onsager-github",
     "crates/onsager-portal",
+    "crates/onsager-scheduler",
     "crates/onsager-trigger",
     "crates/ising",
     "crates/stiglab",

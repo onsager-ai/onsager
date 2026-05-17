@@ -1,0 +1,94 @@
+//! [`SpineEventStoreClient`] — a real [`SpineClient`] backed by
+//! [`onsager_spine::EventStore`].
+//!
+//! Bridges the executor-facing port (in `onsager-nodes`) to the
+//! sqlx-backed spine implementation. Every `emit` call writes one
+//! `events_ext` row in the `substrate` namespace.
+//!
+//! Lives here (in the scheduler binary) rather than in `onsager-nodes`
+//! to keep the executor-catalog crate database-free — the library
+//! stays test-friendly, only the deployed host pays the sqlx cost.
+//!
+//! ## `read_artifact` returns `None` in v1
+//!
+//! The spine `artifacts` schema (`crates/onsager-spine/migrations/
+//! 002_artifacts.sql`) splits an `Artifact` across several tables
+//! (`artifacts`, `artifact_versions`, `vertical_lineage`,
+//! `horizontal_lineage`, `quality_signals`); reconstructing a single
+//! `Artifact` value here would duplicate read logic that doesn't yet
+//! exist in `onsager-artifact`. The deployed scheduler's executors
+//! reach upstream artifacts through the [`PlanStore`], not through
+//! `read_artifact` — every executor in the catalog today gathers its
+//! inputs from `ExecutorContext::inputs`. Returning `Ok(None)` here
+//! is the same contract `StubSpine` ships with in the catalog's own
+//! tests. Wire a real reader when an executor needs it.
+
+use async_trait::async_trait;
+use onsager_artifact::{Artifact, ArtifactId};
+use onsager_nodes::{SpineClient, SpineError};
+use onsager_spine::{EventMetadata, EventStore};
+
+/// Substrate-scheduler [`SpineClient`] backed by the real spine event
+/// store. Every emit writes one `events_ext` row in the `substrate`
+/// namespace.
+#[derive(Clone)]
+pub struct SpineEventStoreClient {
+    store: EventStore,
+    actor: String,
+}
+
+impl std::fmt::Debug for SpineEventStoreClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpineEventStoreClient")
+            .field("actor", &self.actor)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SpineEventStoreClient {
+    pub fn new(store: EventStore, actor: impl Into<String>) -> Self {
+        Self {
+            store,
+            actor: actor.into(),
+        }
+    }
+}
+
+#[async_trait]
+impl SpineClient for SpineEventStoreClient {
+    async fn emit(&self, kind: &str, payload: serde_json::Value) -> Result<(), SpineError> {
+        let plan_id = payload
+            .get("plan_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let node_id = payload
+            .get("node_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let stream_id = format!("substrate:{plan_id}:{node_id}");
+        let metadata = EventMetadata {
+            correlation_id: None,
+            causation_id: None,
+            actor: self.actor.clone(),
+        };
+        self.store
+            .append_ext(
+                "default",
+                &stream_id,
+                "substrate",
+                kind,
+                payload,
+                &metadata,
+                None,
+            )
+            .await
+            .map_err(|e| SpineError::new(format!("append_ext failed: {e}")))?;
+        Ok(())
+    }
+
+    async fn read_artifact(&self, _id: &ArtifactId) -> Result<Option<Artifact>, SpineError> {
+        // See module docs — v1 returns None; executors gather inputs
+        // through PlanStore, not through cross-plan spine reads.
+        Ok(None)
+    }
+}

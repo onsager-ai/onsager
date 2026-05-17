@@ -2,12 +2,13 @@
 #
 # Unified single-container deployment. All subsystems run in one service:
 #
-#   Process         | Description                               | Port
-#   --------------- | ----------------------------------------- | ----
-#   stiglab         | Sessions, agents, dashboard, API          | 3000 (exposed)
-#   synodic         | Governance API (internal)                 | 3001 (proxied)
-#   onsager-portal  | GitHub webhook ingress (internal)         | 3002 (proxied)
-#   PostgreSQL      | Shared event spine (Railway plugin)       | 5432
+#   Process            | Description                                       | Port
+#   ------------------ | ------------------------------------------------- | -----------------
+#   stiglab            | Sessions, agents, dashboard, API                  | 3000 (exposed)
+#   synodic            | Governance API (internal)                         | 3001 (proxied)
+#   onsager-portal     | GitHub webhook ingress (internal)                 | 3002 (proxied)
+#   onsager-scheduler  | Substrate scheduler — trigger.fired → ExecPlan    | — (spine listener)
+#   PostgreSQL         | Shared event spine (Railway plugin)               | 5432
 #
 # Stiglab is the front door — it serves the dashboard, owns /api/health
 # and /agent/ws, and reverse-proxies all other /api/* traffic to portal

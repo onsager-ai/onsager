@@ -48,6 +48,17 @@ if [ -n "$ONSAGER_DATABASE_URL" ]; then
     gosu onsager sh -c "while true; do PORTAL_BIND=\"$PORTAL_BIND\" DATABASE_URL=\"$ONSAGER_DATABASE_URL\" ONSAGER_CREDENTIAL_KEY=\"$PORTAL_CREDENTIAL_KEY\" SYNODIC_URL=\"$PORTAL_SYNODIC_URL\" /app/onsager-portal serve 2>&1; echo 'onsager-portal exited, restarting in 1s...'; sleep 1; done" &
 fi
 
+# Start the substrate scheduler (RUN-03, #386) — listens on the spine
+# for trigger.fired events, compiles each into an ExecutionPlan, and
+# runs it through onsager_nodes::Scheduler. Skipped when the spine DB
+# isn't configured; without DATABASE_URL there's nothing to listen on.
+if [ -n "$ONSAGER_DATABASE_URL" ]; then
+    SCHEDULER_ACTOR="${SCHEDULER_ACTOR:-substrate-scheduler}"
+    SCHEDULER_REPLAY_HISTORY="${SCHEDULER_REPLAY_HISTORY:-false}"
+    echo "Starting onsager-scheduler (actor=${SCHEDULER_ACTOR}, replay=${SCHEDULER_REPLAY_HISTORY})..."
+    gosu onsager sh -c "while true; do DATABASE_URL=\"$ONSAGER_DATABASE_URL\" SCHEDULER_ACTOR=\"$SCHEDULER_ACTOR\" SCHEDULER_REPLAY_HISTORY=\"$SCHEDULER_REPLAY_HISTORY\" /app/onsager-scheduler serve 2>&1; echo 'onsager-scheduler exited, restarting in 1s...'; sleep 1; done" &
+fi
+
 # Issue #156: legacy callers still expect STIGLAB_INTERNAL_DISPATCH_TOKEN
 # in the environment as a per-boot ephemeral secret. The 0.1 forge ↔
 # stiglab dispatch path is gone after spec #363, but synodic + stiglab
@@ -82,6 +93,6 @@ gosu onsager sh -c "while true; do STIGLAB_HOST=\"$STIGLAB_HOST\" STIGLAB_PORT=\
 : "${PORT:=8080}"
 export PORT
 echo "==> pre-exec: binaries present"
-ls -la /app/stiglab /app/synodic /app/onsager-portal /usr/local/bin/caddy
+ls -la /app/stiglab /app/synodic /app/onsager-portal /app/onsager-scheduler /usr/local/bin/caddy
 echo "==> exec-ing caddy on :${PORT}..."
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
