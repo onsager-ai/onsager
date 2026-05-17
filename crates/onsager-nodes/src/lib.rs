@@ -30,11 +30,11 @@ pub mod registry;
 pub mod scheduler;
 pub mod script;
 pub mod spine;
+pub mod subworkflow;
 pub mod verify;
 
 pub use agent::{
     AgentExecutor, AgentRequest, AgentResponse, AgentRunError, AgentRunner, StubAgentRunner,
-    UnconfiguredRunner,
 };
 pub use context::{ExecutorContext, ExecutorOutputs};
 pub use dispatch::dispatch;
@@ -47,4 +47,8 @@ pub use scheduler::{
 };
 pub use script::{INLINE_URI_PREFIX, ScriptExecutor, decode_inline_body};
 pub use spine::{SpineClient, SpineError};
+pub use subworkflow::{
+    SUBWORKFLOW_KIND, SchedulerSubWorkflowRunner, StubSubWorkflowRunner, SubWorkflowExecutor,
+    SubWorkflowRunError, SubWorkflowRunner,
+};
 pub use verify::{Check, FailPolicy, VERIFY_KIND, VerifyExecutor};

@@ -372,6 +372,7 @@ mod tests {
             node_id: NodeId::generate(),
             inputs: Vec::new(),
             spine: Arc::new(MockSpine::default()),
+            subworkflow_ref: None,
         }
     }
 
@@ -433,6 +434,7 @@ mod tests {
             node_id,
             inputs: Vec::new(),
             spine: Arc::new(MockSpine::default()),
+            subworkflow_ref: None,
         };
 
         let outputs = exec.execute(ctx).await.unwrap();
@@ -480,6 +482,7 @@ mod tests {
             node_id: NodeId::generate(),
             inputs: vec![(input_id.clone(), input_art)],
             spine: Arc::new(MockSpine::default()),
+            subworkflow_ref: None,
         };
 
         exec.execute(ctx).await.unwrap();
@@ -644,6 +647,7 @@ mod tests {
             node_id,
             inputs: Vec::new(),
             spine: Arc::new(MockSpine::default()),
+            subworkflow_ref: None,
         };
         let outputs = exec.execute(ctx).await.unwrap();
         let (_id, art) = &outputs.artifacts[0];
