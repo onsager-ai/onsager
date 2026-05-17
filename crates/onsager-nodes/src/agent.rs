@@ -24,9 +24,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use onsager_artifact::{Artifact, Kind, Provenance, SourceTag};
+use onsager_substrate::events as se;
 use onsager_substrate::executor::Executor as SubstrateExecutor;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::context::{ExecutorContext, ExecutorOutputs};
 use crate::error::ExecutorError;
@@ -244,11 +246,60 @@ impl Executor for AgentExecutor {
             user_prompt: render_user_prompt(&ctx),
         };
 
-        let response = self
-            .runner
-            .run(request)
-            .await
-            .map_err(|e| ExecutorError::failed(e.to_string()))?;
+        // RUN-02 (#360) lifecycle events. `plan_id` is unknown at the
+        // executor surface — the scheduler owns it; the executor
+        // contributes the session-level signals it alone knows about.
+        // Carry an empty `plan_id` until the executor context grows a
+        // `plan_id` field (follow-up); the dashboard run timeline keys
+        // by `(stream_id == plan:<plan>:<node>)`, which still works
+        // because `stream_id` is derived spine-side from the typed
+        // variant — node-level correlation by `node_id` is preserved.
+        let session_id = Uuid::new_v4().to_string();
+        emit_event(
+            &ctx,
+            se::KIND_AGENT_SESSION_STARTED,
+            &se::AgentSessionStarted {
+                plan_id: String::new(),
+                node_id: ctx.node_id,
+                session_id: session_id.clone(),
+                model: self.model.clone(),
+            },
+        )
+        .await;
+
+        let response = match self.runner.run(request).await {
+            Ok(r) => r,
+            Err(e) => {
+                emit_event(
+                    &ctx,
+                    se::KIND_AGENT_SESSION_FAILED,
+                    &se::AgentSessionFailed {
+                        plan_id: String::new(),
+                        node_id: ctx.node_id,
+                        session_id: session_id.clone(),
+                        error: e.to_string(),
+                    },
+                )
+                .await;
+                return Err(ExecutorError::failed(e.to_string()));
+            }
+        };
+
+        emit_event(
+            &ctx,
+            se::KIND_AGENT_SESSION_COMPLETED,
+            &se::AgentSessionCompleted {
+                plan_id: String::new(),
+                node_id: ctx.node_id,
+                session_id,
+                // Token usage is not surfaced through `AgentResponse`
+                // yet; the live runner will fill it in via a runner-
+                // side hook in a follow-up. Leaving `None` keeps the
+                // budget consumer honest — "not reported" ≠ "zero".
+                token_usage: None,
+            },
+        )
+        .await;
 
         let mut artifact = Artifact::new(
             Kind::Document,
@@ -269,6 +320,16 @@ impl Executor for AgentExecutor {
         let artifact_id = artifact.artifact_id.clone();
         Ok(ExecutorOutputs::single(artifact_id, artifact))
     }
+}
+
+/// Best-effort spine emit for an executor lifecycle event. Failures
+/// are logged via the spine adapter (the scheduler's `warn!` path)
+/// rather than propagated — a missed lifecycle event must not stall
+/// the actual execution. `serde_json::to_value` on a substrate event
+/// struct cannot fail (only string keys, no NaN floats).
+async fn emit_event<T: serde::Serialize>(ctx: &ExecutorContext, kind: &str, payload: &T) {
+    let payload = serde_json::to_value(payload).expect("substrate event payload must serialize");
+    let _ = ctx.spine.emit(kind, payload).await;
 }
 
 /// Render upstream artifacts into a single user-side prompt body. The

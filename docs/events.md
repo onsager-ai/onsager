@@ -63,6 +63,7 @@ that requires a coordinated rollout.
 | `workflow` | stiglab (trigger) / substrate scheduler (stage) | 3 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
 | `gate` | onsager-portal (GitHub) / substrate scheduler (manual) | 2 |
+| `substrate` | (unknown — update `stream_producer` in xtask) | 10 |
 
 Each section below covers one stream. Inside a section, every event lists its wire `event_type` string, the Rust variant name, the variant's doc comment, and a payload field table (where the field's own doc comment is the description).
 
@@ -689,6 +690,145 @@ A manual-approval gate received a signal (e.g. the PR was merged). Forge's manua
 | `repo_name` | `String` |  |
 | `pr_number` | `u64` |  |
 | `source` | `String` |  |
+
+## `substrate` events
+
+Producer subsystem: **(unknown — update `stream_producer` in xtask)**.
+
+### `node.started`
+
+- Variant: `FactoryEventKind::NodeStarted`
+- Stream: `substrate`
+
+Substrate scheduler dispatched a node — execution began.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `node_id` | `NodeId` |  |
+| `executor_kind` | `String` | Executor catalog key (`"script"`, `"agent"`, `"verify"`, `"human"`, `"sub_workflow"`, `"noop"`). |
+
+### `node.completed`
+
+- Variant: `FactoryEventKind::NodeCompleted`
+- Stream: `substrate`
+
+A node finished successfully; the scheduler persisted each output artifact under its declared edge `ArtifactId`.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `node_id` | `NodeId` |  |
+| `output_artifact_ids` | `Vec<ArtifactId>` | `ArtifactId`s the executor materialized — order matches the node's declared output edges. |
+
+### `node.failed`
+
+- Variant: `FactoryEventKind::NodeFailed`
+- Stream: `substrate`
+
+A node's executor returned Err. The scheduler aborts the plan (v1; no retries).
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `node_id` | `NodeId` |  |
+| `error` | `String` | Free-text error message from the executor. |
+
+### `node.awaiting_human`
+
+- Variant: `FactoryEventKind::NodeAwaitingHuman`
+- Stream: `substrate`
+
+A Human executor is parked waiting on an out-of-band approval decision. The dashboard's HITL inbox renders this; the substrate's own Human executor (#357) resolves it inline by observing the matching `node.human_approved` / `node.human_rejected`.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `node_id` | `NodeId` |  |
+| `prompt` | `String` | Free-text prompt shown to the human reviewer. |
+
+### `node.human_approved`
+
+- Variant: `FactoryEventKind::NodeHumanApproved`
+- Stream: `substrate`
+
+A pending Human executor node received an approval decision.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `node_id` | `NodeId` |  |
+| `approved_by` | `String` | Actor identifier — `"human:<id>"` for a dashboard user, `"supervisor"` for a delegate agent. |
+
+### `node.human_rejected`
+
+- Variant: `FactoryEventKind::NodeHumanRejected`
+- Stream: `substrate`
+
+A pending Human executor node received a rejection decision.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `node_id` | `NodeId` |  |
+| `rejected_by` | `String` | Actor identifier — same shape as `approved_by` above. |
+| `reason` | `Option<String>` | Free-text justification carried into the audit trail. _(optional)_ |
+
+### `synodic.verdict`
+
+- Variant: `FactoryEventKind::SynodicVerdict`
+- Stream: `substrate`
+
+Verify executor produced a verdict — pass / fail outcome with per-check details. Distinct from the legacy `synodic.gate_verdict` emitted by the 0.1 Synodic subsystem (retired by MIG-03); per spec #360 this is the substrate-native verdict event.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `node_id` | `NodeId` |  |
+| `passed` | `bool` | True when every check the executor ran passed. |
+| `check_results` | `Vec<VerifyCheckResult>` | Per-check (name, passed) results so the dashboard can render the failure surface without a follow-up read. |
+
+### `agent.session_started`
+
+- Variant: `FactoryEventKind::AgentSessionStarted`
+- Stream: `substrate`
+
+Agent executor opened an LLM session.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `node_id` | `NodeId` |  |
+| `session_id` | `String` | Session identifier minted by the agent runner. |
+| `model` | `String` | Model name (`"claude-sonnet-4-6"`, etc.). |
+
+### `agent.session_completed`
+
+- Variant: `FactoryEventKind::AgentSessionCompleted`
+- Stream: `substrate`
+
+Agent executor's LLM session finished successfully.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `node_id` | `NodeId` |  |
+| `session_id` | `String` |  |
+| `token_usage` | `Option<TokenUsage>` | Token usage for this session — `None` when the runner does not report it (stub / mock runners). _(optional)_ |
+
+### `agent.session_failed`
+
+- Variant: `FactoryEventKind::AgentSessionFailed`
+- Stream: `substrate`
+
+Agent executor's LLM session terminated with an error.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `node_id` | `NodeId` |  |
+| `session_id` | `String` |  |
+| `error` | `String` | Free-text error from the runner. |
 
 
 ---

@@ -253,6 +253,20 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::GateManualApprovalSignal { .. }
         | FactoryEventKind::PortalSessionRequested { .. }
         | FactoryEventKind::PortalSessionCancelRequested { .. }
-        | FactoryEventKind::PortalPrOpenFailed { .. } => None,
+        | FactoryEventKind::PortalPrOpenFailed { .. }
+        // Substrate runtime events (RUN-02, #360) — node-scoped, not
+        // artifact-scoped at the spine envelope level. The output
+        // artifact ids on `NodeCompleted` are a payload concern, not
+        // a tenant-routing key.
+        | FactoryEventKind::NodeStarted { .. }
+        | FactoryEventKind::NodeCompleted { .. }
+        | FactoryEventKind::NodeFailed { .. }
+        | FactoryEventKind::NodeAwaitingHuman { .. }
+        | FactoryEventKind::NodeHumanApproved { .. }
+        | FactoryEventKind::NodeHumanRejected { .. }
+        | FactoryEventKind::SynodicVerdict { .. }
+        | FactoryEventKind::AgentSessionStarted { .. }
+        | FactoryEventKind::AgentSessionCompleted { .. }
+        | FactoryEventKind::AgentSessionFailed { .. } => None,
     }
 }

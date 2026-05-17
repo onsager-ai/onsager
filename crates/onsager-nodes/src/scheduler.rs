@@ -21,13 +21,19 @@
 //!
 //! 1. For each Pending node whose input edges are all Completed (or
 //!    External + materialized in the [`PlanStore`]), transition it to
-//!    `Ready` → `Running`, persist both transitions, then dispatch.
+//!    `Ready` → `Running`, persist both transitions, then emit
+//!    `node.started` and dispatch.
 //! 2. On `Ok` outputs: persist each output artifact under its edge's
 //!    `ArtifactId`, transition the node to `Completed`, emit
-//!    `node.completed` on the spine.
-//! 3. On `Err`: transition to `Failed`, emit `node.failed`, abort the
-//!    plan with [`SchedulerError::NodeFailed`].
+//!    `node.completed` (carrying `output_artifact_ids`) on the spine.
+//! 3. On `Err`: transition to `Failed`, emit `node.failed` (carrying
+//!    the executor's error message), abort the plan with
+//!    [`SchedulerError::NodeFailed`].
 //! 4. Repeat until no progress (every node is terminal).
+//!
+//! Wire vocabulary lives in `onsager-substrate::events` (typed
+//! authoring) and `onsager-spine::FactoryEventKind` (typed wire) —
+//! registered in `onsager-registry::EVENTS` per RUN-02 (#360).
 //!
 //! Restart safety: at `run()` entry the scheduler reads the persisted
 //! state map. `Completed` / `Failed` survive; `Running` / `Ready` are
@@ -42,6 +48,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use onsager_artifact::{Artifact, ArtifactId, NodeId};
 use onsager_substrate::compiler::ExecutionPlan;
+use onsager_substrate::events as se;
 use onsager_substrate::ids::EdgeId;
 use onsager_substrate::workflow::Node;
 use serde::{Deserialize, Serialize};
@@ -96,8 +103,10 @@ impl std::fmt::Display for PlanId {
 pub enum NodeState {
     /// Some input edges still have an unresolved producer.
     Pending,
-    /// All inputs are resolved — queued for dispatch. Emitted as
-    /// `plan.node_ready` on the spine.
+    /// All inputs are resolved — queued for dispatch. Internal-only;
+    /// no spine event (RUN-02, #360 collapsed `plan.node_ready` and
+    /// `plan.node_running` into the single `node.started` lifecycle
+    /// event emitted when the executor actually begins).
     Ready,
     /// `Executor::execute` is in flight.
     Running,
@@ -270,13 +279,15 @@ pub enum SchedulerError {
     Store(String),
 }
 
-/// Event names the scheduler emits on the spine. Free constants so the
-/// downstream `FactoryEventKind` migration (when these enter the typed
-/// registry) can match by string.
-pub const EVENT_NODE_READY: &str = "plan.node_ready";
-pub const EVENT_NODE_RUNNING: &str = "plan.node_running";
-pub const EVENT_NODE_COMPLETED: &str = "node.completed";
-pub const EVENT_NODE_FAILED: &str = "node.failed";
+/// Event names the scheduler emits on the spine, re-exported from
+/// `onsager-substrate::events` so external callers (the dashboard run
+/// timeline; future Observer subscriptions) can match by string
+/// without taking a second dep. The wire vocabulary itself lives in
+/// the registry manifest (`onsager-registry::EVENTS`) and the
+/// `FactoryEventKind` enum (`onsager-spine`) — per RUN-02 (#360).
+pub const EVENT_NODE_STARTED: &str = se::KIND_NODE_STARTED;
+pub const EVENT_NODE_COMPLETED: &str = se::KIND_NODE_COMPLETED;
+pub const EVENT_NODE_FAILED: &str = se::KIND_NODE_FAILED;
 
 /// The substrate scheduler.
 ///
@@ -404,12 +415,22 @@ impl Scheduler {
         node: &Node,
         state: &mut HashMap<NodeId, NodeState>,
     ) -> Result<(), SchedulerError> {
+        // Ready is purely internal — persisted so a restart can tell
+        // "queued but not yet running" apart from "never seen", but no
+        // spine event. `node.started` (below) is the first user-visible
+        // signal that a node has begun execution.
         state.insert(node.id, NodeState::Ready);
-        self.transition(plan_id, node.id, NodeState::Ready).await?;
+        self.store
+            .set_node_state(plan_id, node.id, NodeState::Ready)
+            .await
+            .map_err(|e| SchedulerError::Store(e.0))?;
 
         state.insert(node.id, NodeState::Running);
-        self.transition(plan_id, node.id, NodeState::Running)
-            .await?;
+        self.store
+            .set_node_state(plan_id, node.id, NodeState::Running)
+            .await
+            .map_err(|e| SchedulerError::Store(e.0))?;
+        self.emit_started(plan_id, node).await;
 
         let inputs = self.gather_inputs(plan_id, node, plan).await?;
         let ctx = ExecutorContext {
@@ -419,20 +440,84 @@ impl Scheduler {
         };
         match dispatch(&self.registry, node, ctx).await {
             Ok(outputs) => {
-                self.persist_outputs(plan_id, plan, node, outputs).await?;
+                let output_artifact_ids =
+                    self.persist_outputs(plan_id, plan, node, outputs).await?;
                 state.insert(node.id, NodeState::Completed);
-                self.transition(plan_id, node.id, NodeState::Completed)
-                    .await?;
+                self.store
+                    .set_node_state(plan_id, node.id, NodeState::Completed)
+                    .await
+                    .map_err(|e| SchedulerError::Store(e.0))?;
+                self.emit_completed(plan_id, node.id, output_artifact_ids)
+                    .await;
                 Ok(())
             }
             Err(err) => {
                 state.insert(node.id, NodeState::Failed);
-                self.transition(plan_id, node.id, NodeState::Failed).await?;
+                self.store
+                    .set_node_state(plan_id, node.id, NodeState::Failed)
+                    .await
+                    .map_err(|e| SchedulerError::Store(e.0))?;
+                self.emit_failed(plan_id, node.id, &err).await;
                 Err(SchedulerError::NodeFailed {
                     node_id: node.id,
                     source: err,
                 })
             }
+        }
+    }
+
+    async fn emit_started(&self, plan_id: &PlanId, node: &Node) {
+        let payload = se::NodeStarted {
+            plan_id: plan_id.as_str().to_string(),
+            node_id: node.id,
+            executor_kind: node.executor.executor_kind().to_string(),
+        };
+        self.emit(plan_id, node.id, EVENT_NODE_STARTED, &payload)
+            .await;
+    }
+
+    async fn emit_completed(
+        &self,
+        plan_id: &PlanId,
+        node_id: NodeId,
+        output_artifact_ids: Vec<ArtifactId>,
+    ) {
+        let payload = se::NodeCompleted {
+            plan_id: plan_id.as_str().to_string(),
+            node_id,
+            output_artifact_ids,
+        };
+        self.emit(plan_id, node_id, EVENT_NODE_COMPLETED, &payload)
+            .await;
+    }
+
+    async fn emit_failed(&self, plan_id: &PlanId, node_id: NodeId, err: &ExecutorError) {
+        let payload = se::NodeFailed {
+            plan_id: plan_id.as_str().to_string(),
+            node_id,
+            error: err.to_string(),
+        };
+        self.emit(plan_id, node_id, EVENT_NODE_FAILED, &payload)
+            .await;
+    }
+
+    async fn emit<T: serde::Serialize>(
+        &self,
+        plan_id: &PlanId,
+        node_id: NodeId,
+        kind: &str,
+        payload: &T,
+    ) {
+        // Serializing a typed payload struct from
+        // `onsager_substrate::events` cannot fail unless the type has
+        // non-string map keys or a NaN float — none of the substrate
+        // events carry either, so unwrapping is the right shape: a
+        // serialization failure here is a programmer error, not a
+        // runtime condition.
+        let payload =
+            serde_json::to_value(payload).expect("substrate event payload must serialize");
+        if let Err(e) = self.spine.emit(kind, payload).await {
+            warn!(plan = %plan_id, node = %node_id, "spine emit failed: {e}");
         }
     }
 
@@ -467,7 +552,7 @@ impl Scheduler {
         plan: &ExecutionPlan,
         node: &Node,
         outputs: crate::context::ExecutorOutputs,
-    ) -> Result<(), SchedulerError> {
+    ) -> Result<Vec<ArtifactId>, SchedulerError> {
         // Contract: an executor returns *at most* one artifact per
         // declared output edge, in declaration order. Side-effect-
         // only executors (NoOp) legitimately return zero; surface
@@ -486,6 +571,7 @@ impl Scheduler {
                 )),
             });
         }
+        let mut persisted = Vec::with_capacity(outputs.artifacts.len());
         for (i, (_, mut artifact)) in outputs.artifacts.into_iter().enumerate() {
             let output_ref = node.outputs[i];
             let edge = plan
@@ -504,35 +590,9 @@ impl Scheduler {
                 .put_artifact(plan_id, &edge.artifact_id, artifact)
                 .await
                 .map_err(|e| SchedulerError::Store(e.0))?;
+            persisted.push(edge.artifact_id.clone());
         }
-        Ok(())
-    }
-
-    async fn transition(
-        &self,
-        plan_id: &PlanId,
-        node_id: NodeId,
-        state: NodeState,
-    ) -> Result<(), SchedulerError> {
-        self.store
-            .set_node_state(plan_id, node_id, state)
-            .await
-            .map_err(|e| SchedulerError::Store(e.0))?;
-        let kind = match state {
-            NodeState::Ready => EVENT_NODE_READY,
-            NodeState::Running => EVENT_NODE_RUNNING,
-            NodeState::Completed => EVENT_NODE_COMPLETED,
-            NodeState::Failed => EVENT_NODE_FAILED,
-            NodeState::Pending => return Ok(()),
-        };
-        let payload = serde_json::json!({
-            "plan_id": plan_id.as_str(),
-            "node_id": node_id,
-        });
-        if let Err(e) = self.spine.emit(kind, payload).await {
-            warn!(plan = %plan_id, node = %node_id, "spine emit failed: {e}");
-        }
-        Ok(())
+        Ok(persisted)
     }
 }
 
@@ -606,7 +666,9 @@ mod tests {
         for (_, state) in states {
             assert_eq!(state, NodeState::Completed);
         }
-        // Each Completed node emitted at least one node.completed.
+        // Each Completed node emitted exactly one node.started and
+        // one node.completed (Ready is an internal-only transition
+        // post RUN-02 / #360 — no spine event).
         let kinds: Vec<_> = spine
             .emitted
             .lock()
@@ -618,9 +680,24 @@ mod tests {
             kinds.iter().filter(|k| *k == EVENT_NODE_COMPLETED).count(),
             2,
         );
-        // The Ready / Running transitions emitted too.
-        assert!(kinds.iter().any(|k| k == EVENT_NODE_READY));
-        assert!(kinds.iter().any(|k| k == EVENT_NODE_RUNNING));
+        assert_eq!(kinds.iter().filter(|k| *k == EVENT_NODE_STARTED).count(), 2,);
+        // No legacy `plan.node_ready` / `plan.node_running` emits.
+        assert!(!kinds.iter().any(|k| k == "plan.node_ready"));
+        assert!(!kinds.iter().any(|k| k == "plan.node_running"));
+
+        // node.completed payload is the typed `NodeCompleted` shape
+        // (plan_id, node_id, output_artifact_ids) — RUN-02 contract.
+        let completed_payload = spine
+            .emitted
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| k == EVENT_NODE_COMPLETED)
+            .map(|(_, p)| p.clone())
+            .expect("at least one node.completed emit");
+        assert!(completed_payload.get("plan_id").is_some());
+        assert!(completed_payload.get("node_id").is_some());
+        assert!(completed_payload.get("output_artifact_ids").is_some());
     }
 
     #[tokio::test]
@@ -710,15 +787,20 @@ mod tests {
             .filter(|s| matches!(s, NodeState::Failed))
             .count();
         assert_eq!(failed, 1);
-        // node.failed event was emitted.
-        let kinds: Vec<_> = spine
-            .emitted
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|(k, _)| k.clone())
-            .collect();
+        // node.failed event was emitted, with the typed NodeFailed
+        // payload (plan_id, node_id, error) per RUN-02 (#360).
+        let emitted = spine.emitted.lock().unwrap();
+        let kinds: Vec<_> = emitted.iter().map(|(k, _)| k.clone()).collect();
         assert!(kinds.iter().any(|k| k == EVENT_NODE_FAILED));
+        let (_, payload) = emitted
+            .iter()
+            .find(|(k, _)| k == EVENT_NODE_FAILED)
+            .expect("node.failed emit");
+        assert!(payload.get("error").is_some(), "payload = {payload}");
+        assert!(
+            payload["error"].as_str().unwrap().contains("boom"),
+            "expected executor error message to surface, got {payload}",
+        );
     }
 
     #[tokio::test]

@@ -57,7 +57,7 @@ pub use onsager_artifact::{
 pub use extension_event::ExtensionEventRecord;
 pub use factory_event::{
     EscalationResolution, EventRef, FactoryEvent, FactoryEventKind, ForgeProcessState, GatePoint,
-    InsightKind, InsightScope, ShapingOutcome, VerdictSummary,
+    InsightKind, InsightScope, ShapingOutcome, TokenUsage, VerdictSummary, VerifyCheckResult,
 };
 pub use listener::{EventHandler, Listener};
 pub use namespace::{Namespace, NamespaceError};

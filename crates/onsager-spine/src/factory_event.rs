@@ -7,7 +7,7 @@
 //! library provides a single typed vocabulary.
 
 use chrono::{DateTime, Utc};
-use onsager_artifact::{ArtifactId, ArtifactState, Kind};
+use onsager_artifact::{ArtifactId, ArtifactState, Kind, NodeId};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -529,6 +529,124 @@ pub enum FactoryEventKind {
         pr_number: u64,
         source: String,
     },
+
+    // -- Substrate runtime (RUN-02, #360) -----------------------------------
+    // Lifecycle events the 0.2 substrate scheduler and the executor
+    // catalog emit. The on-wire shapes mirror the typed payload structs
+    // in `onsager-substrate::events`; the structs there are the
+    // authoring surface for substrate-side code, this enum is the
+    // single wire vocabulary the spine read API hands to the dashboard
+    // and (post OBS-01 / #361) to Observers.
+    //
+    // `plan_id` is the externally-assigned identifier for one
+    // Execution Plan run (`onsager-nodes::scheduler::PlanId`) carried
+    // as a `String` here so the spine crate doesn't need to depend on
+    // the runtime; downstream consumers parse it back into `PlanId`
+    // via `PlanId::new(...)`.
+    /// Substrate scheduler dispatched a node — execution began.
+    NodeStarted {
+        plan_id: String,
+        node_id: NodeId,
+        /// Executor catalog key (`"script"`, `"agent"`, `"verify"`,
+        /// `"human"`, `"sub_workflow"`, `"noop"`).
+        executor_kind: String,
+    },
+
+    /// A node finished successfully; the scheduler persisted each output
+    /// artifact under its declared edge `ArtifactId`.
+    NodeCompleted {
+        plan_id: String,
+        node_id: NodeId,
+        /// `ArtifactId`s the executor materialized — order matches the
+        /// node's declared output edges.
+        output_artifact_ids: Vec<ArtifactId>,
+    },
+
+    /// A node's executor returned Err. The scheduler aborts the plan
+    /// (v1; no retries).
+    NodeFailed {
+        plan_id: String,
+        node_id: NodeId,
+        /// Free-text error message from the executor.
+        error: String,
+    },
+
+    /// A Human executor is parked waiting on an out-of-band approval
+    /// decision. The dashboard's HITL inbox renders this; the
+    /// substrate's own Human executor (#357) resolves it inline by
+    /// observing the matching `node.human_approved` /
+    /// `node.human_rejected`.
+    NodeAwaitingHuman {
+        plan_id: String,
+        node_id: NodeId,
+        /// Free-text prompt shown to the human reviewer.
+        prompt: String,
+    },
+
+    /// A pending Human executor node received an approval decision.
+    NodeHumanApproved {
+        plan_id: String,
+        node_id: NodeId,
+        /// Actor identifier — `"human:<id>"` for a dashboard user,
+        /// `"supervisor"` for a delegate agent.
+        approved_by: String,
+    },
+
+    /// A pending Human executor node received a rejection decision.
+    NodeHumanRejected {
+        plan_id: String,
+        node_id: NodeId,
+        /// Actor identifier — same shape as `approved_by` above.
+        rejected_by: String,
+        /// Free-text justification carried into the audit trail.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+
+    /// Verify executor produced a verdict — pass / fail outcome with
+    /// per-check details. Distinct from the legacy
+    /// `synodic.gate_verdict` emitted by the 0.1 Synodic subsystem
+    /// (retired by MIG-03); per spec #360 this is the substrate-native
+    /// verdict event.
+    SynodicVerdict {
+        plan_id: String,
+        node_id: NodeId,
+        /// True when every check the executor ran passed.
+        passed: bool,
+        /// Per-check (name, passed) results so the dashboard can
+        /// render the failure surface without a follow-up read.
+        check_results: Vec<VerifyCheckResult>,
+    },
+
+    /// Agent executor opened an LLM session.
+    AgentSessionStarted {
+        plan_id: String,
+        node_id: NodeId,
+        /// Session identifier minted by the agent runner.
+        session_id: String,
+        /// Model name (`"claude-sonnet-4-6"`, etc.).
+        model: String,
+    },
+
+    /// Agent executor's LLM session finished successfully.
+    AgentSessionCompleted {
+        plan_id: String,
+        node_id: NodeId,
+        session_id: String,
+        /// Token usage for this session — `None` when the runner does
+        /// not report it (stub / mock runners).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token_usage: Option<TokenUsage>,
+    },
+
+    /// Agent executor's LLM session terminated with an error.
+    AgentSessionFailed {
+        plan_id: String,
+        node_id: NodeId,
+        session_id: String,
+        /// Free-text error from the runner.
+        error: String,
+    },
 }
 
 impl FactoryEventKind {
@@ -579,6 +697,16 @@ impl FactoryEventKind {
             Self::StageAdvanced { .. } => "stage.advanced",
             Self::GateCheckUpdated { .. } => "gate.check_updated",
             Self::GateManualApprovalSignal { .. } => "gate.manual_approval_signal",
+            Self::NodeStarted { .. } => "node.started",
+            Self::NodeCompleted { .. } => "node.completed",
+            Self::NodeFailed { .. } => "node.failed",
+            Self::NodeAwaitingHuman { .. } => "node.awaiting_human",
+            Self::NodeHumanApproved { .. } => "node.human_approved",
+            Self::NodeHumanRejected { .. } => "node.human_rejected",
+            Self::SynodicVerdict { .. } => "synodic.verdict",
+            Self::AgentSessionStarted { .. } => "agent.session_started",
+            Self::AgentSessionCompleted { .. } => "agent.session_completed",
+            Self::AgentSessionFailed { .. } => "agent.session_failed",
         }
     }
 
@@ -631,6 +759,19 @@ impl FactoryEventKind {
             // mixing with first-class workflow runtime events.
             Self::WorkflowManualTriggered { .. } => "audit",
             Self::GateCheckUpdated { .. } | Self::GateManualApprovalSignal { .. } => "gate",
+            // Substrate runtime — node lifecycle, Verify verdicts, and
+            // agent-session signals share the `substrate` stream so the
+            // dashboard / Observer (#361) can subscribe with one prefix.
+            Self::NodeStarted { .. }
+            | Self::NodeCompleted { .. }
+            | Self::NodeFailed { .. }
+            | Self::NodeAwaitingHuman { .. }
+            | Self::NodeHumanApproved { .. }
+            | Self::NodeHumanRejected { .. }
+            | Self::SynodicVerdict { .. }
+            | Self::AgentSessionStarted { .. }
+            | Self::AgentSessionCompleted { .. }
+            | Self::AgentSessionFailed { .. } => "substrate",
         }
     }
 
@@ -701,6 +842,39 @@ impl FactoryEventKind {
                 pr_number,
                 ..
             } => format!("{repo_owner}/{repo_name}#{pr_number}"),
+            // Substrate runtime — `(plan_id, node_id)` is the natural
+            // composite key so the dashboard run timeline can scope
+            // by plan and node without parsing the payload.
+            Self::NodeStarted {
+                plan_id, node_id, ..
+            }
+            | Self::NodeCompleted {
+                plan_id, node_id, ..
+            }
+            | Self::NodeFailed {
+                plan_id, node_id, ..
+            }
+            | Self::NodeAwaitingHuman {
+                plan_id, node_id, ..
+            }
+            | Self::NodeHumanApproved {
+                plan_id, node_id, ..
+            }
+            | Self::NodeHumanRejected {
+                plan_id, node_id, ..
+            }
+            | Self::SynodicVerdict {
+                plan_id, node_id, ..
+            }
+            | Self::AgentSessionStarted {
+                plan_id, node_id, ..
+            }
+            | Self::AgentSessionCompleted {
+                plan_id, node_id, ..
+            }
+            | Self::AgentSessionFailed {
+                plan_id, node_id, ..
+            } => format!("plan:{plan_id}:{node_id}"),
         }
     }
 }
@@ -832,6 +1006,17 @@ pub enum RuleProposalAction {
         subject_ref: String,
         suggested_condition: Option<String>,
     },
+}
+
+/// One check's outcome carried on [`FactoryEventKind::SynodicVerdict`].
+/// The Verify executor's [`Check`](../../../crates/onsager-nodes/src/verify.rs)
+/// list maps 1:1 onto this struct list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerifyCheckResult {
+    /// Check name (e.g. `"cargo_test"`, `"clippy"`, `"schema_lint"`).
+    pub name: String,
+    /// `true` when this check passed.
+    pub passed: bool,
 }
 
 /// How a rule proposal should be handled by Synodic.

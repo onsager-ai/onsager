@@ -31,6 +31,7 @@
 
 use async_trait::async_trait;
 use onsager_artifact::{Artifact, ArtifactId, Kind, NodeId, Provenance, SourceTag};
+use onsager_substrate::events as se;
 use onsager_substrate::executor::Executor as SubstrateExecutor;
 use serde::{Deserialize, Serialize};
 
@@ -184,6 +185,30 @@ impl RuntimeExecutor for VerifyExecutor {
     }
 
     async fn execute(&self, ctx: ExecutorContext) -> Result<ExecutorOutputs, ExecutorError> {
+        let check_results: Vec<se::VerifyCheckResult> = self
+            .checks
+            .iter()
+            .map(|c| se::VerifyCheckResult {
+                name: c.name().to_string(),
+                passed: c.must_pass(),
+            })
+            .collect();
+        let passed = check_results.iter().all(|c| c.passed);
+
+        // RUN-02 (#360): emit `synodic.verdict` for every verify
+        // execution — pass or fail, escalate or deny. The dashboard
+        // run timeline keys off this event, not the wrapped
+        // `Err(ExecutorError)`. `plan_id` is empty until the executor
+        // context surfaces it (follow-up).
+        let verdict = se::SynodicVerdict {
+            plan_id: String::new(),
+            node_id: ctx.node_id,
+            passed,
+            check_results,
+        };
+        let payload = serde_json::to_value(&verdict).expect("verdict must serialize");
+        let _ = ctx.spine.emit(se::KIND_SYNODIC_VERDICT, payload).await;
+
         let failures: Vec<String> = self
             .checks
             .iter()

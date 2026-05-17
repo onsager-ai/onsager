@@ -30,36 +30,43 @@ use serde::Serialize;
 /// `Substrate` is the 0.2 production-line role (`onsager-substrate` +
 /// `onsager-nodes`) that replaces the deprecated 0.1 `Forge` crate
 /// (spec #363). The substrate scheduler dispatches executors and drives
-/// artifacts through their lifecycle. `Substrate` is intentionally not
-/// in [`SCANNED`] yet — the emit/listener call sites move in over RUN-02
-/// (spec #360); until then the manifest tracks the forward intent so
-/// downstream consumer-side checks remain wired.
+/// artifacts through their lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Subsystem {
-    Substrate,
     Stiglab,
     Synodic,
     Ising,
     Portal,
+    /// The 0.2 substrate — the scheduler (`onsager-nodes::scheduler`) and
+    /// executors (`onsager-nodes::{script,agent,verify,...}`) that emit
+    /// runtime lifecycle events (`node.*`, `agent.session_*`,
+    /// `synodic.verdict`) onto the spine. Replaces the Forge tick loop
+    /// per [ADR 0009](../../../docs/adr/0009-three-layer-pipeline.md).
+    /// Not in `SCANNED` because substrate source lives in
+    /// `onsager-substrate` / `onsager-nodes`, outside the
+    /// `crates/{stiglab,synodic,ising}/` scope the emit / listener
+    /// scan walks.
+    Substrate,
 }
 
 impl Subsystem {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Substrate => "substrate",
             Self::Stiglab => "stiglab",
             Self::Synodic => "synodic",
             Self::Ising => "ising",
             Self::Portal => "portal",
+            Self::Substrate => "substrate",
         }
     }
 
     /// Subsystems that own source under `crates/<name>/` and whose emit /
     /// listener call sites the CI check scans. `Portal` is excluded: its
     /// emitters live outside the workspace's lint surface. `Substrate`
-    /// is excluded until RUN-02 (spec #360) ports the emit/listener call
-    /// sites that used to live in `crates/forge/`.
+    /// is excluded for the same reason — its emitters live in
+    /// `onsager-substrate` / `onsager-nodes`, not the scanned source
+    /// trees.
     pub const SCANNED: &'static [Subsystem] = &[Self::Stiglab, Self::Synodic, Self::Ising];
 }
 
@@ -536,6 +543,125 @@ pub const EVENTS: EventManifest = EventManifest {
         // truth; mutations no longer publish a spine event. Add a row
         // back here when there is a real consumer.
 
+        // -- Substrate runtime (RUN-02, #360) -------------------------------
+        // Lifecycle events emitted by the substrate scheduler and the
+        // executor catalog. Producer is `Substrate` (the
+        // `onsager-nodes::scheduler` + executors under
+        // `onsager-nodes/src/{script,agent,verify,...}`); consumers will
+        // arrive with OBS-01 (#361) once the Observer runtime is wired
+        // up. Until then they're diagnostic-only so the dashboard run
+        // timeline can render them without falsely claiming a
+        // subsystem listener exists.
+        EventDefinition {
+            kind: "node.started",
+            schema_version: 1,
+            producers: &[Subsystem::Substrate],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard run timeline; Observer consumer arrives with OBS-01 (#361)",
+            ),
+            description: "Substrate scheduler dispatched a node — execution began.",
+        },
+        EventDefinition {
+            kind: "node.completed",
+            schema_version: 1,
+            producers: &[Subsystem::Substrate],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard run timeline; Observer consumer arrives with OBS-01 (#361)",
+            ),
+            description: "A node finished successfully; outputs persisted under the edge's ArtifactId.",
+        },
+        EventDefinition {
+            kind: "node.failed",
+            schema_version: 1,
+            producers: &[Subsystem::Substrate],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard run timeline; Observer consumer arrives with OBS-01 (#361)",
+            ),
+            description: "A node's executor returned Err; the plan is aborted (v1 — no retries).",
+        },
+        EventDefinition {
+            kind: "node.awaiting_human",
+            schema_version: 1,
+            producers: &[Subsystem::Substrate],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard HITL inbox; Human executor approval round-trips via portal (#357)",
+            ),
+            description: "A Human executor is waiting on an out-of-band approval decision.",
+        },
+        EventDefinition {
+            kind: "node.human_approved",
+            schema_version: 1,
+            producers: &[Subsystem::Substrate],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard HITL audit; the substrate's own Human executor consumes the approval inline",
+            ),
+            description: "A pending Human executor node received an approval decision.",
+        },
+        EventDefinition {
+            kind: "node.human_rejected",
+            schema_version: 1,
+            producers: &[Subsystem::Substrate],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard HITL audit; the substrate's own Human executor consumes the rejection inline",
+            ),
+            description: "A pending Human executor node received a rejection decision.",
+        },
+        EventDefinition {
+            kind: "synodic.verdict",
+            schema_version: 1,
+            producers: &[Subsystem::Substrate],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard run timeline as gate outcome; Observer / dashboard read it directly — distinct from the legacy `synodic.gate_verdict` emitted by the 0.1 Synodic subsystem (retired by MIG-03)",
+            ),
+            description: "Verify executor produced a verdict — pass / fail outcome with per-check details.",
+        },
+        EventDefinition {
+            kind: "agent.session_started",
+            schema_version: 1,
+            producers: &[Subsystem::Substrate],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard agent timeline; supersedes the 0.1 `stiglab.session_*` events once MIG-01 retires stiglab",
+            ),
+            description: "Agent executor opened an LLM session.",
+        },
+        EventDefinition {
+            kind: "agent.session_completed",
+            schema_version: 1,
+            producers: &[Subsystem::Substrate],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard agent timeline; carries optional token usage for budget consumers",
+            ),
+            description: "Agent executor's LLM session finished successfully.",
+        },
+        EventDefinition {
+            kind: "agent.session_failed",
+            schema_version: 1,
+            producers: &[Subsystem::Substrate],
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard agent timeline; the executor wraps this into ExecutorError::Failed for the scheduler",
+            ),
+            description: "Agent executor's LLM session terminated with an error.",
+        },
         // -- Gate adapters (GitHub webhooks) --------------------------------
         EventDefinition {
             kind: "gate.check_updated",

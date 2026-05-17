@@ -1729,6 +1729,7 @@ name = "onsager-substrate"
 version = "0.2.0-alpha.1"
 dependencies = [
  "onsager-artifact",
+ "onsager-spine",
  "serde",
  "serde_json",
  "sqlx",

@@ -15,4 +15,5 @@ sqlx = { workspace = true, features = ["runtime-tokio", "tls-rustls", "postgres"
 thiserror = { workspace = true }
 
 [dev-dependencies]
+onsager-spine = { path = "../onsager-spine" }
 tokio = { workspace = true }
