@@ -30,6 +30,14 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
+              # The 0.2 substrate + nodes crates have no dedicated
+              # filter, but their tests (incl. the Crawlab capstone
+              # fixture in `onsager-nodes/tests/`) must still run on
+              # changes to either crate. Folding them into `workspace`
+              # keeps the `check` job triggered without growing the
+              # filter matrix.
+              - 'crates/onsager-substrate/**'
+              - 'crates/onsager-nodes/**'
             onsager-spine:
               - 'crates/onsager-spine/**'
             ising:
