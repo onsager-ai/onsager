@@ -52,23 +52,23 @@ that requires a coordinated rollout.
 
 | Stream | Producer subsystem | Event count |
 |---|---|---|
-| `artifact` | forge | 3 |
+| `artifact` | substrate scheduler (onsager-substrate) | 3 |
 | `git` | onsager-portal (GitHub webhooks) | 4 |
-| `forge` | forge | 6 |
+| `forge` | substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363 | 6 |
 | `stiglab` | stiglab | 4 |
 | `portal` | (unknown — update `stream_producer` in xtask) | 3 |
 | `synodic` | synodic | 9 |
 | `ising` | ising | 6 |
 | `refract` | onsager-portal (via MCP submissions from external onsager-refract, ADR 0014) | 3 |
-| `workflow` | stiglab (trigger) / forge (stage) | 3 |
+| `workflow` | stiglab (trigger) / substrate scheduler (stage) | 3 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
-| `gate` | onsager-portal (GitHub) / forge (manual) | 2 |
+| `gate` | onsager-portal (GitHub) / substrate scheduler (manual) | 2 |
 
 Each section below covers one stream. Inside a section, every event lists its wire `event_type` string, the Rust variant name, the variant's doc comment, and a payload field table (where the field's own doc comment is the description).
 
 ## `artifact` events
 
-Producer subsystem: **forge**.
+Producer subsystem: **substrate scheduler (onsager-substrate)**.
 
 ### `artifact.registered`
 
@@ -160,7 +160,7 @@ Producer subsystem: **onsager-portal (GitHub webhooks)**.
 
 ## `forge` events
 
-Producer subsystem: **forge**.
+Producer subsystem: **substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363**.
 
 ### `forge.shaping_dispatched`
 
@@ -593,7 +593,7 @@ Decomposition failed — either no decomposer matched, or the matched decomposer
 
 ## `workflow` events
 
-Producer subsystem: **stiglab (trigger) / forge (stage)**.
+Producer subsystem: **stiglab (trigger) / substrate scheduler (stage)**.
 
 ### `trigger.fired`
 
@@ -659,7 +659,7 @@ Audit record for a manual / CLI / replay trigger fire (#241). Emitted alongside 
 
 ## `gate` events
 
-Producer subsystem: **onsager-portal (GitHub) / forge (manual)**.
+Producer subsystem: **onsager-portal (GitHub) / substrate scheduler (manual)**.
 
 ### `gate.check_updated`
 

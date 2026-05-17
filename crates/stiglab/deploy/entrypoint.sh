@@ -48,16 +48,11 @@ if [ -n "$ONSAGER_DATABASE_URL" ]; then
     gosu onsager sh -c "while true; do PORTAL_BIND=\"$PORTAL_BIND\" DATABASE_URL=\"$ONSAGER_DATABASE_URL\" ONSAGER_CREDENTIAL_KEY=\"$PORTAL_CREDENTIAL_KEY\" SYNODIC_URL=\"$PORTAL_SYNODIC_URL\" /app/onsager-portal serve 2>&1; echo 'onsager-portal exited, restarting in 1s...'; sleep 1; done" &
 fi
 
-# Start forge (workflow orchestrator) on an internal port.
-# Forge subscribes to `trigger.fired` events on the spine and registers
-# the workflow's first artifact; downstream dispatch flows through
-# spine events post-Lever C (#148). Skipped when the spine DB isn't
-# configured (no events to consume).
-#
-# Issue #156: stiglab and forge share STIGLAB_INTERNAL_DISPATCH_TOKEN —
-# kept as a per-boot ephemeral secret for any legacy callers still
-# checking it. If unset, auto-generate so co-located processes still
-# trust each other.
+# Issue #156: legacy callers still expect STIGLAB_INTERNAL_DISPATCH_TOKEN
+# in the environment as a per-boot ephemeral secret. The 0.1 forge ↔
+# stiglab dispatch path is gone after spec #363, but synodic + stiglab
+# still source the variable on startup; auto-generate to keep
+# co-located processes trusting each other.
 if [ -z "$STIGLAB_INTERNAL_DISPATCH_TOKEN" ]; then
     # 32 bytes of urandom rendered as 64 hex chars = 128 bits of entropy,
     # plenty for an in-container shared secret that's never written to
@@ -65,19 +60,9 @@ if [ -z "$STIGLAB_INTERNAL_DISPATCH_TOKEN" ]; then
     # on every Debian/Alpine slim base — `xxd` is NOT (it's a separate
     # package in Debian and missing on most slim images).
     STIGLAB_INTERNAL_DISPATCH_TOKEN="$(od -An -vN32 -tx1 /dev/urandom | tr -d ' \n')"
-    echo "Generated ephemeral STIGLAB_INTERNAL_DISPATCH_TOKEN for forge↔stiglab dispatch"
+    echo "Generated ephemeral STIGLAB_INTERNAL_DISPATCH_TOKEN"
 fi
 export STIGLAB_INTERNAL_DISPATCH_TOKEN
-
-if [ -n "$ONSAGER_DATABASE_URL" ]; then
-    # Default 3002 collides with portal — use 3003.
-    FORGE_PORT="${FORGE_PORT:-3003}"
-    # stiglab binds to $PORT first (Railway-injected) then STIGLAB_PORT.
-    FORGE_STIGLAB_URL="${STIGLAB_URL:-http://127.0.0.1:${PORT:-${STIGLAB_PORT:-3000}}}"
-    FORGE_SYNODIC_URL="${SYNODIC_URL:-http://127.0.0.1:${SYNODIC_PORT}}"
-    echo "Starting forge on :${FORGE_PORT}..."
-    gosu onsager sh -c "while true; do DATABASE_URL=\"$ONSAGER_DATABASE_URL\" FORGE_PORT=\"$FORGE_PORT\" STIGLAB_URL=\"$FORGE_STIGLAB_URL\" SYNODIC_URL=\"$FORGE_SYNODIC_URL\" STIGLAB_INTERNAL_DISPATCH_TOKEN=\"$STIGLAB_INTERNAL_DISPATCH_TOKEN\" /app/forge serve 2>&1; echo 'forge exited, restarting in 1s...'; sleep 1; done" &
-fi
 
 # Stiglab binds to 127.0.0.1:3000 (loopback only). The agent
 # control-plane WebSocket is reachable from outside only through Caddy
@@ -97,6 +82,6 @@ gosu onsager sh -c "while true; do STIGLAB_HOST=\"$STIGLAB_HOST\" STIGLAB_PORT=\
 : "${PORT:=8080}"
 export PORT
 echo "==> pre-exec: binaries present"
-ls -la /app/stiglab /app/synodic /app/onsager-portal /app/forge /usr/local/bin/caddy
+ls -la /app/stiglab /app/synodic /app/onsager-portal /usr/local/bin/caddy
 echo "==> exec-ing caddy on :${PORT}..."
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

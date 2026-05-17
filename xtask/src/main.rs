@@ -545,19 +545,19 @@ fn escape_md_code(s: &str) -> String {
 /// fact. If the spine ever grows a registry of producers, swap this for that.
 fn stream_producer(stream: &str) -> &'static str {
     match stream {
-        "artifact" => "forge",
-        "warehouse" => "warehouse worker (forge)",
-        "delivery" => "delivery worker (forge)",
-        "deliverable" => "forge",
+        "artifact" => "substrate scheduler (onsager-substrate)",
+        "warehouse" => "substrate scheduler (warehouse role)",
+        "delivery" => "substrate scheduler (delivery role)",
+        "deliverable" => "substrate scheduler (onsager-substrate)",
         "git" => "onsager-portal (GitHub webhooks)",
-        "forge" => "forge",
+        "forge" => "substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363",
         "stiglab" => "stiglab",
         "synodic" => "synodic",
         "ising" => "ising",
         "refract" => "onsager-portal (via MCP submissions from external onsager-refract, ADR 0014)",
-        "workflow" => "stiglab (trigger) / forge (stage)",
+        "workflow" => "stiglab (trigger) / substrate scheduler (stage)",
         "registry" => "synodic (catalog crud)",
-        "gate" => "onsager-portal (GitHub) / forge (manual)",
+        "gate" => "onsager-portal (GitHub) / substrate scheduler (manual)",
         _ => "(unknown — update `stream_producer` in xtask)",
     }
 }
