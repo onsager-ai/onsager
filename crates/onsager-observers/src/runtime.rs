@@ -39,9 +39,11 @@
 //! the substrate writer will block once the buffer fills, applying
 //! backpressure upstream rather than buffering forever.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use chrono::Duration;
 use onsager_spine::{EventNotification, EventStore, FactoryEvent};
 use tokio::sync::{Mutex, oneshot};
 
@@ -58,6 +60,11 @@ use crate::store::ObserverOutputStore;
 struct Registered {
     id: String,
     patterns: Vec<EventPattern>,
+    /// Cached at registration so the hydration phase doesn't have to
+    /// lock the observer mutex (and so each observer's window is read
+    /// exactly once — the spec is "declare alongside subscriptions",
+    /// not "ask repeatedly").
+    hydration_window: Option<Duration>,
     observer: Arc<Mutex<Box<dyn Observer>>>,
 }
 
@@ -103,14 +110,16 @@ impl ObserverRuntime {
     ///
     /// `id` is what the runtime writes into `observer_outputs.observer_id`
     /// — pick something stable across restarts. The observer's
-    /// declared [`subscriptions`](Observer::subscriptions) are read
-    /// once and cached; observers cannot change their patterns at
-    /// runtime.
+    /// declared [`subscriptions`](Observer::subscriptions) and
+    /// [`hydration_window`](Observer::hydration_window) are read
+    /// once and cached; observers cannot change either at runtime.
     pub fn register<O: Observer + 'static>(mut self, id: impl Into<String>, observer: O) -> Self {
         let patterns = observer.subscriptions();
+        let hydration_window = observer.hydration_window();
         self.observers.push(Registered {
             id: id.into(),
             patterns,
+            hydration_window,
             observer: Arc::new(Mutex::new(Box::new(observer))),
         });
         self
@@ -121,9 +130,11 @@ impl ObserverRuntime {
     /// their own.
     pub fn register_boxed(mut self, id: impl Into<String>, observer: Box<dyn Observer>) -> Self {
         let patterns = observer.subscriptions();
+        let hydration_window = observer.hydration_window();
         self.observers.push(Registered {
             id: id.into(),
             patterns,
+            hydration_window,
             observer: Arc::new(Mutex::new(observer)),
         });
         self
@@ -163,11 +174,30 @@ impl ObserverRuntime {
     }
 
     /// Like [`run`](Self::run), but signals on `ready` once the spine
-    /// subscription is attached and the fan-out loop is about to
-    /// consume its first notification. Tests use this to wait for
-    /// readiness deterministically instead of sleeping a fixed
-    /// duration. Dropping the receiver is fine — the runtime simply
-    /// proceeds.
+    /// subscription is attached, history has been replayed, and the
+    /// fan-out loop is about to consume its first live notification.
+    /// Tests use this to wait for readiness deterministically instead
+    /// of sleeping a fixed duration. Dropping the receiver is fine —
+    /// the runtime simply proceeds.
+    ///
+    /// Startup sequence (spec #392):
+    ///
+    /// 1. Subscribe to `pg_notify`. The live channel starts
+    ///    buffering immediately so events written during hydration
+    ///    are not lost.
+    /// 2. Capture
+    ///    [`max_event_id`](onsager_spine::EventStore::max_event_id)
+    ///    as a cutoff.
+    /// 3. For every registered observer that opted into hydration
+    ///    via [`hydration_window`](Observer::hydration_window),
+    ///    replay events in `[now - window, cutoff]` through
+    ///    `on_event` — but suppress the outputs. Observer state
+    ///    (artifact-id → kind indices, sliding-window buffers, …) is
+    ///    rebuilt to the shape it would have had if the observer had
+    ///    been online over the window.
+    /// 4. Signal `ready`.
+    /// 5. Drive the live loop, skipping events with `id <= cutoff`
+    ///    (those were already hydrated).
     pub async fn run_with_ready(self, ready: Option<oneshot::Sender<()>>) -> Result<()> {
         let mut rx_unbounded;
         let mut rx_bounded;
@@ -190,7 +220,31 @@ impl ObserverRuntime {
             }
         };
 
-        // Subscription is attached — let any awaiter know.
+        // Cutoff captured AFTER subscribe so any event with id >
+        // cutoff is guaranteed to also arrive via the live channel
+        // (subscribe started first, channel is buffering). Events
+        // with id <= cutoff are hydrated below and skipped when the
+        // live loop sees them.
+        //
+        // We read `max_core_event_id` (core `events` only) — *not*
+        // `max_event_id`, which mixes in `events_ext.id`. A higher
+        // `events_ext.id` could otherwise mask a newer-but-lower
+        // `events.id` and cause the live loop to skip live core
+        // rows below the inflated cutoff.
+        let cutoff_id = self
+            .event_store
+            .max_core_event_id()
+            .await
+            .context("read max_core_event_id for hydration cutoff")?
+            .unwrap_or(0);
+
+        // Replay history through hydrating observers. Outputs are
+        // suppressed — see `hydrate_observers`.
+        hydrate_observers(&self.observers, &self.event_store, cutoff_id).await?;
+
+        // Subscription attached AND hydration complete — only now
+        // is the runtime really "ready". Test waiters rely on this
+        // ordering.
         if let Some(tx) = ready {
             let _ = tx.send(());
         }
@@ -206,6 +260,17 @@ impl ObserverRuntime {
             // one `tokio::spawn` + one `SELECT FROM events WHERE id` per
             // observer per ignored notification.
             if notification.table != "events" {
+                continue;
+            }
+            // Skip events already replayed during hydration. A
+            // notification with `id <= cutoff_id` is one of:
+            //  - a row written before subscribe attached, then
+            //    captured by the cutoff and replayed by
+            //    `hydrate_observers`;
+            //  - a row written between subscribe and the cutoff read
+            //    (also replayed — the cutoff is post-subscribe).
+            // Either way the observer state already accounts for it.
+            if notification.id <= cutoff_id {
                 continue;
             }
             // Dispatch each matching observer in its own task so a
@@ -268,10 +333,185 @@ impl ObserverRuntime {
         }
         output_ids
     }
+
+    /// Replay a pre-built list of historical [`SpineEvent`]s through
+    /// the runtime's observers, with **outputs suppressed**.
+    ///
+    /// Exposed primarily for tests that want to drive the hydration
+    /// path without standing up a live spine subscription. The
+    /// `run_with_ready` startup path uses the same dispatch shape
+    /// after fetching events via the spine.
+    ///
+    /// Events should be supplied in `event_id` ASC order; the runtime
+    /// dispatches them as-is and observers that depend on monotonic
+    /// ordering rely on the caller's ordering.
+    ///
+    /// A single hydration reference timestamp is captured up front
+    /// (`Utc::now()`) and used to evaluate every per-observer window
+    /// — so the in/out decision for an event near the window
+    /// boundary does not depend on how long replay takes.
+    pub async fn hydrate_from_events(&self, history: Vec<SpineEvent>) {
+        let hydration_now = chrono::Utc::now();
+        for event in history {
+            dispatch_hydration(&self.observers, &event, hydration_now).await;
+        }
+    }
 }
 
 fn any_pattern_matches(patterns: &[EventPattern], event_type: &str) -> bool {
     patterns.iter().any(|p| p.matches(event_type))
+}
+
+/// Compute the spine-side `event_type = ANY(...)` filter for the
+/// hydration query.
+///
+/// Returns `None` (no server-side filter; scan the window) when any
+/// hydrating observer subscribes via a wildcard pattern. Otherwise
+/// returns the sorted, deduplicated union of exact event types — the
+/// query only fetches rows whose `event_type` is in this set, which
+/// keeps the replay cost proportional to what the observers actually
+/// care about.
+fn hydration_event_type_filter(observers: &[&Registered]) -> Option<Vec<String>> {
+    let mut exacts: BTreeSet<String> = BTreeSet::new();
+    for obs in observers {
+        for pat in &obs.patterns {
+            if pat.is_wildcard() {
+                return None;
+            }
+            exacts.insert(pat.as_str().to_owned());
+        }
+    }
+    Some(exacts.into_iter().collect())
+}
+
+/// Dispatch one historical event through every matching observer
+/// with the observer's hydration window respected and outputs
+/// suppressed.
+///
+/// "Output suppression" is the spec's key correctness rule
+/// (#392): hydration must not write to `observer_outputs`,
+/// otherwise restarts would re-emit insights for last week's
+/// patterns. Discarding the returned `Vec<ObserverOutput>` here is
+/// where that rule is enforced — observers don't need to know
+/// whether they're being hydrated, and the same `on_event`
+/// implementation handles both modes.
+///
+/// `hydration_now` is the single reference timestamp captured at
+/// the start of the hydration phase. Threading it through (rather
+/// than reading `Utc::now()` per event) keeps the in/out boundary
+/// of each observer's window stable regardless of how long replay
+/// takes, and identical to the lower bound used for the spine
+/// query.
+async fn dispatch_hydration(
+    observers: &[Registered],
+    event: &SpineEvent,
+    hydration_now: chrono::DateTime<chrono::Utc>,
+) {
+    for obs in observers {
+        let Some(window) = obs.hydration_window else {
+            // Observer didn't opt into hydration. Live-only — its
+            // state will warm up from incoming events after ready.
+            continue;
+        };
+        // Per-observer window: the spec is explicit that hydration
+        // bounds are per-observer, so an observer with a tight
+        // window does not get re-fed events older than it cares
+        // about even if a sibling observer requested a longer
+        // window.
+        if event.created_at < hydration_now - window {
+            continue;
+        }
+        if !any_pattern_matches(&obs.patterns, &event.event_type) {
+            continue;
+        }
+        let mut guard = obs.observer.lock().await;
+        // Outputs are intentionally discarded — see function
+        // doc-comment. The observer's state mutations
+        // (artifact-id → kind index updates, sliding-window
+        // pushes, …) persist; the returned insights/alerts do not.
+        let _ = guard.on_event(event).await;
+    }
+}
+
+/// Replay historical events through the runtime's observers before
+/// the live loop starts.
+///
+/// One bulk query against `events` — the union of declared hydration
+/// windows — and one dispatch pass per event. Observers without a
+/// declared hydration window are skipped. Failures to parse a row's
+/// payload are logged and skipped (matching the live loop's
+/// best-effort behavior); they do not abort hydration.
+async fn hydrate_observers(
+    observers: &[Registered],
+    event_store: &EventStore,
+    cutoff_id: i64,
+) -> Result<()> {
+    let hydrating: Vec<&Registered> = observers
+        .iter()
+        .filter(|o| o.hydration_window.is_some())
+        .collect();
+    if hydrating.is_empty() {
+        return Ok(());
+    }
+
+    // Union of declared windows: the spec says "the runtime fetches
+    // the union of declared windows". Per-observer windows are still
+    // honored at dispatch time (`dispatch_hydration` re-checks each
+    // event's age against each observer's own window).
+    //
+    // `hydration_now` is captured ONCE up front and reused for both
+    // the query lower bound AND each per-observer in-window check
+    // in `dispatch_hydration`. Without this, a long-running replay
+    // could pull rows close to the query boundary that then get
+    // skipped at dispatch (or vice versa) — the in/out decision
+    // would depend on wall-clock drift during hydration.
+    let max_window = hydrating
+        .iter()
+        .filter_map(|o| o.hydration_window)
+        .max()
+        .expect("at least one hydrating observer");
+    let hydration_now = chrono::Utc::now();
+    let since = hydration_now - max_window;
+    let event_types = hydration_event_type_filter(&hydrating);
+
+    let rows = event_store
+        .query_events_for_replay(since, cutoff_id, event_types.as_deref())
+        .await
+        .context("query events for observer hydration")?;
+
+    let total = rows.len();
+    let mut dispatched = 0usize;
+    for record in rows {
+        let payload: FactoryEvent = match serde_json::from_value(record.data) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(
+                    event_id = record.id,
+                    event_type = %record.event_type,
+                    error = %e,
+                    "skip hydration row: parse FactoryEvent failed"
+                );
+                continue;
+            }
+        };
+        let spine_event = SpineEvent {
+            event_id: record.id,
+            event_type: record.event_type,
+            payload,
+            created_at: record.created_at,
+        };
+        dispatch_hydration(observers, &spine_event, hydration_now).await;
+        dispatched += 1;
+    }
+    tracing::info!(
+        observers = hydrating.len(),
+        rows = total,
+        dispatched,
+        cutoff_id,
+        window_seconds = max_window.num_seconds(),
+        "observer runtime: hydration complete"
+    );
+    Ok(())
 }
 
 /// Trait abstracting over `mpsc::UnboundedReceiver` and `mpsc::Receiver`
@@ -508,5 +748,370 @@ mod tests {
             actor: "test".into(),
             timestamp: Utc::now(),
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Hydration (#392) — unit-level coverage
+    //
+    // Exercises the runtime-side replay logic without standing up a
+    // spine. The end-to-end DB-backed scenario (subscribe → cutoff
+    // → hydrate → live) is covered in tests/runtime_hydration_e2e.rs
+    // behind the DATABASE_URL gate.
+    // -----------------------------------------------------------------
+
+    /// Test observer that records every event it sees and would
+    /// gladly emit on each one — useful for asserting that hydration
+    /// *does* drive `on_event` while *not* persisting outputs.
+    struct RecordingObserver {
+        seen_ids: Arc<std::sync::Mutex<Vec<i64>>>,
+        patterns: Vec<EventPattern>,
+        hydration: Option<Duration>,
+    }
+
+    #[async_trait]
+    impl Observer for RecordingObserver {
+        fn subscriptions(&self) -> Vec<EventPattern> {
+            self.patterns.clone()
+        }
+        fn hydration_window(&self) -> Option<Duration> {
+            self.hydration
+        }
+        async fn on_event(&mut self, ev: &SpineEvent) -> Vec<ObserverOutput> {
+            self.seen_ids.lock().unwrap().push(ev.event_id);
+            vec![ObserverOutput::Insight(Insight::new(
+                format!("would-emit for {}", ev.event_id),
+                0.5,
+            ))]
+        }
+    }
+
+    fn registered(
+        id: &str,
+        patterns: Vec<EventPattern>,
+        hydration: Option<Duration>,
+        obs: Box<dyn Observer>,
+    ) -> Registered {
+        Registered {
+            id: id.into(),
+            patterns,
+            hydration_window: hydration,
+            observer: Arc::new(Mutex::new(obs)),
+        }
+    }
+
+    fn ev(event_id: i64, event_type: &str, age: Duration) -> SpineEvent {
+        SpineEvent {
+            event_id,
+            event_type: event_type.into(),
+            payload: dummy_factory_event(),
+            created_at: chrono::Utc::now() - age,
+        }
+    }
+
+    #[tokio::test]
+    async fn hydration_dispatches_to_observers_that_opted_in() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<i64>::new()));
+        let obs = Box::new(RecordingObserver {
+            seen_ids: Arc::clone(&seen),
+            patterns: vec![EventPattern::new("artifact.*")],
+            hydration: Some(Duration::days(7)),
+        });
+        let observers = vec![registered(
+            "obs.recording",
+            vec![EventPattern::new("artifact.*")],
+            Some(Duration::days(7)),
+            obs,
+        )];
+
+        // Three events inside the window — all should be dispatched.
+        let history = vec![
+            ev(10, "artifact.registered", Duration::hours(1)),
+            ev(11, "artifact.state_changed", Duration::minutes(30)),
+            ev(12, "artifact.archived", Duration::seconds(5)),
+        ];
+        for e in history {
+            dispatch_hydration(&observers, &e, chrono::Utc::now()).await;
+        }
+
+        let ids = seen.lock().unwrap().clone();
+        assert_eq!(ids, vec![10, 11, 12]);
+    }
+
+    #[tokio::test]
+    async fn hydration_skips_observers_without_window() {
+        // Same patterns, but no opt-in — observer must not be invoked
+        // during hydration. Live mode would still drive it; hydration
+        // is opt-in only.
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<i64>::new()));
+        let obs = Box::new(RecordingObserver {
+            seen_ids: Arc::clone(&seen),
+            patterns: vec![EventPattern::new("artifact.*")],
+            hydration: None,
+        });
+        let observers = vec![registered(
+            "obs.no_hydrate",
+            vec![EventPattern::new("artifact.*")],
+            None,
+            obs,
+        )];
+
+        dispatch_hydration(
+            &observers,
+            &ev(10, "artifact.registered", Duration::minutes(5)),
+            chrono::Utc::now(),
+        )
+        .await;
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn hydration_skips_events_outside_observer_window() {
+        // Observer wants 1 hour of history; the event is 2 hours
+        // old. Bounded window — older events do not get replayed
+        // even if they would have matched.
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<i64>::new()));
+        let obs = Box::new(RecordingObserver {
+            seen_ids: Arc::clone(&seen),
+            patterns: vec![EventPattern::new("artifact.registered")],
+            hydration: Some(Duration::hours(1)),
+        });
+        let observers = vec![registered(
+            "obs.bounded",
+            vec![EventPattern::new("artifact.registered")],
+            Some(Duration::hours(1)),
+            obs,
+        )];
+
+        let hydration_now = chrono::Utc::now();
+        dispatch_hydration(
+            &observers,
+            &ev(10, "artifact.registered", Duration::hours(2)),
+            hydration_now,
+        )
+        .await;
+        assert!(seen.lock().unwrap().is_empty());
+
+        // An in-window event still drives the observer.
+        dispatch_hydration(
+            &observers,
+            &ev(11, "artifact.registered", Duration::minutes(10)),
+            hydration_now,
+        )
+        .await;
+        assert_eq!(seen.lock().unwrap().clone(), vec![11]);
+    }
+
+    #[tokio::test]
+    async fn hydration_skips_events_that_do_not_match_pattern() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<i64>::new()));
+        let obs = Box::new(RecordingObserver {
+            seen_ids: Arc::clone(&seen),
+            patterns: vec![EventPattern::new("forge.gate_verdict")],
+            hydration: Some(Duration::days(1)),
+        });
+        let observers = vec![registered(
+            "obs.specific",
+            vec![EventPattern::new("forge.gate_verdict")],
+            Some(Duration::days(1)),
+            obs,
+        )];
+
+        // Pattern mismatch — even though in window.
+        dispatch_hydration(
+            &observers,
+            &ev(10, "artifact.registered", Duration::minutes(5)),
+            chrono::Utc::now(),
+        )
+        .await;
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn hydration_outputs_are_suppressed() {
+        // The recording observer would happily emit one Insight per
+        // event; the contract is that hydration discards them. We
+        // verify by reaching directly into the observer state — the
+        // events were seen (state mutated) but no path here would
+        // have persisted to `observer_outputs` (there is no
+        // `output_store.record(...)` call inside `dispatch_hydration`,
+        // so the suppression is structural, not behavioral).
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<i64>::new()));
+        let obs = Box::new(RecordingObserver {
+            seen_ids: Arc::clone(&seen),
+            patterns: vec![EventPattern::new("artifact.*")],
+            hydration: Some(Duration::days(7)),
+        });
+        let observers = vec![registered(
+            "obs.suppress",
+            vec![EventPattern::new("artifact.*")],
+            Some(Duration::days(7)),
+            obs,
+        )];
+
+        let hydration_now = chrono::Utc::now();
+        for i in 0..5 {
+            dispatch_hydration(
+                &observers,
+                &ev(20 + i, "artifact.registered", Duration::minutes(1)),
+                hydration_now,
+            )
+            .await;
+        }
+        // Events drove `on_event`...
+        assert_eq!(seen.lock().unwrap().len(), 5);
+        // ...but we have no path through `dispatch_hydration` that
+        // would have written to `observer_outputs`. The E2E DB
+        // test confirms the storage is empty after a restart.
+    }
+
+    #[tokio::test]
+    async fn restart_rebuilds_gate_override_kind_index_via_hydration() {
+        // The motivating scenario from spec #392: a code artifact
+        // registered before restart, with no `artifact.registered`
+        // replay, would mean post-restart verdicts can't be grouped
+        // by kind. With hydration, the registration is replayed and
+        // the verdicts trip the override-rate insight as before.
+        use crate::gate_override::{GateOverrideObserver, TAG};
+        use chrono::Utc;
+        use onsager_artifact::{ArtifactId, Kind};
+        use onsager_spine::factory_event::{FactoryEventKind, GatePoint, VerdictSummary};
+
+        let id = ArtifactId::new("art_restart");
+        let mut obs = GateOverrideObserver::default();
+        // Sanity: the observer opts into hydration.
+        assert_eq!(obs.hydration_window(), Some(Duration::days(7)));
+
+        // History: the registration is the only event before "restart".
+        let history = vec![SpineEvent {
+            event_id: 1,
+            event_type: "artifact.registered".into(),
+            payload: FactoryEvent {
+                event: FactoryEventKind::ArtifactRegistered {
+                    artifact_id: id.clone(),
+                    kind: Kind::Code,
+                    name: "t".into(),
+                    owner: "marvin".into(),
+                },
+                correlation_id: None,
+                causation_id: None,
+                actor: "test".into(),
+                timestamp: Utc::now(),
+            },
+            created_at: Utc::now() - Duration::hours(1),
+        }];
+
+        // Replay the registration into the observer's state. Drive
+        // the observer directly (not through `dispatch_hydration`,
+        // since we want to inspect emitted outputs from the post-
+        // restart verdicts below — those go through live `on_event`).
+        for ev in &history {
+            // Hydration call: outputs discarded.
+            let _ = obs.on_event(ev).await;
+        }
+
+        // Post-restart: a burst of denies arrives over the live
+        // stream. Without hydration, the observer's
+        // `artifacts: HashMap<String, Kind>` is empty and the
+        // verdicts drop out of grouping (`evaluate`'s
+        // `self.artifacts.get(...)` returns `None`). With
+        // hydration it returns `Some(Kind::Code)` and the rate trips.
+        let mut emitted = Vec::new();
+        for i in 0..5 {
+            let ev = SpineEvent {
+                event_id: 10 + i,
+                event_type: "forge.gate_verdict".into(),
+                payload: FactoryEvent {
+                    event: FactoryEventKind::ForgeGateVerdict {
+                        artifact_id: id.clone(),
+                        gate_point: GatePoint::PreDispatch,
+                        verdict: VerdictSummary::Deny,
+                    },
+                    correlation_id: None,
+                    causation_id: None,
+                    actor: "test".into(),
+                    timestamp: Utc::now(),
+                },
+                created_at: Utc::now(),
+            };
+            emitted.extend(obs.on_event(&ev).await);
+        }
+        assert_eq!(
+            emitted.len(),
+            1,
+            "post-restart verdicts must group by kind via hydrated index, got {emitted:?}"
+        );
+        match &emitted[0] {
+            ObserverOutput::Insight(i) => {
+                assert_eq!(i.tag.as_deref(), Some(TAG));
+            }
+            _ => panic!("expected Insight"),
+        }
+    }
+
+    #[test]
+    fn hydration_event_type_filter_unions_exact_patterns() {
+        let o1 = registered(
+            "o1",
+            vec![
+                EventPattern::new("artifact.registered"),
+                EventPattern::new("forge.gate_verdict"),
+            ],
+            Some(Duration::days(1)),
+            Box::new(RecordingObserver {
+                seen_ids: Arc::new(std::sync::Mutex::new(Vec::new())),
+                patterns: vec![],
+                hydration: None,
+            }),
+        );
+        let o2 = registered(
+            "o2",
+            vec![EventPattern::new("forge.shaping_returned")],
+            Some(Duration::days(1)),
+            Box::new(RecordingObserver {
+                seen_ids: Arc::new(std::sync::Mutex::new(Vec::new())),
+                patterns: vec![],
+                hydration: None,
+            }),
+        );
+        let filter = hydration_event_type_filter(&[&o1, &o2]).expect("all exact -> Some(...)");
+        // BTreeSet ordering keeps this stable.
+        assert_eq!(
+            filter,
+            vec![
+                "artifact.registered".to_string(),
+                "forge.gate_verdict".to_string(),
+                "forge.shaping_returned".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn hydration_event_type_filter_returns_none_for_wildcard() {
+        // Any wildcard in any hydrating observer disables the
+        // server-side filter — we can't enumerate the matching
+        // event types up front.
+        let o1 = registered(
+            "o1",
+            vec![EventPattern::new("artifact.*")],
+            Some(Duration::days(1)),
+            Box::new(RecordingObserver {
+                seen_ids: Arc::new(std::sync::Mutex::new(Vec::new())),
+                patterns: vec![],
+                hydration: None,
+            }),
+        );
+        assert!(hydration_event_type_filter(&[&o1]).is_none());
+
+        let o2 = registered(
+            "o2",
+            vec![EventPattern::new("*")],
+            Some(Duration::days(1)),
+            Box::new(RecordingObserver {
+                seen_ids: Arc::new(std::sync::Mutex::new(Vec::new())),
+                patterns: vec![],
+                hydration: None,
+            }),
+        );
+        assert!(hydration_event_type_filter(&[&o2]).is_none());
     }
 }

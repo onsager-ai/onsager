@@ -73,6 +73,14 @@ impl EventPattern {
             p => p == event_type,
         }
     }
+
+    /// Returns `true` if this pattern is a wildcard form (`"*"` or
+    /// `"<prefix>.*"`). Used by the hydration path to decide whether
+    /// the spine replay query can use a server-side `event_type`
+    /// filter or must scan the full window.
+    pub fn is_wildcard(&self) -> bool {
+        self.0 == "*" || self.0.ends_with(".*")
+    }
 }
 
 impl From<&str> for EventPattern {
