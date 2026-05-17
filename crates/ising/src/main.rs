@@ -1,46 +1,11 @@
-//! ising — CLI entry point for the Ising continuous improvement engine.
-
-use clap::{Parser, Subcommand};
-
-#[derive(Parser)]
-#[command(
-    name = "ising",
-    about = "Onsager Ising — continuous improvement engine"
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Start the Ising observation loop
-    Serve {
-        /// Database URL for the event spine
-        #[arg(long, env = "DATABASE_URL")]
-        database_url: String,
-
-        /// Analyzer tick interval in milliseconds
-        #[arg(long, default_value = "5000")]
-        tick_ms: u64,
-    },
-
-    /// Show current Ising status
-    Status,
-}
+//! `ising` — deprecation stub. See the crate docs and spec #362
+//! (OBS-02) for the substrate-Observer replacement.
 
 fn main() {
-    let cli = Cli::parse();
-
-    match cli.command {
-        Commands::Serve {
-            database_url,
-            tick_ms,
-        } => {
-            ising::cmd::serve::run(&database_url, tick_ms);
-        }
-        Commands::Status => {
-            println!("ising: not running (status check requires a running instance)");
-        }
-    }
+    eprintln!(
+        "ising is deprecated. The 0.1 analyzer engine has been replaced \
+         by the substrate Observer runtime (onsager-observers, spec #362).\n\
+         The `ising` binary is now a no-op; nothing is started."
+    );
+    std::process::exit(0);
 }
