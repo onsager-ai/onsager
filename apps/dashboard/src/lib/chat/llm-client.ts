@@ -62,16 +62,25 @@ const SYSTEM_PROMPT = [
   "  conversation, ask before guessing.",
 ].join("\n")
 
-// Locked preamble (per spec #400) prepended to the system prompt when the
-// user is in FTUE workspace-less mode. Iterating the wording is a
-// follow-up — touch this only with an accompanying spec amendment.
+// FTUE preamble prepended to the system prompt when the user is in
+// workspace-less mode (spec #400). The locked spec copy referenced a
+// `propose_workflow_draft` MCP tool — that tool will land in a follow-up
+// once the sibling `onsager-ai/onsager-skills` skill bundle gets a
+// matching `allowed_tools` grant (the cross-check lint enforces both
+// repos stay in sync). Until then, the preamble describes the shape
+// in prose so the agent proposes a workflow as text/markdown without
+// trying to invoke the unregistered tool.
 const FTUE_PREAMBLE = [
   "You are helping a new Onsager user design their first workflow draft.",
   "They do not have a workspace yet. Drafts live client-side until the user",
   "chooses to bind. Do not ask for a workspace, repo, or installation —",
-  "those are for the binding step. If a tool requires workspace context,",
-  'prefer "propose_workflow_draft" (no workspace_id) over "create_workflow".',
-  "Be concrete: end your first reply with a workflow draft proposal.",
+  "those are for the binding step. Do not call tools that require a",
+  "workspace_id (propose_workflow, run_workflow, list_workflows, …).",
+  "Instead, sketch the workflow shape directly in your reply: a name, a",
+  "trigger (which GitHub event), and an ordered stage list (gate kind +",
+  "intent). The user reviews your sketch in the right panel and the",
+  "binding flow promotes it to a real workflow when they're ready.",
+  "Be concrete: end your first reply with a workflow draft sketch.",
 ].join("\n")
 
 /** Wire shape of one content block in the Anthropic response. */

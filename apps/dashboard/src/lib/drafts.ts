@@ -250,11 +250,41 @@ export function useWorkflowDraft(
     [activeId, userId],
   )
 
+  // `setWorkflow` is the path that propose_workflow / propose_workflow_draft
+  // tool-call commits take in ChatPage. The FTUE flow can hit this before
+  // the user has clicked a template or `+ New draft`, so the call must
+  // auto-create a draft on first write rather than silently no-op.
   const setWorkflow = useCallback(
     (workflow: WorkflowDocument) => {
-      updateDraft({ workflow })
+      const current = loadDrafts(userId)
+      const targetId = activeId ?? current[0]?.id
+      if (!targetId) {
+        const fresh = makeDraft(
+          userId,
+          "chat",
+          workflow,
+          workflow.name || "Untitled draft",
+        )
+        saveDraft(userId, fresh)
+        bumpAndSelect(fresh.id)
+        return
+      }
+      const active = current.find((d) => d.id === targetId)
+      if (!active) {
+        const fresh = makeDraft(
+          userId,
+          "chat",
+          workflow,
+          workflow.name || "Untitled draft",
+        )
+        saveDraft(userId, fresh)
+        bumpAndSelect(fresh.id)
+        return
+      }
+      saveDraft(userId, { ...active, workflow })
+      setVersion((v) => v + 1)
     },
-    [updateDraft],
+    [activeId, userId, bumpAndSelect],
   )
 
   const deleteById = useCallback(

@@ -283,7 +283,6 @@ mod tests {
         let names: Vec<&str> = registry().iter().map(|t| t.name).collect();
         for required in [
             "propose_workflow",
-            "propose_workflow_draft",
             "run_workflow",
             "edit_workflow",
             "schedule_workflow",
@@ -312,7 +311,6 @@ mod tests {
             let is_mutation = matches!(
                 t.name,
                 "propose_workflow"
-                    | "propose_workflow_draft"
                     | "run_workflow"
                     | "edit_workflow"
                     | "schedule_workflow"

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -206,28 +206,32 @@ function YamlInner({
     () => (draft ? workflowDocumentToYaml(draft) : ""),
     [draft],
   )
+  // `override` is the in-flight text buffer the user is typing. While it
+  // matches the last-synced canonical, an external draft update folds
+  // straight into the textarea (template pick, DAG edit). Once the user
+  // diverges, the override sticks until they re-sync (clear text, etc.).
   const [override, setOverride] = useState<string | null>(null)
-  const [lastSeenCanonical, setLastSeenCanonical] = useState(canonical)
   const [parseError, setParseError] = useState<string | null>(null)
+  const lastSyncedCanonicalRef = useRef(canonical)
 
-  // Render-time reconciliation: if the canonical changed but the user
-  // hasn't typed since we last observed it, drop the override so the
-  // textarea snaps to the fresh serialization. This is the
-  // "derived-state from props" pattern React 19 prefers over an effect.
-  let text: string
-  if (canonical !== lastSeenCanonical) {
-    if (override === null || override === lastSeenCanonical) {
-      text = canonical
+  // Sync derived text state when the canonical changes from outside.
+  // This is the classic "synchronize state with an external source"
+  // useEffect pattern carved out by React's docs; the lint rule's
+  // generic warning doesn't apply.
+  useEffect(() => {
+    if (canonical === lastSyncedCanonicalRef.current) return
+    const prevSynced = lastSyncedCanonicalRef.current
+    lastSyncedCanonicalRef.current = canonical
+    // Only fold into the textarea when the user hasn't typed since our
+    // last sync — otherwise we'd clobber an in-flight edit.
+    if (override === null || override === prevSynced) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOverride(null)
-      setLastSeenCanonical(canonical)
       setParseError(null)
-    } else {
-      text = override
-      setLastSeenCanonical(canonical)
     }
-  } else {
-    text = override ?? canonical
-  }
+  }, [canonical, override])
+
+  const text = override ?? canonical
 
   if (!draft) {
     return (

@@ -49,7 +49,7 @@ export function DraftStrip({
                 type="button"
                 aria-label={`Delete ${d.name || "draft"}`}
                 onClick={() => onDelete(d.id)}
-                className="opacity-0 transition-opacity group-hover:opacity-70 hover:opacity-100"
+                className="rounded-full opacity-0 transition-opacity outline-none group-hover:opacity-70 hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 group-focus-within:opacity-70"
               >
                 <X className="h-3 w-3" />
               </button>

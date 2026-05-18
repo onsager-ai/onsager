@@ -50,10 +50,16 @@ export function workflowDocumentToYaml(doc: WorkflowDocument): string {
 export class WorkflowYamlError extends Error {}
 
 /**
- * Parse YAML text back into a `WorkflowDocument`. Throws
+ * Parse YAML text back into a `WorkflowDocument`. Strict: throws
  * `WorkflowYamlError` with a human-readable message on any shape
- * mismatch — callers surface that as inline copy on the YAML side per
- * spec #400's "couldn't parse" path.
+ * mismatch — missing required fields, non-string scalars where strings
+ * are required, unknown gate kinds. Callers surface the message as
+ * inline copy on the YAML side per spec #400's "couldn't parse" path.
+ *
+ * "Required" mirrors the WorkflowDocument shape: `name`, `trigger.{install_id,
+ * repo_owner, repo_name, label}`, every stage's `{id, name, gate_kind,
+ * artifact_kind}`. Empty strings are allowed (a half-filled draft still
+ * round-trips); missing keys are not.
  */
 export function workflowDocumentFromYaml(text: string): WorkflowDocument {
   let raw: unknown
@@ -67,7 +73,7 @@ export function workflowDocumentFromYaml(text: string): WorkflowDocument {
   if (!isObject(raw)) {
     throw new WorkflowYamlError("Top-level YAML must be a mapping")
   }
-  const name = readString(raw, "name")
+  const name = requireString(raw, "name", "top-level")
   const trigger = parseTrigger(raw.trigger)
   const stages = parseStages(raw.stages)
   return { name, trigger, stages }
@@ -78,10 +84,10 @@ function parseTrigger(raw: unknown): WorkflowTriggerDraft {
     throw new WorkflowYamlError("`trigger` must be a mapping")
   }
   return {
-    install_id: readString(raw, "install_id"),
-    repo_owner: readString(raw, "repo_owner"),
-    repo_name: readString(raw, "repo_name"),
-    label: readString(raw, "label"),
+    install_id: requireString(raw, "install_id", "trigger"),
+    repo_owner: requireString(raw, "repo_owner", "trigger"),
+    repo_name: requireString(raw, "repo_name", "trigger"),
+    label: requireString(raw, "label", "trigger"),
   }
 }
 
@@ -93,22 +99,26 @@ function parseStages(raw: unknown): WorkflowStage[] {
     if (!isObject(entry)) {
       throw new WorkflowYamlError(`stage ${i} must be a mapping`)
     }
-    const gateKind = readString(entry, "gate_kind") as WorkflowGateKind
-    if (!GATE_KINDS.includes(gateKind)) {
+    const ctx = `stage ${i}`
+    const gateKindRaw = requireString(entry, "gate_kind", ctx)
+    if (!GATE_KINDS.includes(gateKindRaw as WorkflowGateKind)) {
       throw new WorkflowYamlError(
-        `stage ${i} has unknown gate_kind \`${gateKind}\``,
+        `${ctx} has unknown gate_kind \`${gateKindRaw}\``,
       )
     }
-    const artifactKind = readString(entry, "artifact_kind") as WorkflowArtifactKind
     const config = entry.config
     if (config != null && !isObject(config)) {
-      throw new WorkflowYamlError(`stage ${i} \`config\` must be a mapping`)
+      throw new WorkflowYamlError(`${ctx} \`config\` must be a mapping`)
     }
     return {
-      id: readString(entry, "id"),
-      name: readString(entry, "name"),
-      gate_kind: gateKind,
-      artifact_kind: artifactKind,
+      id: requireString(entry, "id", ctx),
+      name: requireString(entry, "name", ctx),
+      gate_kind: gateKindRaw as WorkflowGateKind,
+      artifact_kind: requireString(
+        entry,
+        "artifact_kind",
+        ctx,
+      ) as WorkflowArtifactKind,
       config: (config ?? {}) as Record<string, unknown>,
     }
   })
@@ -118,9 +128,21 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v != null && !Array.isArray(v)
 }
 
-function readString(obj: Record<string, unknown>, key: string): string {
+function requireString(
+  obj: Record<string, unknown>,
+  key: string,
+  ctx: string,
+): string {
+  if (!(key in obj)) {
+    throw new WorkflowYamlError(`${ctx} is missing \`${key}\``)
+  }
   const v = obj[key]
   if (typeof v === "string") return v
+  // Empty strings round-trip via `yaml` as either `""` or as the empty
+  // scalar (`null`); accept both so a half-filled draft can be edited
+  // without forcing the user to type `""` literals.
   if (v == null) return ""
-  return String(v)
+  throw new WorkflowYamlError(
+    `${ctx}.\`${key}\` must be a string (got ${typeof v})`,
+  )
 }

@@ -256,7 +256,11 @@ export function ChatPage() {
     }
     return memberships[0] ?? null
   }, [scopedWorkspace, memberships])
-  const isFtue = scopedWorkspace == null
+  // FTUE = truly zero workspace context (not just "visited /chat without
+  // a slug"). A returning user on /chat with a resolvable last-used
+  // workspace gets the regular surface, not the workspace-less FTUE
+  // chrome.
+  const isFtue = workspace == null
   const { user } = useAuth()
   const buildInfo = useBuildInfo()
   const isOss = buildInfo?.is_oss ?? false
@@ -288,12 +292,19 @@ export function ChatPage() {
   const [submitting, setSubmitting] = useState(false)
   const [prompt, setPrompt] = useState("")
   // Banner is dismissible per session (spec #398). Sessionstorage so
-  // re-mounts/page navs within the same tab don't repop it.
-  const [ossBannerDismissed, setOssBannerDismissed] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.sessionStorage.getItem("onsager.oss_banner_dismissed") === "1",
-  )
+  // re-mounts/page navs within the same tab don't repop it. Wrapped in
+  // try/catch — private-browsing / blocked-storage modes throw on access
+  // and we don't want ChatPage to crash because of a chrome detail.
+  const [ossBannerDismissed, setOssBannerDismissed] = useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      return (
+        window.sessionStorage.getItem("onsager.oss_banner_dismissed") === "1"
+      )
+    } catch {
+      return false
+    }
+  })
   const feedEndRef = useRef<HTMLDivElement>(null)
 
   const [turns, setTurns] = useState<ChatTurn[]>(() => {
@@ -528,10 +539,15 @@ export function ChatPage() {
               onClick={() => {
                 setOssBannerDismissed(true)
                 if (typeof window !== "undefined") {
-                  window.sessionStorage.setItem(
-                    "onsager.oss_banner_dismissed",
-                    "1",
-                  )
+                  try {
+                    window.sessionStorage.setItem(
+                      "onsager.oss_banner_dismissed",
+                      "1",
+                    )
+                  } catch {
+                    // Private browsing / quota — UI state is the
+                    // floor; banner just repops next mount.
+                  }
                 }
               }}
               aria-label="Dismiss OSS banner"
