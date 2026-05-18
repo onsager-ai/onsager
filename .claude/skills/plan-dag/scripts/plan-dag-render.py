@@ -643,8 +643,7 @@ def render_html(ir, emoji=True):
     Adds: critical-path footer if `ir.critical_path` is set, max-width
     centering, and responsive `svg { max-width: 100% }` so it scales to
     the viewport. No legend — status is dual-encoded by the per-node fill
-    color plus a label marker (leading emoji when `emoji=True`, trailing
-    `✓` / `…` glyph when `emoji=False`), which is self-explanatory.
+    color + leading emoji in the styled SVG, which is self-explanatory.
     """
     svg = _strip_svg_prolog(_dot_to_svg(ir, emoji=emoji))
 
