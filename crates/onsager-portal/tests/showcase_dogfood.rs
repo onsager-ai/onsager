@@ -162,6 +162,53 @@ async fn seed_pr_for_issue(
     pr_artifact_id
 }
 
+/// Seed a `git.pr_merged` extension event for the given workspace. The
+/// stats query filters on the indexed `workspace_id` column (migration
+/// 016) — the variant data carries no top-level `workspace_id`, so a
+/// JSONB-only predicate would never match.
+async fn seed_git_pr_merged_event(spine: &PgPool, workspace_id: &str, pr_number: i64) {
+    sqlx::query(
+        "INSERT INTO events_ext (stream_id, namespace, event_type, data, metadata, workspace_id) \
+         VALUES ($1, 'git', 'git.pr_merged', \
+                 jsonb_build_object('type', 'git_pr_merged', \
+                                    'pr_number', $2::bigint, \
+                                    'artifact_id', $3::text, \
+                                    'merge_sha', 'deadbeef'), \
+                 '{}'::jsonb, $4)",
+    )
+    .bind(format!("pr-stream-{pr_number}"))
+    .bind(pr_number)
+    .bind(format!("art_pr_{pr_number}"))
+    .bind(workspace_id)
+    .execute(spine)
+    .await
+    .expect("seed git.pr_merged event");
+}
+
+/// Seed a `synodic.gate_verdict` event with the given verdict tag. The
+/// stats query reads `data->'verdict'->>'verdict'` to match the
+/// `GateVerdict` enum's `#[serde(tag = "verdict")]` shape — i.e. the
+/// envelope serializes as `{type, gate_id, ..., verdict: {verdict, ...}}`.
+async fn seed_gate_verdict_event(spine: &PgPool, workspace_id: &str, verdict: &str) {
+    let payload = serde_json::json!({
+        "type": "synodic_gate_verdict",
+        "gate_id": format!("gate-{verdict}"),
+        "artifact_id": "art_some",
+        "gate_point": "merge",
+        "verdict": { "verdict": verdict },
+    });
+    sqlx::query(
+        "INSERT INTO events_ext (stream_id, namespace, event_type, data, metadata, workspace_id) \
+         VALUES ($1, 'synodic', 'synodic.gate_verdict', $2, '{}'::jsonb, $3)",
+    )
+    .bind(format!("gate-{verdict}"))
+    .bind(&payload)
+    .bind(workspace_id)
+    .execute(spine)
+    .await
+    .expect("seed synodic.gate_verdict event");
+}
+
 async fn cleanup_workflow(spine: &PgPool, portal: &PgPool, workflow_id: &str) {
     // Drop horizontal_lineage rows that point at this workflow's artifacts.
     let _ = sqlx::query(
@@ -179,6 +226,13 @@ async fn cleanup_workflow(spine: &PgPool, portal: &PgPool, workflow_id: &str) {
         .await;
     let _ = sqlx::query("DELETE FROM workflows WHERE workflow_id = $1")
         .bind(workflow_id)
+        .execute(spine)
+        .await;
+}
+
+async fn cleanup_workspace_events(spine: &PgPool, workspace_id: &str) {
+    let _ = sqlx::query("DELETE FROM events_ext WHERE workspace_id = $1")
+        .bind(workspace_id)
         .execute(spine)
         .await;
 }
@@ -381,6 +435,75 @@ async fn projection_exposes_only_allow_listed_fields() {
     }
 
     cleanup_workflow(&spine, &portal, &workflow_id).await;
+    cleanup_workspace_events(&spine, &workspace_id).await;
+}
+
+#[tokio::test]
+async fn projection_counts_recent_events_into_stats() {
+    let Some(spine) = try_pool().await else {
+        eprintln!("skipping: DATABASE_URL not set");
+        return;
+    };
+    let portal = spine.clone();
+    let workspace_id = format!("ws-showcase-stats-{}", Uuid::new_v4());
+    let workflow_id = seed_dogfood_workflow(&spine, &workspace_id).await;
+
+    // Two released runs in the workspace → specs_shipped = 2.
+    let project_id = format!("proj-{}", Uuid::new_v4());
+    let _ = seed_issue_run(
+        &spine,
+        &workspace_id,
+        &workflow_id,
+        &project_id,
+        407,
+        "released",
+        Some(3),
+    )
+    .await;
+    let _ = seed_issue_run(
+        &spine,
+        &workspace_id,
+        &workflow_id,
+        &project_id,
+        408,
+        "released",
+        Some(3),
+    )
+    .await;
+
+    // Three merged-PR events and two allow verdicts (plus a deny that
+    // mustn't count).
+    seed_git_pr_merged_event(&spine, &workspace_id, 412).await;
+    seed_git_pr_merged_event(&spine, &workspace_id, 413).await;
+    seed_git_pr_merged_event(&spine, &workspace_id, 414).await;
+    seed_gate_verdict_event(&spine, &workspace_id, "allow").await;
+    seed_gate_verdict_event(&spine, &workspace_id, "allow").await;
+    seed_gate_verdict_event(&spine, &workspace_id, "deny").await;
+
+    let body = build_projection_for_test(&spine, &portal, &workflow_id)
+        .await
+        .expect("projection succeeds");
+
+    // The acceptance criterion is "Counters reflect actual data for the
+    // last 7 calendar days" — pin the wire format the dashboard reads.
+    assert_eq!(
+        body["stats_7d"]["specs_shipped"],
+        Value::Number(2.into()),
+        "specs_shipped counts released runs of this workflow"
+    );
+    assert_eq!(
+        body["stats_7d"]["prs_merged"],
+        Value::Number(3.into()),
+        "prs_merged counts git.pr_merged events in the workspace"
+    );
+    assert_eq!(
+        body["stats_7d"]["verify_gates_passed"],
+        Value::Number(2.into()),
+        "verify_gates_passed counts only `allow` verdicts in the workspace"
+    );
+
+    cleanup_workflow(&spine, &portal, &workflow_id).await;
+    cleanup_workspace_events(&spine, &workspace_id).await;
 }
 
 #[tokio::test]
@@ -404,4 +527,5 @@ async fn projection_marks_quiet_when_no_recent_activity() {
     assert_eq!(body["stats_7d"]["specs_shipped"], Value::Number(0.into()));
 
     cleanup_workflow(&spine, &portal, &workflow_id).await;
+    cleanup_workspace_events(&spine, &workspace_id).await;
 }

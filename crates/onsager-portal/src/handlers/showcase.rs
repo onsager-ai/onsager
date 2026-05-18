@@ -132,9 +132,11 @@ pub async fn get_dogfood(State(state): State<AppState>) -> Response {
         Err(e) => {
             tracing::error!(error = %e, "showcase: projection failed");
             // Public surface — fail soft so a transient DB hiccup
-            // doesn't surface a 500 to an evaluator.
-            let mut b = disabled_payload();
-            b["error"] = json!("projection unavailable");
+            // doesn't surface a 500 to an evaluator. Reuse the
+            // disabled shape verbatim so the `{ enabled: false }`
+            // allow-list contract still holds; the failure signal is
+            // `enabled: false` plus the server-side log.
+            let b = disabled_payload();
             cache().put(b.clone());
             return Json(b).into_response();
         }
@@ -325,14 +327,15 @@ async fn project_run(
 /// kinds or DB ids from the URL. The 12-char prefix is plenty unique
 /// across 10 runs.
 fn run_status_id(artifact_id: &str) -> String {
-    let h = blake3_hex(artifact_id);
+    let h = fnv1a_hex(artifact_id);
     format!("run_{}", &h[..12])
 }
 
-fn blake3_hex(input: &str) -> String {
-    // Cheap deterministic hash without pulling a new crate: a u64
-    // FNV-1a is plenty for 10-runs uniqueness on the public surface.
-    // (Sticking to std avoids growing the dep graph for one helper.)
+/// FNV-1a 64-bit hash → lowercase hex. Non-cryptographic, deterministic,
+/// std-only. Plenty unique for the 10-runs surface; opacity here is
+/// "don't leak the internal `art_iss_<uuid>` shape", not adversarial
+/// resistance.
+fn fnv1a_hex(input: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in input.as_bytes() {
         hash ^= u64::from(*byte);
@@ -462,14 +465,17 @@ async fn compute_stats_7d(
     .get::<i64, _>(0);
 
     // PRs merged: `git.pr_merged` events scoped to the workflow's
-    // workspace, last 7 days. Workflow-level scoping would require
-    // joining each event to its run; workspace scoping is good enough
-    // for the dogfood instance where the workspace hosts only this one
-    // workflow.
+    // workspace, last 7 days. Filter on the indexed `workspace_id`
+    // column (migration 016) rather than a JSONB hint — the
+    // `FactoryEventKind::GitPrMerged` payload carries
+    // `(artifact_id, pr_number, merge_sha)` and no top-level
+    // `workspace_id`, so the legacy JSONB predicate would always
+    // miss. Workspace-level scoping is good enough for the dogfood
+    // instance where the workspace hosts only this one workflow.
     let prs_merged: i64 = sqlx::query(
         "SELECT COUNT(*)::BIGINT FROM events_ext \
           WHERE event_type = 'git.pr_merged' \
-            AND data->>'workspace_id' = $1 \
+            AND workspace_id = $1 \
             AND created_at >= NOW() - INTERVAL '7 days'",
     )
     .bind(workspace_id)
@@ -477,15 +483,17 @@ async fn compute_stats_7d(
     .await?
     .get::<i64, _>(0);
 
-    // Verify gates passed: `synodic.gate_verdict` events with verdict
-    // == 'allow'. Same workspace scoping as above. The verdict is
-    // tagged at the JSON top level by the enum's `tag = "verdict"`
-    // serde attribute on GateVerdict.
+    // Verify gates passed: `synodic.gate_verdict` events whose inner
+    // `GateVerdict` enum tag is `"allow"`. The enum lives at
+    // `data.verdict.verdict` (FactoryEventKind serializes as
+    // `{type, ..., verdict: <GateVerdict>}` and `GateVerdict` is
+    // `#[serde(tag = "verdict")]`). Same indexed-column scoping as
+    // above.
     let verify_passed: i64 = sqlx::query(
         "SELECT COUNT(*)::BIGINT FROM events_ext \
           WHERE event_type = 'synodic.gate_verdict' \
-            AND data->>'verdict' = 'allow' \
-            AND data->>'workspace_id' = $1 \
+            AND workspace_id = $1 \
+            AND data->'verdict'->>'verdict' = 'allow' \
             AND created_at >= NOW() - INTERVAL '7 days'",
     )
     .bind(workspace_id)
