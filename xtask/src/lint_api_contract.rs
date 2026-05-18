@@ -480,6 +480,10 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "/api/build-info",
         "Runtime deployment descriptor (spec #398) — fetched from `lib/build-info.ts` via a bespoke fetch before any workspace scope exists. No auth, no workspace_id; outside the `lib/api/` typed scanner.",
     ),
+    (
+        "/api/showcase/dogfood",
+        "Public Dogfood showcase projection (spec #407) — fetched from `pages/ShowcaseDogfoodPage.tsx` via a bespoke pre-auth fetch on an unauthenticated route. No `workspace_id` scoping; outside the `lib/api/` typed scanner.",
+    ),
 ];
 
 /// Routes registered by stiglab (or any other factory subsystem) that

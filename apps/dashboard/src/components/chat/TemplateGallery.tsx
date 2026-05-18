@@ -81,6 +81,18 @@ function TemplateCard({
           {" · "}
           {triggerLabel(template.trigger_kind)}
         </div>
+        {template.id === "onsager-dogfood" ? (
+          // Spec #407 link-surfacing — the dogfood template card carries
+          // a "see live" pointer to the public showcase so an evaluator
+          // can confirm the template isn't aspirational.
+          <a
+            href="/showcase/dogfood"
+            onClick={(e) => e.stopPropagation()}
+            className="text-[11px] text-primary underline-offset-4 hover:underline"
+          >
+            See this template running on Onsager itself →
+          </a>
+        ) : null}
       </CardContent>
     </Card>
   )

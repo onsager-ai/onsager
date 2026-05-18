@@ -64,6 +64,13 @@ pub struct Config {
     /// self-hosted enterprise deploys that want the OSS chrome.
     /// Configured via `ONSAGER_DEPLOYMENT`.
     pub deployment: Option<String>,
+    /// Pinned workflow_id for the public Dogfood showcase (spec #407).
+    /// When `None`, `GET /api/showcase/dogfood` short-circuits to
+    /// `{ enabled: false }`. The Cloud deploy sets this to the spine
+    /// workflow row that models Onsager-managing-Onsager; OSS
+    /// self-hosters can point it at their own dogfood workflow.
+    /// Configured via `SHOWCASE_DOGFOOD_WORKFLOW_ID`.
+    pub showcase_dogfood_workflow_id: Option<String>,
 }
 
 /// Default monthly per-workspace cap for `propose_remediation` AI
@@ -151,6 +158,7 @@ mod tests {
             telegram_webhook_secret: None,
             remediation_monthly_cap_usd: DEFAULT_REMEDIATION_MONTHLY_CAP_USD,
             deployment: None,
+            showcase_dogfood_workflow_id: None,
         }
     }
 

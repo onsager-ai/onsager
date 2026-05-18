@@ -86,6 +86,11 @@ enum Command {
         /// the workspace-less `/chat` entry per spec #398).
         #[arg(long, env = "ONSAGER_DEPLOYMENT")]
         deployment: Option<String>,
+        /// Pinned workflow_id for the public Dogfood showcase
+        /// (spec #407). When unset, `GET /api/showcase/dogfood`
+        /// returns `{ enabled: false }`.
+        #[arg(long, env = "SHOWCASE_DOGFOOD_WORKFLOW_ID")]
+        showcase_dogfood_workflow_id: Option<String>,
     },
     /// Backfill issues + PRs for an existing project.
     Backfill {
@@ -134,6 +139,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             telegram_webhook_secret,
             remediation_monthly_cap_usd,
             deployment,
+            showcase_dogfood_workflow_id,
         } => {
             let allowlist = sso_return_host_allowlist
                 .as_deref()
@@ -172,6 +178,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 remediation_monthly_cap_usd: remediation_monthly_cap_usd
                     .unwrap_or(onsager_portal::config::DEFAULT_REMEDIATION_MONTHLY_CAP_USD),
                 deployment: deployment.filter(|s| !s.trim().is_empty()),
+                showcase_dogfood_workflow_id: showcase_dogfood_workflow_id
+                    .filter(|s| !s.trim().is_empty()),
             };
             tracing::info!(%bind, "onsager-portal: starting webhook server");
             onsager_portal::server::run(cfg).await

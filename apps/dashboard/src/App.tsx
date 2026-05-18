@@ -54,6 +54,11 @@ const ChatPage = lazy(() =>
 const LandingPage = lazy(() =>
   import("@/pages/LandingPage").then((m) => ({ default: m.LandingPage })),
 )
+const ShowcaseDogfoodPage = lazy(() =>
+  import("@/pages/ShowcaseDogfoodPage").then((m) => ({
+    default: m.ShowcaseDogfoodPage,
+  })),
+)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -175,10 +180,25 @@ function AppRoutes() {
     />
   )
 
+  // Public Dogfood showcase (spec #407). Same auth-pre-empt as
+  // /landing: an evaluator clicking "see live runs ↗" from the OSS
+  // README hits this route directly, with no session.
+  const showcaseRoute = (
+    <Route
+      path="/showcase/dogfood"
+      element={
+        <LazyRoute>
+          <ShowcaseDogfoodPage />
+        </LazyRoute>
+      }
+    />
+  )
+
   if (loading) {
     return (
       <Routes>
         {landingRoute}
+        {showcaseRoute}
         <Route path="*" element={<AppShellSkeleton />} />
       </Routes>
     )
@@ -187,6 +207,7 @@ function AppRoutes() {
   return (
     <Routes>
       {landingRoute}
+      {showcaseRoute}
       <Route
         path="/login"
         element={user ? <Navigate to="/" replace /> : <LoginPage />}

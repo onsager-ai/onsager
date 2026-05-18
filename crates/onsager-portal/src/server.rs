@@ -14,8 +14,8 @@ use crate::handlers::{
     live_data as live_data_handlers, nodes as node_handlers, pats as pat_handlers,
     projects as project_handlers, registry_events as registry_event_handlers,
     registry_triggers as registry_trigger_handlers, runs as run_handlers,
-    sessions as session_handlers, spine as spine_handlers, tasks as task_handlers,
-    telegram_webhook, triggers as trigger_handlers, webhook,
+    sessions as session_handlers, showcase as showcase_handlers, spine as spine_handlers,
+    tasks as task_handlers, telegram_webhook, triggers as trigger_handlers, webhook,
     workflow_kinds as workflow_kind_handlers, workflow_views as workflow_view_handlers,
     workflows as workflow_handlers, workspaces as workspace_handlers,
 };
@@ -341,6 +341,17 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route(
             "/api/chat/completions",
             post(chat_handlers::create_chat_completion),
+        )
+        // Public Dogfood showcase (spec #407). Read-only projection of
+        // the Onsager-managing-Onsager workflow's recent runs. No auth,
+        // 60s in-process cache, sanitized to anonymized stage names +
+        // (number, url) spec/PR links — nothing else from the source
+        // tables crosses the boundary. Selection of which workflow to
+        // project is driven by `SHOWCASE_DOGFOOD_WORKFLOW_ID`; when
+        // unset the route returns `{ enabled: false }`.
+        .route(
+            "/api/showcase/dogfood",
+            axum::routing::get(showcase_handlers::get_dogfood),
         )
         // MCP server (ADR 0007 / #288). JSON-RPC 2.0 over HTTP — the
         // runtime-agnostic public contract for AI clients. Auth reuses
