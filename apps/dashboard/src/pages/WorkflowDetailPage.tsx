@@ -20,6 +20,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs"
 import { ActiveRunsBanner } from "@/components/factory/workflows/ActiveRunsBanner"
+import { MetaphorBanner } from "@/components/factory/workflows/MetaphorBanner"
 import { ArtifactBadge } from "@/components/factory/workflows/ArtifactBadge"
 import { ArtifactFlowOverview } from "@/components/factory/workflows/ArtifactFlowOverview"
 import { WorkflowActions } from "@/components/factory/workflows/WorkflowActions"
@@ -128,6 +129,7 @@ export function WorkflowDetailPage() {
 
   return (
     <div className="space-y-4 md:space-y-6">
+      <MetaphorBanner />
       {/* Desktop-only page header. Mobile uses the global top bar. */}
       <div className="hidden space-y-2 md:block">
         <BackLink workspaceSlug={workspace.slug} />

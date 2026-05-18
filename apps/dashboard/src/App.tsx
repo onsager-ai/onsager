@@ -51,6 +51,9 @@ const PersonalAccessTokensPage = lazy(() =>
 const ChatPage = lazy(() =>
   import("@/pages/ChatPage").then((m) => ({ default: m.ChatPage })),
 )
+const LandingPage = lazy(() =>
+  import("@/pages/LandingPage").then((m) => ({ default: m.LandingPage })),
+)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -158,12 +161,32 @@ function SessionIdRedirect() {
 function AppRoutes() {
   const { user, loading } = useAuth()
 
+  // Public landing surface (#408 location 4) — must render before the
+  // auth probe resolves so a first-contact visit isn't gated on
+  // `/api/auth/me`. Matched before the auth-loading branch.
+  const landingRoute = (
+    <Route
+      path="/landing"
+      element={
+        <LazyRoute>
+          <LandingPage />
+        </LazyRoute>
+      }
+    />
+  )
+
   if (loading) {
-    return <AppShellSkeleton />
+    return (
+      <Routes>
+        {landingRoute}
+        <Route path="*" element={<AppShellSkeleton />} />
+      </Routes>
+    )
   }
 
   return (
     <Routes>
+      {landingRoute}
       <Route
         path="/login"
         element={user ? <Navigate to="/" replace /> : <LoginPage />}

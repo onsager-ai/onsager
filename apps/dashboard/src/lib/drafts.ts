@@ -46,6 +46,7 @@ export function makeDraft(
   source: WorkflowDraftSource = "blank",
   workflow: WorkflowDocument = emptyDocument(),
   name = "Untitled draft",
+  templateId?: string,
 ): WorkflowDraft {
   const now = new Date().toISOString()
   return {
@@ -53,6 +54,7 @@ export function makeDraft(
     user_id: userId ?? ANON_USER_KEY,
     name,
     source,
+    template_id: templateId,
     workflow,
     created_at: now,
     updated_at: now,
@@ -169,6 +171,7 @@ export interface UseWorkflowDraftResult {
     source?: WorkflowDraftSource,
     workflow?: WorkflowDocument,
     name?: string,
+    templateId?: string,
   ) => WorkflowDraft
   /** Delete a draft. If it was the active one, switches to the next newest. */
   deleteById: (id: string) => void
@@ -216,8 +219,9 @@ export function useWorkflowDraft(
       source: WorkflowDraftSource = "blank",
       workflow: WorkflowDocument = emptyDocument(),
       name = "Untitled draft",
+      templateId?: string,
     ): WorkflowDraft => {
-      const fresh = makeDraft(userId, source, workflow, name)
+      const fresh = makeDraft(userId, source, workflow, name, templateId)
       saveDraft(userId, fresh)
       bumpAndSelect(fresh.id)
       return fresh

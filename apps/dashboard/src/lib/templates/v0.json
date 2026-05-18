@@ -1,0 +1,203 @@
+{
+  "version": 0,
+  "templates": [
+    {
+      "id": "auto-merge-on-green",
+      "name": "Auto-merge on green",
+      "scenario_class": "D",
+      "intent": "Auto-merge PRs labeled \"auto-merge\" once CI passes and a Verify gate confirms tests touch the changed code.",
+      "trigger_kind": "github_issue_webhook",
+      "trigger_label": "auto-merge",
+      "stages": [
+        {
+          "name": "CI-wait",
+          "gate_kind": "external-check",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Verify (tests-touch-diff)",
+          "gate_kind": "governance",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Merge",
+          "gate_kind": "external-check",
+          "artifact_kind": "PR"
+        }
+      ],
+      "primary_artifact_kind": "PR",
+      "factory_framing": "A QC checkpoint that lets clean PRs ship themselves."
+    },
+    {
+      "id": "spec-compliance-gate",
+      "name": "Spec-compliance gate",
+      "scenario_class": "D",
+      "intent": "Block merge unless the PR description links a spec issue (\"Closes #N\" or \"Part of #N\") OR the PR is labeled \"trivial\".",
+      "trigger_kind": "github_issue_webhook",
+      "trigger_label": "needs-spec-check",
+      "stages": [
+        {
+          "name": "Parse PR body",
+          "gate_kind": "external-check",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Verify spec-link",
+          "gate_kind": "governance",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Gate (deny | allow)",
+          "gate_kind": "manual-approval",
+          "artifact_kind": "PR"
+        }
+      ],
+      "primary_artifact_kind": "PR",
+      "factory_framing": "Refuses any product not tied to a blueprint."
+    },
+    {
+      "id": "labeled-issue-summary",
+      "name": "Labeled-issue summary",
+      "scenario_class": "D",
+      "intent": "When an issue is labeled \"needs-summary\", spin up an agent session to produce a 5-bullet summary, attach it as a comment, gate by a Verify check that the comment contains all required sections.",
+      "trigger_kind": "github_issue_webhook",
+      "trigger_label": "needs-summary",
+      "stages": [
+        {
+          "name": "Agent session (Summarize)",
+          "gate_kind": "agent-session",
+          "artifact_kind": "Issue"
+        },
+        {
+          "name": "Verify (sections present)",
+          "gate_kind": "governance",
+          "artifact_kind": "Issue"
+        },
+        {
+          "name": "Comment",
+          "gate_kind": "agent-session",
+          "artifact_kind": "Issue"
+        }
+      ],
+      "primary_artifact_kind": "Issue",
+      "factory_framing": "Sends incoming orders through an agent station for triage."
+    },
+    {
+      "id": "release-notes-from-merged-prs",
+      "name": "Weekly release notes",
+      "scenario_class": "D",
+      "intent": "Every Friday at 10am, generate release notes from PRs merged in the last 7 days; Verify by checking each referenced PR exists and is merged; post to a draft GitHub Release.",
+      "trigger_kind": "cron",
+      "trigger_label": "0 10 * * 5",
+      "stages": [
+        {
+          "name": "List merged PRs",
+          "gate_kind": "external-check",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Agent session (Draft notes)",
+          "gate_kind": "agent-session",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Verify (PRs exist and merged)",
+          "gate_kind": "governance",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Draft release",
+          "gate_kind": "agent-session",
+          "artifact_kind": "PR"
+        }
+      ],
+      "primary_artifact_kind": "PR",
+      "factory_framing": "Weekly inventory report from the production line.",
+      "cloud_only_note": "The 24/7 cron scheduler is Cloud-only; OSS can still preview this template's shape."
+    },
+    {
+      "id": "security-review-on-pr",
+      "name": "Security review on sensitive PRs",
+      "scenario_class": "D",
+      "intent": "For PRs touching files in a configured \"sensitive\" list, run a security-review agent session; require a human approve verdict before merge becomes allowed.",
+      "trigger_kind": "github_issue_webhook",
+      "trigger_label": "sensitive-area",
+      "stages": [
+        {
+          "name": "Path-glob filter",
+          "gate_kind": "external-check",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Agent session (Security review)",
+          "gate_kind": "agent-session",
+          "artifact_kind": "Session"
+        },
+        {
+          "name": "Human gate",
+          "gate_kind": "manual-approval",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Annotate PR",
+          "gate_kind": "agent-session",
+          "artifact_kind": "PR"
+        }
+      ],
+      "primary_artifact_kind": "PR",
+      "factory_framing": "Human inspection station for the sensitive line."
+    },
+    {
+      "id": "onsager-dogfood",
+      "name": "Onsager dogfood",
+      "scenario_class": "A",
+      "intent": "The workflow Onsager itself uses to ship its own code: spec issue → branch → PR → CI green → review → merge → close issue.",
+      "trigger_kind": "github_issue_webhook",
+      "trigger_label": "ready-to-implement",
+      "stages": [
+        {
+          "name": "Branch",
+          "gate_kind": "agent-session",
+          "artifact_kind": "Issue"
+        },
+        {
+          "name": "Agent session (Implement per spec)",
+          "gate_kind": "agent-session",
+          "artifact_kind": "Issue"
+        },
+        {
+          "name": "Verify (tests pass and touch new code)",
+          "gate_kind": "governance",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "PR",
+          "gate_kind": "agent-session",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "CI-wait",
+          "gate_kind": "external-check",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Review gate",
+          "gate_kind": "manual-approval",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Merge",
+          "gate_kind": "external-check",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "Close",
+          "gate_kind": "agent-session",
+          "artifact_kind": "Issue"
+        }
+      ],
+      "primary_artifact_kind": "PR",
+      "factory_framing": "The production line that builds Onsager itself."
+    }
+  ]
+}
