@@ -52,6 +52,7 @@ import type {
   WorkflowDocument,
   WorkflowDraft,
 } from "@/components/factory/workflows/workflow-draft"
+import { type FtueTemplate, templateToDocument } from "@/lib/templates"
 
 // ─── Runtime types ──────────────────────────────────────────────────────────
 
@@ -501,13 +502,15 @@ export function ChatPage() {
 
   const isEmpty = turns.length === 0
 
-  // Pick a template: switch into a fresh draft seeded with the template
-  // and pre-fill the composer with a `Customize "<name>" for my project.`
-  // hint per spec #400.
+  // Pick a template (spec #406): create a fresh draft seeded with the
+  // template's document, record source + template_id on the outer draft
+  // (the spec #404 instrumentation hook), and pre-fill the composer with
+  // the template's intent so the agent's first reply has context.
   const handlePickTemplate = useCallback(
-    (_presetId: string, presetLabel: string, doc: WorkflowDocument) => {
-      newDraft("template", doc, presetLabel || "Untitled draft")
-      setPrompt(`Customize "${presetLabel}" for my project.`)
+    (template: FtueTemplate) => {
+      const doc = templateToDocument(template)
+      newDraft("template", doc, template.name, template.id)
+      setPrompt(`Customize "${template.name}" for my project. ${template.intent}`)
     },
     [newDraft],
   )
@@ -570,6 +573,7 @@ export function ChatPage() {
             <EmptyState
               onChip={setPrompt}
               onPickTemplate={handlePickTemplate}
+              selectedTemplateId={activeDraft?.template_id}
               showTemplateGallery={isFtue}
             />
           ) : (
@@ -664,11 +668,17 @@ const EXAMPLE_CHIPS = [
 
 interface EmptyStateProps {
   onChip: (text: string) => void
-  onPickTemplate: (presetId: string, presetLabel: string, doc: WorkflowDocument) => void
+  onPickTemplate: (template: FtueTemplate) => void
+  selectedTemplateId?: string
   showTemplateGallery: boolean
 }
 
-function EmptyState({ onChip, onPickTemplate, showTemplateGallery }: EmptyStateProps) {
+function EmptyState({
+  onChip,
+  onPickTemplate,
+  selectedTemplateId,
+  showTemplateGallery,
+}: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center gap-6 py-12 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -683,9 +693,7 @@ function EmptyState({ onChip, onPickTemplate, showTemplateGallery }: EmptyStateP
       </div>
       {showTemplateGallery && (
         <div className="w-full max-w-3xl px-2">
-          <TemplateGallery
-            onPick={(preset, doc) => onPickTemplate(preset.id, preset.label, doc)}
-          />
+          <TemplateGallery onPick={onPickTemplate} selectedId={selectedTemplateId} />
         </div>
       )}
       <div className="flex flex-wrap justify-center gap-2">
@@ -702,14 +710,16 @@ function EmptyState({ onChip, onPickTemplate, showTemplateGallery }: EmptyStateP
           </Button>
         ))}
       </div>
-      <p className="max-w-xs text-xs text-muted-foreground">
+      {/* Spec #408 location 1: factory-metaphor copy on the chat empty state. */}
+      <p className="max-w-md text-xs text-muted-foreground">
         <Sparkles className="mr-1 inline h-3 w-3" />
-        Cards along the way show what&apos;s about to change. Nothing ships
-        until you accept.
+        Cards along the way are inspection reports — what&apos;s about to
+        change at each QC checkpoint. Nothing ships until you accept.
       </p>
     </div>
   )
 }
+
 
 // ─── Conversation feed ────────────────────────────────────────────────────────
 

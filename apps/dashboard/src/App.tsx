@@ -51,6 +51,9 @@ const PersonalAccessTokensPage = lazy(() =>
 const ChatPage = lazy(() =>
   import("@/pages/ChatPage").then((m) => ({ default: m.ChatPage })),
 )
+const LandingPage = lazy(() =>
+  import("@/pages/LandingPage").then((m) => ({ default: m.LandingPage })),
+)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -167,6 +170,14 @@ function AppRoutes() {
       <Route
         path="/login"
         element={user ? <Navigate to="/" replace /> : <LoginPage />}
+      />
+      <Route
+        path="/landing"
+        element={
+          <LazyRoute>
+            <LandingPage />
+          </LazyRoute>
+        }
       />
       <Route
         path="/*"
