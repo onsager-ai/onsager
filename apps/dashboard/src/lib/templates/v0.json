@@ -150,11 +150,16 @@
     {
       "id": "onsager-dogfood",
       "name": "Onsager dogfood",
-      "scenario_class": "D",
+      "scenario_class": "A",
       "intent": "The workflow Onsager itself uses to ship its own code: spec issue → branch → PR → CI green → review → merge → close issue.",
       "trigger_kind": "github_issue_webhook",
       "trigger_label": "ready-to-implement",
       "stages": [
+        {
+          "name": "Branch",
+          "gate_kind": "agent-session",
+          "artifact_kind": "Issue"
+        },
         {
           "name": "Agent session (Implement per spec)",
           "gate_kind": "agent-session",
@@ -163,6 +168,11 @@
         {
           "name": "Verify (tests pass and touch new code)",
           "gate_kind": "governance",
+          "artifact_kind": "PR"
+        },
+        {
+          "name": "PR",
+          "gate_kind": "agent-session",
           "artifact_kind": "PR"
         },
         {
@@ -176,9 +186,14 @@
           "artifact_kind": "PR"
         },
         {
-          "name": "Merge & close",
+          "name": "Merge",
           "gate_kind": "external-check",
           "artifact_kind": "PR"
+        },
+        {
+          "name": "Close",
+          "gate_kind": "agent-session",
+          "artifact_kind": "Issue"
         }
       ],
       "primary_artifact_kind": "PR",

@@ -515,6 +515,20 @@ export function ChatPage() {
     [newDraft],
   )
 
+  // The "describe one yourself" chips are a separate authoring path from
+  // the template gallery. If the active draft was seeded from a template,
+  // open a fresh blank draft so the right-panel DAG preview doesn't keep
+  // showing a stale template shape that no longer matches the prompt.
+  const handleChipPick = useCallback(
+    (text: string) => {
+      setPrompt(text)
+      if (activeDraft?.source === "template") {
+        newDraft()
+      }
+    },
+    [activeDraft?.source, newDraft],
+  )
+
   return (
     <div className="grid h-full grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
       {/* ── Left panel: chat ────────────────────────────────────────── */}
@@ -571,7 +585,7 @@ export function ChatPage() {
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
           {isEmpty ? (
             <EmptyState
-              onChip={setPrompt}
+              onChip={handleChipPick}
               onPickTemplate={handlePickTemplate}
               selectedTemplateId={activeDraft?.template_id}
               showTemplateGallery={isFtue}

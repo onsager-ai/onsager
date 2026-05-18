@@ -40,8 +40,14 @@ export function getTemplate(id: string): FtueTemplate | undefined {
 
 // Project a template into a fresh editable WorkflowDocument. The outer
 // WorkflowDraft record (source: "template", template_id, timestamps) is
-// composed by the caller via useWorkflowDraft.newDraft. Trigger fields
-// stay blank — binding (#402) fills them in.
+// composed by the caller via useWorkflowDraft.newDraft. The repo-scoped
+// fields (`install_id`, `repo_owner`, `repo_name`) stay blank because
+// binding (#402) is what picks the workspace, install, and project.
+// The `label` field carries whatever the template's trigger shape
+// contributes (GitHub label name, cron expression, etc.) so the data
+// round-trips into binding rather than being silently dropped — once
+// the WorkflowTriggerDraft type grows non-GitHub trigger fields (#402),
+// the cron expression moves into its proper slot.
 export function templateToDocument(template: FtueTemplate): WorkflowDocument {
   return {
     name: template.name,
@@ -49,7 +55,7 @@ export function templateToDocument(template: FtueTemplate): WorkflowDocument {
       install_id: "",
       repo_owner: "",
       repo_name: "",
-      label: template.trigger_kind === "cron" ? "" : template.trigger_label,
+      label: template.trigger_label,
     },
     stages: template.stages.map((s) =>
       makeStage(s.gate_kind, s.artifact_kind, s.name),

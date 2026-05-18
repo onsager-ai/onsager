@@ -9,16 +9,27 @@ import { Button } from "@/components/ui/button"
 const STORAGE_KEY = "onsager.metaphor_seen.workflow_detail"
 
 function readDismissed(): boolean {
-  if (typeof window === "undefined") return true
-  return window.localStorage.getItem(STORAGE_KEY) === "1"
+  // Private/restricted-mode storage throws on access; treat as
+  // not-yet-dismissed and let the in-memory dismiss handle the
+  // session so the banner doesn't crash the page.
+  try {
+    if (typeof window === "undefined") return true
+    return window.localStorage.getItem(STORAGE_KEY) === "1"
+  } catch {
+    return false
+  }
 }
 
 export function MetaphorBanner() {
   const [dismissed, setDismissed] = useState<boolean>(readDismissed)
 
   const dismiss = () => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, "1")
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(STORAGE_KEY, "1")
+      }
+    } catch {
+      // Quota or private mode — keep in-memory dismissal and move on.
     }
     setDismissed(true)
   }
@@ -40,7 +51,7 @@ export function MetaphorBanner() {
         variant="ghost"
         size="sm"
         onClick={dismiss}
-        aria-label="Dismiss"
+        aria-label="Got it, dismiss"
       >
         Got it
         <X className="h-3.5 w-3.5" />

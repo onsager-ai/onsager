@@ -8,9 +8,11 @@ interface TemplateGalleryProps {
 }
 
 // Horizontal scroll-strip of v0 templates (spec #406). Card click
-// populates the right-panel DAG preview. The factory-framing string
-// lives here as the card subtitle — the only place the metaphor
-// surfaces in the chat empty state (#408 location 3).
+// populates the right-panel DAG preview. Each card's subtitle is the
+// `factory_framing` string — that's the surface #408 location 3
+// commits to. (The chat empty state also carries the location-1
+// inspection-report callout in `ChatPage.tsx`; this component owns
+// the card surface, not the full empty-state vocabulary audit.)
 export function TemplateGallery({ onPick, selectedId }: TemplateGalleryProps) {
   return (
     <div className="w-full">
@@ -20,20 +22,20 @@ export function TemplateGallery({ onPick, selectedId }: TemplateGalleryProps) {
           {TEMPLATES.length} templates
         </span>
       </div>
-      <div
-        className="flex w-full snap-x snap-mandatory gap-3 overflow-x-auto pb-2 pl-1 pr-4"
-        role="list"
+      <ul
+        className="flex w-full snap-x snap-mandatory list-none gap-3 overflow-x-auto pb-2 pl-1 pr-4"
         aria-label="Workflow templates"
       >
         {TEMPLATES.map((template) => (
-          <TemplateCard
-            key={template.id}
-            template={template}
-            selected={selectedId === template.id}
-            onClick={() => onPick(template)}
-          />
+          <li key={template.id} className="shrink-0 snap-start">
+            <TemplateCard
+              template={template}
+              selected={selectedId === template.id}
+              onClick={() => onPick(template)}
+            />
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   )
 }
@@ -49,10 +51,10 @@ function TemplateCard({
 }) {
   return (
     <Card
-      role="listitem"
+      role="button"
       size="sm"
       data-selected={selected || undefined}
-      className="w-64 shrink-0 cursor-pointer snap-start text-left transition-colors hover:bg-muted/40 data-[selected]:ring-2 data-[selected]:ring-primary"
+      className="w-64 cursor-pointer text-left transition-colors hover:bg-muted/40 data-[selected]:ring-2 data-[selected]:ring-primary"
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -62,6 +64,7 @@ function TemplateCard({
       }}
       tabIndex={0}
       aria-pressed={selected}
+      aria-label={`${template.name}. ${template.factory_framing}`}
     >
       <CardContent className="flex flex-col gap-2">
         <div className="flex items-center gap-2">

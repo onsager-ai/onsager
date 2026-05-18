@@ -61,9 +61,14 @@ describe("FTUE template manifest (#406)", () => {
     ])
   })
 
-  it("is dominantly class D", () => {
+  it("is dominantly class D with a class-A signature bridge (#406)", () => {
+    // Spec #406: "Six templates, five class-D plus one class-A bridge."
+    // The bridge is the Dogfood signature scenario.
     const classD = TEMPLATES.filter((t) => t.scenario_class === "D").length
-    expect(classD).toBe(TEMPLATES.length)
+    const classA = TEMPLATES.filter((t) => t.scenario_class === "A").length
+    expect(classD).toBe(5)
+    expect(classA).toBe(1)
+    expect(getTemplate("onsager-dogfood")?.scenario_class).toBe("A")
   })
 
   it.each(TEMPLATES)(

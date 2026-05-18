@@ -20,7 +20,7 @@ describe("MetaphorBanner (#408 location 5)", () => {
 
   it("hides after Got it is clicked and persists across remounts", () => {
     const { unmount } = render(<MetaphorBanner />)
-    fireEvent.click(screen.getByRole("button", { name: /Dismiss/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Got it/ }))
     expect(screen.queryByText(/your first production line/)).toBeNull()
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe("1")
 

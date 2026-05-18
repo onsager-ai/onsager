@@ -51,8 +51,8 @@ export function LandingPage() {
             <span className="font-semibold text-foreground">
               ③ Watch runs land.
             </span>{" "}
-            Every run shows its inspection reports — what each stage
-            verified, what it changed, what it produced.
+            Every run shows what each stage verified, what it changed,
+            and what it produced.
           </li>
         </ol>
       </section>
