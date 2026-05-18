@@ -90,7 +90,6 @@ export function BindDraftDialog({
   initialStep,
   onStepChange,
 }: BindDraftDialogProps) {
-  const queryClient = useQueryClient()
   const navigate = useNavigate()
 
   const { data: workspacesData, isLoading: workspacesLoading } = useQuery({
@@ -196,10 +195,7 @@ export function BindDraftDialog({
             <WorkspaceStep
               workspaces={workspaces}
               loading={workspacesLoading}
-              onSelect={(ws) => {
-                setPickedId(ws.id)
-                queryClient.invalidateQueries({ queryKey: ["workspaces"] })
-              }}
+              onSelect={(ws) => setPickedId(ws.id)}
             />
           )}
 
@@ -217,7 +213,12 @@ export function BindDraftDialog({
               draft={draft}
               userId={userId}
               onBound={(workflowId) => {
-                onOpenChange(false)
+                // Route through handleOpenChange so successful binds
+                // run the same reset path as a user-initiated close
+                // (clears stepOverride). The navigate fires after the
+                // dialog has closed so React doesn't try to render the
+                // ProjectStep again with stale state.
+                handleOpenChange(false)
                 navigate(
                   `/workspaces/${selectedWorkspace.slug}/workflows/${workflowId}`,
                 )
@@ -302,10 +303,23 @@ function InstallStep({
   // Round-trip target: come back to /chat with bind=continue so the
   // dialog re-opens at Step C. Portal honours `return_to` via the
   // install-callback cookie path (spec #402).
-  const returnTo = `/chat?draft=${encodeURIComponent(draftId)}&bind=continue&workspace_id=${encodeURIComponent(workspace.id)}`
-  const installUrl =
-    `/api/github-app/install-start?workspace_id=${encodeURIComponent(workspace.id)}` +
-    `&return_to=${encodeURIComponent(returnTo)}`
+  //
+  // Build the path with `URLSearchParams` so each id is encoded once
+  // (inside `returnTo`), then encode the whole `returnTo` once more
+  // when embedding it as the outer `return_to` value. Hand-rolling
+  // `encodeURIComponent` on each id and then again on the wrapped
+  // string would double-encode any character that needs escaping.
+  const returnQuery = new URLSearchParams({
+    draft: draftId,
+    bind: "continue",
+    workspace_id: workspace.id,
+  })
+  const returnTo = `/chat?${returnQuery.toString()}`
+  const outerQuery = new URLSearchParams({
+    workspace_id: workspace.id,
+    return_to: returnTo,
+  })
+  const installUrl = `/api/github-app/install-start?${outerQuery.toString()}`
 
   return (
     <div className="space-y-3">

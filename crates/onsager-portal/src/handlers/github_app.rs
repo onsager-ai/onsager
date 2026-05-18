@@ -50,8 +50,11 @@ const RETURN_TO_COOKIE: &str = "onsager_github_app_return_to";
 /// Validate that a `return_to` value is a safe same-origin path. We
 /// require an explicit leading `/` (so callers can't pass a scheme +
 /// host) and forbid the `//` and `/\` prefixes that browsers treat as
-/// protocol-relative. Length is capped to keep the cookie payload
-/// reasonable.
+/// protocol-relative. We also reject ASCII control characters and
+/// whitespace — those are invalid in a `Location` header and would
+/// otherwise panic `Response::builder().header(…)` after the cookie
+/// round-trip, turning a crafted `return_to` into a 500/DoS. Length
+/// is capped to keep the cookie payload reasonable.
 fn is_safe_return_to(value: &str) -> bool {
     if value.is_empty() || value.len() > 512 {
         return false;
@@ -60,6 +63,16 @@ fn is_safe_return_to(value: &str) -> bool {
         return false;
     }
     if value.starts_with("//") || value.starts_with("/\\") {
+        return false;
+    }
+    // ASCII printable only — no controls, no whitespace, no high-bit
+    // bytes. RFC 3986 path/query chars are a subset of this. Anything
+    // outside this range would either fail header-value validation
+    // (panicking the response builder) or smuggle a header injection.
+    if !value
+        .bytes()
+        .all(|b| (0x21..=0x7e).contains(&b) && b != b'\\')
+    {
         return false;
     }
     true
@@ -357,6 +370,20 @@ mod tests {
         assert!(!is_safe_return_to(""));
         let huge = "/".to_string() + &"a".repeat(1024);
         assert!(!is_safe_return_to(&huge));
+    }
+
+    #[test]
+    fn return_to_rejects_header_smuggling() {
+        // Control characters / whitespace would otherwise panic
+        // `Response::builder().header(LOCATION, …)` once the value
+        // round-trips through the cookie.
+        assert!(!is_safe_return_to("/chat\nLocation: https://evil"));
+        assert!(!is_safe_return_to("/chat\rfoo"));
+        assert!(!is_safe_return_to("/chat with space"));
+        assert!(!is_safe_return_to("/chat\u{0000}"));
+        assert!(!is_safe_return_to("/chat\t"));
+        // High-bit bytes aren't valid in header values either.
+        assert!(!is_safe_return_to("/chat\u{0080}"));
     }
 
     #[test]
