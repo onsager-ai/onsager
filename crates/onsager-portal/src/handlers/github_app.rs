@@ -16,7 +16,9 @@
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{StatusCode, header};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
 use onsager_github::api::app as gh_app;
 use serde::Deserialize;
@@ -37,6 +39,32 @@ use crate::state::AppState;
 /// `onsager_github_app_state` once an operational window passes.
 const STATE_COOKIE: &str = "stiglab_github_app_state";
 
+/// Post-install return-target cookie (spec #402). The FTUE binding flow
+/// passes `?return_to=/chat?…&bind=continue` on install-start; the
+/// portal stashes it here, GitHub redirects back to the callback, and
+/// the callback reads it to send the browser to the binding dialog
+/// instead of the default `/workspaces?…` landing. Validated to be a
+/// same-origin path; anything else is dropped silently.
+const RETURN_TO_COOKIE: &str = "onsager_github_app_return_to";
+
+/// Validate that a `return_to` value is a safe same-origin path. We
+/// require an explicit leading `/` (so callers can't pass a scheme +
+/// host) and forbid the `//` and `/\` prefixes that browsers treat as
+/// protocol-relative. Length is capped to keep the cookie payload
+/// reasonable.
+fn is_safe_return_to(value: &str) -> bool {
+    if value.is_empty() || value.len() > 512 {
+        return false;
+    }
+    if !value.starts_with('/') {
+        return false;
+    }
+    if value.starts_with("//") || value.starts_with("/\\") {
+        return false;
+    }
+    true
+}
+
 /// GET /api/github-app/config — Tiny discovery endpoint so the
 /// dashboard can decide whether to render the "Install via GitHub App"
 /// button or fall back to the manual-entry form.
@@ -49,9 +77,14 @@ pub async fn config() -> Response {
 #[derive(Debug, Deserialize)]
 pub struct InstallStartQuery {
     pub workspace_id: String,
+    /// Optional same-origin path the callback should redirect to instead
+    /// of `/workspaces?...` (spec #402 binding-flow resume). Stashed in
+    /// a short-lived cookie at install-start, consumed at the callback.
+    /// Anything that isn't a safe same-origin path is dropped silently.
+    pub return_to: Option<String>,
 }
 
-/// GET /api/github-app/install-start?workspace_id=...
+/// GET /api/github-app/install-start?workspace_id=...&return_to=...
 pub async fn install_start(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -86,13 +119,44 @@ pub async fn install_start(
     } else {
         ""
     };
-    let cookie =
+    let state_cookie =
         format!("{STATE_COOKIE}={state_param}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600{sec}");
+
+    let return_cookie = query.return_to.as_deref().and_then(|rt| {
+        if is_safe_return_to(rt) {
+            // Base64-encode the path so cookie parsing doesn't choke
+            // on `=`, `;`, or `,` characters in the query string. The
+            // callback decodes before redirecting; URL_SAFE_NO_PAD
+            // produces a cookie-safe alphabet (the same engine `auth.rs`
+            // already uses for opaque session ids and SSO codes).
+            let encoded = URL_SAFE_NO_PAD.encode(rt.as_bytes());
+            Some(format!(
+                "{RETURN_TO_COOKIE}={encoded}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600{sec}"
+            ))
+        } else {
+            tracing::warn!(
+                "github_app install_start dropping unsafe return_to (len={})",
+                rt.len()
+            );
+            None
+        }
+    });
+
     let url = format!(
         "https://github.com/apps/{slug}/installations/new?state={state_param}",
         slug = cfg.slug,
     );
-    ([(header::SET_COOKIE, cookie)], Redirect::temporary(&url)).into_response()
+    let mut builder = axum::response::Response::builder()
+        .status(StatusCode::TEMPORARY_REDIRECT)
+        .header(header::LOCATION, url)
+        .header(header::SET_COOKIE, state_cookie);
+    if let Some(cookie) = return_cookie {
+        builder = builder.header(header::SET_COOKIE, cookie);
+    }
+    builder
+        .body(axum::body::Body::empty())
+        .unwrap()
+        .into_response()
 }
 
 #[derive(Debug, Deserialize)]
@@ -225,17 +289,85 @@ pub async fn install_callback(
     } else {
         ""
     };
-    let clear = format!("{STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}");
-    let location = format!(
-        "/workspaces?github_app_linked={}&workspace_id={}",
-        query.installation_id, workspace_id
-    );
+    let clear_state = format!("{STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}");
+    let clear_return =
+        format!("{RETURN_TO_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}");
+
+    // Spec #402: honour an optional `return_to` cookie set at
+    // install-start. The binding flow uses this to send the user back
+    // to /chat with `bind=continue`; without it, we fall back to the
+    // legacy `/workspaces?github_app_linked=…` landing the workspace
+    // card already handles. Append the install-success params either
+    // way so React Query caches can invalidate on the destination page.
+    let return_to_raw = parse_cookie(cookie_header, RETURN_TO_COOKIE);
+    let return_to_decoded = return_to_raw
+        .and_then(|raw| URL_SAFE_NO_PAD.decode(raw).ok())
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .filter(|decoded| is_safe_return_to(decoded));
+
+    let location = match return_to_decoded {
+        Some(path) => {
+            let separator = if path.contains('?') { '&' } else { '?' };
+            format!(
+                "{path}{separator}github_app_linked={}&workspace_id={}",
+                query.installation_id, workspace_id
+            )
+        }
+        None => format!(
+            "/workspaces?github_app_linked={}&workspace_id={}",
+            query.installation_id, workspace_id
+        ),
+    };
 
     axum::response::Response::builder()
         .status(StatusCode::FOUND)
         .header(header::LOCATION, location)
-        .header(header::SET_COOKIE, clear)
+        .header(header::SET_COOKIE, clear_state)
+        .header(header::SET_COOKIE, clear_return)
         .body(axum::body::Body::empty())
         .unwrap()
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn return_to_accepts_same_origin_paths() {
+        assert!(is_safe_return_to("/chat"));
+        assert!(is_safe_return_to("/chat?bind=continue"));
+        assert!(is_safe_return_to(
+            "/chat?draft=abc&bind=continue&workspace_id=ws_1"
+        ));
+        assert!(is_safe_return_to("/workspaces/acme/workflows"));
+    }
+
+    #[test]
+    fn return_to_rejects_open_redirects() {
+        // Protocol-relative — would let an attacker pivot to a third
+        // party origin once the browser fills in the scheme.
+        assert!(!is_safe_return_to("//evil.example.com/x"));
+        // Backslash variant the URL parser may normalize to `//`.
+        assert!(!is_safe_return_to("/\\evil.example.com/x"));
+        // Absolute URL — explicitly forbidden.
+        assert!(!is_safe_return_to("https://evil.example.com/x"));
+        assert!(!is_safe_return_to("javascript:alert(1)"));
+        // Empty / oversized payloads.
+        assert!(!is_safe_return_to(""));
+        let huge = "/".to_string() + &"a".repeat(1024);
+        assert!(!is_safe_return_to(&huge));
+    }
+
+    #[test]
+    fn return_to_base64_round_trips() {
+        let original = "/chat?draft=abc&bind=continue&workspace_id=ws_1";
+        let encoded = URL_SAFE_NO_PAD.encode(original.as_bytes());
+        // The encoded form must not contain cookie-breaking chars.
+        assert!(!encoded.contains(';'));
+        assert!(!encoded.contains(','));
+        assert!(!encoded.contains('='));
+        let decoded_bytes = URL_SAFE_NO_PAD.decode(encoded).unwrap();
+        assert_eq!(std::str::from_utf8(&decoded_bytes).unwrap(), original);
+    }
 }

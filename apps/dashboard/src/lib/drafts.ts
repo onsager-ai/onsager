@@ -151,6 +151,35 @@ export function deleteDraft(
   return next
 }
 
+/**
+ * Mark a draft as bound to a real spine workflow (axis 5, spec #402). The
+ * Drafted → Bound transition: writes `bound_to: {workspace_id, workflow_id,
+ * bound_at}` onto the draft record so the right-panel header can flip from
+ * `Draft · … · Saved locally` to `Bound · … · Open in Workflows →`.
+ *
+ * Returns the persisted draft, or `null` if no draft with that id exists.
+ */
+export function markDraftBound(
+  userId: string | null | undefined,
+  draftId: string,
+  workspaceId: string,
+  workflowId: string,
+): WorkflowDraft | null {
+  const all = loadDrafts(userId)
+  const draft = all.find((d) => d.id === draftId)
+  if (!draft) return null
+  const next: WorkflowDraft = {
+    ...draft,
+    bound_to: {
+      workspace_id: workspaceId,
+      workflow_id: workflowId,
+      bound_at: new Date().toISOString(),
+    },
+  }
+  saveDraft(userId, next)
+  return next
+}
+
 export interface UseWorkflowDraftResult {
   /** The active draft. Null only before mount completes / after delete. */
   draft: WorkflowDraft | null

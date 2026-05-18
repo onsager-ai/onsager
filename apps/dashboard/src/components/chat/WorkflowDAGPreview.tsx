@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -147,6 +147,12 @@ interface WorkflowDAGPreviewProps {
   onChange?: (next: WorkflowDocument) => void
   /** Optional header status — e.g. "Draft · Saved locally" or "Bound · …". */
   status?: string
+  /**
+   * Optional action rendered in the header bar next to the view toggle —
+   * used by ChatPage to mount the "Bind to a repo →" button (spec #402)
+   * without splitting the header surface across components.
+   */
+  headerAction?: ReactNode
 }
 
 function DAGInner({ draft }: { draft: WorkflowDocument | null }) {
@@ -286,6 +292,7 @@ export function WorkflowDAGPreview({
   draft,
   onChange,
   status,
+  headerAction,
 }: WorkflowDAGPreviewProps) {
   const [view, setView] = useState<ViewMode>("dag")
 
@@ -296,9 +303,10 @@ export function WorkflowDAGPreview({
           <span className="text-xs font-medium text-muted-foreground">
             {status ?? "Workflow preview"}
           </span>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-2">
+            {headerAction}
             {draft && (
-              <span className="mr-2 text-xs text-muted-foreground">
+              <span className="mr-1 text-xs text-muted-foreground">
                 {draft.stages.length} stage{draft.stages.length !== 1 ? "s" : ""}
               </span>
             )}
