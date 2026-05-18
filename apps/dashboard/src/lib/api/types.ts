@@ -514,7 +514,7 @@ export interface Workflow {
 // install id, snake_case `active`. The `trigger_kind` is the registry's
 // snake-case `kind_tag` (e.g. `'github_issue_webhook'`) — fetched at
 // runtime from `/api/registry/triggers` (spec #237). Construct with
-// `draftToCreateRequest` from the UI draft + installations list so the
+// `documentToCreateRequest` from the UI draft + installations list so the
 // numeric id is resolved from the workspace installation record id the
 // draft carries.
 export interface CreateWorkflowRequest {

@@ -13,7 +13,13 @@ import {
 // structured — no free-text linkable fields. The card stack is the source
 // of truth; the chat builder emits tool-call proposals that merge into
 // this draft.
-export interface WorkflowDraft {
+//
+// Renamed from `WorkflowDraft` per spec #401: the bare `{name, trigger,
+// stages}` shape is the *document* the user is authoring; the persisted
+// `WorkflowDraft` record (spec #401) wraps a `WorkflowDocument` with the
+// draft's identity (`id`, `user_id`, `source`, lifecycle timestamps,
+// optional `bound_to`).
+export interface WorkflowDocument {
   name: string
   trigger: WorkflowTriggerDraft
   stages: WorkflowStage[]
@@ -25,6 +31,38 @@ export interface WorkflowTriggerDraft {
   repo_name: string
   label: string
 }
+
+/**
+ * One end-user-owned workflow draft, persisted client-side per spec #401.
+ *
+ * Drafts live in localStorage keyed by `onsager.drafts.<user_id>` until
+ * the binding flow (axis 5) promotes them into a real spine workflow.
+ * Server-side draft sync is a v1.5 follow-up — the substrate stays
+ * untouched.
+ */
+export interface WorkflowDraft {
+  id: string
+  user_id: string
+  /** Display name for the draft; defaults to "Untitled draft". */
+  name: string
+  source: WorkflowDraftSource
+  /** Set when `source === "template"`. */
+  template_id?: string
+  /** The in-progress workflow document being authored. */
+  workflow: WorkflowDocument
+  /** ISO timestamp of first creation. */
+  created_at: string
+  /** ISO timestamp written on every edit. */
+  updated_at: string
+  /** Populated when the binding flow (axis 5) completes. */
+  bound_to?: {
+    workspace_id: string
+    workflow_id: string
+    bound_at: string
+  }
+}
+
+export type WorkflowDraftSource = "template" | "chat" | "yaml-paste" | "blank"
 
 export const GITHUB_ISSUE_TO_PR_PRESET = "github-issue-to-pr" as const
 
@@ -62,7 +100,7 @@ export function defaultStageName(gate: WorkflowGateKind): string {
   }
 }
 
-export function emptyDraft(): WorkflowDraft {
+export function emptyDocument(): WorkflowDocument {
   return {
     name: "",
     trigger: { install_id: "", repo_owner: "", repo_name: "", label: "" },
@@ -72,7 +110,7 @@ export function emptyDraft(): WorkflowDraft {
 
 export function githubIssueToPrPreset(
   trigger: WorkflowTriggerDraft,
-): WorkflowDraft {
+): WorkflowDocument {
   const owner = trigger.repo_owner || "repo"
   const name = trigger.repo_name || "issue-to-pr"
   return {
@@ -87,13 +125,13 @@ export function githubIssueToPrPreset(
 }
 
 // Preset catalog — drives the picker shown at the top of the workflow
-// builder. Each entry returns a fresh draft; the trigger stays empty and
-// is filled in via the TriggerCard.
+// builder. Each entry returns a fresh document; the trigger stays empty
+// and is filled in via the TriggerCard.
 export interface WorkflowPreset {
   id: string
   label: string
   description: string
-  build: (trigger: WorkflowTriggerDraft) => WorkflowDraft
+  build: (trigger: WorkflowTriggerDraft) => WorkflowDocument
 }
 
 export const WORKFLOW_PRESETS: WorkflowPreset[] = [
@@ -189,8 +227,8 @@ export function draftToRequestTrigger(t: WorkflowTriggerDraft): WorkflowTrigger 
 //    id against the installations the page already has loaded.
 // 2. UI-only stage fields (name, artifact_kind) ride inside `params` so
 //    they survive the round-trip without forcing a backend schema change.
-export function draftToCreateRequest(
-  draft: WorkflowDraft,
+export function documentToCreateRequest(
+  doc: WorkflowDocument,
   installations: GitHubAppInstallation[],
   workspaceId: string,
   activate: boolean,
@@ -198,13 +236,13 @@ export function draftToCreateRequest(
   if (!workspaceId.trim()) {
     throw new ApiError("workspace_id is required", 400)
   }
-  if (!isTriggerReady(draft.trigger)) {
+  if (!isTriggerReady(doc.trigger)) {
     throw new ApiError(
       "pick an install, repo, and label before activating",
       400,
     )
   }
-  const install = installations.find((i) => i.id === draft.trigger.install_id)
+  const install = installations.find((i) => i.id === doc.trigger.install_id)
   if (!install) {
     throw new ApiError(
       "selected GitHub install not found in this workspace",
@@ -213,17 +251,17 @@ export function draftToCreateRequest(
   }
   return {
     workspace_id: workspaceId,
-    name: draft.name.trim(),
+    name: doc.name.trim(),
     // Snake-case `kind_tag` from the registry manifest (#237).
     // `<TriggerKindPicker>` could expose this for selection, but today
     // the draft form is GitHub-only so we hardcode the only registered
     // tag — matching whatever `/api/registry/triggers` returns.
     trigger_kind: "github_issue_webhook",
     install_id: install.install_id,
-    repo_owner: draft.trigger.repo_owner,
-    repo_name: draft.trigger.repo_name,
-    trigger_label: draft.trigger.label,
-    stages: draft.stages.map(stageToCreateStage),
+    repo_owner: doc.trigger.repo_owner,
+    repo_name: doc.trigger.repo_name,
+    trigger_label: doc.trigger.label,
+    stages: doc.stages.map(stageToCreateStage),
     active: activate,
   }
 }

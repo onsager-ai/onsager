@@ -80,6 +80,12 @@ enum Command {
         /// `DEFAULT_REMEDIATION_MONTHLY_CAP_USD`.
         #[arg(long, env = "PORTAL_REMEDIATION_MONTHLY_CAP_USD")]
         remediation_monthly_cap_usd: Option<f64>,
+        /// Deployment descriptor — `cloud` for the SaaS deploy; left unset
+        /// for OSS / self-hosted (the dashboard reads this via
+        /// `/api/build-info` to decide whether to show the OSS banner on
+        /// the workspace-less `/chat` entry per spec #398).
+        #[arg(long, env = "ONSAGER_DEPLOYMENT")]
+        deployment: Option<String>,
     },
     /// Backfill issues + PRs for an existing project.
     Backfill {
@@ -127,6 +133,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             dev_login_enabled,
             telegram_webhook_secret,
             remediation_monthly_cap_usd,
+            deployment,
         } => {
             let allowlist = sso_return_host_allowlist
                 .as_deref()
@@ -164,6 +171,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 telegram_webhook_secret: telegram_webhook_secret.filter(|s| !s.is_empty()),
                 remediation_monthly_cap_usd: remediation_monthly_cap_usd
                     .unwrap_or(onsager_portal::config::DEFAULT_REMEDIATION_MONTHLY_CAP_USD),
+                deployment: deployment.filter(|s| !s.trim().is_empty()),
             };
             tracing::info!(%bind, "onsager-portal: starting webhook server");
             onsager_portal::server::run(cfg).await

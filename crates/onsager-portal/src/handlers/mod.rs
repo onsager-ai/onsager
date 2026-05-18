@@ -3,6 +3,7 @@
 
 pub mod agent_ws;
 pub mod auth;
+pub mod build_info;
 pub mod chat;
 pub mod credentials;
 pub mod github_app;

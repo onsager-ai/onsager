@@ -36,11 +36,22 @@ import {
   saveStoredTurns,
   type StoredTurn,
 } from "@/lib/chat/chat-storage"
-import { useActiveWorkspace } from "@/lib/workspace"
+import {
+  readLastUsedWorkspace,
+  useMembershipWorkspaces,
+  useOptionalActiveWorkspace,
+} from "@/lib/workspace"
 import { useAuth } from "@/lib/auth"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { WorkflowDAGPreview } from "@/components/chat/WorkflowDAGPreview"
-import type { WorkflowDraft } from "@/components/factory/workflows/workflow-draft"
+import { TemplateGallery } from "@/components/chat/TemplateGallery"
+import { DraftStrip } from "@/components/chat/DraftStrip"
+import { useWorkflowDraft } from "@/lib/drafts"
+import { useBuildInfo } from "@/lib/build-info"
+import type {
+  WorkflowDocument,
+  WorkflowDraft,
+} from "@/components/factory/workflows/workflow-draft"
 
 // ─── Runtime types ──────────────────────────────────────────────────────────
 
@@ -188,8 +199,13 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-// Extract a WorkflowDraft from propose_workflow args for the DAG preview.
-function extractWorkflowDraft(args: Record<string, unknown>): WorkflowDraft | null {
+// Extract a WorkflowDocument from a `propose_workflow` /
+// `propose_workflow_draft` tool-call's args for the DAG preview. Both
+// tools accept the same canonical {name, trigger, stages} shape; the
+// draft variant just elides workspace context.
+function extractWorkflowDocument(
+  args: Record<string, unknown>,
+): WorkflowDocument | null {
   try {
     const name = typeof args.name === "string" ? args.name : ""
     const trigger = (args.trigger ?? {}) as Record<string, unknown>
@@ -224,24 +240,65 @@ export function ChatPage() {
   // AppLayout switches <main> to overflow-hidden + no padding for split-panel.
   usePageHeader({ title: "Chat", fullBleed: true })
 
-  const workspace = useActiveWorkspace()
+  // The /chat entry is mounted twice — workspace-scoped (under
+  // /workspaces/:slug/chat) and unscoped (top-level /chat per spec #398).
+  // Tolerate both: prefer the explicit scope, fall back to last-used or
+  // memberships[0] so the user's previous workspace is still in scope
+  // when they land on /chat without re-typing the URL.
+  const scopedWorkspace = useOptionalActiveWorkspace()
+  const memberships = useMembershipWorkspaces()
+  const workspace = useMemo(() => {
+    if (scopedWorkspace) return scopedWorkspace
+    const lastUsed = readLastUsedWorkspace()
+    if (lastUsed) {
+      const match = memberships.find((w) => w.slug === lastUsed)
+      if (match) return match
+    }
+    return memberships[0] ?? null
+  }, [scopedWorkspace, memberships])
+  const isFtue = scopedWorkspace == null
   const { user } = useAuth()
+  const buildInfo = useBuildInfo()
+  const isOss = buildInfo?.is_oss ?? false
 
-  const storageKey = useMemo(
-    () => (user ? chatStorageKey(user.id, workspace.id) : null),
-    [user, workspace.id],
-  )
+  // Per spec #401: persist drafts client-side under the user namespace.
+  // The active draft drives the right-panel DAG/YAML preview.
+  const {
+    draft: activeDraft,
+    drafts,
+    setWorkflow,
+    switchDraft,
+    newDraft,
+    deleteById,
+  } = useWorkflowDraft(user?.id ?? null)
+  const workflowDoc: WorkflowDocument | null = activeDraft?.workflow ?? null
+
+  // Chat-history scope. Workspace-bound conversations key off the
+  // workspace; FTUE conversations bind to the active draft so each draft
+  // owns its own back-and-forth, per spec #400.
+  const storageKey = useMemo(() => {
+    if (!user) return null
+    if (workspace) return chatStorageKey(user.id, workspace.id)
+    if (activeDraft) return chatStorageKey(user.id, `draft:${activeDraft.id}`)
+    return chatStorageKey(user.id, "draft:empty")
+  }, [user, workspace, activeDraft])
 
   const [tools, setTools] = useState<McpTool[] | null>(null)
   const [toolsError, setToolsError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [prompt, setPrompt] = useState("")
-  const [workflowDraft, setWorkflowDraft] = useState<WorkflowDraft | null>(null)
+  // Banner is dismissible per session (spec #398). Sessionstorage so
+  // re-mounts/page navs within the same tab don't repop it.
+  const [ossBannerDismissed, setOssBannerDismissed] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.sessionStorage.getItem("onsager.oss_banner_dismissed") === "1",
+  )
   const feedEndRef = useRef<HTMLDivElement>(null)
 
   const [turns, setTurns] = useState<ChatTurn[]>(() => {
-    if (!user) return []
-    return hydrateTurns(loadStoredTurns(chatStorageKey(user.id, workspace.id)))
+    if (!user || !storageKey) return []
+    return hydrateTurns(loadStoredTurns(storageKey))
   })
 
   const turnsRef = useRef<ChatTurn[]>(turns)
@@ -274,10 +331,17 @@ export function ChatPage() {
   }, [turns])
 
   const llmMessages = useMemo<LlmTurnMessage[]>(() => {
-    const out: LlmTurnMessage[] = [
-      { role: "user", content: `(context) workspace_id = ${workspace.id}` },
-      { role: "assistant", content: "Acknowledged." },
-    ]
+    const out: LlmTurnMessage[] = []
+    // Only inject workspace context when one is actually in scope. FTUE
+    // workspace-less turns leave this out entirely — the FTUE preamble
+    // in the system prompt steers the agent to `propose_workflow_draft`.
+    if (workspace) {
+      out.push({
+        role: "user",
+        content: `(context) workspace_id = ${workspace.id}`,
+      })
+      out.push({ role: "assistant", content: "Acknowledged." })
+    }
     for (const t of turns) {
       out.push({ role: "user", content: t.userMessage.content })
       if (t.assistantMessage) {
@@ -285,7 +349,7 @@ export function ChatPage() {
       }
     }
     return out
-  }, [turns, workspace.id])
+  }, [turns, workspace])
 
   const autoRunReadOnly = useCallback(async (turnId: string, call: ToolCallEntry) => {
     try {
@@ -315,7 +379,12 @@ export function ChatPage() {
       const result = await runChatTurn({
         messages: [...llmMessages, { role: "user", content: text }],
         tools,
-        workspaceId: workspace.id,
+        // Always pass the resolved workspace id when one exists — even on
+        // the FTUE /chat path the relay needs *some* workspace to find an
+        // Anthropic credential. The FTUE preamble is what steers tool
+        // selection toward the workspace-less draft path.
+        workspaceId: workspace?.id,
+        ftue: isFtue,
       })
       const assistantMessage: ChatMessage | undefined = result.text
         ? { id: `${turnId}-a`, role: "assistant", content: result.text }
@@ -356,7 +425,7 @@ export function ChatPage() {
     } finally {
       setSubmitting(false)
     }
-  }, [prompt, submitting, tools, llmMessages, workspace.id, autoRunReadOnly])
+  }, [prompt, submitting, tools, llmMessages, workspace, isFtue, autoRunReadOnly])
 
   const onFormSubmit = useCallback(
     (e: FormEvent) => {
@@ -399,8 +468,12 @@ export function ChatPage() {
         setTurns((prev) =>
           updateCall(prev, turnId, callId, { state: "committed", resultText: result.content[0]?.text }),
         )
-        if (target.toolName === "propose_workflow") {
-          setWorkflowDraft(extractWorkflowDraft(mergedArgs))
+        if (
+          target.toolName === "propose_workflow" ||
+          target.toolName === "propose_workflow_draft"
+        ) {
+          const doc = extractWorkflowDocument(mergedArgs)
+          if (doc) setWorkflow(doc)
         }
       } catch (err) {
         setTurns((prev) =>
@@ -408,7 +481,7 @@ export function ChatPage() {
         )
       }
     },
-    [],
+    [setWorkflow],
   )
 
   const handleReject = useCallback((turnId: string, callId: string) => {
@@ -417,13 +490,72 @@ export function ChatPage() {
 
   const isEmpty = turns.length === 0
 
+  // Pick a template: switch into a fresh draft seeded with the template
+  // and pre-fill the composer with a `Customize "<name>" for my project.`
+  // hint per spec #400.
+  const handlePickTemplate = useCallback(
+    (_presetId: string, presetLabel: string, doc: WorkflowDocument) => {
+      newDraft("template", doc, presetLabel || "Untitled draft")
+      setPrompt(`Customize "${presetLabel}" for my project.`)
+    },
+    [newDraft],
+  )
+
   return (
     <div className="grid h-full grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
       {/* ── Left panel: chat ────────────────────────────────────────── */}
       <div className="flex h-full flex-col overflow-hidden border-r">
+        {/* OSS banner (spec #398) — only when running OSS, only on the
+            FTUE workspace-less entry, dismissible per session. */}
+        {isOss && isFtue && !ossBannerDismissed ? (
+          <div className="flex shrink-0 items-center gap-2 border-b bg-muted/40 px-4 py-2 text-xs">
+            <span className="text-muted-foreground">
+              Running Onsager OSS at localhost. Drafts are stored on this machine.
+            </span>
+            <a
+              href="https://app.onsager.ai"
+              target="_blank"
+              rel="noreferrer"
+              className="ml-auto font-medium text-primary hover:underline"
+            >
+              Sign in to sync drafts to the cloud →
+            </a>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6 text-muted-foreground"
+              onClick={() => {
+                setOssBannerDismissed(true)
+                if (typeof window !== "undefined") {
+                  window.sessionStorage.setItem(
+                    "onsager.oss_banner_dismissed",
+                    "1",
+                  )
+                }
+              }}
+              aria-label="Dismiss OSS banner"
+            >
+              <span aria-hidden="true">×</span>
+            </Button>
+          </div>
+        ) : null}
+        {/* Drafts quick-access strip (spec #401). Only shown when the
+            user has at least one persisted draft. */}
+        <DraftStrip
+          drafts={drafts}
+          activeId={activeDraft?.id ?? null}
+          onSwitch={switchDraft}
+          onNew={() => newDraft()}
+          onDelete={deleteById}
+        />
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
           {isEmpty ? (
-            <EmptyState onChip={setPrompt} />
+            <EmptyState
+              onChip={setPrompt}
+              onPickTemplate={handlePickTemplate}
+              showTemplateGallery={isFtue}
+            />
           ) : (
             <ConversationFeed
               turns={turns}
@@ -483,23 +615,46 @@ export function ChatPage() {
 
       {/* ── Right panel: workflow DAG preview (desktop only) ────────── */}
       <div className="hidden md:block">
-        <WorkflowDAGPreview draft={workflowDraft} />
+        <WorkflowDAGPreview
+          draft={workflowDoc}
+          onChange={setWorkflow}
+          status={dagHeaderStatus(activeDraft)}
+        />
       </div>
     </div>
   )
 }
 
+// Build the header status line for the right-panel preview per spec
+// #401's locked copy: `Draft · <name> · Saved locally` while unbound,
+// `Bound · <name> · Open in Workflows →` once the binding flow finishes.
+function dagHeaderStatus(draft: WorkflowDraft | null): string | undefined {
+  if (!draft) return undefined
+  const name = draft.name || draft.workflow.name || "Untitled workflow"
+  if (draft.bound_to) return `Bound · ${name} · Open in Workflows →`
+  return `Draft · ${name} · Saved locally`
+}
+
 // ─── Empty state ─────────────────────────────────────────────────────────────
 
+// Workspace-free example chips per spec #400 — they teach the user the
+// shape of *questions* to ask (the gallery teaches the shape of
+// outputs). Locked copy.
 const EXAMPLE_CHIPS = [
-  "Auto-merge PRs labeled `auto-merge` once CI is green.",
-  "Summarize newly-labeled issues and post to Slack.",
-  "Generate weekly release notes from merged PRs.",
+  "Walk me through the auto-merge-on-green template.",
+  "What's a Verify gate? Show me one.",
+  "Draft a workflow that summarizes labeled issues.",
 ]
 
-function EmptyState({ onChip }: { onChip: (text: string) => void }) {
+interface EmptyStateProps {
+  onChip: (text: string) => void
+  onPickTemplate: (presetId: string, presetLabel: string, doc: WorkflowDocument) => void
+  showTemplateGallery: boolean
+}
+
+function EmptyState({ onChip, onPickTemplate, showTemplateGallery }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center gap-6 py-16 text-center">
+    <div className="flex flex-col items-center gap-6 py-12 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
         <MessageSquare className="h-7 w-7" />
       </div>
@@ -510,6 +665,13 @@ function EmptyState({ onChip }: { onChip: (text: string) => void }) {
           review it, and one click ships it.
         </p>
       </div>
+      {showTemplateGallery && (
+        <div className="w-full max-w-3xl px-2">
+          <TemplateGallery
+            onPick={(preset, doc) => onPickTemplate(preset.id, preset.label, doc)}
+          />
+        </div>
+      )}
       <div className="flex flex-wrap justify-center gap-2">
         {EXAMPLE_CHIPS.map((chip) => (
           <Button

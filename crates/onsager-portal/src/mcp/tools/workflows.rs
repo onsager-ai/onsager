@@ -22,6 +22,106 @@ use super::super::{ToolError, ToolResult};
 use super::require_workspace_access;
 
 // =============================================================================
+// propose_workflow_draft
+// =============================================================================
+
+/// Arguments for `propose_workflow_draft`. The FTUE counterpart of
+/// `propose_workflow` — returns a draft shape the dashboard can render
+/// in the right-panel DAG preview without ever touching the spine.
+/// Crucially, no `workspace_id` is required: the caller may not yet have
+/// one when this tool is invoked from the workspace-less `/chat` entry.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProposeWorkflowDraftArgs {
+    /// Human-readable name for the draft.
+    pub name: String,
+    /// Optional trigger config. May be omitted when the draft is still
+    /// trigger-less — the user binds a real install/repo/label later via
+    /// the binding flow (axis 5).
+    #[serde(default)]
+    pub trigger: Option<TriggerKind>,
+    /// Ordered stage chain. At least one stage is required.
+    pub stages: Vec<StageInput>,
+    /// Optional source hint — `template`, `chat`, `yaml-paste`, `blank`.
+    /// Echoed back so the dashboard can populate the draft record.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Optional template id when `source == "template"`.
+    #[serde(default)]
+    pub template_id: Option<String>,
+}
+
+/// One stage in the proposed draft. Mirrors the persisted shape but
+/// stays detached from any workflow_id (the draft has none yet).
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DraftStageInput {
+    pub gate_kind: GateKind,
+    #[serde(default)]
+    pub params: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct DraftStageOut {
+    id: String,
+    seq: i32,
+    gate_kind: GateKind,
+    params: Value,
+}
+
+#[derive(Debug, Serialize)]
+struct DraftEnvelope {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trigger: Option<TriggerKind>,
+    stages: Vec<DraftStageOut>,
+    source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    template_id: Option<String>,
+}
+
+/// MCP handler for `propose_workflow_draft`. Pure: validates inputs and
+/// echoes back a structured draft. No DB writes, no spine emits, no
+/// workspace membership checks.
+pub async fn propose_workflow_draft(
+    _state: &AppState,
+    _auth_user: &AuthUser,
+    args: Value,
+) -> ToolResult {
+    let args: ProposeWorkflowDraftArgs = serde_json::from_value(args).map_err(|e| {
+        ToolError::InvalidParams(format!("invalid propose_workflow_draft args: {e}"))
+    })?;
+
+    if args.name.trim().is_empty() {
+        return Err(ToolError::InvalidParams("name is required".into()));
+    }
+    if args.stages.is_empty() {
+        return Err(ToolError::InvalidParams(
+            "at least one stage is required".into(),
+        ));
+    }
+
+    let stages: Vec<DraftStageOut> = args
+        .stages
+        .iter()
+        .enumerate()
+        .map(|(i, s)| DraftStageOut {
+            id: Uuid::new_v4().to_string(),
+            seq: i as i32,
+            gate_kind: s.gate_kind,
+            params: s.params.clone().unwrap_or_else(|| serde_json::json!({})),
+        })
+        .collect();
+
+    let envelope = DraftEnvelope {
+        name: args.name.trim().to_string(),
+        trigger: args.trigger,
+        stages,
+        source: args.source.unwrap_or_else(|| "chat".to_string()),
+        template_id: args.template_id,
+    };
+    serde_json::to_value(envelope).map_err(internal_serialize)
+}
+
+// =============================================================================
 // propose_workflow
 // =============================================================================
 

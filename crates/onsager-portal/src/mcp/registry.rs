@@ -98,6 +98,15 @@ fn build_registry() -> Vec<ToolDescriptor> {
             },
         },
         ToolDescriptor {
+            name: "propose_workflow_draft",
+            description: "FTUE counterpart of `propose_workflow`: returns a structured workflow-draft payload without writing to the spine. No workspace_id required — the user may not yet have one. The dashboard wraps the response in a localStorage-backed WorkflowDraft record; the binding flow promotes it to a real workflow via `propose_workflow` once the user picks a workspace/install/repo.",
+            category: ToolCategory::Constructive,
+            input_schema: super::input_schema::<tools::workflows::ProposeWorkflowDraftArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::workflows::propose_workflow_draft(state, user, args))
+            },
+        },
+        ToolDescriptor {
             name: "run_workflow",
             description: "Fire a workflow's `manual` trigger to start a new run. Workflow must be active and declare a matching manual trigger name.",
             category: ToolCategory::Destructive,

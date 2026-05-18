@@ -3,13 +3,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   WORKFLOW_PRESETS,
-  type WorkflowDraft,
+  type WorkflowDocument,
   type WorkflowPreset,
 } from "./workflow-draft"
 
 export interface PresetPickerProps {
-  draft: WorkflowDraft
-  onApply: (next: WorkflowDraft) => void
+  draft: WorkflowDocument
+  onApply: (next: WorkflowDocument) => void
 }
 
 // Preset picker shown above the chat builder. Applying a preset fills the

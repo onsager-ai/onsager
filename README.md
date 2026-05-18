@@ -1,6 +1,38 @@
-# Onsager
+# Onsager — governed workflows for AI-augmented engineering work
 
-AI factory stack — monorepo for the Onsager event bus and its subsystems.
+When agents write code, ship safely. Onsager runs your team's quality
+gates — automated verification, governance, audit — on every
+AI-generated change. Open source, runs anywhere.
+
+## What you do
+
+① Describe the policy in plain English ("auto-merge PRs labeled
+`auto-merge` once CI is green and a Verify gate passes").
+② Onsager proposes a workflow draft you review and edit.
+③ Bind it to a repo when you're ready. Your draft is yours before,
+during, and after.
+
+## Try it
+
+```bash
+git clone https://github.com/onsager-ai/onsager
+cd onsager
+just dev
+```
+
+Open <http://localhost:5173>. You land in Chat — start describing a
+workflow.
+
+## See it run
+
+Onsager builds Onsager. Browse our own runs at
+<https://app.onsager.ai/showcase/dogfood>.
+
+## Or skip the setup
+
+Sign in at <https://app.onsager.ai>.
+
+---
 
 ## Architecture
 
@@ -73,7 +105,7 @@ are typed shared building blocks consumed by the subsystems above.
 A single React app at `apps/dashboard/` surfaces sessions, nodes, governance,
 and factory views.
 
-## Getting Started
+## Getting Started (contributor setup)
 
 Prerequisites: Docker, Rust toolchain (via rustup), pnpm.
 
@@ -83,7 +115,7 @@ just dev                   # Postgres, migrations, and all services
 just smoke-test            # verify everything works (in another terminal)
 ```
 
-Open the dashboard at http://localhost:5173 and click **Dev Login** —
+Open the dashboard at <http://localhost:5173> and click **Dev Login** —
 debug builds (the default `cargo build` / `just dev` profile) seed a
 `${USER}@local` user plus a default workspace and expose a one-click
 login button on the LoginPage. A persistent banner reminds you you're
@@ -100,9 +132,9 @@ To run agent sessions, add your `CLAUDE_CODE_OAUTH_TOKEN` via
 as env vars).
 
 Services:
-- **Dashboard** — http://localhost:5173 (Vite dev server with HMR)
-- **Stiglab API** — http://localhost:3000 (sessions, nodes, WebSocket)
-- **Synodic API** — http://localhost:3001 (governance)
+- **Dashboard** — <http://localhost:5173> (Vite dev server with HMR)
+- **Stiglab API** — <http://localhost:3000> (sessions, nodes, WebSocket)
+- **Synodic API** — <http://localhost:3001> (governance)
 - **Postgres** — `postgres://onsager:onsager@localhost:5432/onsager`
 
 To stop: `Ctrl+C` for services, `just dev-down` for Postgres.

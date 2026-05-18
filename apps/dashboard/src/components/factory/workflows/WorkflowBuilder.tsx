@@ -8,16 +8,16 @@ import { Input } from "@/components/ui/input"
 import { CardStackEditor } from "./CardStackEditor"
 import { PresetPicker } from "./PresetPicker"
 import {
-  draftToCreateRequest,
-  emptyDraft,
+  documentToCreateRequest,
+  emptyDocument,
   isTriggerReady,
-  type WorkflowDraft,
+  type WorkflowDocument,
 } from "./workflow-draft"
 
 export interface WorkflowBuilderProps {
   workspaceId: string
   installations: GitHubAppInstallation[]
-  initialDraft?: WorkflowDraft
+  initialDraft?: WorkflowDocument
   onCreated?: (id: string) => void
 }
 
@@ -27,7 +27,7 @@ export function WorkflowBuilder({
   initialDraft,
   onCreated,
 }: WorkflowBuilderProps) {
-  const [draft, setDraft] = useState<WorkflowDraft>(initialDraft ?? emptyDraft())
+  const [draft, setDraft] = useState<WorkflowDocument>(initialDraft ?? emptyDocument())
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const activeWorkspace = useOptionalActiveWorkspace()
@@ -52,7 +52,7 @@ export function WorkflowBuilder({
 
   const save = (active: boolean) => {
     if (!canSave) return
-    create.mutate(draftToCreateRequest(draft, installations, workspaceId, active))
+    create.mutate(documentToCreateRequest(draft, installations, workspaceId, active))
   }
 
   return (
