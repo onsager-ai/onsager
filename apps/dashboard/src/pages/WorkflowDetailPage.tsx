@@ -42,6 +42,22 @@ import { useActiveWorkspace } from "@/lib/workspace"
 // gains another `Schedule`-category kind, add it here.
 const SCHEDULE_TRIGGER_KIND_TAGS = new Set(["cron", "delay", "interval"])
 
+// Spec #405's run-history view cap on OSS. The locked copy promises
+// "Showing last 7 days"; this is the cutoff that keeps the list
+// honest. Cloud (full server response) does not apply the filter.
+// Hoisted out of the component so `Date.now()` lives outside the
+// render body (the `react-hooks/purity` rule rejects impure calls
+// in render).
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
+
+function filterRunsToLastSevenDays(runs: WorkflowRun[]): WorkflowRun[] {
+  const cutoff = Date.now() - SEVEN_DAYS_MS
+  return runs.filter((r) => {
+    const t = Date.parse(r.started_at)
+    return Number.isNaN(t) || t >= cutoff
+  })
+}
+
 const STATUS_VARIANT: Record<StageRunStatus, "default" | "secondary" | "destructive" | "outline"> = {
   pending: "outline",
   blocked: "secondary",
@@ -89,7 +105,14 @@ export function WorkflowDetailPage() {
     refetchInterval: 5000,
   })
   const workflow = data?.workflow
-  const runs = useMemo(() => runsData?.runs ?? [], [runsData])
+  // Spec #405: keep the OSS "Showing last 7 days" copy truthful.
+  // Backend retention enforcement is the follow-up "Cloud retention
+  // job" spec; the dashboard cap is a view-side filter so the line
+  // and the list agree. Cloud renders the full server response.
+  const runs = useMemo(() => {
+    const all = runsData?.runs ?? []
+    return isOss ? filterRunsToLastSevenDays(all) : all
+  }, [runsData, isOss])
 
   const [tab, setTab] = useState<TabValue>(() => readTabFromHash())
 
@@ -247,7 +270,7 @@ function DefinitionTab({
               <a
                 href="https://app.onsager.ai"
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="underline underline-offset-2 hover:text-foreground"
               >
                 use Cloud →

@@ -142,6 +142,61 @@ describe("Spec #405 — OSS capability-boundary surfacing", () => {
     ).toBeNull()
   })
 
+  it("filters runs older than 7 days on OSS so the locked copy stays truthful", async () => {
+    buildInfoMock.useOSSFlag.mockReturnValue(true)
+    apiMock.getWorkflow.mockResolvedValue(makeWorkflow("github_issue_webhook"))
+    const recent = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+    const ancient = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    apiMock.getWorkflowRuns.mockResolvedValue({
+      runs: [
+        {
+          id: "run_recent",
+          workflow_id: "wf_1",
+          artifact_id: "art_recent",
+          status: "passed",
+          stages: [],
+          started_at: recent,
+          updated_at: recent,
+        },
+        {
+          id: "run_ancient",
+          workflow_id: "wf_1",
+          artifact_id: "art_ancient",
+          status: "passed",
+          stages: [],
+          started_at: ancient,
+          updated_at: ancient,
+        },
+      ],
+    })
+    renderWorkflow("#runs")
+    await screen.findByText("Run history")
+    await waitFor(() => expect(screen.queryByText("art_recent")).toBeTruthy())
+    expect(screen.queryByText("art_ancient")).toBeNull()
+  })
+
+  it("keeps runs older than 7 days when Cloud (no client-side cap)", async () => {
+    buildInfoMock.useOSSFlag.mockReturnValue(false)
+    apiMock.getWorkflow.mockResolvedValue(makeWorkflow("github_issue_webhook"))
+    const ancient = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    apiMock.getWorkflowRuns.mockResolvedValue({
+      runs: [
+        {
+          id: "run_ancient",
+          workflow_id: "wf_1",
+          artifact_id: "art_ancient",
+          status: "passed",
+          stages: [],
+          started_at: ancient,
+          updated_at: ancient,
+        },
+      ],
+    })
+    renderWorkflow("#runs")
+    await screen.findByText("Run history")
+    await waitFor(() => expect(screen.queryByText("art_ancient")).toBeTruthy())
+  })
+
   it("renders the scheduler limitation line on schedule triggers when OSS", async () => {
     buildInfoMock.useOSSFlag.mockReturnValue(true)
     apiMock.getWorkflow.mockResolvedValue(makeWorkflow("cron"))
