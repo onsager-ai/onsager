@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Onsager — governed workflows for AI-augmented engineering work</title>
+    <meta
+      name="description"
+      content="When agents write code, ship safely. Onsager runs your team's quality gates — automated verification, governance, audit — on every AI-generated change. Open source, runs anywhere."
+    />
+    <style>
+      :root {
+        --fg: #0f172a;
+        --muted: #475569;
+        --accent: #4338ca;
+        --bg: #ffffff;
+        --border: #e2e8f0;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #f8fafc;
+          --muted: #94a3b8;
+          --accent: #818cf8;
+          --bg: #0b1120;
+          --border: #1e293b;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+          Roboto, "Helvetica Neue", sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        -webkit-font-smoothing: antialiased;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 96px 24px 120px;
+      }
+      h1 {
+        font-size: clamp(28px, 5vw, 42px);
+        line-height: 1.15;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        margin: 0 0 16px;
+      }
+      h2 {
+        font-size: 22px;
+        font-weight: 600;
+        margin: 56px 0 12px;
+      }
+      p {
+        font-size: 16px;
+        line-height: 1.55;
+        color: var(--muted);
+        margin: 0 0 16px;
+      }
+      .lede {
+        font-size: 18px;
+        color: var(--fg);
+      }
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 32px 0 24px;
+      }
+      .cta {
+        display: inline-block;
+        padding: 10px 18px;
+        border-radius: 8px;
+        font-weight: 600;
+        text-decoration: none;
+        font-size: 15px;
+      }
+      .cta.primary {
+        background: var(--accent);
+        color: #fff;
+      }
+      .cta.primary:hover {
+        opacity: 0.9;
+      }
+      .cta.secondary {
+        border: 1px solid var(--border);
+        color: var(--fg);
+      }
+      .trust {
+        font-size: 14px;
+        color: var(--muted);
+      }
+      .trust a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .trust a:hover {
+        text-decoration: underline;
+      }
+      ol {
+        padding-left: 0;
+        list-style: none;
+        margin: 0;
+      }
+      ol li {
+        font-size: 16px;
+        line-height: 1.6;
+        margin-bottom: 12px;
+        color: var(--fg);
+      }
+      .anti {
+        margin-top: 16px;
+        padding: 12px 14px;
+        border-radius: 8px;
+        background: rgba(148, 163, 184, 0.08);
+        font-size: 14px;
+        color: var(--muted);
+      }
+      pre {
+        background: rgba(148, 163, 184, 0.1);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        font-size: 14px;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+          monospace;
+        overflow-x: auto;
+      }
+      footer {
+        margin-top: 80px;
+        padding-top: 24px;
+        border-top: 1px solid var(--border);
+        font-size: 13px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Governed workflows for AI-augmented engineering work.</h1>
+      <p class="lede">
+        When agents write code, ship safely. Onsager runs your team's quality
+        gates — automated verification, governance, audit — on every
+        AI-generated change. Open source, runs anywhere.
+      </p>
+
+      <div class="cta-row">
+        <a class="cta primary" href="/api/auth/github">Sign in with GitHub →</a>
+        <a class="cta secondary" href="#self-host">Self-host the OSS build →</a>
+      </div>
+
+      <p class="trust">
+        Onsager is the factory that builds Onsager —
+        <a href="/showcase/dogfood">see live runs ↗</a>
+      </p>
+
+      <h2>Who this is for</h2>
+      <p>
+        You are a senior or staff engineer who's already letting AI agents
+        write code. The diff is fine; the policy around the diff is the
+        problem. Onsager is the policy layer.
+      </p>
+      <p class="anti">
+        <strong>Not for:</strong> vibe-coders shipping unreviewed AI output,
+        hobbyists, or large-enterprise procurement-led buyers.
+      </p>
+
+      <h2>What you do</h2>
+      <ol>
+        <li>
+          ① Describe the policy in plain English ("auto-merge PRs labeled
+          <code>auto-merge</code> once CI is green and a Verify gate passes").
+        </li>
+        <li>② Onsager proposes a workflow draft you review and edit.</li>
+        <li>
+          ③ Bind it to a repo when you're ready. Your draft is yours before,
+          during, and after.
+        </li>
+      </ol>
+
+      <h2 id="self-host">Self-host</h2>
+      <pre><code>git clone https://github.com/onsager-ai/onsager
+cd onsager
+just dev</code></pre>
+      <p>Runs locally against your own infrastructure. AGPL-3.0.</p>
+
+      <footer>
+        © Onsager · AGPL-3.0 ·
+        <a href="https://github.com/onsager-ai/onsager">github.com/onsager-ai/onsager</a>
+      </footer>
+    </main>
+  </body>
+</html>

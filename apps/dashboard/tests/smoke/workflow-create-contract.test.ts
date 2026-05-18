@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest"
 import type { GitHubAppInstallation } from "@/lib/api"
 import {
-  draftToCreateRequest,
-  emptyDraft,
-  type WorkflowDraft,
+  documentToCreateRequest,
+  emptyDocument,
+  type WorkflowDocument,
 } from "@/components/factory/workflows/workflow-draft"
 
 // The stiglab `validate_create_body` is the source of truth for the wire
@@ -11,7 +11,7 @@ import {
 // flat trigger fields, numeric install_id resolved from the install record,
 // snake_case `trigger_kind` / `trigger_label` / `active`, and stage params
 // that carry the UI-only name + artifact_kind alongside any gate config.
-describe("draftToCreateRequest", () => {
+describe("documentToCreateRequest", () => {
   const installation: GitHubAppInstallation = {
     id: "inst_abc",
     workspace_id: "t_1",
@@ -21,7 +21,7 @@ describe("draftToCreateRequest", () => {
     created_at: "2026-04-22T00:00:00Z",
   }
 
-  const draft = (): WorkflowDraft => ({
+  const draft = (): WorkflowDocument => ({
     name: "Issue → PR",
     trigger: {
       install_id: "inst_abc", // record id, not numeric GitHub install id
@@ -41,13 +41,13 @@ describe("draftToCreateRequest", () => {
   })
 
   it("resolves the numeric GitHub install_id from the installations list", () => {
-    const out = draftToCreateRequest(draft(), [installation], "t_1", true)
+    const out = documentToCreateRequest(draft(), [installation], "t_1", true)
     expect(out.install_id).toBe(12345)
     expect(typeof out.install_id).toBe("number")
   })
 
   it("flattens the trigger into the backend's snake_case keys", () => {
-    const out = draftToCreateRequest(draft(), [installation], "t_1", true)
+    const out = documentToCreateRequest(draft(), [installation], "t_1", true)
     expect(out).toMatchObject({
       workspace_id: "t_1",
       name: "Issue → PR",
@@ -63,7 +63,7 @@ describe("draftToCreateRequest", () => {
   })
 
   it("maps stages to { gate_kind, params } and carries UI display fields in params", () => {
-    const out = draftToCreateRequest(draft(), [installation], "t_1", true)
+    const out = documentToCreateRequest(draft(), [installation], "t_1", true)
     expect(out.stages).toEqual([
       {
         gate_kind: "agent-session",
@@ -77,25 +77,25 @@ describe("draftToCreateRequest", () => {
   })
 
   it("passes activate=false through as active=false", () => {
-    const out = draftToCreateRequest(draft(), [installation], "t_1", false)
+    const out = documentToCreateRequest(draft(), [installation], "t_1", false)
     expect(out.active).toBe(false)
   })
 
   it("throws when workspace_id is blank", () => {
-    expect(() => draftToCreateRequest(draft(), [installation], "  ", true)).toThrow(
+    expect(() => documentToCreateRequest(draft(), [installation], "  ", true)).toThrow(
       /workspace_id/,
     )
   })
 
   it("throws when the selected install isn't in the list", () => {
-    expect(() => draftToCreateRequest(draft(), [], "t_1", true)).toThrow(
+    expect(() => documentToCreateRequest(draft(), [], "t_1", true)).toThrow(
       /install not found/,
     )
   })
 
   it("throws when the trigger isn't ready (missing label)", () => {
-    const d = emptyDraft()
-    expect(() => draftToCreateRequest(d, [installation], "t_1", true)).toThrow(
+    const d = emptyDocument()
+    expect(() => documentToCreateRequest(d, [installation], "t_1", true)).toThrow(
       /install, repo, and label/,
     )
   })

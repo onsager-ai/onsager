@@ -59,6 +59,11 @@ pub struct Config {
     /// Defaults to a conservative double-digit dollar value; override
     /// via `PORTAL_REMEDIATION_MONTHLY_CAP_USD`.
     pub remediation_monthly_cap_usd: f64,
+    /// Deployment descriptor surfaced by `GET /api/build-info`. Set to
+    /// `cloud` for the SaaS deploy; left unset for local OSS runs and
+    /// self-hosted enterprise deploys that want the OSS chrome.
+    /// Configured via `ONSAGER_DEPLOYMENT`.
+    pub deployment: Option<String>,
 }
 
 /// Default monthly per-workspace cap for `propose_remediation` AI
@@ -145,6 +150,7 @@ mod tests {
             dev_login_enabled: false,
             telegram_webhook_secret: None,
             remediation_monthly_cap_usd: DEFAULT_REMEDIATION_MONTHLY_CAP_USD,
+            deployment: None,
         }
     }
 

@@ -33,6 +33,13 @@ export interface RunChatArgs {
   workspaceId?: string
   /** Optional model override; defaults to the constant above. */
   model?: string
+  /**
+   * Prepend the FTUE preamble (spec #400) to the system prompt. Set to
+   * `true` when chatting from the workspace-less `/chat` entry so the
+   * agent knows to propose drafts rather than ask for workspace/repo
+   * context.
+   */
+  ftue?: boolean
 }
 
 export class LlmConfigError extends Error {}
@@ -53,6 +60,27 @@ const SYSTEM_PROMPT = [
   "  Stage. Use those nouns in copy; never `bundle`, `sealed`, or `spec`.",
   "- If a tool call needs a workspace_id and one was not provided in the",
   "  conversation, ask before guessing.",
+].join("\n")
+
+// FTUE preamble prepended to the system prompt when the user is in
+// workspace-less mode (spec #400). The locked spec copy referenced a
+// `propose_workflow_draft` MCP tool — that tool will land in a follow-up
+// once the sibling `onsager-ai/onsager-skills` skill bundle gets a
+// matching `allowed_tools` grant (the cross-check lint enforces both
+// repos stay in sync). Until then, the preamble describes the shape
+// in prose so the agent proposes a workflow as text/markdown without
+// trying to invoke the unregistered tool.
+const FTUE_PREAMBLE = [
+  "You are helping a new Onsager user design their first workflow draft.",
+  "They do not have a workspace yet. Drafts live client-side until the user",
+  "chooses to bind. Do not ask for a workspace, repo, or installation —",
+  "those are for the binding step. Do not call tools that require a",
+  "workspace_id (propose_workflow, run_workflow, list_workflows, …).",
+  "Instead, sketch the workflow shape directly in your reply: a name, a",
+  "trigger (which GitHub event), and an ordered stage list (gate kind +",
+  "intent). The user reviews your sketch in the right panel and the",
+  "binding flow promotes it to a real workflow when they're ready.",
+  "Be concrete: end your first reply with a workflow draft sketch.",
 ].join("\n")
 
 /** Wire shape of one content block in the Anthropic response. */
@@ -79,9 +107,16 @@ interface AnthropicResponse {
  * header server-side.
  */
 export async function runChatTurn(args: RunChatArgs): Promise<LlmTurn> {
+  // Workspace-less FTUE callers (spec #398 `/chat` entry) pass no
+  // workspace id. The relay still needs *some* workspace to resolve an
+  // anthropic credential against; the dashboard injects the user's
+  // last-used or memberships[0] when available. If neither is set, the
+  // user truly has zero workspaces and we surface a typed error the
+  // ChatPage renders as an inline "set up your Anthropic credential"
+  // prompt instead of swallowing into a generic 4xx.
   if (!args.workspaceId) {
     throw new LlmConfigError(
-      "No workspace selected. Open a workspace to use the chat assistant.",
+      "Onsager needs a workspace to reach Anthropic. Create one to chat with the agent.",
     )
   }
 
@@ -91,6 +126,24 @@ export async function runChatTurn(args: RunChatArgs): Promise<LlmTurn> {
     input_schema: t.inputSchema,
   }))
 
+  // FTUE preamble is locked text per spec #400. Cached separately from
+  // the canonical system prompt so the Anthropic prompt-cache hit rate
+  // stays good across workspace and FTUE turns alike.
+  const systemBlocks: Array<{
+    type: "text"
+    text: string
+    cache_control?: { type: "ephemeral" }
+  }> = [
+    { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+  ]
+  if (args.ftue) {
+    systemBlocks.push({
+      type: "text",
+      text: FTUE_PREAMBLE,
+      cache_control: { type: "ephemeral" },
+    })
+  }
+
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -98,13 +151,7 @@ export async function runChatTurn(args: RunChatArgs): Promise<LlmTurn> {
       workspace_id: args.workspaceId,
       model: args.model ?? DEFAULT_MODEL,
       max_tokens: MAX_TOKENS,
-      system: [
-        {
-          type: "text",
-          text: SYSTEM_PROMPT,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
+      system: systemBlocks,
       tools,
       messages: args.messages.map((m) => ({
         role: m.role,

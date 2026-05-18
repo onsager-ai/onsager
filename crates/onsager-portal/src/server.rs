@@ -8,13 +8,14 @@ use axum::routing::{any, delete, get, post, put};
 use crate::config::Config;
 use crate::gate::GateClient;
 use crate::handlers::{
-    agent_ws, auth as auth_handlers, chat as chat_handlers, credentials as credential_handlers,
-    github_app as github_app_handlers, governance as governance_handlers,
-    installations as installation_handlers, live_data as live_data_handlers,
-    nodes as node_handlers, pats as pat_handlers, projects as project_handlers,
-    registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
-    runs as run_handlers, sessions as session_handlers, spine as spine_handlers,
-    tasks as task_handlers, telegram_webhook, triggers as trigger_handlers, webhook,
+    agent_ws, auth as auth_handlers, build_info as build_info_handlers, chat as chat_handlers,
+    credentials as credential_handlers, github_app as github_app_handlers,
+    governance as governance_handlers, installations as installation_handlers,
+    live_data as live_data_handlers, nodes as node_handlers, pats as pat_handlers,
+    projects as project_handlers, registry_events as registry_event_handlers,
+    registry_triggers as registry_trigger_handlers, runs as run_handlers,
+    sessions as session_handlers, spine as spine_handlers, tasks as task_handlers,
+    telegram_webhook, triggers as trigger_handlers, webhook,
     workflow_kinds as workflow_kind_handlers, workflow_views as workflow_view_handlers,
     workflows as workflow_handlers, workspaces as workspace_handlers,
 };
@@ -66,6 +67,11 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/health", get(api_health))
+        // GET /api/build-info — runtime deployment descriptor for the
+        // dashboard's FTUE convergence (spec #398). No auth: the
+        // dashboard reads this before user state loads to decide whether
+        // to render the OSS banner.
+        .route("/api/build-info", get(build_info_handlers::build_info))
         // Agent control-plane WebSocket (ADR 0008). Portal terminates
         // the upgrade and forwards bytes bidirectionally to stiglab
         // on loopback (`ws://127.0.0.1:3000/agent/ws-internal`).

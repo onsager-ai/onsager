@@ -8,13 +8,13 @@ import {
 } from "./DeliverablePanel"
 import { StageCard } from "./StageCard"
 import { TriggerCard } from "./TriggerCard"
-import { makeStage, type WorkflowDraft } from "./workflow-draft"
+import { makeStage, type WorkflowDocument } from "./workflow-draft"
 
 export interface CardStackEditorProps {
   workspaceId: string
   installations: GitHubAppInstallation[]
-  draft: WorkflowDraft
-  onChange: (next: WorkflowDraft) => void
+  draft: WorkflowDocument
+  onChange: (next: WorkflowDocument) => void
   /// When set (run-detail view), the flow strip highlights this stage and
   /// the deliverable panel becomes visible. Editor view leaves both undefined.
   currentStageIndex?: number

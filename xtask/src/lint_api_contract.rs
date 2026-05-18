@@ -476,6 +476,10 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "/api/chat/completions",
         "Anthropic relay (spec #318) — called from `lib/chat/llm-client.ts` via a bespoke fetch, outside the `lib/api/` scanner scope. Same pattern as `/mcp/messages`.",
     ),
+    (
+        "/api/build-info",
+        "Runtime deployment descriptor (spec #398) — fetched from `lib/build-info.ts` via a bespoke fetch before any workspace scope exists. No auth, no workspace_id; outside the `lib/api/` typed scanner.",
+    ),
 ];
 
 /// Routes registered by stiglab (or any other factory subsystem) that

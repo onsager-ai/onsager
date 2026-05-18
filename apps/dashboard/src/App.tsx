@@ -10,7 +10,7 @@ import { PageSkeleton } from "@/components/layout/PageSkeleton"
 // pay for an extra chunk fetch. Every other page is lazy.
 import { LoginPage } from "@/pages/LoginPage"
 import { api } from "@/lib/api"
-import { readLastUsedWorkspace, WorkspaceScope } from "@/lib/workspace"
+import { WorkspaceScope } from "@/lib/workspace"
 import { DevModeBanner } from "@/components/layout/DevModeBanner"
 import type { ReactNode } from "react"
 
@@ -91,68 +91,39 @@ function LazyRoute({
   return <Suspense fallback={<PageSkeleton variant={variant} />}>{children}</Suspense>
 }
 
-// Redirects users with zero workspaces to /workspaces?welcome=1 on their
-// first visit of the session. Once we've shown the welcome hero, mark the
-// onboarding as seen so the user can navigate freely without being bounced
-// back — they'll still see the empty-state banner on pages that render one.
+// Per spec #398: `/chat` is the universal landing — workspace-less users
+// see the FTUE empty state (template gallery + workspace-less example
+// chips), workspace users see the same surface with their last-used
+// workspace in scope. The old `OnboardingGate` bounce to
+// `/workspaces?welcome=1` no longer applies: the gate is a thin
+// pass-through that the demolition spec (#403) will remove entirely
+// once the FTUE binding flow (axis 5) lands. Keeping it as an identity
+// wrapper preserves call sites while letting the route change settle.
 const ONBOARDING_SEEN_KEY = "onsager.onboarding_seen"
 
 function OnboardingGate({ children }: { children: ReactNode }) {
   const location = useLocation()
-  // ProtectedRoute already enforces an authenticated user, so the query
-  // can fire unconditionally — there's no anonymous branch to skip.
-  const { data, isLoading } = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: api.listWorkspaces,
-    staleTime: 30_000,
-  })
-  const workspaces = data?.workspaces ?? []
-  const seen =
-    typeof window !== "undefined" &&
-    window.sessionStorage.getItem(ONBOARDING_SEEN_KEY) === "1"
-
+  // Still mark the welcome flag once the user has visited /workspaces,
+  // so legacy redirects don't loop. The active bounce is gone.
   const onWorkspaces =
     location.pathname === "/workspaces" ||
     location.pathname.startsWith("/workspaces/")
-
   useEffect(() => {
     if (onWorkspaces && typeof window !== "undefined") {
       window.sessionStorage.setItem(ONBOARDING_SEEN_KEY, "1")
     }
   }, [onWorkspaces])
-
-  if (!isLoading && workspaces.length === 0 && !seen && !onWorkspaces) {
-    return <Navigate to="/workspaces?welcome=1" replace />
-  }
-
   return <>{children}</>
 }
 
-// Bare-path redirect: `/` → `/workspaces/<active>` if the user has a
-// workspace, otherwise let `OnboardingGate` send them to the picker.
-// "Active" is last-used (localStorage) when valid, else memberships[0].
+// Bare-path redirect: `/` → `/chat`, unconditionally per spec #398. The
+// previous "redirect to last-used workspace" behavior conflated chrome
+// (which workspace is active) with intent (what surface the user wants
+// to see); the redesign flips this — ChatPage is the entry, workspace
+// context is resolved inside it from `readLastUsedWorkspace` and
+// memberships.
 function BarePathRedirect() {
-  const { loading } = useAuth()
-  const { data, isLoading } = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: api.listWorkspaces,
-    staleTime: 30_000,
-  })
-  const workspaces = data?.workspaces ?? []
-
-  if (loading || isLoading) {
-    return <AppShellSkeleton />
-  }
-
-  if (workspaces.length === 0) {
-    // OnboardingGate will catch this on the next render; keep the user
-    // visible while it does so the screen isn't blank.
-    return <Navigate to="/workspaces?welcome=1" replace />
-  }
-
-  const lastUsed = readLastUsedWorkspace()
-  const active = workspaces.find((w) => w.slug === lastUsed) ?? workspaces[0]
-  return <Navigate to={`/workspaces/${active.slug}`} replace />
+  return <Navigate to="/chat" replace />
 }
 
 // Builds an absolute workspace-scoped redirect from a relative suffix.
@@ -205,9 +176,20 @@ function AppRoutes() {
             <AppLayout>
               <OnboardingGate>
                 <Routes>
-                  {/* Bare path: redirect to last-used workspace. With auth
-                      always-on (#193), every user has a membership context. */}
+                  {/* Bare path: redirect to /chat (spec #398). ChatPage
+                      is the universal entry — workspace-less users see
+                      the FTUE empty state; workspace users see the same
+                      surface with their last-used workspace in scope. */}
                   <Route path="/" element={<BarePathRedirect />} />
+
+                  {/* Top-level Chat (spec #398). The same surface lives at
+                      `/workspaces/:slug/chat` for users who deep-link a
+                      specific workspace; this unscoped mount is the
+                      universal landing. */}
+                  <Route
+                    path="/chat"
+                    element={<LazyRoute><ChatPage /></LazyRoute>}
+                  />
 
                   {/* Workspace picker / list. Stays unscoped — the user
                       lands here when they have zero workspaces or want to
