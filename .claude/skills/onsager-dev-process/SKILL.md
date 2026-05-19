@@ -262,7 +262,7 @@ transitions. Plan-item ticks on merge are manual; the
 
 | Stage | Skill / workflow |
 |-------|------------------|
-| Write the spec | [`issue-spec`](../issue-spec/SKILL.md) |
+| Write the spec | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) (installed globally from `onsager-ai/dev-skills`) |
 | Pre-push checks | [`onsager-pre-push`](../onsager-pre-push/SKILL.md) |
 | On PR open → flip to `in-progress` | [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) |
 | CI triage, review, iterate | [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md) |
