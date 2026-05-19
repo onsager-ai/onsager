@@ -44,7 +44,6 @@ import {
   Building2,
   Check,
   ChevronsUpDown,
-  Circle,
   GitBranch,
   Package,
   Plus,
@@ -123,11 +122,6 @@ export function WorkspaceCard({ workspace }: { workspace: Workspace }) {
           )}
         </div>
 
-        <SetupProgress
-          hasInstalls={hasInstalls}
-          hasProjects={hasProjects}
-        />
-
         <NextStepCallout
           workspaceId={workspace.id}
           workspaceSlug={workspace.slug}
@@ -158,10 +152,11 @@ export function WorkspaceCard({ workspace }: { workspace: Workspace }) {
 }
 
 /**
- * Step-by-step CTA: surfaces the single next action the user needs to take
- * to drive a workspace from "Setup needed" to running an agent session.
- * Replaces the previous experience where the only progress signal was the
- * dotted SetupProgress checklist with no buttons attached.
+ * Surfaces the single next action a workspace admin needs to take to
+ * finish setup. The earlier "Step N of 3" ladder framing was demolished
+ * in spec #403 — workspace creation is no longer the FTUE entry, so the
+ * card just exposes the remaining affordance (connect GitHub / add a
+ * project) as a plain primary action.
  */
 function NextStepCallout({
   workspaceId,
@@ -207,7 +202,7 @@ function NextStepCallout({
     // loading (treat optimistically) or has confirmed `enabled: true`.
     return (
       <NextStepRow
-        label="Step 2 of 3 · Connect GitHub"
+        label="Connect GitHub"
         description="Install the Onsager GitHub App on a user or org you own so this workspace can read its repositories."
         action={
           <a
@@ -226,7 +221,7 @@ function NextStepCallout({
   if (!hasProjects) {
     return (
       <NextStepRow
-        label="Step 3 of 3 · Add a project"
+        label="Add a project"
         description="Pick a repository the App can see — agent sessions will run against it."
         action={
           <Button size="sm" onClick={onAddProject}>
@@ -293,41 +288,6 @@ function NextStepRow({
       </div>
       <div className="shrink-0 self-start sm:self-auto">{action}</div>
     </div>
-  )
-}
-
-function SetupProgress({
-  hasInstalls,
-  hasProjects,
-}: {
-  hasInstalls: boolean
-  hasProjects: boolean
-}) {
-  const steps = [
-    { label: "Workspace created", done: true },
-    { label: "GitHub connected", done: hasInstalls },
-    { label: "Project linked", done: hasProjects },
-  ]
-  return (
-    <ol className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-      {steps.map((s, i) => (
-        <li key={s.label} className="flex items-center gap-1.5">
-          {s.done ? (
-            <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
-          ) : (
-            <Circle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-          )}
-          <span
-            className={cn(
-              "font-medium",
-              s.done ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {i + 1}. {s.label}
-          </span>
-        </li>
-      ))}
-    </ol>
   )
 }
 

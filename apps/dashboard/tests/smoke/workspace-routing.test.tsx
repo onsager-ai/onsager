@@ -7,13 +7,12 @@ import { MemoryRouter, Routes, Route, Navigate, useLocation } from "react-router
 // context internally (last-used or zero-state FTUE), so the redirect
 // no longer needs to read membership state or `localStorage`.
 //
-// The OnboardingGate / BarePathRedirect / "bounce to first workspace"
-// machinery was deleted in spec #403; this test pins the post-demolition
-// invariant. We replicate the App.tsx redirect row here rather than
-// rendering the full App to keep the test scope tight (no AuthProvider,
-// no lazy chunks).
+// The "bounce to first workspace" machinery was deleted in spec #403;
+// this test pins the post-demolition invariant. We replicate the App.tsx
+// redirect row here rather than rendering the full App to keep the test
+// scope tight (no AuthProvider, no lazy chunks).
 
-function BarePathRedirect() {
+function BarePathRoute() {
   return <Navigate to="/chat" replace />
 }
 
@@ -26,7 +25,7 @@ function renderRoute(initial: string) {
   return render(
     <MemoryRouter initialEntries={[initial]}>
       <Routes>
-        <Route path="/" element={<BarePathRedirect />} />
+        <Route path="/" element={<BarePathRoute />} />
         <Route path="/chat" element={<LocationProbe />} />
         <Route path="/workspaces/:workspace/*" element={<LocationProbe />} />
       </Routes>

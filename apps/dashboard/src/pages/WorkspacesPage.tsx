@@ -10,9 +10,8 @@ import { usePageHeader } from "@/components/layout/PageHeader"
 
 /**
  * Top-level Workspaces page. Lists the user's workspaces and exposes the
- * explicit create flow. The first-run hero (`WorkspaceOnboarding`) and the
- * `welcome=1` URL param were demolished in spec #403 — the FTUE entry is
- * now `/chat`, and binding lifts workspace creation into a single dialog.
+ * explicit create flow. The FTUE entry is `/chat`; binding lifts workspace
+ * creation into a single dialog, so this page is admin-mode only.
  */
 export function WorkspacesPage() {
   usePageHeader({ title: "Workspaces" })

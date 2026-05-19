@@ -23,9 +23,7 @@ export interface SetupProgress {
 /**
  * Shared source of truth for workspace setup progress. Used by the
  * sidebar's progressive nav disclosure (hide scoped nav items until a
- * workspace exists). The sidebar SetupChecklist that previously shared
- * this hook was deleted in spec #403; the hook stays for the nav-gating
- * consumer and any future caller that needs the same aggregated view.
+ * workspace exists).
  */
 export function useSetupProgress(): SetupProgress {
   const { user } = useAuth()
