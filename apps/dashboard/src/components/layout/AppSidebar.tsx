@@ -15,7 +15,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { useOptionalActiveWorkspace } from "@/lib/workspace"
-import { SetupChecklist } from "@/components/workspaces/SetupChecklist"
 import { useSetupProgress } from "@/hooks/useSetupProgress"
 import { WorkspaceSwitcher } from "@/components/workspaces/WorkspaceSwitcher"
 
@@ -40,10 +39,11 @@ const SCOPED_ITEMS: NavItem[] = [
 export function AppSidebar() {
   const location = useLocation()
   const { isMobile, setOpenMobile } = useSidebar()
-  // Call the progress hook once at the sidebar root and thread the result
-  // down — avoids a second observer/render path when SetupChecklist mounts.
-  const setupProgress = useSetupProgress()
-  const { hasWorkspace, workspacesLoading } = setupProgress
+  // `useSetupProgress` drives the progressive nav disclosure below — the
+  // sidebar hides scoped items until the user has at least one workspace.
+  // (The sidebar checklist that previously shared this hook was deleted
+  // in spec #403.)
+  const { hasWorkspace, workspacesLoading } = useSetupProgress()
   const activeWorkspace = useOptionalActiveWorkspace()
 
   // Auth is always-on as of #193. Pages outside a scoped route (the
@@ -106,7 +106,6 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         )}
-        <SetupChecklist progress={setupProgress} />
       </SidebarContent>
       <SidebarFooter className="gap-1 border-t p-2">
         <UserMenu variant="row" />

@@ -21,11 +21,11 @@ export interface SetupProgress {
 }
 
 /**
- * Shared source of truth for workspace onboarding progress. Used by the
- * sidebar's progressive nav disclosure (hide Factory/Governance/Infra until
- * a workspace exists) and the SetupChecklist that surfaces the remaining
- * setup steps. Co-locating the queries keeps the React Query cache honest
- * and avoids double-fetching across callers.
+ * Shared source of truth for workspace setup progress. Used by the
+ * sidebar's progressive nav disclosure (hide scoped nav items until a
+ * workspace exists). The sidebar SetupChecklist that previously shared
+ * this hook was deleted in spec #403; the hook stays for the nav-gating
+ * consumer and any future caller that needs the same aggregated view.
  */
 export function useSetupProgress(): SetupProgress {
   const { user } = useAuth()
