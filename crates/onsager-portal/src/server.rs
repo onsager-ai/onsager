@@ -8,16 +8,17 @@ use axum::routing::{any, delete, get, post, put};
 use crate::config::Config;
 use crate::gate::GateClient;
 use crate::handlers::{
-    agent_ws, auth as auth_handlers, build_info as build_info_handlers, chat as chat_handlers,
-    credentials as credential_handlers, github_app as github_app_handlers,
-    governance as governance_handlers, installations as installation_handlers,
-    live_data as live_data_handlers, nodes as node_handlers, pats as pat_handlers,
-    projects as project_handlers, registry_events as registry_event_handlers,
-    registry_triggers as registry_trigger_handlers, runs as run_handlers,
-    sessions as session_handlers, showcase as showcase_handlers, spine as spine_handlers,
-    tasks as task_handlers, telegram_webhook, triggers as trigger_handlers, webhook,
-    workflow_kinds as workflow_kind_handlers, workflow_views as workflow_view_handlers,
-    workflows as workflow_handlers, workspaces as workspace_handlers,
+    activation as activation_handlers, agent_ws, auth as auth_handlers,
+    build_info as build_info_handlers, chat as chat_handlers, credentials as credential_handlers,
+    github_app as github_app_handlers, governance as governance_handlers,
+    installations as installation_handlers, live_data as live_data_handlers,
+    nodes as node_handlers, pats as pat_handlers, projects as project_handlers,
+    registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
+    runs as run_handlers, sessions as session_handlers, showcase as showcase_handlers,
+    spine as spine_handlers, tasks as task_handlers, telegram_webhook,
+    triggers as trigger_handlers, webhook, workflow_kinds as workflow_kind_handlers,
+    workflow_views as workflow_view_handlers, workflows as workflow_handlers,
+    workspaces as workspace_handlers,
 };
 use crate::proxy_cache::ProxyCache;
 use crate::state::AppState;
@@ -353,6 +354,20 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/showcase/dogfood",
             axum::routing::get(showcase_handlers::get_dogfood),
         )
+        // FTUE activation funnel (spec #404). `POST /api/activation`
+        // accepts the four `ftue.*` events from the dashboard;
+        // `GET /api/admin/activation-funnel` is the internal report.
+        // Auth on the POST is optional — pre-auth `ftue.inspected`
+        // arrives with no user_id — so the extractor is `Option<AuthUser>`
+        // inside the handler.
+        .route(
+            "/api/activation",
+            post(activation_handlers::record_activation),
+        )
+        .route(
+            "/api/admin/activation-funnel",
+            get(activation_handlers::get_funnel),
+        )
         // MCP server (ADR 0007 / #288). JSON-RPC 2.0 over HTTP — the
         // runtime-agnostic public contract for AI clients. Auth reuses
         // the `AuthUser` extractor (PAT or session); workspace-scoped
@@ -372,6 +387,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     // Clone handles needed by background listeners before consuming state.
     let listener_pool = state.pool.clone();
     let listener_spine = state.spine.clone();
+    let activation_pool = state.pool.clone();
+    let activation_spine = state.spine.clone();
 
     let app = app.with_state(state);
 
@@ -383,6 +400,17 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             crate::listeners::session_completed::run(listener_pool, listener_spine).await
         {
             tracing::error!("portal: session_completed listener exited: {e}");
+        }
+    });
+
+    // Spawn the stage.advanced → ftue.activated listener (spec #404).
+    // Writes one activation row per (user, workflow) the first time a
+    // bound workflow's run reaches the final stage.
+    tokio::spawn(async move {
+        if let Err(e) =
+            crate::listeners::workflow_activated::run(activation_pool, activation_spine).await
+        {
+            tracing::error!("portal: workflow_activated listener exited: {e}");
         }
     });
 

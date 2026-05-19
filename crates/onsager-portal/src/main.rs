@@ -91,6 +91,11 @@ enum Command {
         /// returns `{ enabled: false }`.
         #[arg(long, env = "SHOWCASE_DOGFOOD_WORKFLOW_ID")]
         showcase_dogfood_workflow_id: Option<String>,
+        /// Comma-separated `github_login` values granted access to
+        /// the internal `/api/admin/*` surface (spec #404). Empty in
+        /// dev — local dev-login sessions are always admins.
+        #[arg(long, env = "ONSAGER_ADMIN_LOGINS")]
+        admin_logins: Option<String>,
     },
     /// Backfill issues + PRs for an existing project.
     Backfill {
@@ -140,6 +145,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             remediation_monthly_cap_usd,
             deployment,
             showcase_dogfood_workflow_id,
+            admin_logins,
         } => {
             let allowlist = sso_return_host_allowlist
                 .as_deref()
@@ -180,6 +186,14 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 deployment: deployment.filter(|s| !s.trim().is_empty()),
                 showcase_dogfood_workflow_id: showcase_dogfood_workflow_id
                     .filter(|s| !s.trim().is_empty()),
+                admin_github_logins: admin_logins
+                    .map(|s| {
+                        s.split(',')
+                            .map(|p| p.trim().to_string())
+                            .filter(|p| !p.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             };
             tracing::info!(%bind, "onsager-portal: starting webhook server");
             onsager_portal::server::run(cfg).await

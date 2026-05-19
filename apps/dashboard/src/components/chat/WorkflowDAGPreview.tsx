@@ -17,6 +17,7 @@ import {
   workflowDocumentFromYaml,
   workflowDocumentToYaml,
 } from "@/lib/workflow-yaml"
+import { trackActivation } from "@/lib/activation"
 
 // Gate kind → human label + colour token
 const GATE_META: Record<string, { label: string; color: string }> = {
@@ -296,6 +297,16 @@ export function WorkflowDAGPreview({
 }: WorkflowDAGPreviewProps) {
   const [view, setView] = useState<ViewMode>("dag")
 
+  // Spec #404 rung 1 — Inspected. Fires on the first DAG↔YAML toggle
+  // in a browser; the activation client dedups so subsequent toggles
+  // are no-ops.
+  const switchView = (next: ViewMode) => {
+    if (next !== view) {
+      void trackActivation("ftue.inspected", "chat")
+    }
+    setView(next)
+  }
+
   return (
     <ReactFlowProvider>
       <div className="flex h-full flex-col overflow-hidden border-l">
@@ -323,7 +334,7 @@ export function WorkflowDAGPreview({
                 size="sm"
                 variant={view === "dag" ? "default" : "ghost"}
                 className="h-6 rounded-full px-2.5 text-xs"
-                onClick={() => setView("dag")}
+                onClick={() => switchView("dag")}
               >
                 DAG
               </Button>
@@ -335,7 +346,7 @@ export function WorkflowDAGPreview({
                 size="sm"
                 variant={view === "yaml" ? "default" : "ghost"}
                 className="h-6 rounded-full px-2.5 text-xs"
-                onClick={() => setView("yaml")}
+                onClick={() => switchView("yaml")}
               >
                 YAML
               </Button>

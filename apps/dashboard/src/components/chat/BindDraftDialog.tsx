@@ -31,6 +31,7 @@ import {
   type Workspace,
 } from "@/lib/api"
 import { markDraftBound } from "@/lib/drafts"
+import { trackActivation } from "@/lib/activation"
 import { documentToCreateRequest } from "@/components/factory/workflows/workflow-draft"
 import type { WorkflowDraft } from "@/components/factory/workflows/workflow-draft"
 import { RepoCombobox } from "@/components/factory/workflows/RepoCombobox"
@@ -435,6 +436,14 @@ function ProjectStep({
       queryClient.invalidateQueries({ queryKey: ["workflows"] })
       queryClient.invalidateQueries({
         queryKey: ["workspace-projects", workspace.id],
+      })
+      // Spec #404 rung 3 — Bound. Fired client-side from the dialog
+      // success path so the funnel records bind even if the user
+      // never navigates to the bound workflow detail page.
+      void trackActivation("ftue.bound", "dialog", {
+        draft_id: draft.id,
+        workspace_id: workspace.id,
+        workflow_id: id,
       })
       onBound(id)
     },
