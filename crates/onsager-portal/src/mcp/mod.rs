@@ -293,6 +293,18 @@ mod tests {
             "get_stage_logs",
             "get_artifact",
             "propose_remediation",
+            // 0.2 substrate authoring (#395).
+            "submit_spec_plan",
+            "update_spec",
+            "list_spec_plans",
+            "get_spec_plan",
+            "compile_dry_run",
+            "get_execution_plan",
+            "submit_workflow",
+            "update_workflow",
+            "retire_workflow",
+            "list_workflows_v2",
+            "get_workflow_v2",
         ] {
             assert!(
                 names.contains(&required),
@@ -315,6 +327,11 @@ mod tests {
                     | "edit_workflow"
                     | "schedule_workflow"
                     | "cancel_run"
+                    | "submit_spec_plan"
+                    | "update_spec"
+                    | "submit_workflow"
+                    | "update_workflow"
+                    | "retire_workflow"
             );
             if is_mutation {
                 assert!(

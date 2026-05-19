@@ -190,5 +190,117 @@ fn build_registry() -> Vec<ToolDescriptor> {
                 Box::pin(tools::diagnostics::propose_remediation(state, user, args))
             },
         },
+        // --- 0.2 substrate authoring (spec #395) ---
+        ToolDescriptor {
+            name: "submit_spec_plan",
+            description: "Persist a new substrate `SpecPlan` (ADR 0015) under `(workspace_id, spec_plan_id)`. The `spec_plan` argument carries the full `{ specs, deps }` JSON shape the substrate consumes; structural checks (`SpecPlan::validate`) run before insert so cycles and dangling deps surface as `InvalidParams`. First-write only — duplicate `spec_plan_id` is rejected.",
+            category: ToolCategory::Constructive,
+            input_schema: super::input_schema::<tools::substrate_specs::SubmitSpecPlanArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_specs::submit_spec_plan(state, user, args))
+            },
+        },
+        ToolDescriptor {
+            name: "update_spec",
+            description: "Replace a single `SpecRef` inside an existing `SpecPlan`. Identity is matched on `spec.id`; renaming is not supported (submit a fresh plan via `submit_spec_plan` instead). The plan is re-validated after the swap, so a malformed update (dangling dep, dupe id with a sibling) is rejected on the call that introduced it.",
+            category: ToolCategory::Diff,
+            input_schema: super::input_schema::<tools::substrate_specs::UpdateSpecArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_specs::update_spec(state, user, args))
+            },
+        },
+        ToolDescriptor {
+            name: "list_spec_plans",
+            description: "List every persisted `SpecPlan` in a workspace, newest first.",
+            category: ToolCategory::ReadOnly,
+            input_schema: super::input_schema::<tools::substrate_specs::ListSpecPlansArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_specs::list_spec_plans(state, user, args))
+            },
+        },
+        ToolDescriptor {
+            name: "get_spec_plan",
+            description: "Read a single `SpecPlan` by `(workspace_id, spec_plan_id)`.",
+            category: ToolCategory::ReadOnly,
+            input_schema: super::input_schema::<tools::substrate_specs::GetSpecPlanArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_specs::get_spec_plan(state, user, args))
+            },
+        },
+        ToolDescriptor {
+            name: "compile_dry_run",
+            description: "Run the Plan Compiler (ADR 0017) against a candidate `SpecPlan` over the workspace's current Workflow Library snapshot. Returns the resulting `ExecutionPlan` shape (node/edge counts + per-spec entry/exit edges + the library versions that were resolved) on success, or the full `CompileError` payload on failure — including the batched `Invariant(Vec)` set from ADR 0018. No persistence; this is the linter for authors.",
+            category: ToolCategory::ReadOnly,
+            input_schema: super::input_schema::<tools::substrate_specs::CompileDryRunArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_specs::compile_dry_run(state, user, args))
+            },
+        },
+        ToolDescriptor {
+            name: "get_execution_plan",
+            description: "Load a persisted `SpecPlan` by id and recompile it on read against the latest Workflow Library snapshot. Same response shape as `compile_dry_run`. v1 recompiles on every call — caching is a later spec.",
+            category: ToolCategory::ReadOnly,
+            input_schema: super::input_schema::<tools::substrate_specs::GetExecutionPlanArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_specs::get_execution_plan(
+                    state, user, args,
+                ))
+            },
+        },
+        ToolDescriptor {
+            name: "submit_workflow",
+            description: "Register a new `Workflow` (ADR 0016) for `spec_kind` in the substrate Workflow Library. Inserts a fresh monotonic version (per-kind `MAX(version) + 1`); the new row becomes the active version the Plan Compiler resolves. Workflow payload round-trips via the substrate's `Workflow` serde derive (executors flow through `typetag`'s `kind` discriminator).",
+            category: ToolCategory::Constructive,
+            input_schema: super::input_schema::<tools::substrate_workflows::SubmitWorkflowArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_workflows::submit_workflow(
+                    state, user, args,
+                ))
+            },
+        },
+        ToolDescriptor {
+            name: "update_workflow",
+            description: "Append a new version of a `Workflow` for `spec_kind` (ADR 0016 — one active version per kind, latest wins). Semantically identical to `submit_workflow`; the separate tool exists so the dashboard HitlCard can render a diff against the current active version. Argument shape is unchanged.",
+            category: ToolCategory::Diff,
+            input_schema: super::input_schema::<tools::substrate_workflows::UpdateWorkflowArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_workflows::update_workflow(
+                    state, user, args,
+                ))
+            },
+        },
+        ToolDescriptor {
+            name: "retire_workflow",
+            description: "Mark the currently-active `Workflow` version for `spec_kind` inactive via the `retired_at` column. Compile passes stop resolving the kind on the next call; previous versions are preserved as audit history. Irreversible at the row level — a fresh `submit_workflow` is needed to re-establish an active workflow.",
+            category: ToolCategory::Destructive,
+            input_schema: super::input_schema::<tools::substrate_workflows::RetireWorkflowArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_workflows::retire_workflow(
+                    state, user, args,
+                ))
+            },
+        },
+        ToolDescriptor {
+            name: "list_workflows_v2",
+            description: "List one card per `spec_kind` in the substrate Workflow Library — the latest version plus the retire status. Workflow bodies are omitted from this view; use `get_workflow_v2` for the full graph.",
+            category: ToolCategory::ReadOnly,
+            input_schema: super::input_schema::<tools::substrate_workflows::ListWorkflowsV2Args>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_workflows::list_workflows_v2(
+                    state, user, args,
+                ))
+            },
+        },
+        ToolDescriptor {
+            name: "get_workflow_v2",
+            description: "Read a substrate `Workflow` by `(spec_kind, version)`. `version` omitted resolves the latest **active** version; an explicit retired version still returns so authors can inspect what they shipped before retire.",
+            category: ToolCategory::ReadOnly,
+            input_schema: super::input_schema::<tools::substrate_workflows::GetWorkflowV2Args>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_workflows::get_workflow_v2(
+                    state, user, args,
+                ))
+            },
+        },
     ]
 }
