@@ -39,6 +39,68 @@ use crate::portal_registry::{self, ToolEntry};
 
 const SKILLS_ENV: &str = "ONSAGER_SKILLS_DIR";
 
+/// Tools that are intentionally registered in the portal MCP server
+/// but do not yet have a paired skill grant in
+/// `onsager-ai/onsager-skills`. Every entry is **debt** — the lint
+/// catches accidental drift between registry and skills bundle, and
+/// each exemption admits a known cross-repo-PR gap. The reason text
+/// is grep-able and references the spec issue + the planned skill
+/// name; landing the sibling-repo PR is a one-line removal here.
+///
+/// Same shape as the seam lint's `seam-allow` escape hatch: narrow,
+/// labeled, trackable, never silently retained. Empty by default.
+const PENDING_SKILL_GRANTS: &[(&str, &str)] = &[
+    // Spec #395 — 0.2 substrate authoring tools. Paired skill
+    // `onsager-author-substrate` is the planned sibling-repo PR; the
+    // cloud session this PR was authored in is scoped to
+    // `onsager-ai/onsager` only, so the skill grant lands in a
+    // follow-up.
+    (
+        "submit_spec_plan",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+    (
+        "update_spec",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+    (
+        "list_spec_plans",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+    (
+        "get_spec_plan",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+    (
+        "compile_dry_run",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+    (
+        "get_execution_plan",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+    (
+        "submit_workflow",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+    (
+        "update_workflow",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+    (
+        "retire_workflow",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+    (
+        "list_workflows_v2",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+    (
+        "get_workflow_v2",
+        "spec #395 — pending `onsager-author-substrate` skill",
+    ),
+];
+
 pub fn run() -> Result<()> {
     let root = crate::workspace_root()?;
     let registry_path = root.join(portal_registry::REGISTRY_SRC);
@@ -234,13 +296,45 @@ fn cross_check(tools: &[ToolEntry], skills: &[SkillEntry]) -> Result<()> {
     }
 
     // Every registered tool must be granted by at least one skill.
+    let pending: BTreeMap<&str, &str> = PENDING_SKILL_GRANTS.iter().copied().collect();
+    let mut still_pending: Vec<(String, &str)> = Vec::new();
     for t in tools {
-        if grants.get(&t.name).map(|v| v.is_empty()).unwrap_or(true) {
-            errors.push(format!(
-                "tool `{}` is not granted by any skill — every public tool must \
-                 appear in at least one SKILL.md's allowed_tools",
-                t.name
-            ));
+        let ungranted = grants.get(&t.name).map(|v| v.is_empty()).unwrap_or(true);
+        if !ungranted {
+            // Tool is granted: a `PENDING_SKILL_GRANTS` entry for it
+            // is now stale and should be removed.
+            if pending.contains_key(t.name.as_str()) {
+                errors.push(format!(
+                    "tool `{}` is now granted by a skill — remove its \
+                     `PENDING_SKILL_GRANTS` entry in \
+                     `xtask/src/check_tools_and_skills.rs`",
+                    t.name
+                ));
+            }
+            continue;
+        }
+        if let Some(reason) = pending.get(t.name.as_str()) {
+            still_pending.push((t.name.clone(), reason));
+            continue;
+        }
+        errors.push(format!(
+            "tool `{}` is not granted by any skill — every public tool must \
+             appear in at least one SKILL.md's allowed_tools",
+            t.name
+        ));
+    }
+
+    if !still_pending.is_empty() {
+        // Print debt so it's visible on every lint run. The lint
+        // itself doesn't fail on pending exemptions, but the noise
+        // surfaces the gap on every CI / local run.
+        println!(
+            "check-tools-and-skills: {} pending skill grant(s) — debt tracked in \
+             `PENDING_SKILL_GRANTS`:",
+            still_pending.len()
+        );
+        for (tool, reason) in &still_pending {
+            println!("  - {tool}: {reason}");
         }
     }
 
