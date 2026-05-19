@@ -484,6 +484,10 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "/api/showcase/dogfood",
         "Public Dogfood showcase projection (spec #407) — fetched from `pages/ShowcaseDogfoodPage.tsx` via a bespoke pre-auth fetch on an unauthenticated route. No `workspace_id` scoping; outside the `lib/api/` typed scanner.",
     ),
+    (
+        "/api/admin/activation-funnel",
+        "FTUE activation funnel report (spec #404). v1 is internal-only — \"the query runs, returns numbers\"; the admin dashboard surface is an explicit follow-up. Today this is exercised by ops humans hitting the URL directly (or via a future internal dashboard); no typed `request<T>` caller yet by design.",
+    ),
 ];
 
 /// Routes registered by stiglab (or any other factory subsystem) that

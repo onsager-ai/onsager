@@ -14,6 +14,7 @@ import type {
   WorkflowDocument,
   WorkflowDraftSource,
 } from "@/components/factory/workflows/workflow-draft"
+import { trackActivation } from "@/lib/activation"
 
 /** Soft cap on stored drafts per user. Oldest by `updated_at` evicted. */
 const DRAFT_CAP = 50
@@ -138,6 +139,13 @@ export function saveDraft(
     merged = merged.slice(0, DRAFT_CAP)
   }
   writeDrafts(userId, merged)
+  // Spec #404 rung 2 — Drafted. Fires on the first `updated_at` write
+  // per (user, draft). The activation client dedups client-side and
+  // server-side; safe to call on every save.
+  void trackActivation("ftue.drafted", "chat", {
+    draft_id: next.id,
+    template_id: next.template_id,
+  })
   return merged
 }
 

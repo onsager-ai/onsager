@@ -76,6 +76,7 @@ import { workflows } from './workflows';
 import { issues } from './issues';
 import { pulls } from './pulls';
 import { registry } from './registry';
+import { activation } from './activation';
 
 export const api = {
   ...sessions,
@@ -89,4 +90,5 @@ export const api = {
   ...issues,
   ...pulls,
   ...registry,
+  ...activation,
 };

@@ -71,6 +71,12 @@ pub struct Config {
     /// self-hosters can point it at their own dogfood workflow.
     /// Configured via `SHOWCASE_DOGFOOD_WORKFLOW_ID`.
     pub showcase_dogfood_workflow_id: Option<String>,
+    /// Comma-separated `github_login` values granted access to the
+    /// internal `/api/admin/*` surface (spec #404 — activation funnel).
+    /// Empty means "no Cloud admins" — dev-login sessions are always
+    /// admins, so local development still works. Configured via
+    /// `ONSAGER_ADMIN_LOGINS`.
+    pub admin_github_logins: Vec<String>,
 }
 
 /// Default monthly per-workspace cap for `propose_remediation` AI
@@ -159,6 +165,7 @@ mod tests {
             remediation_monthly_cap_usd: DEFAULT_REMEDIATION_MONTHLY_CAP_USD,
             deployment: None,
             showcase_dogfood_workflow_id: None,
+            admin_github_logins: Vec::new(),
         }
     }
 
