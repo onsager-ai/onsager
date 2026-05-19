@@ -13,10 +13,16 @@ import {
 } from "react"
 import Markdown from "react-markdown"
 import rehypeHighlight from "rehype-highlight"
-import { AlertTriangle, MessageSquare, Send, Sparkles } from "lucide-react"
+import { AlertTriangle, ArrowRight, MessageSquare, Send, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { HitlCard } from "@/components/chat/HitlCard"
+import { BindDraftDialog } from "@/components/chat/BindDraftDialog"
 import type { HitlCard as HitlCardSpec, HitlCardState } from "@/components/chat/hitl-types"
 import {
   McpClientError,
@@ -42,6 +48,7 @@ import {
   useOptionalActiveWorkspace,
 } from "@/lib/workspace"
 import { useAuth } from "@/lib/auth"
+import { useQueryClient } from "@tanstack/react-query"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { WorkflowDAGPreview } from "@/components/chat/WorkflowDAGPreview"
 import { TemplateGallery } from "@/components/chat/TemplateGallery"
@@ -265,6 +272,7 @@ export function ChatPage() {
   const { user } = useAuth()
   const buildInfo = useBuildInfo()
   const isOss = buildInfo?.is_oss ?? false
+  const queryClient = useQueryClient()
 
   // Per spec #401: persist drafts client-side under the user namespace.
   // The active draft drives the right-panel DAG/YAML preview.
@@ -502,6 +510,52 @@ export function ChatPage() {
 
   const isEmpty = turns.length === 0
 
+  // Binding dialog (spec #402). The "Bind to a repo →" button on the
+  // right-panel header opens this; the GitHub install round-trip lands
+  // back at `/chat?draft=…&bind=continue&workspace_id=…` and re-opens
+  // here at Step C.
+  const [bindOpen, setBindOpen] = useState(false)
+  const [bindWorkspaceId, setBindWorkspaceId] = useState<string | null>(null)
+  const [bindStep, setBindStep] = useState<"workspace" | "install" | "project" | null>(null)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("bind") !== "continue") return
+    const draftIdParam = params.get("draft")
+    const workspaceIdParam = params.get("workspace_id")
+    if (draftIdParam) {
+      // Switch to the originating draft if it's still around — drafts
+      // are user-scoped in localStorage, so this is best-effort: if the
+      // user cleared storage between starting the bind and returning,
+      // we just open the dialog on whatever the active draft is.
+      switchDraft(draftIdParam)
+    }
+    if (workspaceIdParam) setBindWorkspaceId(workspaceIdParam)
+    setBindStep("project")
+    setBindOpen(true)
+
+    // Strip the resume params so a page reload doesn't loop the dialog.
+    // Preserve any other params the install callback appended
+    // (`github_app_linked`) so React Query cache invalidation below
+    // also runs.
+    if (params.has("github_app_linked") && workspaceIdParam) {
+      queryClient.invalidateQueries({
+        queryKey: ["workspace-installations", workspaceIdParam],
+      })
+    }
+    params.delete("bind")
+    params.delete("draft")
+    params.delete("workspace_id")
+    params.delete("github_app_linked")
+    const q = params.toString()
+    window.history.replaceState(
+      {},
+      "",
+      window.location.pathname + (q ? `?${q}` : ""),
+    )
+  }, [queryClient, switchDraft])
+
   // Pick a template (spec #406): create a fresh draft seeded with the
   // template's document, record source + template_id on the outer draft
   // (the spec #404 instrumentation hook), and pre-fill the composer with
@@ -654,9 +708,65 @@ export function ChatPage() {
           draft={workflowDoc}
           onChange={setWorkflow}
           status={dagHeaderStatus(activeDraft)}
+          headerAction={
+            activeDraft && !activeDraft.bound_to ? (
+              <BindButton
+                disabled={!workflowDoc || workflowDoc.stages.length === 0}
+                onClick={() => {
+                  setBindStep(null)
+                  setBindWorkspaceId(workspace?.id ?? null)
+                  setBindOpen(true)
+                }}
+              />
+            ) : null
+          }
         />
       </div>
+      <BindDraftDialog
+        open={bindOpen}
+        onOpenChange={setBindOpen}
+        draft={activeDraft}
+        userId={user?.id ?? null}
+        initialWorkspaceId={bindWorkspaceId}
+        initialStep={bindStep ?? undefined}
+      />
     </div>
+  )
+}
+
+// Right-panel "Bind to a repo →" button (spec #402). Disabled with the
+// locked tooltip when the draft has zero stages so the user understands
+// why the surface is dimmed.
+function BindButton({
+  disabled,
+  onClick,
+}: {
+  disabled: boolean
+  onClick: () => void
+}) {
+  const button = (
+    <Button
+      type="button"
+      size="sm"
+      className="h-7 rounded-full px-3 text-xs"
+      disabled={disabled}
+      onClick={onClick}
+      aria-label="Bind to a repo"
+    >
+      Bind to a repo
+      <ArrowRight className="ml-1 h-3 w-3" />
+    </Button>
+  )
+  if (!disabled) return button
+  // Tooltip wraps a span so the disabled button still receives hover
+  // events — disabled DOM elements don't fire pointer events directly.
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex" />}>
+        {button}
+      </TooltipTrigger>
+      <TooltipContent>Add at least one stage to your draft.</TooltipContent>
+    </Tooltip>
   )
 }
 

@@ -1,6 +1,6 @@
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { api } from "@/lib/api"
+import { api, ApiError, type Workspace } from "@/lib/api"
 import {
   Dialog,
   DialogContent,
@@ -125,5 +125,79 @@ export function NewWorkspaceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Slimmed-down workspace-create surface used by the FTUE binding flow
+ * (spec #402, Step A). Asks for the display name only; the slug is
+ * auto-derived. Power-user surfaces (`/workspaces` Create button) keep
+ * the full `NewWorkspaceDialog` with its explicit slug field.
+ *
+ * On success, invalidates the workspaces query so the parent picker
+ * sees the new row, and calls `onCreated` with the persisted record so
+ * the binding dialog can advance to Step B / C without re-querying.
+ */
+export function WorkspaceCreateForm({
+  onCreated,
+  submitLabel = "Create and continue →",
+  autoFocus = true,
+}: {
+  onCreated: (workspace: Workspace) => void
+  submitLabel?: string
+  autoFocus?: boolean
+}) {
+  const queryClient = useQueryClient()
+  const [name, setName] = useState("")
+  const [error, setError] = useState<string | null>(null)
+
+  const slug = slugify(name)
+
+  const create = useMutation({
+    mutationFn: () => api.createWorkspace({ slug, name }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] })
+      onCreated(res.workspace)
+    },
+    onError: (err) => {
+      if (err instanceof ApiError) {
+        setError(err.message || "Failed to create workspace")
+      } else if (err instanceof Error) {
+        setError(err.message)
+      } else {
+        setError("Failed to create workspace")
+      }
+    },
+  })
+
+  const canSubmit = !!name.trim() && !!slug && !create.isPending
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    if (!canSubmit) return
+    create.mutate()
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-3">
+      <label className="block space-y-1">
+        <span className="text-sm font-medium">Workspace name</span>
+        <Input
+          placeholder="Personal"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoFocus={autoFocus}
+          aria-label="Workspace name"
+        />
+        <span className="text-xs text-muted-foreground">
+          e.g. <em>Acme Engineering</em> or your personal scope.
+        </span>
+      </label>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      <Button type="submit" disabled={!canSubmit} className="w-full">
+        {create.isPending ? "Creating…" : submitLabel}
+      </Button>
+    </form>
   )
 }
