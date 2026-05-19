@@ -8,6 +8,11 @@ export interface DraftStripProps {
   onSwitch: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
+  // Spec #405: OSS persists drafts in localStorage so each device has
+  // its own copy. The footer below makes that constraint visible
+  // without nagging — Cloud (server-side draft sync, future) shows
+  // nothing.
+  isOss?: boolean
 }
 
 // Spec #401's lightweight draft-quick-access strip. One chip per stored
@@ -19,10 +24,12 @@ export function DraftStrip({
   onSwitch,
   onNew,
   onDelete,
+  isOss = false,
 }: DraftStripProps) {
   if (drafts.length === 0) return null
   return (
-    <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-3 py-1.5">
+    <div className="flex shrink-0 flex-col gap-1 border-b px-3 py-1.5">
+      <div className="flex items-center gap-1.5 overflow-x-auto">
       {drafts.map((d) => {
         const isActive = d.id === activeId
         return (
@@ -68,6 +75,12 @@ export function DraftStrip({
         <Plus className="mr-1 h-3 w-3" />
         New draft
       </Button>
+      </div>
+      {isOss && (
+        <p className="text-[10px] text-muted-foreground/70">
+          Drafts on this device.
+        </p>
+      )}
     </div>
   )
 }

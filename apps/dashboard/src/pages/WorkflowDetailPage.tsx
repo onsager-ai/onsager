@@ -30,7 +30,33 @@ import { WorkflowSessionsCard } from "@/components/factory/workflows/WorkflowSes
 import { WorkflowVerdictsTab } from "@/components/factory/workflows/WorkflowVerdictsTab"
 import { outputArtifactKind } from "@/components/factory/workflows/workflow-meta"
 import { usePageHeader } from "@/components/layout/PageHeader"
+import { useOSSFlag } from "@/hooks/useOSSFlag"
 import { useActiveWorkspace } from "@/lib/workspace"
+
+// Spec #405: Cloud-vs-OSS surfacing on the workflow detail page is
+// inline at the natural limit, not promotional. The `schedule` trigger
+// category covers `cron` / `delay` / `interval` kind tags — i.e.
+// triggers that need an always-on scheduler. Sourced from the trigger
+// registry (`crates/onsager-registry/src/triggers.rs`). Keeping the set
+// inline avoids a second registry fetch on this page; if the registry
+// gains another `Schedule`-category kind, add it here.
+const SCHEDULE_TRIGGER_KIND_TAGS = new Set(["cron", "delay", "interval"])
+
+// Spec #405's run-history view cap on OSS. The locked copy promises
+// "Showing last 7 days"; this is the cutoff that keeps the list
+// honest. Cloud (full server response) does not apply the filter.
+// Hoisted out of the component so `Date.now()` lives outside the
+// render body (the `react-hooks/purity` rule rejects impure calls
+// in render).
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
+
+function filterRunsToLastSevenDays(runs: WorkflowRun[]): WorkflowRun[] {
+  const cutoff = Date.now() - SEVEN_DAYS_MS
+  return runs.filter((r) => {
+    const t = Date.parse(r.started_at)
+    return Number.isNaN(t) || t >= cutoff
+  })
+}
 
 const STATUS_VARIANT: Record<StageRunStatus, "default" | "secondary" | "destructive" | "outline"> = {
   pending: "outline",
@@ -61,6 +87,7 @@ function readTabFromHash(): TabValue {
 export function WorkflowDetailPage() {
   const { id = "" } = useParams<{ id: string }>()
   const workspace = useActiveWorkspace()
+  const isOss = useOSSFlag()
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["workflow", id],
@@ -78,7 +105,14 @@ export function WorkflowDetailPage() {
     refetchInterval: 5000,
   })
   const workflow = data?.workflow
-  const runs = useMemo(() => runsData?.runs ?? [], [runsData])
+  // Spec #405: keep the OSS "Showing last 7 days" copy truthful.
+  // Backend retention enforcement is the follow-up "Cloud retention
+  // job" spec; the dashboard cap is a view-side filter so the line
+  // and the list agree. Cloud renders the full server response.
+  const runs = useMemo(() => {
+    const all = runsData?.runs ?? []
+    return isOss ? filterRunsToLastSevenDays(all) : all
+  }, [runsData, isOss])
 
   const [tab, setTab] = useState<TabValue>(() => readTabFromHash())
 
@@ -170,7 +204,7 @@ export function WorkflowDetailPage() {
         </TabsList>
 
         <TabsContent value="definition" className="space-y-4 pt-4 md:space-y-6">
-          <DefinitionTab workflow={workflow} />
+          <DefinitionTab workflow={workflow} isOss={isOss} />
         </TabsContent>
 
         <TabsContent value="runs" className="space-y-4 pt-4 md:space-y-6">
@@ -183,6 +217,7 @@ export function WorkflowDetailPage() {
             runs={runs}
             stageIds={workflow.stages.map((s) => s.id)}
             workspaceSlug={workspace.slug}
+            isOss={isOss}
           />
           <WorkflowEventsCard workflowId={workflow.id} runs={runs} />
           <WorkflowSessionsCard runs={runs} />
@@ -205,9 +240,12 @@ export function WorkflowDetailPage() {
 
 function DefinitionTab({
   workflow,
+  isOss,
 }: {
   workflow: NonNullable<Awaited<ReturnType<typeof api.getWorkflow>>["workflow"]>
+  isOss: boolean
 }) {
+  const isSchedule = SCHEDULE_TRIGGER_KIND_TAGS.has(workflow.trigger.kind_tag)
   return (
     <Card>
       <CardHeader className="px-4 pb-2 pt-4 md:px-6">
@@ -222,6 +260,23 @@ function DefinitionTab({
             triggerLabel={workflow.trigger.label ?? ""}
             stages={workflow.stages}
           />
+          {/* Spec #405: OSS users running schedule triggers (cron /
+              delay / interval) discover the always-on-scheduler limit
+              here, where it bites. The line is inline, not a modal. */}
+          {isOss && isSchedule && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Runs while this Onsager process is running. For 24/7
+              schedules,{" "}
+              <a
+                href="https://app.onsager.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                use Cloud →
+              </a>
+            </p>
+          )}
         </div>
         {workflow.stages.map((s, i) => {
           const output = outputArtifactKind(s.gate_kind, s.artifact_kind)
@@ -267,15 +322,27 @@ function RunsList({
   runs,
   stageIds,
   workspaceSlug,
+  isOss,
 }: {
   runs: WorkflowRun[]
   stageIds: string[]
   workspaceSlug: string
+  isOss: boolean
 }) {
   return (
     <Card>
       <CardHeader className="px-4 pb-2 pt-4 md:px-6">
         <CardTitle className="text-base">Run history</CardTitle>
+        {/* Spec #405: OSS dashboards cap the run-history view at 7
+            days; the line surfaces the Cloud value (90-day retention)
+            at the moment the user hits the wall. Informative, not
+            promotional. The actual retention enforcement is a follow-
+            up spec; this is the surfacing half. */}
+        {isOss && (
+          <p className="text-xs text-muted-foreground">
+            Showing last 7 days · Cloud retains 90.
+          </p>
+        )}
       </CardHeader>
       <CardContent className="space-y-3 px-4 pb-4 md:px-6">
         {runs.length === 0 ? (
