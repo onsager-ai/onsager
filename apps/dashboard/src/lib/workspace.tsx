@@ -88,10 +88,10 @@ export function WorkspaceScope({ children }: WorkspaceLayoutProps) {
   }
 
   if (workspaces.length === 0) {
-    // OnboardingGate handles the welcome redirect; the user landing here
-    // directly (deep-link to a scoped path with zero memberships) gets
-    // bounced to the picker so they can create one.
-    return <Navigate to="/workspaces?welcome=1" replace />
+    // Deep-link to a scoped path with zero memberships — send them to
+    // `/chat`, the FTUE entry. The picker still lives at `/workspaces`
+    // for users who want to create one explicitly.
+    return <Navigate to="/chat" replace />
   }
 
   if (!active) {
