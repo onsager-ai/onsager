@@ -389,6 +389,11 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let listener_spine = state.spine.clone();
     let activation_pool = state.pool.clone();
     let activation_spine = state.spine.clone();
+    let activation_is_oss = !state
+        .config
+        .deployment
+        .as_deref()
+        .is_some_and(|d| d.eq_ignore_ascii_case("cloud"));
 
     let app = app.with_state(state);
 
@@ -407,8 +412,12 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     // Writes one activation row per (user, workflow) the first time a
     // bound workflow's run reaches the final stage.
     tokio::spawn(async move {
-        if let Err(e) =
-            crate::listeners::workflow_activated::run(activation_pool, activation_spine).await
+        if let Err(e) = crate::listeners::workflow_activated::run(
+            activation_pool,
+            activation_spine,
+            activation_is_oss,
+        )
+        .await
         {
             tracing::error!("portal: workflow_activated listener exited: {e}");
         }

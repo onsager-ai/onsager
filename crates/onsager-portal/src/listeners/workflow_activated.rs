@@ -26,7 +26,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::Utc;
 use onsager_spine::factory_event::FactoryEventKind;
 use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 use sqlx::postgres::PgPool;
@@ -34,30 +33,39 @@ use uuid::Uuid;
 
 use crate::handlers::activation::activated_dedup_key;
 
-pub async fn run(pool: PgPool, store: EventStore) -> anyhow::Result<()> {
+pub async fn run(pool: PgPool, store: EventStore, is_oss: bool) -> anyhow::Result<()> {
     let handler = WorkflowActivated {
         pool: Arc::new(pool),
         store: store.clone(),
+        is_oss,
     };
-    Listener::new(store).run(handler).await
+    // Warm-start cursor — `ftue.activated` is a forward-looking signal;
+    // backfilling years of historical `stage.advanced` events on every
+    // process boot would log misleading "first activation" rows and
+    // run a DB lookup per event. `dedup_key` would still drop the
+    // duplicate inserts, but the work itself is wasted.
+    let since = store.max_event_id().await.ok().flatten();
+    Listener::new(store).with_since(since).run(handler).await
 }
 
 struct WorkflowActivated {
     pool: Arc<PgPool>,
     store: EventStore,
+    is_oss: bool,
 }
 
 impl WorkflowActivated {
     async fn handle_stage_advanced(&self, notification: &EventNotification) -> anyhow::Result<()> {
-        let kind = match notification.table.as_str() {
+        let ext_row = match notification.table.as_str() {
             "events_ext" => {
                 let Some(row) = self.store.get_ext_event_by_id(notification.id).await? else {
                     return Ok(());
                 };
-                serde_json::from_value::<FactoryEventKind>(row.data)?
+                row
             }
             _ => return Ok(()),
         };
+        let kind = serde_json::from_value::<FactoryEventKind>(ext_row.data.clone())?;
 
         let FactoryEventKind::StageAdvanced {
             workflow_id,
@@ -75,10 +83,12 @@ impl WorkflowActivated {
             return Ok(());
         }
 
-        // Resolve the workflow's owner. Without a `created_by` we cannot
-        // attribute the activation rung to a user — skip silently.
+        // Resolve the workflow's owner. The spine `workflows` table is
+        // keyed by `workflow_id` (see migration 006). Without a
+        // `created_by` we cannot attribute the activation rung to a
+        // user — skip silently.
         let row: Option<(Option<String>,)> =
-            sqlx::query_as("SELECT created_by FROM workflows WHERE id = $1")
+            sqlx::query_as("SELECT created_by FROM workflows WHERE workflow_id = $1")
                 .bind(&workflow_id)
                 .fetch_optional(&*self.pool)
                 .await?;
@@ -97,17 +107,23 @@ impl WorkflowActivated {
             "workflow_id": workflow_id,
             "terminal_status": "completed",
         });
+        // Use the spine row's timestamp so reporting reflects when the
+        // run actually reached terminal state, not when the listener
+        // happened to process it.
+        let occurred_at = ext_row.created_at;
+        let path = if self.is_oss { "oss" } else { "cloud" };
 
         let res = sqlx::query(
             "INSERT INTO activation_events \
                  (id, event, occurred_at, user_id, anonymous_id, surface, path, context, dedup_key) \
-             VALUES ($1, 'ftue.activated', $2, $3, $4, 'spine', 'cloud', $5, $6) \
+             VALUES ($1, 'ftue.activated', $2, $3, $4, 'spine', $5, $6, $7) \
              ON CONFLICT (dedup_key) DO NOTHING",
         )
         .bind(&id)
-        .bind(Utc::now())
+        .bind(occurred_at)
         .bind(&user_id)
         .bind(&anonymous_id)
+        .bind(path)
         .bind(&context)
         .bind(&dedup_key)
         .execute(&*self.pool)
@@ -147,6 +163,6 @@ mod tests {
 
     #[allow(dead_code)]
     fn _type_check_run_signature(pool: PgPool, store: EventStore) {
-        std::mem::drop(run(pool, store));
+        std::mem::drop(run(pool, store, false));
     }
 }

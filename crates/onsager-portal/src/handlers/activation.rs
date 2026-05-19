@@ -22,7 +22,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::auth::{AuthUser, SessionKind};
@@ -61,6 +61,7 @@ const VALID_SURFACES: &[&str] = &["landing", "chat", "dialog", "spine"];
 const VALID_PATHS: &[&str] = &["cloud", "oss"];
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ActivationEventBody {
     pub event: String,
     pub occurred_at: DateTime<Utc>,
@@ -68,7 +69,27 @@ pub struct ActivationEventBody {
     pub surface: String,
     pub path: String,
     #[serde(default)]
-    pub context: serde_json::Value,
+    pub context: ActivationContext,
+}
+
+/// Closed-shape context payload. Matches the spec's interface verbatim;
+/// `deny_unknown_fields` rejects anything else at the wire boundary so
+/// the funnel contract is mechanically falsifiable.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActivationContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_status: Option<String>,
 }
 
 /// POST /api/activation — record one rung crossing.
@@ -101,9 +122,6 @@ pub async fn record_activation(
     if body.anonymous_id.trim().is_empty() {
         return reject("anonymous_id required");
     }
-    if !body.context.is_object() {
-        return reject("context must be an object");
-    }
     if body.event == "ftue.activated" {
         return reject("ftue.activated is emitted server-side only");
     }
@@ -117,6 +135,10 @@ pub async fn record_activation(
     ) {
         Ok(k) => k,
         Err(msg) => return reject(msg),
+    };
+    let context_json = match serde_json::to_value(&body.context) {
+        Ok(v) => v,
+        Err(_) => return reject("context serialization failed"),
     };
 
     let id = Uuid::new_v4().to_string();
@@ -133,7 +155,7 @@ pub async fn record_activation(
     .bind(&body.anonymous_id)
     .bind(&body.surface)
     .bind(&body.path)
-    .bind(&body.context)
+    .bind(&context_json)
     .bind(&dedup_key)
     .execute(&state.pool)
     .await;
@@ -242,23 +264,23 @@ fn build_dedup_key(
     event: &str,
     user_id: Option<&str>,
     anonymous_id: &str,
-    context: &serde_json::Value,
+    context: &ActivationContext,
 ) -> Result<String, &'static str> {
     let actor = user_id.unwrap_or(anonymous_id);
     match event {
         "ftue.inspected" => Ok(format!("ftue.inspected|{actor}")),
         "ftue.drafted" => {
             let draft_id = context
-                .get("draft_id")
-                .and_then(|v| v.as_str())
+                .draft_id
+                .as_deref()
                 .ok_or("ftue.drafted requires context.draft_id")?;
             Ok(format!("ftue.drafted|{actor}|{draft_id}"))
         }
         "ftue.bound" => {
             let user_id = user_id.ok_or("ftue.bound requires authenticated user_id")?;
             let draft_id = context
-                .get("draft_id")
-                .and_then(|v| v.as_str())
+                .draft_id
+                .as_deref()
                 .ok_or("ftue.bound requires context.draft_id")?;
             Ok(format!("ftue.bound|{user_id}|{draft_id}"))
         }
@@ -267,8 +289,8 @@ fn build_dedup_key(
         "ftue.activated" => {
             let user_id = user_id.ok_or("ftue.activated requires user_id")?;
             let workflow_id = context
-                .get("workflow_id")
-                .and_then(|v| v.as_str())
+                .workflow_id
+                .as_deref()
                 .ok_or("ftue.activated requires context.workflow_id")?;
             Ok(format!("ftue.activated|{user_id}|{workflow_id}"))
         }
@@ -296,20 +318,22 @@ pub(crate) fn activated_dedup_key(user_id: &str, workflow_id: &str) -> String {
 mod tests {
     use super::*;
 
+    fn ctx_with_draft(draft_id: &str) -> ActivationContext {
+        ActivationContext {
+            draft_id: Some(draft_id.to_string()),
+            ..ActivationContext::default()
+        }
+    }
+
     #[test]
     fn dedup_keys_match_spec_table() {
+        let empty = ActivationContext::default();
         assert_eq!(
-            build_dedup_key("ftue.inspected", None, "anon-uuid", &serde_json::json!({})).unwrap(),
+            build_dedup_key("ftue.inspected", None, "anon-uuid", &empty).unwrap(),
             "ftue.inspected|anon-uuid"
         );
         assert_eq!(
-            build_dedup_key(
-                "ftue.inspected",
-                Some("user-1"),
-                "anon-uuid",
-                &serde_json::json!({})
-            )
-            .unwrap(),
+            build_dedup_key("ftue.inspected", Some("user-1"), "anon-uuid", &empty).unwrap(),
             "ftue.inspected|user-1"
         );
         assert_eq!(
@@ -317,19 +341,13 @@ mod tests {
                 "ftue.drafted",
                 Some("user-1"),
                 "anon",
-                &serde_json::json!({ "draft_id": "d_1" })
+                &ctx_with_draft("d_1"),
             )
             .unwrap(),
             "ftue.drafted|user-1|d_1"
         );
         assert_eq!(
-            build_dedup_key(
-                "ftue.bound",
-                Some("user-1"),
-                "anon",
-                &serde_json::json!({ "draft_id": "d_1" })
-            )
-            .unwrap(),
+            build_dedup_key("ftue.bound", Some("user-1"), "anon", &ctx_with_draft("d_1"),).unwrap(),
             "ftue.bound|user-1|d_1"
         );
         assert_eq!(
@@ -344,7 +362,7 @@ mod tests {
             "ftue.drafted",
             Some("user-1"),
             "anon",
-            &serde_json::json!({}),
+            &ActivationContext::default(),
         )
         .unwrap_err();
         assert!(err.contains("draft_id"));
@@ -352,13 +370,36 @@ mod tests {
 
     #[test]
     fn ftue_bound_requires_user_id() {
-        let err = build_dedup_key(
-            "ftue.bound",
-            None,
-            "anon",
-            &serde_json::json!({ "draft_id": "d_1" }),
-        )
-        .unwrap_err();
+        let err = build_dedup_key("ftue.bound", None, "anon", &ctx_with_draft("d_1")).unwrap_err();
         assert!(err.contains("user_id"));
+    }
+
+    #[test]
+    fn unknown_top_level_fields_are_rejected() {
+        let json = serde_json::json!({
+            "event": "ftue.drafted",
+            "occurred_at": "2026-05-19T00:00:00Z",
+            "anonymous_id": "a",
+            "surface": "chat",
+            "path": "cloud",
+            "context": { "draft_id": "d_1" },
+            "extra_field": "nope",
+        });
+        let err = serde_json::from_value::<ActivationEventBody>(json).unwrap_err();
+        assert!(err.to_string().contains("extra_field"), "{err}");
+    }
+
+    #[test]
+    fn unknown_context_keys_are_rejected() {
+        let json = serde_json::json!({
+            "event": "ftue.drafted",
+            "occurred_at": "2026-05-19T00:00:00Z",
+            "anonymous_id": "a",
+            "surface": "chat",
+            "path": "cloud",
+            "context": { "draft_id": "d_1", "secret_email": "me@x" },
+        });
+        let err = serde_json::from_value::<ActivationEventBody>(json).unwrap_err();
+        assert!(err.to_string().contains("secret_email"), "{err}");
     }
 }

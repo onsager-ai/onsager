@@ -49,6 +49,22 @@ export interface ActivationContext {
   terminal_status?: "completed" | "failed" | "cancelled"
 }
 
+/** Per-page-load fallback id. Held in module scope so every call site
+ * inside a single tab/session gets the same value when localStorage
+ * is unavailable (private mode, quota exhausted) — but different
+ * tabs/loads stay distinct so the funnel's distinct-actor count
+ * isn't collapsed onto a single shared constant. */
+let ephemeralAnonId: string | null = null
+
+function mintFallbackId(): string {
+  if (ephemeralAnonId) return ephemeralAnonId
+  ephemeralAnonId =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? `eph_${crypto.randomUUID()}`
+      : `eph_${Math.random().toString(36).slice(2)}_${Date.now()}`
+  return ephemeralAnonId
+}
+
 /** Read the localStorage UUID, generating one on first use. */
 export function getAnonymousId(): string {
   if (typeof window === "undefined") return "ssr"
@@ -63,9 +79,11 @@ export function getAnonymousId(): string {
     }
     return id
   } catch {
-    // Private mode / quota — return an ephemeral id rather than
-    // throwing through every call site.
-    return "anon-ephemeral"
+    // Private mode / quota — return a per-page-load random id so
+    // distinct-actor counts don't collapse onto one shared
+    // constant. Persistence is lost across reloads in this branch,
+    // which is acceptable given private mode is itself ephemeral.
+    return mintFallbackId()
   }
 }
 
