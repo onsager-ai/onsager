@@ -282,6 +282,190 @@ const propose_remediation: McpToolBinding = {
 }
 
 // -----------------------------------------------------------------------------
+// 0.2 substrate authoring (#395) — SpecPlan + Workflow Library v2 + compiler
+// -----------------------------------------------------------------------------
+
+function specPlanSummary(args: Record<string, unknown>): string {
+  const sp = args.spec_plan as Record<string, unknown> | undefined
+  if (!sp) return "no plan body"
+  const specs = Array.isArray(sp.specs) ? sp.specs.length : 0
+  const deps = Array.isArray(sp.deps) ? sp.deps.length : 0
+  return `${specs} spec${specs === 1 ? "" : "s"}, ${deps} dep${deps === 1 ? "" : "s"}`
+}
+
+function workflowGraphSummary(args: Record<string, unknown>): string {
+  const w = args.workflow as Record<string, unknown> | undefined
+  if (!w) return "no workflow body"
+  const nodes = Array.isArray(w.nodes) ? w.nodes.length : 0
+  const edges = Array.isArray(w.edges) ? w.edges.length : 0
+  return `${nodes} node${nodes === 1 ? "" : "s"}, ${edges} edge${edges === 1 ? "" : "s"}`
+}
+
+const submit_spec_plan: McpToolBinding = {
+  name: "submit_spec_plan",
+  category: "constructive",
+  title: (args) => `Submit spec plan · ${str(args, "spec_plan_id", "unknown")}`,
+  buildCard: (args) => ({
+    kind: "constructive",
+    title: `Submit spec plan · ${str(args, "spec_plan_id", "unknown")}`,
+    summary: specPlanSummary(args),
+    body: {
+      fields: [
+        field("Workspace", str(args, "workspace_id")),
+        field("Plan id", str(args, "spec_plan_id"), { editable: true, key: "spec_plan_id" }),
+        field("Shape", specPlanSummary(args)),
+      ],
+    },
+    commit: { label: "Submit plan", intent: "primary" },
+    reject: { label: "Discard" },
+  }),
+}
+
+const update_spec: McpToolBinding = {
+  name: "update_spec",
+  category: "diff",
+  title: (args) => `Update spec · ${str(args, "spec_plan_id", "unknown")}`,
+  buildCard: (args) => {
+    const spec = args.spec as Record<string, unknown> | undefined
+    const specId = spec && typeof spec.id === "string" ? spec.id : "(unknown)"
+    const kind = spec && typeof spec.kind === "string" ? spec.kind : "(unset)"
+    return {
+      kind: "diff",
+      title: `Update spec · ${specId}`,
+      summary: `Plan ${str(args, "spec_plan_id", "(unknown)")} → spec ${specId}`,
+      body: {
+        before: { spec: "(current value)" },
+        after: { spec: `${specId} (kind: ${kind})` },
+      },
+      commit: { label: "Apply update", intent: "primary" },
+      reject: { label: "Discard" },
+    }
+  },
+}
+
+const list_spec_plans: McpToolBinding = {
+  name: "list_spec_plans",
+  category: "read_only",
+  title: () => "List spec plans",
+  renderInfo: (args) => {
+    const ws = str(args, "workspace_id")
+    return ws ? `Listing spec plans in workspace ${ws}.` : "Listing spec plans."
+  },
+}
+
+const get_spec_plan: McpToolBinding = {
+  name: "get_spec_plan",
+  category: "read_only",
+  title: () => "Get spec plan",
+  renderInfo: (args) =>
+    `Reading spec plan ${str(args, "spec_plan_id", "(unknown)")}.`,
+}
+
+const compile_dry_run: McpToolBinding = {
+  name: "compile_dry_run",
+  category: "read_only",
+  title: () => "Compile (dry run)",
+  renderInfo: (args) =>
+    `Compiling candidate plan against the workspace library — ${specPlanSummary(args)}.`,
+}
+
+const get_execution_plan: McpToolBinding = {
+  name: "get_execution_plan",
+  category: "read_only",
+  title: () => "Get execution plan",
+  renderInfo: (args) =>
+    `Recompiling stored plan ${str(args, "spec_plan_id", "(unknown)")} on read.`,
+}
+
+const submit_workflow: McpToolBinding = {
+  name: "submit_workflow",
+  category: "constructive",
+  title: (args) => `Submit workflow · ${str(args, "spec_kind", "unknown")}`,
+  buildCard: (args) => ({
+    kind: "constructive",
+    title: `Submit workflow · ${str(args, "spec_kind", "unknown")}`,
+    summary: workflowGraphSummary(args),
+    body: {
+      fields: [
+        field("Workspace", str(args, "workspace_id")),
+        field("Spec kind", str(args, "spec_kind"), { editable: true, key: "spec_kind" }),
+        field("Shape", workflowGraphSummary(args)),
+      ],
+    },
+    commit: { label: "Register workflow", intent: "primary" },
+    reject: { label: "Discard" },
+  }),
+}
+
+const update_workflow: McpToolBinding = {
+  name: "update_workflow",
+  category: "diff",
+  title: (args) => `Update workflow · ${str(args, "spec_kind", "unknown")}`,
+  buildCard: (args) => ({
+    kind: "diff",
+    title: `Update workflow · ${str(args, "spec_kind", "unknown")}`,
+    summary: `New version → ${workflowGraphSummary(args)}`,
+    body: {
+      before: { workflow: "(current active version)" },
+      after: { workflow: workflowGraphSummary(args) },
+    },
+    commit: { label: "Append version", intent: "primary" },
+    reject: { label: "Discard" },
+  }),
+}
+
+const retire_workflow: McpToolBinding = {
+  name: "retire_workflow",
+  category: "destructive",
+  title: (args) => `Retire workflow · ${str(args, "spec_kind", "unknown")}`,
+  buildCard: (args) => ({
+    kind: "destructive",
+    title: `Retire workflow · ${str(args, "spec_kind", "unknown")}`,
+    body: {
+      info: "Marks the currently-active workflow version inactive. Future compiles for this spec kind will hard-fail with `MissingKind` until a fresh `submit_workflow` lands.",
+    },
+    sideEffects: [
+      "Sets `workflow_library.retired_at = NOW()` on the active row",
+      "Subsequent compile_dry_run / get_execution_plan calls for this kind return `MissingKind`",
+    ],
+    reversibility:
+      "Irreversible at the row level — register a new version via `submit_workflow` to re-establish an active workflow.",
+    confirmTyping: {
+      promptLabel: "Type the spec kind to confirm",
+      expectedValue: str(args, "spec_kind"),
+    },
+    commit: {
+      label: `Retire ${str(args, "spec_kind", "")}`.trim(),
+      intent: "destructive",
+    },
+    reject: { label: "Keep workflow" },
+  }),
+}
+
+const list_workflows_v2: McpToolBinding = {
+  name: "list_workflows_v2",
+  category: "read_only",
+  title: () => "List workflows (substrate)",
+  renderInfo: (args) => {
+    const ws = str(args, "workspace_id")
+    return ws
+      ? `Listing substrate workflows in workspace ${ws}.`
+      : "Listing substrate workflows."
+  },
+}
+
+const get_workflow_v2: McpToolBinding = {
+  name: "get_workflow_v2",
+  category: "read_only",
+  title: () => "Get workflow (substrate)",
+  renderInfo: (args) => {
+    const v = args.version
+    const versionPart = typeof v === "number" ? ` at version ${v}` : " (latest active)"
+    return `Reading substrate workflow ${str(args, "spec_kind", "(unknown)")}${versionPart}.`
+  },
+}
+
+// -----------------------------------------------------------------------------
 // Registry
 // -----------------------------------------------------------------------------
 
@@ -298,6 +482,18 @@ const BINDINGS: McpToolBinding[] = [
   get_stage_logs,
   get_artifact,
   propose_remediation,
+  // 0.2 substrate authoring (#395)
+  submit_spec_plan,
+  update_spec,
+  list_spec_plans,
+  get_spec_plan,
+  compile_dry_run,
+  get_execution_plan,
+  submit_workflow,
+  update_workflow,
+  retire_workflow,
+  list_workflows_v2,
+  get_workflow_v2,
 ]
 
 /** All known MCP tools, in registry order. */
