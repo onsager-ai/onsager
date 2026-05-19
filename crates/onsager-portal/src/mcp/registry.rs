@@ -98,6 +98,15 @@ fn build_registry() -> Vec<ToolDescriptor> {
             },
         },
         ToolDescriptor {
+            name: "propose_workflow_draft",
+            description: "Propose a workflow *draft* (no workspace, no install, no repo). Validates the `{name, trigger, stages}` shape and echoes it back so the dashboard can route through the FTUE HitlCard and into client-side draft storage. Drafts live in localStorage until the binding flow (#402) promotes them into a real spine workflow via `propose_workflow`. Use this tool from the workspace-less `/chat` entry; for workspace-scoped design use `propose_workflow` directly.",
+            category: ToolCategory::Constructive,
+            input_schema: super::input_schema::<tools::workflows::ProposeWorkflowDraftArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::workflows::propose_workflow_draft(state, user, args))
+            },
+        },
+        ToolDescriptor {
             name: "run_workflow",
             description: "Fire a workflow's `manual` trigger to start a new run. Workflow must be active and declare a matching manual trigger name.",
             category: ToolCategory::Destructive,

@@ -635,6 +635,7 @@ export function ChatPage() {
           onSwitch={switchDraft}
           onNew={() => newDraft()}
           onDelete={deleteById}
+          isOss={isOss}
         />
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
           {isEmpty ? (
