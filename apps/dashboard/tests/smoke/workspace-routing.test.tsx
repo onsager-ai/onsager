@@ -1,69 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom"
+import { MemoryRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 
-import { rememberLastUsedWorkspace } from "@/lib/workspace"
-
-// Pull in the App's redirect helpers indirectly: rendering the full App.tsx
-// pulls in lazy-loaded chunks and the entire AuthProvider; what we actually
-// want to assert is that the bare path bounces to the active workspace.
+// Per spec #398 the bare path `/` is the universal landing and redirects
+// unconditionally to `/chat`. ChatPage resolves the user's workspace
+// context internally (last-used or zero-state FTUE), so the redirect
+// no longer needs to read membership state or `localStorage`.
 //
-// To keep the test focused, we replicate the App.tsx route table for just
-// the redirect row under test (BarePathRedirect). The test depends on:
-//   * `api.listWorkspaces` returning a known workspace list
-//   * `localStorage` carrying the last-used slug
-// — and that's enough surface to pin the bare-path redirect contract.
+// The "bounce to first workspace" machinery was deleted in spec #403;
+// this test pins the post-demolition invariant. We replicate the App.tsx
+// redirect row here rather than rendering the full App to keep the test
+// scope tight (no AuthProvider, no lazy chunks).
 
-vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({
-    user: { id: "u1" },
-    authEnabled: true,
-    loading: false,
-  }),
-}))
-
-vi.mock("@/lib/api", () => ({
-  api: {
-    listWorkspaces: vi.fn().mockResolvedValue({
-      workspaces: [
-        {
-          id: "w1",
-          slug: "acme",
-          name: "Acme",
-          created_by: "u1",
-          created_at: "2026-01-01",
-        },
-        {
-          id: "w2",
-          slug: "beta",
-          name: "Beta",
-          created_by: "u1",
-          created_at: "2026-01-01",
-        },
-      ],
-    }),
-  },
-}))
-
-// Re-export the redirect component from a tiny shim — App.tsx hides it
-// behind a module-private binding, but it's built on Navigate and the
-// listWorkspaces query, both of which we can re-construct here.
-import { Navigate } from "react-router-dom"
-import { useQuery } from "@tanstack/react-query"
-import { api } from "@/lib/api"
-import { readLastUsedWorkspace } from "@/lib/workspace"
-
-function BarePathRedirect() {
-  const { data } = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: api.listWorkspaces,
-  })
-  const workspaces = data?.workspaces ?? []
-  if (workspaces.length === 0) return null
-  const lastUsed = readLastUsedWorkspace()
-  const active = workspaces.find((w) => w.slug === lastUsed) ?? workspaces[0]
-  return <Navigate to={`/workspaces/${active.slug}`} replace />
+function BarePathRoute() {
+  return <Navigate to="/chat" replace />
 }
 
 function LocationProbe() {
@@ -72,43 +22,32 @@ function LocationProbe() {
 }
 
 function renderRoute(initial: string) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[initial]}>
-        <Routes>
-          <Route path="/" element={<BarePathRedirect />} />
-          <Route path="/workspaces/:workspace/*" element={<LocationProbe />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={[initial]}>
+      <Routes>
+        <Route path="/" element={<BarePathRoute />} />
+        <Route path="/chat" element={<LocationProbe />} />
+        <Route path="/workspaces/:workspace/*" element={<LocationProbe />} />
+      </Routes>
+    </MemoryRouter>,
   )
 }
 
-describe("App-level bare-path redirect (#166)", () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    if (typeof window !== "undefined") {
-      window.localStorage.clear()
-    }
-  })
-
-  it("bare `/` bounces to the user's first workspace when no last-used is set", async () => {
+describe("App-level bare-path redirect (#398, #403)", () => {
+  it("bare `/` redirects to /chat regardless of workspace state", async () => {
     renderRoute("/")
     await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent(
-        "/workspaces/acme",
-      ),
+      expect(screen.getByTestId("location")).toHaveTextContent("/chat"),
     )
   })
 
-  it("bare `/` honors the last-used workspace from localStorage", async () => {
-    rememberLastUsedWorkspace("beta")
+  it("does not bounce to a workspace overview", async () => {
     renderRoute("/")
     await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent(
-        "/workspaces/beta",
-      ),
+      expect(screen.getByTestId("location")).toHaveTextContent("/chat"),
+    )
+    expect(screen.getByTestId("location").textContent).not.toMatch(
+      /^\/workspaces\//,
     )
   })
 })

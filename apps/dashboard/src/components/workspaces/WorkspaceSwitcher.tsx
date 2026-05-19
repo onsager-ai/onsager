@@ -90,8 +90,9 @@ export function WorkspaceSwitcher() {
   )
 
   if (workspaces.length === 0) {
-    // Zero memberships: the OnboardingGate handles the redirect-to-welcome
-    // path; rendering a no-op switcher here would be confusing chrome.
+    // Zero memberships: the FTUE flow lives at /chat and binding lifts
+    // workspace creation into a single dialog. Rendering a no-op switcher
+    // here would be confusing chrome.
     return null
   }
 

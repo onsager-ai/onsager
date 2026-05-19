@@ -158,7 +158,7 @@ describe("WorkspaceCard — OAuth-first Add project flow", () => {
   })
 })
 
-describe("WorkspaceCard — step-by-step NextStepCallout", () => {
+describe("WorkspaceCard — NextStepCallout (post-#403 demolition)", () => {
   beforeEach(() => vi.clearAllMocks())
 
   it("shows a Connect GitHub CTA when no installations are linked yet", async () => {
@@ -168,7 +168,10 @@ describe("WorkspaceCard — step-by-step NextStepCallout", () => {
     expect(link.getAttribute("href")).toBe(
       "/api/github-app/install-start?workspace_id=ws1",
     )
-    expect(screen.getByText(/step 2 of 3/i)).toBeInTheDocument()
+    // Per spec #403 the "Step N of 3" ladder framing is gone — the
+    // callout label is just the action name.
+    expect(screen.getByText(/^connect github$/i)).toBeInTheDocument()
+    expect(screen.queryByText(/step \d of 3/i)).not.toBeInTheDocument()
     // Empty-state CTA must be unambiguous — the InstallationsSection
     // must not duplicate the callout's install button.
     expect(
@@ -199,12 +202,23 @@ describe("WorkspaceCard — step-by-step NextStepCallout", () => {
     renderCard()
     const cta = await screen.findByRole("button", { name: /^add project/i })
     expect(cta).toBeInTheDocument()
-    expect(screen.getByText(/step 3 of 3/i)).toBeInTheDocument()
+    // Label is the bare action — no "Step 3 of 3" lead-in.
+    expect(screen.getByText(/^add a project$/i)).toBeInTheDocument()
+    expect(screen.queryByText(/step \d of 3/i)).not.toBeInTheDocument()
     // The empty-state button in the section is suppressed; only the callout
     // CTA drives the user forward.
     expect(
       screen.queryByRole("button", { name: /add another project/i }),
     ).not.toBeInTheDocument()
+  })
+
+  it("does not render the dotted setup-progress checklist", async () => {
+    await primeMocks({ repos: [], installations: [] })
+    renderCard()
+    await screen.findByRole("link", { name: /install github app/i })
+    expect(screen.queryByText(/workspace created/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/github connected/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/project linked/i)).not.toBeInTheDocument()
   })
 
   it("clicking the Add project CTA opens the add-project form", async () => {
