@@ -20,6 +20,8 @@ use super::ToolError;
 pub mod artifacts;
 pub mod diagnostics;
 pub mod runs;
+pub mod substrate_specs;
+pub mod substrate_workflows;
 pub mod workflows;
 
 /// MCP-side workspace authorization. Mirrors
