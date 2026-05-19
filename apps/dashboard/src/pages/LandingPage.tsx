@@ -14,6 +14,17 @@ export function LandingPage() {
           Governed workflows for AI-augmented engineering work. When agents
           write code, ship safely. Open source, runs anywhere.
         </p>
+        {/* Spec #407 trust-strip — locked copy. The link points at the
+            public Dogfood showcase, the live reference for the
+            Onsager-managing-Onsager claim. */}
+        <p className="text-sm text-muted-foreground">
+          <Link
+            to="/showcase/dogfood"
+            className="font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            Onsager is the factory that builds Onsager — see live runs ↗
+          </Link>
+        </p>
       </header>
 
       <section className="flex flex-col gap-3">
