@@ -328,7 +328,7 @@ the spec-link requirement applies to all non-trivial PRs.
 
 ## What this skill does NOT cover
 
-- Writing the spec issue — see [`issue-spec`](../issue-spec/SKILL.md).
+- Writing the spec issue — see [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) (installed globally from `onsager-ai/dev-skills`).
 - Opening or managing the PR — see [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md).
 - The end-to-end dev loop — see [`onsager-dev-process`](../onsager-dev-process/SKILL.md).
 - Smoke-testing Railway deploys — see the `railway` skill.

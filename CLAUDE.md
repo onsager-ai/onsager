@@ -296,13 +296,16 @@ Layers landing in stages (#288):
   follow-up), Caddyfile `/mcp/*` block, `xtask
   check-tools-and-skills` lint, ADR 0007 flipped to Accepted.
 - **Skills bundle (#310, migrated #323)** — the four initial public
-  skills (`onsager-design-workflow`, `onsager-run-workflow`,
-  `onsager-triage-run`, `onsager-explore-artifacts`) plus `plan-dag`
-  live canonically in `onsager-ai/onsager-skills`. Install with
+  user-facing skills (`onsager-design-workflow`, `onsager-run-workflow`,
+  `onsager-triage-run`, `onsager-explore-artifacts`) live canonically
+  in `onsager-ai/onsager-skills`. Install with
   `npx skills add onsager-ai/onsager-skills` or
   `git clone https://github.com/onsager-ai/onsager-skills`. See the
   sibling repo's `README.md` for the trigger-phrase matrix and how the
-  skills compose into one product loop.
+  skills compose into one product loop. Cross-repo dev-process skills
+  (`plan-dag`, `issue-spec`, `ci-triage`, `web-testing`, `railway`,
+  …) now live in `onsager-ai/dev-skills` and install globally via
+  `npx skills add -g onsager-ai/dev-skills --skill '*' -a claude-code`.
 - **Dashboard MCP client + HitlCard primitive (landed, spec #311).**
   `apps/dashboard/src/components/chat/HitlCard.tsx` renders the three
   HITL card shapes (constructive / diff / destructive) over one

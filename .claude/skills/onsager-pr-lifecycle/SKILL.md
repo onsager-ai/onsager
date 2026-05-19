@@ -174,7 +174,7 @@ This refresh is manual. Run through it for every merged PR that closes
 
 For classification taxonomy (`regression` / `flake` / `infra` / `needs-human`),
 suspect-commit identification, and the rolling `main-red` issue convention,
-use the [`ci-triage` skill](../ci-triage/SKILL.md). This section covers the
+use the [`ci-triage` skill](https://github.com/onsager-ai/dev-skills/blob/main/skills/ci-triage/SKILL.md) (installed globally from `onsager-ai/dev-skills`). This section covers the
 PR-side specifics — reproducing locally and the repo's common failure
 patterns.
 
@@ -338,7 +338,7 @@ commit message in chat — the user can see it on the PR.
 | Related surface | Role |
 |-----------------|------|
 | [`onsager-dev-process`](../onsager-dev-process/SKILL.md) | Top-level SDD loop; points here for the post-push stage. |
-| [`issue-spec`](../issue-spec/SKILL.md) | Creates the spec issue this PR links to. |
+| [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) | Creates the spec issue this PR links to. Installed globally from `onsager-ai/dev-skills`. |
 | [`onsager-pre-push`](../onsager-pre-push/SKILL.md) | Runs before `git push`; enforces the spec-link check locally. |
 | [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) | Automates the open / close-unmerged label transitions. Plan-item ticks remain manual. |
-| [`ci-triage`](../ci-triage/SKILL.md) | Shared failure taxonomy + `main-red` issue convention; called from this skill's CI triage flow. |
+| [`ci-triage`](https://github.com/onsager-ai/dev-skills/blob/main/skills/ci-triage/SKILL.md) | Shared failure taxonomy + `main-red` issue convention; called from this skill's CI triage flow. Installed globally from `onsager-ai/dev-skills`. |

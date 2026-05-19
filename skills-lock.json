@@ -7,12 +7,6 @@
       "skillPath": "skills/frontend-design/SKILL.md",
       "computedHash": "063a0e6448123cd359ad0044cc46b0e490cc7964d45ef4bb9fd842bd2ffbca67"
     },
-    "plan-dag": {
-      "source": "onsager-ai/onsager-skills",
-      "sourceType": "github",
-      "skillPath": "skills/plan-dag/SKILL.md",
-      "computedHash": "6787d3a8369eb736f269fa3acb6ec996af92e0acd98897545ba8059158b7d78f"
-    },
     "web-design-guidelines": {
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",
