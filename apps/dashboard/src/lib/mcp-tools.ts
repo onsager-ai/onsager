@@ -111,6 +111,32 @@ const propose_workflow: McpToolBinding = {
   },
 }
 
+const propose_workflow_draft: McpToolBinding = {
+  name: "propose_workflow_draft",
+  category: "constructive",
+  title: (args) =>
+    `Propose draft${str(args, "name") ? ` · ${str(args, "name")}` : ""}`,
+  buildCard: (args) => {
+    const trigger = args.trigger as Record<string, unknown> | undefined
+    const label =
+      trigger && typeof trigger.label === "string" ? trigger.label : "(unset)"
+    return {
+      kind: "constructive",
+      title: `Propose workflow draft${str(args, "name") ? ` · ${str(args, "name")}` : ""}`,
+      summary: stagesSummary(args),
+      body: {
+        fields: [
+          field("Name", str(args, "name"), { editable: true, key: "name" }),
+          field("Trigger label", label),
+          field("Stages", stagesSummary(args)),
+        ],
+      },
+      commit: { label: "Save draft", intent: "primary" },
+      reject: { label: "Reject" },
+    }
+  },
+}
+
 const run_workflow: McpToolBinding = {
   name: "run_workflow",
   category: "destructive",
@@ -261,6 +287,7 @@ const propose_remediation: McpToolBinding = {
 
 const BINDINGS: McpToolBinding[] = [
   propose_workflow,
+  propose_workflow_draft,
   run_workflow,
   edit_workflow,
   schedule_workflow,
