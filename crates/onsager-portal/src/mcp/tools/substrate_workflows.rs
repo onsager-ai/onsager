@@ -126,28 +126,31 @@ pub struct RetireWorkflowArgs {
 pub async fn retire_workflow(state: &AppState, auth_user: &AuthUser, args: Value) -> ToolResult {
     let args: RetireWorkflowArgs = serde_json::from_value(args)
         .map_err(|e| ToolError::InvalidParams(format!("invalid retire_workflow args: {e}")))?;
+    if args.spec_kind.trim().is_empty() {
+        return Err(ToolError::InvalidParams("spec_kind is required".into()));
+    }
     require_workspace_access(&state.pool, auth_user, &args.workspace_id).await?;
 
-    let row = substrate_library_db::retire_latest(state.spine.pool(), &args.spec_kind)
+    let spec_kind = args.spec_kind.trim();
+    let row = substrate_library_db::retire_latest(state.spine.pool(), spec_kind)
         .await
         .map_err(|e| match e {
             substrate_library_db::LibraryDbError::NotFound => ToolError::NotFound(format!(
-                "no active workflow registered for spec kind `{}`",
-                args.spec_kind
+                "no active workflow registered for spec kind `{spec_kind}`"
             )),
-            substrate_library_db::LibraryDbError::AlreadyRetired => {
-                ToolError::InvalidParams(format!(
-                    "workflow for spec kind `{}` is already retired",
-                    args.spec_kind
-                ))
-            }
+            substrate_library_db::LibraryDbError::AlreadyRetired => ToolError::InvalidParams(
+                format!("workflow for spec kind `{spec_kind}` is already retired"),
+            ),
             other => {
                 tracing::error!("mcp retire_workflow failed: {other}");
                 ToolError::Internal(format!("failed to retire workflow: {other}"))
             }
         })?;
 
-    Ok(serde_json::json!({ "retired": row }))
+    // Same envelope key as `get_workflow_v2` so MCP clients can
+    // route the response through one renderer; `retired_at` on the
+    // row carries the destructive signal.
+    Ok(serde_json::json!({ "workflow": row }))
 }
 
 // =============================================================================
@@ -192,9 +195,13 @@ pub struct GetWorkflowV2Args {
 pub async fn get_workflow_v2(state: &AppState, auth_user: &AuthUser, args: Value) -> ToolResult {
     let args: GetWorkflowV2Args = serde_json::from_value(args)
         .map_err(|e| ToolError::InvalidParams(format!("invalid get_workflow_v2 args: {e}")))?;
+    if args.spec_kind.trim().is_empty() {
+        return Err(ToolError::InvalidParams("spec_kind is required".into()));
+    }
     require_workspace_access(&state.pool, auth_user, &args.workspace_id).await?;
 
-    let row = substrate_library_db::get_by_kind(state.spine.pool(), &args.spec_kind, args.version)
+    let spec_kind = args.spec_kind.trim();
+    let row = substrate_library_db::get_by_kind(state.spine.pool(), spec_kind, args.version)
         .await
         .map_err(|e| {
             tracing::error!("mcp get_workflow_v2 failed: {e}");
@@ -202,8 +209,8 @@ pub async fn get_workflow_v2(state: &AppState, auth_user: &AuthUser, args: Value
         })?
         .ok_or_else(|| {
             let qualifier = match args.version {
-                Some(v) => format!("`{}` at version {}", args.spec_kind, v),
-                None => format!("`{}`", args.spec_kind),
+                Some(v) => format!("`{spec_kind}` at version {v}"),
+                None => format!("`{spec_kind}`"),
             };
             ToolError::NotFound(format!("workflow {qualifier} not found"))
         })?;

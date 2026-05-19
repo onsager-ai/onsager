@@ -141,7 +141,7 @@ pub async fn submit_spec_plan(state: &AppState, auth_user: &AuthUser, args: Valu
     })?;
 
     let stored = spec_plan_db::insert(
-        state.spine.pool(),
+        &state.pool,
         &args.workspace_id,
         args.spec_plan_id.trim(),
         &plan,
@@ -184,14 +184,22 @@ pub async fn update_spec(state: &AppState, auth_user: &AuthUser, args: Value) ->
     let args: UpdateSpecArgs = serde_json::from_value(args)
         .map_err(|e| ToolError::InvalidParams(format!("invalid update_spec args: {e}")))?;
 
+    if args.spec_plan_id.trim().is_empty() {
+        return Err(ToolError::InvalidParams("spec_plan_id is required".into()));
+    }
     require_workspace_access(&state.pool, auth_user, &args.workspace_id).await?;
     let new_spec = parse_spec_ref(args.spec)?;
 
+    // `replace_spec` validates the post-swap plan *before* the DB
+    // write, so a malformed update (dupe id from a sibling spec
+    // rename, dangling dep) surfaces as `InvalidParams` without
+    // corrupting the stored row.
     let stored = spec_plan_db::replace_spec(
-        state.spine.pool(),
+        &state.pool,
         &args.workspace_id,
-        &args.spec_plan_id,
+        args.spec_plan_id.trim(),
         new_spec,
+        true,
     )
     .await
     .map_err(|e| match e {
@@ -201,17 +209,13 @@ pub async fn update_spec(state: &AppState, auth_user: &AuthUser, args: Value) ->
         spec_plan_db::SpecPlanStoreError::SpecNotFound(id) => {
             ToolError::InvalidParams(format!("spec `{id}` not found in plan"))
         }
+        spec_plan_db::SpecPlanStoreError::Validation(e) => {
+            ToolError::InvalidParams(format!("updated spec plan failed validation: {e}"))
+        }
         other => {
             tracing::error!("mcp update_spec failed: {other}");
             ToolError::Internal(format!("failed to update spec: {other}"))
         }
-    })?;
-
-    // Re-validate after the swap so callers who pass a malformed
-    // SpecRef (dupe id from a sibling spec rename, dangling dep)
-    // hear about it on the write that caused it.
-    stored.plan.validate().map_err(|e| {
-        ToolError::InvalidParams(format!("updated spec plan failed validation: {e}"))
     })?;
 
     serde_json::to_value(SubmitSpecPlanResponse { spec_plan: stored }).map_err(internal_serialize)
@@ -231,7 +235,7 @@ pub async fn list_spec_plans(state: &AppState, auth_user: &AuthUser, args: Value
         .map_err(|e| ToolError::InvalidParams(format!("invalid list_spec_plans args: {e}")))?;
     require_workspace_access(&state.pool, auth_user, &args.workspace_id).await?;
 
-    let plans = spec_plan_db::list(state.spine.pool(), &args.workspace_id)
+    let plans = spec_plan_db::list(&state.pool, &args.workspace_id)
         .await
         .map_err(|e| {
             tracing::error!("mcp list_spec_plans failed: {e}");
@@ -253,17 +257,19 @@ pub struct GetSpecPlanArgs {
 pub async fn get_spec_plan(state: &AppState, auth_user: &AuthUser, args: Value) -> ToolResult {
     let args: GetSpecPlanArgs = serde_json::from_value(args)
         .map_err(|e| ToolError::InvalidParams(format!("invalid get_spec_plan args: {e}")))?;
+    if args.spec_plan_id.trim().is_empty() {
+        return Err(ToolError::InvalidParams("spec_plan_id is required".into()));
+    }
     require_workspace_access(&state.pool, auth_user, &args.workspace_id).await?;
 
-    let plan = spec_plan_db::get(state.spine.pool(), &args.workspace_id, &args.spec_plan_id)
+    let spec_plan_id = args.spec_plan_id.trim();
+    let plan = spec_plan_db::get(&state.pool, &args.workspace_id, spec_plan_id)
         .await
         .map_err(|e| {
             tracing::error!("mcp get_spec_plan failed: {e}");
             ToolError::Internal(format!("failed to get spec plan: {e}"))
         })?
-        .ok_or_else(|| {
-            ToolError::NotFound(format!("spec plan `{}` not found", args.spec_plan_id))
-        })?;
+        .ok_or_else(|| ToolError::NotFound(format!("spec plan `{spec_plan_id}` not found")))?;
     serde_json::to_value(SubmitSpecPlanResponse { spec_plan: plan }).map_err(internal_serialize)
 }
 
@@ -309,17 +315,19 @@ pub struct GetExecutionPlanArgs {
 pub async fn get_execution_plan(state: &AppState, auth_user: &AuthUser, args: Value) -> ToolResult {
     let args: GetExecutionPlanArgs = serde_json::from_value(args)
         .map_err(|e| ToolError::InvalidParams(format!("invalid get_execution_plan args: {e}")))?;
+    if args.spec_plan_id.trim().is_empty() {
+        return Err(ToolError::InvalidParams("spec_plan_id is required".into()));
+    }
     require_workspace_access(&state.pool, auth_user, &args.workspace_id).await?;
 
-    let stored = spec_plan_db::get(state.spine.pool(), &args.workspace_id, &args.spec_plan_id)
+    let spec_plan_id = args.spec_plan_id.trim();
+    let stored = spec_plan_db::get(&state.pool, &args.workspace_id, spec_plan_id)
         .await
         .map_err(|e| {
             tracing::error!("mcp get_execution_plan get failed: {e}");
             ToolError::Internal(format!("failed to load spec plan: {e}"))
         })?
-        .ok_or_else(|| {
-            ToolError::NotFound(format!("spec plan `{}` not found", args.spec_plan_id))
-        })?;
+        .ok_or_else(|| ToolError::NotFound(format!("spec plan `{spec_plan_id}` not found")))?;
 
     let snapshot = substrate_library_db::snapshot_active(state.spine.pool())
         .await

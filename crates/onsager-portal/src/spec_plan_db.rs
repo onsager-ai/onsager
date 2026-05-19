@@ -19,7 +19,7 @@
 //!   `updated_at`.
 
 use chrono::{DateTime, Utc};
-use onsager_substrate::{SpecId, SpecPlan, SpecRef};
+use onsager_substrate::{SpecId, SpecPlan, SpecPlanError, SpecRef};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::PgPool;
@@ -51,6 +51,11 @@ pub enum SpecPlanStoreError {
     /// the plan's `specs` array.
     #[error("spec '{0}' not found in plan")]
     SpecNotFound(SpecId),
+
+    /// The post-swap plan failed structural validation. Surfaced
+    /// *before* the DB write — the stored row is unchanged.
+    #[error("updated spec plan failed validation: {0}")]
+    Validation(#[from] SpecPlanError),
 
     /// JSONB content failed to round-trip via serde.
     #[error("spec plan (de)serialization failed: {0}")]
@@ -171,11 +176,19 @@ pub async fn list(
 
 /// Replace a single [`SpecRef`] inside an existing plan. Identity is
 /// matched on `SpecId`. Bumps `updated_at`.
+///
+/// `validate_after_swap` runs `SpecPlan::validate` on the mutated
+/// plan **before** the DB write. Callers that need to keep the
+/// invalid plan persisted (e.g. recovering from a broken row) can
+/// pass `false`; the MCP `update_spec` tool always passes `true` so
+/// a failed validation surfaces as `InvalidParams` *without*
+/// corrupting the stored row.
 pub async fn replace_spec(
     pool: &PgPool,
     workspace_id: &str,
     spec_plan_id: &str,
     new_spec: SpecRef,
+    validate_after_swap: bool,
 ) -> Result<StoredSpecPlan, SpecPlanStoreError> {
     let mut existing = get(pool, workspace_id, spec_plan_id)
         .await?
@@ -192,6 +205,13 @@ pub async fn replace_spec(
     }
     if !replaced {
         return Err(SpecPlanStoreError::SpecNotFound(target_id));
+    }
+
+    if validate_after_swap {
+        existing
+            .plan
+            .validate()
+            .map_err(SpecPlanStoreError::Validation)?;
     }
 
     let plan_json = serde_json::to_value(&existing.plan)?;

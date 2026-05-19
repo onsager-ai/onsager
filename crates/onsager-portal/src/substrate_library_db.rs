@@ -70,6 +70,10 @@ type VersionedRow = (String, Value, DateTime<Utc>, Option<DateTime<Utc>>);
 /// returned by `list_cards`.
 type CardRow = (String, String, i32, DateTime<Utc>, Option<DateTime<Utc>>);
 
+/// `(id, spec_kind, version, workflow_json, retired_at)` row shape
+/// returned by `snapshot_active`'s pre-filter SELECT.
+type SnapshotRow = (String, String, i32, Value, Option<DateTime<Utc>>);
+
 #[derive(Debug, Error)]
 pub enum LibraryDbError {
     #[error("workflow library row not found")]
@@ -85,8 +89,21 @@ pub enum LibraryDbError {
     Database(#[from] sqlx::Error),
 }
 
-/// Return the latest **active** (not retired) workflow for `kind`,
-/// `Ok(None)` when no active row exists.
+/// Return the workflow for `kind` if (and only if) the **latest**
+/// registered version is not retired.
+///
+/// "Active" means "latest version exists *and* is not retired" — not
+/// "latest non-retired version". Retiring the latest must not silently
+/// fall back to an earlier non-retired version: the migration and tool
+/// docs promise that a fresh `submit_workflow` is required to
+/// re-establish an active workflow for that kind.
+///
+/// Selects the highest-versioned row unconditionally, then returns
+/// `None` when that row is retired (or no row exists). The
+/// `idx_workflow_library_active_kind` partial index satisfies the
+/// `WHERE retired_at IS NULL` shape used by the snapshot query; this
+/// query reads the same `(spec_kind, version DESC)` column ordering
+/// from the unique constraint's index.
 pub async fn latest_active(
     pool: &PgPool,
     spec_kind: &str,
@@ -94,7 +111,7 @@ pub async fn latest_active(
     let row: Option<LatestActiveRow> = sqlx::query_as(
         "SELECT id, version, workflow_json, registered_at, retired_at \
          FROM workflow_library \
-         WHERE spec_kind = $1 AND retired_at IS NULL \
+         WHERE spec_kind = $1 \
          ORDER BY version DESC LIMIT 1",
     )
     .bind(spec_kind)
@@ -102,6 +119,7 @@ pub async fn latest_active(
     .await?;
 
     match row {
+        Some((_, _, _, _, Some(_))) => Ok(None),
         Some((id, version, json, registered_at, retired_at)) => Ok(Some(WorkflowLibraryRow {
             id,
             spec_kind: spec_kind.to_string(),
@@ -214,12 +232,16 @@ pub async fn retire_latest(
 /// map so the compile response can attribute each resolved workflow
 /// to a concrete library row.
 pub async fn snapshot_active(pool: &PgPool) -> Result<LibrarySnapshot, LibraryDbError> {
-    // Window over (spec_kind, version DESC) and keep row #1 per
-    // kind. DISTINCT ON gives that in one query.
-    let rows: Vec<(String, String, i32, Value)> = sqlx::query_as(
-        "SELECT DISTINCT ON (spec_kind) id, spec_kind, version, workflow_json \
+    // Pick the latest row per kind first (DISTINCT ON over the full
+    // table), *then* drop kinds whose latest is retired. Filtering
+    // `retired_at IS NULL` inside the DISTINCT ON would silently fall
+    // back to an earlier non-retired version after the latest is
+    // retired — the read-side counterpart of the `latest_active`
+    // semantics, and what the migration's "fresh submit_workflow
+    // needed" promise depends on.
+    let rows: Vec<SnapshotRow> = sqlx::query_as(
+        "SELECT DISTINCT ON (spec_kind) id, spec_kind, version, workflow_json, retired_at \
          FROM workflow_library \
-         WHERE retired_at IS NULL \
          ORDER BY spec_kind, version DESC",
     )
     .fetch_all(pool)
@@ -227,7 +249,10 @@ pub async fn snapshot_active(pool: &PgPool) -> Result<LibrarySnapshot, LibraryDb
 
     let mut by_kind: HashMap<String, Workflow> = HashMap::new();
     let mut versions: HashMap<String, (String, i32)> = HashMap::new();
-    for (id, spec_kind, version, json) in rows {
+    for (id, spec_kind, version, json, retired_at) in rows {
+        if retired_at.is_some() {
+            continue;
+        }
         let workflow: Workflow = serde_json::from_value(json)?;
         versions.insert(spec_kind.clone(), (id, version));
         by_kind.insert(spec_kind, workflow);
@@ -239,12 +264,20 @@ pub async fn snapshot_active(pool: &PgPool) -> Result<LibrarySnapshot, LibraryDb
 /// [`onsager_substrate::compile`] entry point.
 ///
 /// Implements [`WorkflowLookup`] over `by_kind`; `WorkflowId` lookup
-/// is left as `None` because the snapshot does not preserve the
-/// substrate's internal `WorkflowId` identity (rows are keyed by
-/// `(spec_kind, version)` in this layer). The compiler only needs
-/// `by_kind` to resolve `SpecRef::kind`; `subworkflow_ref` ids that
-/// reach `get` would surface as invariant-4 violations, which is the
-/// correct downstream behavior.
+/// is currently a hard `None`. Compiling a workflow whose graph
+/// contains a `SubWorkflow` executor (ADR 0011) will therefore fail
+/// invariant 4 (ADR 0018) even when the referenced workflow lives in
+/// the library — invariant 4 walks `Executor::subworkflow_ref()` and
+/// calls `library.get(workflow_id)`.
+///
+/// v1 is intentionally narrow: spec #395 targets the SpecPlan/Workflow
+/// authoring loop, not the SubWorkflow executor pipeline (still
+/// gated behind EXE-06, #358). When SubWorkflow lands, the snapshot
+/// gains a `WorkflowId → Workflow` map alongside `by_kind` — likely
+/// loading every active row, not just the latest-per-kind — and the
+/// `get` impl resolves through it. Until then a workflow containing
+/// a SubWorkflow node failing `compile_dry_run` is a load-bearing
+/// "this is not yet supported" signal, not a regression.
 #[derive(Debug, Default)]
 pub struct LibrarySnapshot {
     by_kind: HashMap<String, Workflow>,
