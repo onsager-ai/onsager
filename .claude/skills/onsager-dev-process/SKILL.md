@@ -204,11 +204,13 @@ with no spec is invisible to the next maintainer.
 ## Issue progress is the source of truth
 
 A spec issue's open/closed state plus its Plan checkboxes are the source
-of truth. The issue is `open` while any Plan item is unticked or any
-linked PR is in flight; it closes when GitHub fires `Closes #N` on PR
-merge (or a human closes it manually after the last `Part of #N` PR
-lands). Plan-item ticks on merge are manual; the `onsager-pr-lifecycle`
-skill documents the procedure.
+of truth. Use `Closes #N` only on a PR that delivers the final unticked
+Plan items, so GitHub's auto-close fires once the spec is actually
+complete; use `Part of #N` for partial slices that leave items behind,
+then tick the delivered checkboxes manually on merge. If a multi-PR spec
+finishes via `Part of` PRs only, a human closes the parent once the last
+Plan item ticks. Plan-item ticks on merge are manual; the
+`onsager-pr-lifecycle` skill documents the procedure.
 
 ## Anti-patterns (don't)
 
