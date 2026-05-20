@@ -1,12 +1,14 @@
 //! Spec #298 — drift check for `apps/dashboard/src/lib/api/generated/`.
 //!
-//! The dashboard's API types are generated from portal's serde structs
-//! via `ts-rs` at `cargo test` time. The generated files are committed
-//! so the dashboard's `pnpm tsc --noEmit` can resolve them without a
-//! prior Rust build. This check enforces "what's committed == what the
+//! The dashboard's API types are generated from `onsager-portal` and
+//! `onsager-spine` serde structs via `ts-rs` at `cargo test` time
+//! (spine joined the cascade with spec #434 — `TriggerKind` and its
+//! variant tree). The generated files are committed so the
+//! dashboard's `pnpm tsc --noEmit` can resolve them without a prior
+//! Rust build. This check enforces "what's committed == what the
 //! current Rust would emit": snapshot the dir, regenerate via
-//! `cargo test -p onsager-portal --lib export_bindings`, and bail on
-//! any add / remove / content change.
+//! `cargo test -p onsager-portal -p onsager-spine --lib
+//! export_bindings`, and bail on any add / remove / content change.
 //!
 //! Same shape as `gen-event-docs --check`: hard-fail with a
 //! reproducible command in the error message.
@@ -43,7 +45,7 @@ pub fn run() -> Result<()> {
     }
 
     let mut msg = format!(
-        "{} is out of date.\n\nRegenerate with:\n    cargo test -p onsager-portal --lib export_bindings\n\nThen commit the result. Differences:\n",
+        "{} is out of date.\n\nRegenerate with:\n    cargo test -p onsager-portal -p onsager-spine --lib export_bindings\n\nThen commit the result. Differences:\n",
         GENERATED_DIR
     );
     for line in &drift {
@@ -106,35 +108,44 @@ fn regenerate(root: &Path) -> Result<()> {
     // zero tests (e.g. ts-rs renames its generated test prefix, or someone
     // drops `#[ts(export)]` from every type). Without that guard the drift
     // check would silently pass while doing no actual regeneration.
-    let output = Command::new("cargo")
-        .args(["test", "-p", "onsager-portal", "--lib", "export_bindings"])
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .output()
-        .context("spawn `cargo test -p onsager-portal --lib export_bindings`")?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    // Portal and spine both host `#[ts(export)]` types whose generated
+    // bindings land in `GENERATED_DIR` (spine joined the cascade with
+    // spec #434 — `TriggerKind` and its variant tree). Each `-p` runs
+    // its own libtest harness invocation, so we drive them in sequence
+    // and require at least one matched test per crate.
+    for pkg in ["onsager-portal", "onsager-spine"] {
+        let output = Command::new("cargo")
+            .args(["test", "-p", pkg, "--lib", "export_bindings"])
+            .current_dir(root)
+            .stdin(Stdio::null())
+            .output()
+            .with_context(|| format!("spawn `cargo test -p {pkg} --lib export_bindings`"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            bail!(
+                "`cargo test -p {pkg} export_bindings` failed (exit {}):\n--- stdout ---\n{}\n--- stderr ---\n{}",
+                output.status,
+                stdout.trim(),
+                stderr.trim()
+            );
+        }
         let stdout = String::from_utf8_lossy(&output.stdout);
-        bail!(
-            "`cargo test export_bindings` failed (exit {}):\n--- stdout ---\n{}\n--- stderr ---\n{}",
-            output.status,
-            stdout.trim(),
-            stderr.trim()
-        );
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let passed = parse_test_passed(&stdout).context(
-        "could not find `test result: ok. N passed` summary in cargo test output — \
-         the harness format may have changed",
-    )?;
-    if passed == 0 {
-        bail!(
-            "`cargo test ... export_bindings` matched 0 tests — the ts-rs auto-generated \
-             `export_bindings_*` tests didn't run, so no regeneration happened.\n\
-             Check that `#[ts(export)]` is still present on the portal serde structs, and \
-             that ts-rs hasn't renamed its generated test prefix.\n\n\
-             cargo test output:\n{stdout}"
-        );
+        let passed = parse_test_passed(&stdout).with_context(|| {
+            format!(
+                "could not find `test result: ok. N passed` summary in cargo test output for {pkg} — \
+                 the harness format may have changed"
+            )
+        })?;
+        if passed == 0 {
+            bail!(
+                "`cargo test -p {pkg} ... export_bindings` matched 0 tests — the ts-rs auto-generated \
+                 `export_bindings_*` tests didn't run, so no regeneration happened for {pkg}.\n\
+                 Check that `#[ts(export)]` is still present on its serde structs, and \
+                 that ts-rs hasn't renamed its generated test prefix.\n\n\
+                 cargo test output:\n{stdout}"
+            );
+        }
     }
     Ok(())
 }

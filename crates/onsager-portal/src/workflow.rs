@@ -76,7 +76,8 @@ pub struct WorkflowStage {
 }
 
 /// A persisted workflow blueprint.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
 pub struct Workflow {
     pub id: String,
     pub workspace_id: String,
@@ -86,6 +87,14 @@ pub struct Workflow {
     pub trigger: TriggerKind,
     /// Workspace GitHub App install that fires this workflow (reused from
     /// issue #70 — no per-workflow install flow).
+    ///
+    /// Annotated `ts(type = "number")` because `JSON.parse` in the
+    /// dashboard returns a JS `number` for integers, not a `bigint` —
+    /// ts-rs v12's default `bigint` mapping for i64 would mis-type the
+    /// wire value. GitHub installation IDs fit comfortably in
+    /// `Number.MAX_SAFE_INTEGER` (2^53), so the precision loss is
+    /// theoretical only.
+    #[ts(type = "number")]
     pub install_id: i64,
     /// Preset id this workflow was expanded from (e.g. `github-issue-to-pr`).
     /// `None` for custom workflows built in the card editor.
