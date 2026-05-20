@@ -30,7 +30,6 @@ export type {
   ReplayMatch,
   ReplayIssueTriggerResponse,
   BackfillReport,
-  ArtifactDetail,
   ArtifactVersion,
   ArtifactLineageEntry,
   ArtifactHorizontalLineageEntry,
@@ -50,9 +49,6 @@ export type {
   Workflow,
   CreateWorkflowRequest,
   CreateWorkflowStage,
-  StageRunStatus,
-  WorkflowRunStage,
-  WorkflowRun,
   RunDetail,
   RunLinkedSession,
   GitHubLabel,
@@ -62,6 +58,12 @@ export type {
   InstallationDeliveryHealth,
   WorkspaceDeliveryHealthResponse,
 } from './types';
+
+// Generated from Rust serde structs (spec #298 Phase 2 / #435).
+export type { ArtifactDetail } from './generated/ArtifactDetail';
+export type { WorkflowRun } from './generated/WorkflowRun';
+export type { WorkflowRunStage } from './generated/WorkflowRunStage';
+export type { StageRunStatus } from './generated/StageRunStatus';
 
 // Re-export workflow helpers
 export { normalizeWorkflowArtifactKind, stageToCreateStage } from './workflows';
