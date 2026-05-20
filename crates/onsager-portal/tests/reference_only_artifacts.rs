@@ -217,3 +217,110 @@ async fn touch_artifact_bumps_version_but_leaves_provider_fields_null() {
 
     cleanup(&spine, &created.artifact_id).await;
 }
+
+#[tokio::test]
+async fn external_ref_with_provider_fields_is_rejected_by_schema() {
+    // Spec #336: the contract is mechanically enforced by the
+    // `artifacts_external_ref_no_provider_fields` CHECK constraint
+    // (migration 030). Any future external-integration write path that
+    // stuffs a provider-authored title into `name` (or login into
+    // `owner`) alongside a non-NULL `external_ref` is rejected at the
+    // schema layer, not just by review. This test exercises the raw
+    // INSERT path so a future regression — adding an `upsert_*_artifact`
+    // that populates `name` — fails loudly even if `upsert_pr_artifact_ref`
+    // / `upsert_issue_artifact_ref` are left intact.
+    let Some(spine) = try_pool().await else {
+        eprintln!("skipping: DATABASE_URL not set");
+        return;
+    };
+
+    let artifact_id = format!("art_bad_{}", Uuid::new_v4().simple());
+    let external_ref = format!("github:project:proj-{}:pr:1", Uuid::new_v4());
+
+    // `external_ref` + non-NULL `name` → CHECK violation.
+    let err = sqlx::query(
+        "INSERT INTO artifacts \
+            (artifact_id, kind, name, owner, created_by, state, current_version, \
+             external_ref, workspace_id) \
+         VALUES ($1, 'pull_request', 'PR title leak', NULL, 'tester', 'in_progress', 1, \
+                 $2, 'ws-test')",
+    )
+    .bind(&artifact_id)
+    .bind(&external_ref)
+    .execute(&spine)
+    .await
+    .expect_err("CHECK constraint must reject denormalized external state");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("artifacts_external_ref_no_provider_fields"),
+        "expected CHECK constraint violation, got: {msg}"
+    );
+
+    // `external_ref` + non-NULL `owner` → same violation.
+    let err = sqlx::query(
+        "INSERT INTO artifacts \
+            (artifact_id, kind, name, owner, created_by, state, current_version, \
+             external_ref, workspace_id) \
+         VALUES ($1, 'pull_request', NULL, 'octocat', 'tester', 'in_progress', 1, \
+                 $2, 'ws-test')",
+    )
+    .bind(&artifact_id)
+    .bind(&external_ref)
+    .execute(&spine)
+    .await
+    .expect_err("CHECK constraint must reject denormalized author too");
+    assert!(
+        err.to_string()
+            .contains("artifacts_external_ref_no_provider_fields"),
+        "expected CHECK constraint violation on owner, got: {err}"
+    );
+
+    // Internal-origin artifact (no `external_ref`) with `name` + `owner`
+    // populated still inserts — the constraint only binds the external case.
+    sqlx::query(
+        "INSERT INTO artifacts \
+            (artifact_id, kind, name, owner, created_by, state, current_version, \
+             workspace_id) \
+         VALUES ($1, 'code', 'internal-name', 'tester', 'tester', 'draft', 0, \
+                 'ws-test')",
+    )
+    .bind(&artifact_id)
+    .execute(&spine)
+    .await
+    .expect("internal-origin write path is unaffected by the constraint");
+
+    // UPDATE-path: promoting an internal-origin row to external-origin
+    // (setting `external_ref` without first nulling `name`/`owner`) is
+    // also rejected. Postgres evaluates the CHECK against the row's
+    // post-image, so the constraint binds INSERTs and UPDATEs symmetrically.
+    // This pins the contract end-to-end: a future write path that
+    // back-fills `external_ref` onto an existing row can't smuggle a
+    // provider-authored title back in.
+    let promote_ref = format!("github:project:proj-{}:pr:2", Uuid::new_v4());
+    let err = sqlx::query("UPDATE artifacts SET external_ref = $2 WHERE artifact_id = $1")
+        .bind(&artifact_id)
+        .bind(&promote_ref)
+        .execute(&spine)
+        .await
+        .expect_err("UPDATE that introduces external_ref alongside name/owner must violate CHECK");
+    assert!(
+        err.to_string()
+            .contains("artifacts_external_ref_no_provider_fields"),
+        "expected CHECK constraint violation on UPDATE, got: {err}"
+    );
+
+    // The same UPDATE succeeds once `name` / `owner` are nulled in the
+    // same statement — the predicate is forward-looking, not historical.
+    sqlx::query(
+        "UPDATE artifacts SET external_ref = $2, name = NULL, owner = NULL \
+         WHERE artifact_id = $1",
+    )
+    .bind(&artifact_id)
+    .bind(&promote_ref)
+    .execute(&spine)
+    .await
+    .expect("UPDATE that nulls name/owner alongside external_ref is allowed");
+
+    cleanup(&spine, &artifact_id).await;
+}
