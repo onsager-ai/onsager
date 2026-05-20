@@ -178,7 +178,7 @@ pub struct Task {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[ts(export, optional_fields)]
 pub struct TaskRequest {
     pub prompt: String,
     pub node_id: Option<String>,

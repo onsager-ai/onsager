@@ -182,6 +182,7 @@ struct LivePull {
 pub struct ProjectIssueDetailResponse {
     pub issue: Option<LiveIssueDetailRow>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub error: Option<String>,
 }
 
@@ -477,7 +478,7 @@ pub async fn list_project_pulls(
 // ── POST /api/projects/:id/backfill ───────────────────────────────────────
 
 #[derive(Debug, Deserialize, TS)]
-#[ts(export, rename = "BackfillRequestBody")]
+#[ts(export, rename = "BackfillRequestBody", optional_fields)]
 pub struct BackfillBody {
     #[serde(default)]
     pub cap: Option<usize>,
@@ -555,7 +556,7 @@ pub async fn backfill_project(
 // ── POST /api/projects/:id/issues/:number/replay-trigger ─────────────────
 
 #[derive(Debug, Deserialize, Default, TS)]
-#[ts(export, rename = "ReplayIssueTriggerRequest")]
+#[ts(export, rename = "ReplayIssueTriggerRequest", optional_fields)]
 pub struct ReplayTriggerBody {
     #[serde(default)]
     pub dry_run: Option<bool>,

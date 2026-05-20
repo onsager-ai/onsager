@@ -6,4 +6,4 @@ import type { ProjectIssueDetail } from "./ProjectIssueDetail";
  * is null and `error` is set when the upstream is rate-limited or
  * unreachable (#170 fail-open).
  */
-export type ProjectIssueDetailResponse = { issue: ProjectIssueDetail | null, error: string | null, };
+export type ProjectIssueDetailResponse = { issue: ProjectIssueDetail | null, error?: string, };
