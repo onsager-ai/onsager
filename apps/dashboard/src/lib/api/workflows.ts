@@ -12,35 +12,13 @@ import type {
   RunLinkedSession,
 } from './types';
 import type { WorkflowRun } from './generated/WorkflowRun';
-
-// Backend read shapes. Stiglab returns workflows with the unified
-// `trigger` variant (spec #237) — `{ kind: 'github_issue_webhook',
-// repo, label }` — and stages as `{ gate_kind, params }` with opaque
-// JSON params. The UI keeps a richer nested `Workflow` shape; the
-// adapters below translate so the rest of the app doesn't have to
-// know the wire format.
-interface BackendTrigger {
-  kind: string;
-  repo?: string;
-  label?: string;
-  // Manual / replay variants — `name` for `manual`, `source_event_id`
-  // for `replay`. Other variants carry their own per-kind fields the
-  // UI doesn't currently render.
-  name?: string;
-  [extra: string]: unknown;
-}
-
-interface BackendWorkflow {
-  id: string;
-  workspace_id: string;
-  name: string;
-  trigger: BackendTrigger;
-  install_id: number;
-  preset_id: string | null;
-  active: boolean;
-  created_at: string;
-  updated_at: string;
-}
+// Generated wire shapes (spec #434 cascaded ts-rs into `onsager-spine` so
+// `TriggerKind` and `Workflow` are emitted from Rust). The dashboard
+// keeps a richer nested UI-side `Workflow` (with `status`, flattened
+// `trigger`); these adapters translate generated → UI shape so the
+// rest of the app doesn't have to know the wire format.
+import type { Workflow as BackendWorkflow } from './generated/Workflow';
+import type { TriggerKind as BackendTrigger } from './generated/TriggerKind';
 
 interface BackendWorkflowStage {
   id: string;
@@ -103,11 +81,11 @@ function workflowFromBackend(
   w: BackendWorkflow,
   stages: BackendWorkflowStage[] = [],
 ): Workflow {
-  // Today the only kind is `github_issue_webhook`; the registry
+  // Per-kind UI translation lives here so the rest of the app can keep
+  // its richer nested trigger shape. The registry
   // (`/api/registry/triggers`) is the source of truth for which kinds
-  // exist. Per-kind UI translation lives here so the rest of the app
-  // can keep its richer nested trigger shape.
-  const repo = w.trigger.repo ?? '';
+  // exist; the discriminated `TriggerKind` union narrows by `kind`.
+  const { repo, label, manualName } = extractTriggerFields(w.trigger);
   const [repoOwner = '', repoName = ''] = repo.split('/');
   return {
     id: w.id,
@@ -120,14 +98,32 @@ function workflowFromBackend(
       install_id: String(w.install_id),
       repo_owner: repoOwner,
       repo_name: repoName,
-      label: w.trigger.label ?? '',
-      kind_tag: w.trigger.kind ?? '',
-      manual_name: typeof w.trigger.name === 'string' ? w.trigger.name : '',
+      label,
+      kind_tag: w.trigger.kind,
+      manual_name: manualName,
     },
     stages: stages.map(stageFromBackend),
     created_at: w.created_at,
     updated_at: w.updated_at,
   };
+}
+
+function extractTriggerFields(t: BackendTrigger): {
+  repo: string;
+  label: string;
+  manualName: string;
+} {
+  switch (t.kind) {
+    case 'github_issue_webhook':
+      return { repo: t.repo, label: t.label, manualName: '' };
+    case 'github_pull_request_closed':
+    case 'github_workflow_run_completed':
+      return { repo: t.repo, label: '', manualName: '' };
+    case 'manual':
+      return { repo: '', label: '', manualName: t.name };
+    default:
+      return { repo: '', label: '', manualName: '' };
+  }
 }
 
 function defaultStageName(gate: WorkflowGateKind): string {

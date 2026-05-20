@@ -76,7 +76,8 @@ pub struct WorkflowStage {
 }
 
 /// A persisted workflow blueprint.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
 pub struct Workflow {
     pub id: String,
     pub workspace_id: String,

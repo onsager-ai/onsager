@@ -24,14 +24,16 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use ts_rs::TS;
 
 /// A workflow-runtime trigger and its configuration.
 ///
 /// `serde` representation is `tag = "kind"` with snake_case keys, matching
 /// the persisted `workflows.trigger_kind` column and `FactoryEventKind`'s
 /// wire form. New variants append at the end; do not reorder.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
 pub enum TriggerKind {
     /// A GitHub `issues.labeled` webhook whose label matches `label`.
     /// `repo` is the `"owner/name"` slug.
@@ -150,7 +152,8 @@ pub enum TriggerKind {
 /// `Some(false)` fires only on closed-without-merge, and `None` fires on
 /// every close. Future fields (e.g. `base_branch`, `labels`) extend with
 /// `serde(default)` so existing rows keep parsing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema, TS)]
+#[ts(export)]
 pub struct PullRequestClosedPredicate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged: Option<bool>,
@@ -161,8 +164,9 @@ pub struct PullRequestClosedPredicate {
 /// `created_at` / `last_fired_at` baseline). Future variants:
 /// `EventReceivedAt(EventKind)` — needs the event-trigger category to
 /// land first to define "when was an event received".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema, TS)]
 #[serde(tag = "anchor", rename_all = "snake_case")]
+#[ts(export)]
 pub enum DelayAnchor {
     #[default]
     WorkflowActivatedAt,
@@ -178,7 +182,8 @@ pub enum DelayAnchor {
 ///
 /// Full JSONata is out of scope (per #239 resolution) — the simple form
 /// covers the known use cases and keeps the evaluator small.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema, TS)]
+#[ts(export)]
 pub struct JsonFilter {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub equals: BTreeMap<String, serde_json::Value>,
