@@ -87,10 +87,7 @@ pub async fn run(
                 .filter(|p| p.state == "open" || p.merged_at.is_some())
                 .collect(),
         ),
-        Strategy::Prioritized => (
-            prioritize_issues(issues, cap),
-            prioritize_pulls(pulls, cap),
-        ),
+        Strategy::Prioritized => (prioritize_issues(issues, cap), prioritize_pulls(pulls, cap)),
     };
 
     let mut report = BackfillReport {
