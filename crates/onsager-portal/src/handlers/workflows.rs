@@ -505,9 +505,9 @@ pub async fn list_workflow_runs(
         }
     };
 
-    let runs: Vec<serde_json::Value> = rows
+    let runs: Vec<crate::handlers::runs::WorkflowRun> = rows
         .into_iter()
-        .map(|row| project_run(&row, &stages))
+        .map(|row| project_run(row, &stages))
         .collect();
     Json(serde_json::json!({ "runs": runs })).into_response()
 }
@@ -533,58 +533,26 @@ struct ArtifactRunRow {
 /// - `workflow_parked_reason` set → run blocked; current stage blocked.
 /// - otherwise → stages [0..idx] passed, stage[idx] pending, rest pending.
 fn project_run(
-    row: &ArtifactRunRow,
+    row: ArtifactRunRow,
     stages: &[crate::workflow::WorkflowStage],
-) -> serde_json::Value {
-    let current_idx = row
-        .current_stage_index
-        .and_then(|i| usize::try_from(i).ok());
-
-    let archived = row.state == "archived";
-    let released = row.state == "released";
-    let parked = row.workflow_parked_reason.is_some();
-
-    let stage_entries: Vec<serde_json::Value> = stages
-        .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let status = match (released, archived, parked, current_idx) {
-                (true, _, _, _) => "passed",
-                (_, true, _, Some(idx)) if i < idx => "passed",
-                (_, true, _, Some(idx)) if i == idx => "failed",
-                (_, true, _, _) => "pending",
-                (_, _, true, Some(idx)) if i < idx => "passed",
-                (_, _, true, Some(idx)) if i == idx => "blocked",
-                (_, _, _, Some(idx)) if i < idx => "passed",
-                _ => "pending",
-            };
-            serde_json::json!({
-                "stage_id": s.id,
-                "status": status,
-                "updated_at": row.updated_at,
-            })
-        })
-        .collect();
-
-    let run_status = if released {
-        "passed"
-    } else if archived {
-        "failed"
-    } else if parked {
-        "blocked"
-    } else {
-        "pending"
-    };
-
-    serde_json::json!({
-        "id": row.artifact_id,
-        "workflow_id": row.workflow_id,
-        "artifact_id": row.artifact_id,
-        "status": run_status,
-        "stages": stage_entries,
-        "started_at": row.created_at,
-        "updated_at": row.updated_at,
-    })
+) -> crate::handlers::runs::WorkflowRun {
+    let (status, stage_entries) = crate::handlers::runs::project_run_stages(
+        &row.state,
+        row.current_stage_index,
+        row.workflow_parked_reason.as_deref(),
+        row.updated_at,
+        stages,
+    );
+    let artifact_id = row.artifact_id;
+    crate::handlers::runs::WorkflowRun {
+        id: artifact_id.clone(),
+        workflow_id: row.workflow_id,
+        artifact_id,
+        status,
+        stages: stage_entries,
+        started_at: row.created_at,
+        updated_at: row.updated_at,
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1080,15 +1048,23 @@ mod tests {
             .collect()
     }
 
+    fn status_str(v: &serde_json::Value) -> &str {
+        v.as_str().expect("status str")
+    }
+
+    fn project_run_json(row: ArtifactRunRow, stages: &[WorkflowStage]) -> serde_json::Value {
+        serde_json::to_value(project_run(row, stages)).expect("serializable")
+    }
+
     fn stage_status(value: &serde_json::Value, idx: usize) -> &str {
-        value["stages"][idx]["status"].as_str().expect("status str")
+        status_str(&value["stages"][idx]["status"])
     }
 
     #[test]
     fn project_run_in_progress_partway_through() {
         let row = run_row("in_progress", Some(1), None);
         let stages = three_stages();
-        let v = project_run(&row, &stages);
+        let v = project_run_json(row, &stages);
         assert_eq!(v["status"], "pending");
         assert_eq!(stage_status(&v, 0), "passed");
         assert_eq!(stage_status(&v, 1), "pending");
@@ -1099,7 +1075,7 @@ mod tests {
     fn project_run_released_marks_all_stages_passed() {
         let row = run_row("released", Some(2), None);
         let stages = three_stages();
-        let v = project_run(&row, &stages);
+        let v = project_run_json(row, &stages);
         assert_eq!(v["status"], "passed");
         for i in 0..3 {
             assert_eq!(stage_status(&v, i), "passed", "stage {i}");
@@ -1110,7 +1086,7 @@ mod tests {
     fn project_run_archived_marks_current_stage_failed() {
         let row = run_row("archived", Some(1), None);
         let stages = three_stages();
-        let v = project_run(&row, &stages);
+        let v = project_run_json(row, &stages);
         assert_eq!(v["status"], "failed");
         assert_eq!(stage_status(&v, 0), "passed");
         assert_eq!(stage_status(&v, 1), "failed");
@@ -1121,7 +1097,7 @@ mod tests {
     fn project_run_parked_marks_current_stage_blocked() {
         let row = run_row("under_review", Some(1), Some("ci red"));
         let stages = three_stages();
-        let v = project_run(&row, &stages);
+        let v = project_run_json(row, &stages);
         assert_eq!(v["status"], "blocked");
         assert_eq!(stage_status(&v, 0), "passed");
         assert_eq!(stage_status(&v, 1), "blocked");
@@ -1134,7 +1110,7 @@ mod tests {
         // artifacts before the first tick has set the column.
         let row = run_row("draft", None, None);
         let stages = three_stages();
-        let v = project_run(&row, &stages);
+        let v = project_run_json(row, &stages);
         assert_eq!(v["status"], "pending");
         for i in 0..3 {
             assert_eq!(stage_status(&v, i), "pending", "stage {i}");
@@ -1147,7 +1123,7 @@ mod tests {
         // the index as absent rather than panicking.
         let row = run_row("draft", Some(-1), None);
         let stages = three_stages();
-        let v = project_run(&row, &stages);
+        let v = project_run_json(row, &stages);
         for i in 0..3 {
             assert_eq!(stage_status(&v, i), "pending", "stage {i}");
         }
@@ -1161,7 +1137,7 @@ mod tests {
         // current stage because there is no current stage in range.
         let row = run_row("in_progress", Some(5), None);
         let stages = three_stages();
-        let v = project_run(&row, &stages);
+        let v = project_run_json(row, &stages);
         for i in 0..3 {
             assert_eq!(stage_status(&v, i), "passed", "stage {i}");
         }
@@ -1173,7 +1149,7 @@ mod tests {
         // this test pins that contract.
         let row = run_row("draft", None, None);
         let stages = three_stages();
-        let v = project_run(&row, &stages);
+        let v = project_run_json(row, &stages);
         assert_eq!(v["id"], "art_test");
         assert_eq!(v["artifact_id"], "art_test");
         assert_eq!(v["workflow_id"], "wf_test");

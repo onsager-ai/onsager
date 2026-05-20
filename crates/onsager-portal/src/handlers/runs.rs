@@ -19,6 +19,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+use ts_rs::TS;
 
 use crate::auth::AuthUser;
 use crate::handlers::workspaces::require_workspace_access;
@@ -44,6 +45,92 @@ struct LinkedSession {
     node_id: String,
     created_at: String,
     updated_at: String,
+}
+
+/// Stage / run status the dashboard renders.
+#[derive(Debug, Clone, Copy, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum StageRunStatus {
+    Pending,
+    Blocked,
+    Passed,
+    Failed,
+}
+
+/// Per-stage projection of a workflow run.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct WorkflowRunStage {
+    pub stage_id: String,
+    pub status: StageRunStatus,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// One execution of a workflow against an artifact. The dashboard treats
+/// `id` and `artifact_id` interchangeably — a run is the artifact's
+/// flow through its workflow.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct WorkflowRun {
+    pub id: String,
+    pub workflow_id: String,
+    pub artifact_id: String,
+    pub status: StageRunStatus,
+    pub stages: Vec<WorkflowRunStage>,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Stage-status projection rules shared by both `runs.rs::get_run` and
+/// `workflows.rs::list_workflow_runs`. The two call sites carry different
+/// row shapes (the per-run row has `workflow_id: Option<String>`, the
+/// per-workflow row has it as `String`), but the status math is identical.
+pub(crate) fn project_run_stages(
+    state: &str,
+    current_stage_index: Option<i32>,
+    workflow_parked_reason: Option<&str>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+    stages: &[crate::workflow::WorkflowStage],
+) -> (StageRunStatus, Vec<WorkflowRunStage>) {
+    let current_idx = current_stage_index.and_then(|i| usize::try_from(i).ok());
+    let archived = state == "archived";
+    let released = state == "released";
+    let parked = workflow_parked_reason.is_some();
+
+    let stage_entries: Vec<WorkflowRunStage> = stages
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let status = match (released, archived, parked, current_idx) {
+                (true, _, _, _) => StageRunStatus::Passed,
+                (_, true, _, Some(idx)) if i < idx => StageRunStatus::Passed,
+                (_, true, _, Some(idx)) if i == idx => StageRunStatus::Failed,
+                (_, true, _, _) => StageRunStatus::Pending,
+                (_, _, true, Some(idx)) if i < idx => StageRunStatus::Passed,
+                (_, _, true, Some(idx)) if i == idx => StageRunStatus::Blocked,
+                (_, _, _, Some(idx)) if i < idx => StageRunStatus::Passed,
+                _ => StageRunStatus::Pending,
+            };
+            WorkflowRunStage {
+                stage_id: s.id.clone(),
+                status,
+                updated_at,
+            }
+        })
+        .collect();
+
+    let run_status = if released {
+        StageRunStatus::Passed
+    } else if archived {
+        StageRunStatus::Failed
+    } else if parked {
+        StageRunStatus::Blocked
+    } else {
+        StageRunStatus::Pending
+    };
+
+    (run_status, stage_entries)
 }
 
 fn not_found(msg: &str) -> Response {
@@ -129,7 +216,23 @@ pub async fn get_run(
         }
     };
 
-    let run = project_run(&row, &stages);
+    let (status, stage_entries) = project_run_stages(
+        &row.state,
+        row.current_stage_index,
+        row.workflow_parked_reason.as_deref(),
+        row.updated_at,
+        &stages,
+    );
+    let artifact_id = row.artifact_id;
+    let run = WorkflowRun {
+        id: artifact_id.clone(),
+        workflow_id,
+        artifact_id,
+        status,
+        stages: stage_entries,
+        started_at: row.created_at,
+        updated_at: row.updated_at,
+    };
     Json(serde_json::json!({
         "run": run,
         "workflow": workflow,
@@ -137,61 +240,4 @@ pub async fn get_run(
         "sessions": linked_sessions,
     }))
     .into_response()
-}
-
-/// Same projection rules as `handlers::workflows::project_run`. Kept
-/// inline because the source struct shape (`RunRow` vs `ArtifactRunRow`)
-/// differs by one nullable field; collapsing them into a shared helper
-/// would force the workflow handler to handle `Option<String>` for the
-/// `workflow_id` it always has.
-fn project_run(row: &RunRow, stages: &[crate::workflow::WorkflowStage]) -> serde_json::Value {
-    let current_idx = row
-        .current_stage_index
-        .and_then(|i| usize::try_from(i).ok());
-
-    let archived = row.state == "archived";
-    let released = row.state == "released";
-    let parked = row.workflow_parked_reason.is_some();
-
-    let stage_entries: Vec<serde_json::Value> = stages
-        .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let status = match (released, archived, parked, current_idx) {
-                (true, _, _, _) => "passed",
-                (_, true, _, Some(idx)) if i < idx => "passed",
-                (_, true, _, Some(idx)) if i == idx => "failed",
-                (_, true, _, _) => "pending",
-                (_, _, true, Some(idx)) if i < idx => "passed",
-                (_, _, true, Some(idx)) if i == idx => "blocked",
-                (_, _, _, Some(idx)) if i < idx => "passed",
-                _ => "pending",
-            };
-            serde_json::json!({
-                "stage_id": s.id,
-                "status": status,
-                "updated_at": row.updated_at,
-            })
-        })
-        .collect();
-
-    let run_status = if released {
-        "passed"
-    } else if archived {
-        "failed"
-    } else if parked {
-        "blocked"
-    } else {
-        "pending"
-    };
-
-    serde_json::json!({
-        "id": row.artifact_id,
-        "workflow_id": row.workflow_id,
-        "artifact_id": row.artifact_id,
-        "status": run_status,
-        "stages": stage_entries,
-        "started_at": row.created_at,
-        "updated_at": row.updated_at,
-    })
 }

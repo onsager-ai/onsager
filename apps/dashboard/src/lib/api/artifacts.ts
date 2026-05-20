@@ -1,10 +1,10 @@
 import { request } from './client';
 import type {
-  ArtifactDetail,
   ArtifactActionRequest,
   ArtifactActionResponse,
   OverrideGateRequestBody,
 } from './types';
+import type { ArtifactDetail } from './generated/ArtifactDetail';
 
 export const artifacts = {
   getArtifact: (id: string) => request<{ artifact: ArtifactDetail }>(`/spine/artifacts/${id}`),

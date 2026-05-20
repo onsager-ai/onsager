@@ -8,10 +8,10 @@ import type {
   WorkflowArtifactKind,
   CreateWorkflowRequest,
   CreateWorkflowStage,
-  WorkflowRun,
   RunDetail,
   RunLinkedSession,
 } from './types';
+import type { WorkflowRun } from './generated/WorkflowRun';
 
 // Backend read shapes. Stiglab returns workflows with the unified
 // `trigger` variant (spec #237) — `{ kind: 'github_issue_webhook',

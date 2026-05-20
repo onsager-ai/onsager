@@ -357,14 +357,6 @@ export interface BackfillReport {
   skipped: number;
 }
 
-export interface ArtifactDetail extends SpineArtifact {
-  created_by: string;
-  versions: ArtifactVersion[];
-  vertical_lineage: ArtifactLineageEntry[];
-  horizontal_lineage?: ArtifactHorizontalLineageEntry[];
-  related_events?: SpineEvent[];
-}
-
 export interface ArtifactVersion {
   version: number;
   content_ref_uri: string;
@@ -554,24 +546,6 @@ export interface CreateWorkflowStage {
   params: Record<string, unknown>;
 }
 
-export type StageRunStatus = 'pending' | 'blocked' | 'passed' | 'failed';
-
-export interface WorkflowRunStage {
-  stage_id: string;
-  status: StageRunStatus;
-  updated_at: string;
-}
-
-export interface WorkflowRun {
-  id: string;
-  workflow_id: string;
-  artifact_id: string | null;
-  status: StageRunStatus;
-  stages: WorkflowRunStage[];
-  started_at: string;
-  updated_at: string;
-}
-
 /** A session linked back to a run via `sessions.artifact_id` (spec #303). */
 export interface RunLinkedSession {
   id: string;
@@ -583,7 +557,7 @@ export interface RunLinkedSession {
 
 /** Combined response shape for `GET /api/runs/:id` (spec #303). */
 export interface RunDetail {
-  run: WorkflowRun;
+  run: import('./generated/WorkflowRun').WorkflowRun;
   workflow: Workflow;
   stages: WorkflowStage[];
   sessions: RunLinkedSession[];

@@ -47,12 +47,21 @@ pub struct EventsQuery {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Serialize, FromRow, TS)]
+#[ts(export)]
 pub struct SpineEvent {
+    /// Spine row id. Modelled as `number` on the TS side to match the
+    /// pre-existing hand-typed shape; JS `Number` losslessly represents
+    /// every event id we project here.
+    #[ts(type = "number")]
     pub id: i64,
     pub stream_id: String,
     pub stream_type: String,
     pub event_type: String,
+    /// Event payload — always an object in practice (Postgres jsonb).
+    /// `Record<string, unknown>` on the TS side keeps the dashboard's
+    /// `e.data.<field> as T` access pattern working.
+    #[ts(type = "Record<string, unknown>")]
     pub data: serde_json::Value,
     pub actor: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -94,19 +103,44 @@ pub struct ArtifactVersionRow {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Serialize, FromRow, TS)]
+#[ts(export, rename = "ArtifactLineageEntry")]
 pub struct VerticalLineageRow {
     pub version: i32,
     pub session_id: String,
     pub recorded_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Serialize, FromRow, TS)]
+#[ts(export, rename = "ArtifactHorizontalLineageEntry")]
 pub struct HorizontalLineageRow {
     pub source_artifact_id: String,
     pub source_version: i32,
     pub role: String,
     pub recorded_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Detail-page shape for an artifact: extends `SpineArtifact` (via
+/// `#[serde(flatten)]`) with the version chain, both lineage axes, and
+/// related events so the dashboard's artifact-detail page renders
+/// without a second roundtrip.
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct ArtifactDetail {
+    #[serde(flatten)]
+    pub base: SpineArtifact,
+    pub created_by: String,
+    pub versions: Vec<ArtifactVersionRow>,
+    pub vertical_lineage: Vec<VerticalLineageRow>,
+    pub horizontal_lineage: Vec<HorizontalLineageRow>,
+    pub related_events: Vec<SpineEvent>,
+}
+
+/// Envelope for `GET /api/spine/artifacts/:id` — keeps the response
+/// fully typed without an intermediate `serde_json::Value` round-trip.
+#[derive(Debug, Serialize)]
+struct ArtifactDetailEnvelope {
+    artifact: ArtifactDetail,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -448,24 +482,15 @@ pub async fn get_artifact(
         Vec::new()
     });
 
-    Json(serde_json::json!({
-        "artifact": {
-            "id": artifact.id,
-            "kind": artifact.kind,
-            "name": artifact.name,
-            "state": artifact.state,
-            "owner": artifact.owner,
-            "current_version": artifact.current_version,
-            "created_by": created_by,
-            "created_at": artifact.created_at,
-            "updated_at": artifact.updated_at,
-            "versions": versions,
-            "vertical_lineage": lineage,
-            "horizontal_lineage": horizontal,
-            "related_events": related_events,
-        }
-    }))
-    .into_response()
+    let detail = ArtifactDetail {
+        base: artifact,
+        created_by,
+        versions,
+        vertical_lineage: lineage,
+        horizontal_lineage: horizontal,
+        related_events,
+    };
+    Json(ArtifactDetailEnvelope { artifact: detail }).into_response()
 }
 
 /// Fetch spine events related to an artifact for the per-run DAG (issue #14
