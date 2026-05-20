@@ -560,7 +560,6 @@ fn stream_producer(stream: &str) -> &'static str {
         "stiglab" => "stiglab",
         "synodic" => "synodic",
         "ising" => "ising",
-        "refract" => "onsager-portal (via MCP submissions from external onsager-refract, ADR 0014)",
         "workflow" => "stiglab (trigger) / substrate scheduler (stage)",
         "registry" => "synodic (catalog crud)",
         "gate" => "onsager-portal (GitHub) / substrate scheduler (manual)",

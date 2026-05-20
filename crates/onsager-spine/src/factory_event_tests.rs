@@ -126,33 +126,6 @@ mod tests {
     }
 
     #[test]
-    fn refract_events_round_trip() {
-        let submitted = FactoryEventKind::IntentSubmitted {
-            intent_id: "int_abc".into(),
-            intent_class: "file_migration".into(),
-            description: "Migrate auth callers".into(),
-            submitter: "marvin".into(),
-        };
-        assert_eq!(submitted.event_type(), "refract.intent_submitted");
-        assert_eq!(submitted.stream_type(), "refract");
-        assert_eq!(submitted.stream_id(), "int_abc");
-
-        let decomposed = FactoryEventKind::RefractDecomposed {
-            intent_id: "int_abc".into(),
-            decomposer: "file_migration".into(),
-            artifact_ids: vec!["art_1".into(), "art_2".into()],
-        };
-        assert_eq!(decomposed.event_type(), "refract.decomposed");
-        assert_eq!(decomposed.stream_type(), "refract");
-
-        let failed = FactoryEventKind::RefractFailed {
-            intent_id: "int_abc".into(),
-            reason: "no decomposer matched".into(),
-        };
-        assert_eq!(failed.event_type(), "refract.failed");
-    }
-
-    #[test]
     fn gate_resolution_proposed_round_trip() {
         let event = FactoryEventKind::SynodicGateResolutionProposed {
             escalation_id: "esc_42".into(),

@@ -244,9 +244,6 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::IsingRuleProposed { .. }
         | FactoryEventKind::IsingAnalyzerError { .. }
         | FactoryEventKind::IsingCatchupCompleted { .. }
-        | FactoryEventKind::IntentSubmitted { .. }
-        | FactoryEventKind::RefractDecomposed { .. }
-        | FactoryEventKind::RefractFailed { .. }
         | FactoryEventKind::TriggerFired { .. }
         | FactoryEventKind::WorkflowManualTriggered { .. }
         | FactoryEventKind::GateCheckUpdated { .. }

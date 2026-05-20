@@ -497,37 +497,6 @@ pub const EVENTS: EventManifest = EventManifest {
             tracking_issue: None,
             description: "Ising finished catching up from a lag position.",
         },
-        // -- Refract (intent decomposition) ---------------------------------
-        EventDefinition {
-            kind: "refract.intent_submitted",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in refract intent timeline"),
-            tracking_issue: None,
-            description: "A new intent was submitted for decomposition.",
-        },
-        EventDefinition {
-            kind: "refract.decomposed",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in refract intent timeline"),
-            tracking_issue: None,
-            description: "A decomposer produced an artifact tree for an intent.",
-        },
-        EventDefinition {
-            kind: "refract.failed",
-            schema_version: 1,
-            producers: &[Subsystem::Portal],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in refract intent timeline"),
-            tracking_issue: None,
-            description: "Decomposition failed — no decomposer matched, or the matched decomposer errored out.",
-        },
         // -- Workflow runtime (issue #80 / #81) -----------------------------
         EventDefinition {
             kind: "trigger.fired",

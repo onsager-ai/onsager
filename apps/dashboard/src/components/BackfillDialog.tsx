@@ -162,7 +162,7 @@ export function BackfillDialog({
               <SelectContent>
                 <SelectItem value="recent">Recent (newest first)</SelectItem>
                 <SelectItem value="active">Active (skip stale)</SelectItem>
-                <SelectItem value="refract">Refract (priority-ranked)</SelectItem>
+                <SelectItem value="prioritized">Prioritized (open-first, more labels)</SelectItem>
               </SelectContent>
             </Select>
           </div>

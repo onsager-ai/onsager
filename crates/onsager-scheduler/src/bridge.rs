@@ -28,9 +28,10 @@
 //!
 //! v1 builds a one-element [`SpecPlan`] per trigger: the resolved
 //! `spec_kind` is the spec's `kind`, and its id is derived from the
-//! workflow id. Multi-spec orchestration (Refract producing a
-//! many-spec plan) is a layer above this bridge — when it lands, it
-//! will hand the bridge a pre-built [`SpecPlan`] instead.
+//! workflow id. Multi-spec orchestration (an upstream author handing
+//! the bridge a pre-built many-spec [`SpecPlan`]) is a layer above
+//! this bridge — when it lands, it will skip the single-element
+//! construction path here.
 
 use std::collections::HashMap;
 use std::sync::Arc;

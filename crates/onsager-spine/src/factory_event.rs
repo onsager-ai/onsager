@@ -412,39 +412,6 @@ pub enum FactoryEventKind {
     /// Ising finished catching up from a lag position.
     IsingCatchupCompleted { events_processed: u64 },
 
-    // -- Refract events (issue #35 — intent decomposition) ------------------
-    /// A new intent was submitted for decomposition. Intents are the
-    /// high-level units of work a Refract decomposer expands into artifact
-    /// trees (e.g. `"migrate all legacy auth callers to the new SDK"` →
-    /// one artifact per file-touchpoint).
-    IntentSubmitted {
-        /// Opaque unique id — used as the correlation handle for every
-        /// downstream `refract.*` event.
-        intent_id: String,
-        /// Stable class identifier — maps 1:1 to a registered decomposer
-        /// (e.g. `"file_migration"`, `"spec_rollout"`).
-        intent_class: String,
-        /// Free-form description of the intent, shown in the UI and
-        /// preserved as audit trail.
-        description: String,
-        /// Who or what submitted the intent.
-        submitter: String,
-    },
-
-    /// A decomposer produced an artifact tree for an intent.
-    RefractDecomposed {
-        intent_id: String,
-        /// Name of the decomposer that handled the intent (the Refract
-        /// equivalent of Ising's `signal_kind`).
-        decomposer: String,
-        /// Newly registered artifact ids produced by the decomposition.
-        artifact_ids: Vec<String>,
-    },
-
-    /// Decomposition failed — either no decomposer matched, or the matched
-    /// decomposer errored out.
-    RefractFailed { intent_id: String, reason: String },
-
     // -- Workflow runtime events (issue #80) --------------------------------
     /// A trigger (e.g. a GitHub issue webhook) fired and produced a payload
     /// the trigger subscriber will translate into an artifact registration.
@@ -688,9 +655,6 @@ impl FactoryEventKind {
             Self::IsingRuleProposed { .. } => "ising.rule_proposed",
             Self::IsingAnalyzerError { .. } => "ising.analyzer_error",
             Self::IsingCatchupCompleted { .. } => "ising.catchup_completed",
-            Self::IntentSubmitted { .. } => "refract.intent_submitted",
-            Self::RefractDecomposed { .. } => "refract.decomposed",
-            Self::RefractFailed { .. } => "refract.failed",
             Self::TriggerFired { .. } => "trigger.fired",
             Self::WorkflowManualTriggered { .. } => "workflow.manual_triggered",
             Self::StageEntered { .. } => "stage.entered",
@@ -748,9 +712,6 @@ impl FactoryEventKind {
             | Self::IsingRuleProposed { .. }
             | Self::IsingAnalyzerError { .. }
             | Self::IsingCatchupCompleted { .. } => "ising",
-            Self::IntentSubmitted { .. }
-            | Self::RefractDecomposed { .. }
-            | Self::RefractFailed { .. } => "refract",
             Self::TriggerFired { .. } | Self::StageEntered { .. } | Self::StageAdvanced { .. } => {
                 "workflow"
             }
@@ -820,9 +781,6 @@ impl FactoryEventKind {
             Self::IsingRuleProposed { insight_id, .. } => insight_id.clone(),
             Self::IsingAnalyzerError { analyzer, .. } => analyzer.clone(),
             Self::IsingCatchupCompleted { .. } => "ising".to_string(),
-            Self::IntentSubmitted { intent_id, .. }
-            | Self::RefractDecomposed { intent_id, .. }
-            | Self::RefractFailed { intent_id, .. } => intent_id.clone(),
             Self::TriggerFired { workflow_id, .. } => format!("workflow:{workflow_id}"),
             Self::WorkflowManualTriggered { workflow_id, .. } => {
                 format!("audit:workflow:{workflow_id}")

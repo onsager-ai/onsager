@@ -59,7 +59,6 @@ that requires a coordinated rollout.
 | `portal` | (unknown — update `stream_producer` in xtask) | 3 |
 | `synodic` | synodic | 9 |
 | `ising` | ising | 6 |
-| `refract` | onsager-portal (via MCP submissions from external onsager-refract, ADR 0014) | 3 |
 | `workflow` | stiglab (trigger) / substrate scheduler (stage) | 3 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
 | `gate` | onsager-portal (GitHub) / substrate scheduler (manual) | 2 |
@@ -548,49 +547,6 @@ Ising finished catching up from a lag position.
 | Field | Type | Description |
 |---|---|---|
 | `events_processed` | `u64` |  |
-
-## `refract` events
-
-Producer subsystem: **onsager-portal (via MCP submissions from external onsager-refract, ADR 0014)**.
-
-### `refract.intent_submitted`
-
-- Variant: `FactoryEventKind::IntentSubmitted`
-- Stream: `refract`
-
-A new intent was submitted for decomposition. Intents are the high-level units of work a Refract decomposer expands into artifact trees (e.g. `"migrate all legacy auth callers to the new SDK"` → one artifact per file-touchpoint).
-
-| Field | Type | Description |
-|---|---|---|
-| `intent_id` | `String` | Opaque unique id — used as the correlation handle for every downstream `refract.*` event. |
-| `intent_class` | `String` | Stable class identifier — maps 1:1 to a registered decomposer (e.g. `"file_migration"`, `"spec_rollout"`). |
-| `description` | `String` | Free-form description of the intent, shown in the UI and preserved as audit trail. |
-| `submitter` | `String` | Who or what submitted the intent. |
-
-### `refract.decomposed`
-
-- Variant: `FactoryEventKind::RefractDecomposed`
-- Stream: `refract`
-
-A decomposer produced an artifact tree for an intent.
-
-| Field | Type | Description |
-|---|---|---|
-| `intent_id` | `String` |  |
-| `decomposer` | `String` | Name of the decomposer that handled the intent (the Refract equivalent of Ising's `signal_kind`). |
-| `artifact_ids` | `Vec<String>` | Newly registered artifact ids produced by the decomposition. |
-
-### `refract.failed`
-
-- Variant: `FactoryEventKind::RefractFailed`
-- Stream: `refract`
-
-Decomposition failed — either no decomposer matched, or the matched decomposer errored out.
-
-| Field | Type | Description |
-|---|---|---|
-| `intent_id` | `String` |  |
-| `reason` | `String` |  |
 
 ## `workflow` events
 

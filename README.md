@@ -50,14 +50,14 @@ direct calls.
      (edge)
 ```
 
-Refract — the Spec Plan author — lives in its own repo per
-[ADR 0014](docs/adr/0014-onsager-refract-boundary.md). The ADR
-boundary has Refract submit Spec Plans through the portal's MCP
-surface; the specific MCP tools (`submit_spec_plan`, `update_spec`, …)
-are listed in ADR 0014's adoption checklist as follow-up work, not
-yet exposed by the in-tree MCP registry. See
-[`docs/related-work/refract.md`](docs/related-work/refract.md) for
-the current state of the migration.
+Spec Plans reach the factory through two ingress paths: the dashboard
+chat (an MCP client at `apps/dashboard/src/pages/ChatPage.tsx` that
+calls portal's public MCP surface — ADR 0007), and humans writing
+GitHub issues with the `issue-spec` skill (which arrive via the
+GitHub webhook → portal → forge trigger path). The original plan to
+ship a separate Refract Spec-Plan-author algorithm was retired in
+#396; see the amendment on
+[ADR 0014](docs/adr/0014-onsager-refract-boundary.md).
 
 The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md)):
 
@@ -94,10 +94,12 @@ and the ADRs under [`docs/adr/`](docs/adr/).
 | `synodic`        | AI agent governance — gates, verdicts, escalations                               |
 | `ising`          | Continuous improvement — observes the spine and surfaces insights                |
 
-Refract (the Spec Plan author) lives outside the monorepo at
-[`onsager-ai/onsager-refract`](https://github.com/onsager-ai/onsager-refract);
-see [ADR 0014](docs/adr/0014-onsager-refract-boundary.md) and
-[`docs/related-work/refract.md`](docs/related-work/refract.md).
+Spec Plans (the factory's input contract) are authored externally —
+by the dashboard chat (an MCP client) and by humans writing GitHub
+issues (ingested via GitHub webhooks). No in-tree algorithm authors
+Spec Plans; see the amendment on
+[ADR 0014](docs/adr/0014-onsager-refract-boundary.md) for the
+retirement of the original separate-Refract-repo plan.
 
 Library crates (`onsager-{artifact, warehouse, delivery, registry, github}`)
 are typed shared building blocks consumed by the subsystems above.
