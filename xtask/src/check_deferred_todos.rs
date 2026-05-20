@@ -22,6 +22,14 @@
 //! `crates/*/tests/`, etc. We exclude generated / vendored content
 //! (`target/`, `node_modules/`).
 //!
+//! ## Scope: Rust only
+//!
+//! Today this lint scans only `.rs` files. The string-literal stripper
+//! understands Rust `"..."` and `r#"..."#`; it does **not** handle
+//! TS/JS single-quoted strings (`'...'`) or template literals
+//! (`` `...` ``), so a `TODO` inside a JS template would false-trigger.
+//! Extending coverage to TS/JS is a follow-up — see PR #426 review.
+//!
 //! ## Modes
 //!
 //! - `--mode=warn` (default): print violations, exit 0.
@@ -148,7 +156,7 @@ fn rel(root: &Path, p: &Path) -> PathBuf {
 
 fn collect_files(root: &Path) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
-    for sub in ["crates", "xtask", "apps/dashboard/src"] {
+    for sub in ["crates", "xtask"] {
         walk(&root.join(sub), &mut out)?;
     }
     out.sort();
@@ -171,11 +179,11 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
                 continue;
             }
             walk(&path, out)?;
-        } else {
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            if matches!(ext, "rs" | "ts" | "tsx" | "js" | "jsx") {
-                out.push(path);
-            }
+        } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+            // Rust-only for now. TS/JS support needs a stripper that
+            // handles single-quoted strings and template literals — a
+            // follow-up per the PR #426 review.
+            out.push(path);
         }
     }
     Ok(())

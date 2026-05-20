@@ -19,10 +19,15 @@
 //!   means a mock-impl-only trait isn't flagged as single-impl —
 //!   testability counts.
 //!
-//! Trait → impl matching is by trait identifier (the last path
-//! segment), which is conservative: a `trait Foo` in two crates would
-//! merge and likely under-count. The repo's traits are
-//! distinctively named, so the false-negative risk is small.
+//! Trait → impl matching is keyed by `(crate, trait_name)`: each `pub
+//! trait` is attributed to the crate that owns the file it lives in,
+//! and each `impl <Trait> for <Type>` is attributed to its file's crate
+//! when `<Trait>` is a bare identifier, or to the leading path segment
+//! when the trait is qualified (e.g. `impl crate::Foo for X` stays in
+//! the impl's crate; `impl onsager_substrate::Executor for X` is
+//! attributed to `onsager-substrate`). This avoids merging
+//! same-named-but-distinct traits across crates (e.g. the workspace
+//! defines two `pub trait Executor`s).
 //!
 //! ## Escape hatch
 //!
@@ -50,12 +55,22 @@ enum Mode {
     Fail,
 }
 
+/// Composite key: `(crate_name, trait_name)`. Two crates each defining
+/// `pub trait Executor` produce distinct keys and aren't merged.
+type TraitKey = (String, String);
+
 #[derive(Debug)]
 struct TraitDef {
-    name: String,
+    key: TraitKey,
     file: PathBuf,
     line: usize,
     allow: Option<String>,
+}
+
+impl TraitDef {
+    fn display_name(&self) -> &str {
+        &self.key.1
+    }
 }
 
 pub fn run(args: Vec<String>) -> Result<()> {
@@ -65,7 +80,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
     let files = collect_rust_files(&root)?;
 
     let mut trait_defs: Vec<TraitDef> = Vec::new();
-    let mut impl_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut impl_counts: BTreeMap<TraitKey, usize> = BTreeMap::new();
 
     for file in &files {
         let text =
@@ -74,14 +89,22 @@ pub fn run(args: Vec<String>) -> Result<()> {
             Ok(f) => f,
             Err(_) => continue, // bad syntax — skip; cargo will fail it elsewhere.
         };
-        scan(&parsed, file, &text, &mut trait_defs, &mut impl_counts);
+        let crate_name = crate_for(&root, file);
+        scan(
+            &parsed,
+            file,
+            &text,
+            &crate_name,
+            &mut trait_defs,
+            &mut impl_counts,
+        );
     }
 
     let mut violations: Vec<&TraitDef> = Vec::new();
     let mut allowed: Vec<(&TraitDef, &str)> = Vec::new();
 
     for td in &trait_defs {
-        let count = impl_counts.get(&td.name).copied().unwrap_or(0);
+        let count = impl_counts.get(&td.key).copied().unwrap_or(0);
         if count != 1 {
             continue;
         }
@@ -96,10 +119,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
         eprintln!("single-impl-trait occam-allow exemptions:");
         for (td, reason) in &allowed {
             eprintln!(
-                "  {}:{} `{}` — allowed: {reason}",
+                "  {}:{} `{}::{}` — allowed: {reason}",
                 rel(&root, &td.file).display(),
                 td.line,
-                td.name
+                td.key.0,
+                td.display_name()
             );
         }
         eprintln!();
@@ -120,10 +144,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
     );
     for td in &violations {
         eprintln!(
-            "  {}:{} `{}` — 1 impl in the workspace",
+            "  {}:{} `{}::{}` — 1 impl in the workspace",
             rel(&root, &td.file).display(),
             td.line,
-            td.name
+            td.key.0,
+            td.display_name()
         );
     }
     eprintln!();
@@ -200,8 +225,9 @@ fn scan(
     file: &SynFile,
     path: &Path,
     text: &str,
+    crate_name: &str,
     trait_defs: &mut Vec<TraitDef>,
-    impl_counts: &mut BTreeMap<String, usize>,
+    impl_counts: &mut BTreeMap<TraitKey, usize>,
 ) {
     let lines: Vec<&str> = text.lines().collect();
     for item in &file.items {
@@ -209,6 +235,7 @@ fn scan(
             item,
             path,
             &lines,
+            crate_name,
             trait_defs,
             impl_counts,
             /*in_test=*/ false,
@@ -220,8 +247,9 @@ fn scan_item(
     item: &Item,
     path: &Path,
     lines: &[&str],
+    crate_name: &str,
     trait_defs: &mut Vec<TraitDef>,
-    impl_counts: &mut BTreeMap<String, usize>,
+    impl_counts: &mut BTreeMap<TraitKey, usize>,
     in_test: bool,
 ) {
     match item {
@@ -229,16 +257,24 @@ fn scan_item(
             if in_test {
                 return;
             }
-            collect_trait(t, path, lines, trait_defs);
+            collect_trait(t, path, lines, crate_name, trait_defs);
         }
         Item::Impl(im) => {
-            collect_impl(im, impl_counts);
+            collect_impl(im, crate_name, impl_counts);
         }
         Item::Mod(m) => {
             let mod_is_test = in_test || has_cfg_test(&m.attrs);
             if let Some((_, items)) = &m.content {
                 for inner in items {
-                    scan_item(inner, path, lines, trait_defs, impl_counts, mod_is_test);
+                    scan_item(
+                        inner,
+                        path,
+                        lines,
+                        crate_name,
+                        trait_defs,
+                        impl_counts,
+                        mod_is_test,
+                    );
                 }
             }
         }
@@ -246,7 +282,13 @@ fn scan_item(
     }
 }
 
-fn collect_trait(t: &ItemTrait, path: &Path, lines: &[&str], trait_defs: &mut Vec<TraitDef>) {
+fn collect_trait(
+    t: &ItemTrait,
+    path: &Path,
+    lines: &[&str],
+    crate_name: &str,
+    trait_defs: &mut Vec<TraitDef>,
+) {
     if !matches!(t.vis, Visibility::Public(_)) {
         return;
     }
@@ -258,22 +300,56 @@ fn collect_trait(t: &ItemTrait, path: &Path, lines: &[&str], trait_defs: &mut Ve
         None
     };
     trait_defs.push(TraitDef {
-        name: t.ident.to_string(),
+        key: (crate_name.to_string(), t.ident.to_string()),
         file: path.to_path_buf(),
         line,
         allow,
     });
 }
 
-fn collect_impl(im: &ItemImpl, impl_counts: &mut BTreeMap<String, usize>) {
+fn collect_impl(im: &ItemImpl, crate_name: &str, impl_counts: &mut BTreeMap<TraitKey, usize>) {
     let Some((_, path, _)) = &im.trait_ else {
         return;
     };
-    let Some(seg) = path.segments.last() else {
+    let Some(last_seg) = path.segments.last() else {
         return;
     };
-    let name = seg.ident.to_string();
-    *impl_counts.entry(name).or_insert(0) += 1;
+    let trait_name = last_seg.ident.to_string();
+    // Qualified path like `onsager_substrate::Executor` → attribute to
+    // the leading segment (converted from `onsager_substrate` style
+    // back to `onsager-substrate` for matching against the crate name
+    // derived from the path). A leading `crate::` / `self::` /
+    // `super::` keeps the impl's own crate. A bare identifier
+    // (`Executor`) is also local to the impl's crate.
+    let owning_crate = if path.segments.len() > 1 {
+        let leading = path.segments.first().unwrap().ident.to_string();
+        match leading.as_str() {
+            "crate" | "self" | "super" => crate_name.to_string(),
+            _ => leading.replace('_', "-"),
+        }
+    } else {
+        crate_name.to_string()
+    };
+    *impl_counts.entry((owning_crate, trait_name)).or_insert(0) += 1;
+}
+
+/// Derive the crate name from a path under `crates/<name>/...`. Falls
+/// back to `xtask` for paths under `xtask/`, and to "<unknown>" for
+/// anything else (so the key still namespaces the trait, just under a
+/// shared bucket — the lint stays sound, it just won't merge two
+/// outside-tree files into one crate's namespace).
+fn crate_for(root: &Path, file: &Path) -> String {
+    let rel = file.strip_prefix(root).unwrap_or(file);
+    let mut comps = rel.components();
+    match comps.next().and_then(|c| c.as_os_str().to_str()) {
+        Some("crates") => comps
+            .next()
+            .and_then(|c| c.as_os_str().to_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "<unknown>".to_string()),
+        Some("xtask") => "xtask".to_string(),
+        _ => "<unknown>".to_string(),
+    }
 }
 
 fn has_cfg_test(attrs: &[syn::Attribute]) -> bool {
@@ -301,6 +377,10 @@ mod tests {
         syn::parse_file(src).expect("parse fixture")
     }
 
+    fn key(crate_name: &str, trait_name: &str) -> TraitKey {
+        (crate_name.to_string(), trait_name.to_string())
+    }
+
     #[test]
     fn pub_trait_with_exactly_one_impl_is_flagged() {
         let src = r#"
@@ -311,10 +391,17 @@ impl Doer for A { fn do_it(&self) {} }
         let file = parse(src);
         let mut traits = Vec::new();
         let mut counts = BTreeMap::new();
-        scan(&file, Path::new("/tmp/x.rs"), src, &mut traits, &mut counts);
+        scan(
+            &file,
+            Path::new("/tmp/x.rs"),
+            src,
+            "demo",
+            &mut traits,
+            &mut counts,
+        );
         assert_eq!(traits.len(), 1);
-        assert_eq!(traits[0].name, "Doer");
-        assert_eq!(counts.get("Doer"), Some(&1));
+        assert_eq!(traits[0].key, key("demo", "Doer"));
+        assert_eq!(counts.get(&key("demo", "Doer")), Some(&1));
     }
 
     #[test]
@@ -327,7 +414,14 @@ impl Private for A { fn x(&self) {} }
         let file = parse(src);
         let mut traits = Vec::new();
         let mut counts = BTreeMap::new();
-        scan(&file, Path::new("/tmp/x.rs"), src, &mut traits, &mut counts);
+        scan(
+            &file,
+            Path::new("/tmp/x.rs"),
+            src,
+            "demo",
+            &mut traits,
+            &mut counts,
+        );
         assert!(traits.is_empty(), "private traits are not in scope");
     }
 
@@ -348,9 +442,16 @@ mod tests {
         let file = parse(src);
         let mut traits = Vec::new();
         let mut counts = BTreeMap::new();
-        scan(&file, Path::new("/tmp/x.rs"), src, &mut traits, &mut counts);
+        scan(
+            &file,
+            Path::new("/tmp/x.rs"),
+            src,
+            "demo",
+            &mut traits,
+            &mut counts,
+        );
         // Mock impl + real impl = 2 → not flagged as single-impl.
-        assert_eq!(counts.get("Doer"), Some(&2));
+        assert_eq!(counts.get(&key("demo", "Doer")), Some(&2));
     }
 
     #[test]
@@ -366,7 +467,14 @@ mod tests {
         let file = parse(src);
         let mut traits = Vec::new();
         let mut counts = BTreeMap::new();
-        scan(&file, Path::new("/tmp/x.rs"), src, &mut traits, &mut counts);
+        scan(
+            &file,
+            Path::new("/tmp/x.rs"),
+            src,
+            "demo",
+            &mut traits,
+            &mut counts,
+        );
         assert!(traits.is_empty(), "test-module-only traits are skipped");
     }
 
@@ -376,11 +484,96 @@ mod tests {
         let file = parse(src);
         let mut traits = Vec::new();
         let mut counts = BTreeMap::new();
-        scan(&file, Path::new("/tmp/x.rs"), src, &mut traits, &mut counts);
+        scan(
+            &file,
+            Path::new("/tmp/x.rs"),
+            src,
+            "demo",
+            &mut traits,
+            &mut counts,
+        );
         assert_eq!(traits.len(), 1);
         assert_eq!(
             traits[0].allow.as_deref(),
             Some("deliberate seam for a future impl")
+        );
+    }
+
+    /// Regression for PR #426 review: two crates each defining
+    /// `pub trait Executor` with one impl each must not merge into one
+    /// 2-impl bucket. Each crate's trait counts independently and is
+    /// flagged as single-impl in its own namespace.
+    #[test]
+    fn same_named_trait_in_two_crates_does_not_merge() {
+        let crate_a = r#"
+pub trait Executor { fn run(&self); }
+struct ImplA;
+impl Executor for ImplA { fn run(&self) {} }
+"#;
+        let crate_b = r#"
+pub trait Executor { fn go(&self); }
+struct ImplB;
+impl Executor for ImplB { fn go(&self) {} }
+"#;
+        let mut traits = Vec::new();
+        let mut counts = BTreeMap::new();
+        scan(
+            &parse(crate_a),
+            Path::new("/tmp/a.rs"),
+            crate_a,
+            "crate-a",
+            &mut traits,
+            &mut counts,
+        );
+        scan(
+            &parse(crate_b),
+            Path::new("/tmp/b.rs"),
+            crate_b,
+            "crate-b",
+            &mut traits,
+            &mut counts,
+        );
+        assert_eq!(counts.get(&key("crate-a", "Executor")), Some(&1));
+        assert_eq!(counts.get(&key("crate-b", "Executor")), Some(&1));
+        assert_eq!(traits.len(), 2);
+    }
+
+    /// `impl other_crate::Trait for X` attributes the impl to the
+    /// leading path segment, so cross-crate impls increment the right
+    /// trait's bucket.
+    #[test]
+    fn qualified_impl_path_attributes_to_leading_segment() {
+        let src = r#"
+struct LocalImpl;
+impl onsager_substrate::Executor for LocalImpl { fn run(&self) {} }
+"#;
+        let mut traits = Vec::new();
+        let mut counts = BTreeMap::new();
+        scan(
+            &parse(src),
+            Path::new("/tmp/x.rs"),
+            src,
+            "onsager-nodes",
+            &mut traits,
+            &mut counts,
+        );
+        assert_eq!(counts.get(&key("onsager-substrate", "Executor")), Some(&1));
+        assert!(!counts.contains_key(&key("onsager-nodes", "Executor")));
+    }
+
+    #[test]
+    fn crate_for_extracts_name_from_crates_path() {
+        let root = Path::new("/repo");
+        assert_eq!(
+            crate_for(
+                root,
+                Path::new("/repo/crates/onsager-nodes/src/executor.rs")
+            ),
+            "onsager-nodes"
+        );
+        assert_eq!(
+            crate_for(root, Path::new("/repo/xtask/src/lib.rs")),
+            "xtask"
         );
     }
 }
