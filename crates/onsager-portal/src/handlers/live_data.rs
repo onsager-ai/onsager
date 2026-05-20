@@ -293,10 +293,10 @@ pub async fn get_project_issue(
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("github single-issue fetch failed: {e}");
-            return Json(serde_json::json!({
-                "issue": serde_json::Value::Null,
-                "error": "github_unreachable",
-            }))
+            return Json(ProjectIssueDetailResponse {
+                issue: None,
+                error: Some("github_unreachable".to_string()),
+            })
             .into_response();
         }
     };
@@ -307,10 +307,10 @@ pub async fn get_project_issue(
     if resp.status() == reqwest::StatusCode::FORBIDDEN
         || resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
     {
-        return Json(serde_json::json!({
-            "issue": serde_json::Value::Null,
-            "error": "rate_limited",
-        }))
+        return Json(ProjectIssueDetailResponse {
+            issue: None,
+            error: Some("rate_limited".to_string()),
+        })
         .into_response();
     }
     if !resp.status().is_success() {
@@ -359,7 +359,20 @@ pub async fn get_project_issue(
         closed_at: parsed.closed_at,
     };
 
-    let body = serde_json::json!({ "issue": row });
+    // Serialize once: the typed envelope is the SSOT for the wire shape,
+    // and the proxy cache stores the same JSON bytes so cache-hit + miss
+    // paths produce byte-identical responses.
+    let envelope = ProjectIssueDetailResponse {
+        issue: Some(row),
+        error: None,
+    };
+    let body = match serde_json::to_value(&envelope) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("failed to serialize ProjectIssueDetailResponse: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "serialization error").into_response();
+        }
+    };
     state.proxy_cache.put(cache_key, body.clone());
     Json(body).into_response()
 }
