@@ -928,16 +928,21 @@ pub struct EventRef {
 /// (issue #39). Accounting primitives only — USD cost is resolved downstream
 /// by the budget consumer, not on the event, so we don't have to version the
 /// pricing table every time a model changes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export)]
 pub struct TokenUsage {
+    #[ts(type = "number")]
     pub input_tokens: u64,
+    #[ts(type = "number")]
     pub output_tokens: u64,
     /// Cache-read input tokens (Anthropic-style prompt caching). Zero for
     /// providers without a cache concept.
     #[serde(default)]
+    #[ts(type = "number")]
     pub cache_read_tokens: u64,
     /// Cache-creation input tokens.
     #[serde(default)]
+    #[ts(type = "number")]
     pub cache_write_tokens: u64,
     /// Model identifier (`"claude-sonnet-4-6"`, etc.) so the downstream
     /// pricing table can resolve cost without guessing.

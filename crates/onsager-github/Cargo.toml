@@ -27,6 +27,7 @@ jsonwebtoken = { workspace = true }
 ring = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
+ts-rs = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -8,9 +8,15 @@
 //! but portal is the only writer.
 
 use chrono::Utc;
+use serde::Serialize;
 use sqlx::postgres::PgPool;
+use ts_rs::TS;
 
-#[derive(Debug, Clone)]
+/// Wire-shape exposed at `GET /api/workspaces/:id/credentials`. Only the
+/// name + audit timestamps are surfaced; values stay AES-256-GCM-encrypted
+/// at rest and never leave the server.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, rename = "Credential")]
 pub struct UserCredential {
     pub name: String,
     pub created_at: String,

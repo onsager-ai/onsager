@@ -17,12 +17,57 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::auth::{AuthUser, generate_pat_token};
 use crate::pat_db::{self, UserPat};
 use crate::state::AppState;
+
+/// Wire-shape projection of [`UserPat`] returned to the dashboard.
+/// Token material never appears here; the prefix is the only identifier
+/// surfaced after creation.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct Pat {
+    pub id: String,
+    pub name: String,
+    pub workspace_id: String,
+    pub token_prefix: String,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub last_used_ip: Option<String>,
+    pub last_used_user_agent: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+impl From<&UserPat> for Pat {
+    fn from(p: &UserPat) -> Self {
+        Self {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            workspace_id: p.workspace_id.clone(),
+            token_prefix: p.token_prefix.clone(),
+            expires_at: p.expires_at,
+            last_used_at: p.last_used_at,
+            last_used_ip: p.last_used_ip.clone(),
+            last_used_user_agent: p.last_used_user_agent.clone(),
+            created_at: p.created_at,
+            revoked_at: p.revoked_at,
+        }
+    }
+}
+
+/// Wire-shape envelope for `POST /api/pats`. The full `token` field is
+/// returned exactly once and is unrecoverable thereafter.
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CreatePatResponse {
+    pub pat: Pat,
+    pub token: String,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct CreatePatBody {
@@ -36,19 +81,8 @@ pub struct CreatePatBody {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
-fn pat_summary(pat: &UserPat) -> serde_json::Value {
-    serde_json::json!({
-        "id": pat.id,
-        "name": pat.name,
-        "workspace_id": pat.workspace_id,
-        "token_prefix": pat.token_prefix,
-        "expires_at": pat.expires_at,
-        "last_used_at": pat.last_used_at,
-        "last_used_ip": pat.last_used_ip,
-        "last_used_user_agent": pat.last_used_user_agent,
-        "created_at": pat.created_at,
-        "revoked_at": pat.revoked_at,
-    })
+fn pat_summary(pat: &UserPat) -> Pat {
+    Pat::from(pat)
 }
 
 /// GET /api/pats — list the caller's PATs (no token material).
@@ -184,12 +218,12 @@ pub async fn create_pat(
 
     // The body carries the only copy of the secret token. Tell every
     // intermediary not to cache it — the response is single-use by design.
-    let mut response = Json(serde_json::json!({
-        "pat": pat_summary(&pat),
-        // Returned exactly once. After this response, the only way to
-        // recover access is to mint a new token.
-        "token": generated.token,
-    }))
+    // Returned exactly once. After this response, the only way to
+    // recover access is to mint a new token.
+    let mut response = Json(CreatePatResponse {
+        pat: pat_summary(&pat),
+        token: generated.token,
+    })
     .into_response();
     response.headers_mut().insert(
         axum::http::header::CACHE_CONTROL,

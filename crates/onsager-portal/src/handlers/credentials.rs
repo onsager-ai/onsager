@@ -89,19 +89,7 @@ pub async fn list_credentials(
     }
     match credential_db::get_user_credentials(&state.pool, &workspace_id, &auth_user.user_id).await
     {
-        Ok(creds) => {
-            let items: Vec<_> = creds
-                .into_iter()
-                .map(|c| {
-                    serde_json::json!({
-                        "name": c.name,
-                        "created_at": c.created_at,
-                        "updated_at": c.updated_at,
-                    })
-                })
-                .collect();
-            Json(serde_json::json!({ "credentials": items })).into_response()
-        }
+        Ok(creds) => Json(serde_json::json!({ "credentials": creds })).into_response(),
         Err(e) => {
             tracing::error!("failed to list credentials: {e}");
             // Portal serves the public edge — opaque message to the

@@ -186,7 +186,8 @@ struct RepoJson {
     private: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AccessibleRepo {
     pub owner: String,
     pub name: String,

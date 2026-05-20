@@ -1,36 +1,57 @@
-export interface Node {
-  id: string;
-  name: string;
-  hostname: string;
-  status: 'online' | 'offline' | 'draining';
-  max_sessions: number;
-  active_sessions: number;
-  last_heartbeat: string;
-  registered_at: string;
-}
+// Wire-shape types for the dashboard API. Per spec #298, Rust serde structs
+// in `crates/onsager-portal/` are the single source of truth — `ts-rs`
+// emits the canonical bindings into `./generated/`. This file re-exports
+// the generated types alongside the residual hand-written types that
+// haven't been derived yet (workflow cascade, run/stage typing, synodic
+// proxy types). Once those land (umbrella #298 Phase 3) this file collapses
+// to a pure re-export barrel.
 
-export interface Session {
-  id: string;
-  task_id: string;
-  node_id: string;
-  state: 'pending' | 'dispatched' | 'running' | 'waiting_input' | 'done' | 'failed';
-  prompt: string;
-  output: string | null;
-  working_dir: string | null;
-  artifact_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
+// ── Generated (Rust is SSOT) ─────────────────────────────────────────────
 
-export interface TaskRequest {
-  prompt: string;
-  node_id?: string;
-  working_dir?: string;
-  allowed_tools?: string[];
-  max_turns?: number;
-  project_id?: string;
-}
+export type { AccessibleRepo } from './generated/AccessibleRepo';
+export type { ArtifactHorizontalLineageEntry } from './generated/ArtifactHorizontalLineageEntry';
+export type { ArtifactLineageEntry } from './generated/ArtifactLineageEntry';
+export type { ArtifactVersion } from './generated/ArtifactVersion';
+export type { BackfillReport } from './generated/BackfillReport';
+export type { BackfillRequestBody } from './generated/BackfillRequestBody';
+export type { CreatePatResponse } from './generated/CreatePatResponse';
+export type { Credential } from './generated/Credential';
+export type { GitHubAccountType } from './generated/GitHubAccountType';
+export type { GitHubAppInstallation } from './generated/GitHubAppInstallation';
+export type { InstallationDeliveryHealth } from './generated/InstallationDeliveryHealth';
+export type { Node } from './generated/Node';
+export type { NodeStatus } from './generated/NodeStatus';
+export type { Pat } from './generated/Pat';
+export type { Project } from './generated/Project';
+export type { ProjectIssueDetail } from './generated/ProjectIssueDetail';
+export type { ProjectIssueDetailResponse } from './generated/ProjectIssueDetailResponse';
+export type { ProjectPullRow } from './generated/ProjectPullRow';
+export type { ReplayIssueTriggerRequest } from './generated/ReplayIssueTriggerRequest';
+export type { ReplayIssueTriggerResponse } from './generated/ReplayIssueTriggerResponse';
+export type { ReplayMatch } from './generated/ReplayMatch';
+export type { Session } from './generated/Session';
+export type { SessionKind } from './generated/SessionKind';
+export type { SessionState } from './generated/SessionState';
+export type { SpineArtifact } from './generated/SpineArtifact';
+export type { SpineEvent } from './generated/SpineEvent';
+export type { TaskRequest } from './generated/TaskRequest';
+export type { TokenUsage } from './generated/TokenUsage';
+export type { WorkflowGateKind } from './generated/WorkflowGateKind';
+export type { Workspace } from './generated/Workspace';
+export type { WorkspaceDeliveryHealthResponse } from './generated/WorkspaceDeliveryHealthResponse';
+export type { WorkspaceMember } from './generated/WorkspaceMember';
 
+// Local imports for the residual hand-written wrappers below. `TokenUsage`
+// is consumed by the client-side-only `SessionSpend` row.
+import type { TokenUsage } from './generated/TokenUsage';
+
+// ── Hand-written (pending derive) ────────────────────────────────────────
+
+// User identity returned by `/api/auth/me`. The portal-side `User` struct
+// in `auth_db.rs` carries extra audit fields (`github_id`, `created_at`,
+// `updated_at`) that don't appear on the wire. Deriving directly would
+// require typing the `me` handler response — tracked as a Phase 2
+// follow-up.
 export interface User {
   id: string;
   github_login: string;
@@ -38,109 +59,21 @@ export interface User {
   github_avatar_url: string | null;
 }
 
-/**
- * How the active session was minted (issue #193). `"github"` for a real
- * OAuth session; `"dev"` for a `${USER}@local` session minted by the
- * `/api/auth/dev-login` flow available only in debug builds.
- */
-export type SessionKind = 'github' | 'dev';
-
-export interface Credential {
-  name: string;
+// Denormalized session-completion spend row (issue #39). Constructed
+// client-side from `stiglab.session_completed` events — there is no
+// portal-side endpoint that produces this shape, so it stays hand-written.
+export interface SessionSpend {
+  id: number;
   created_at: string;
-  updated_at: string;
+  session_id: string;
+  artifact_id: string | null;
+  duration_ms: number;
+  token_usage: TokenUsage | null;
 }
 
-// Personal Access Tokens (issue #143). The full token value is only ever
-// returned by `createPat`; subsequent `listPats` calls expose prefix +
-// metadata only. `workspace_id` pins the PAT to a workspace.
-export interface Pat {
-  id: string;
-  name: string;
-  workspace_id: string;
-  token_prefix: string;
-  expires_at: string | null;
-  last_used_at: string | null;
-  last_used_ip: string | null;
-  last_used_user_agent: string | null;
-  created_at: string;
-  revoked_at: string | null;
-}
-
-export interface CreatePatResponse {
-  pat: Pat;
-  /// Returned exactly once on creation. After this response, the only way
-  /// to recover access is to mint a new token.
-  token: string;
-}
-
-// Workspace / membership / GitHub App installation / project types,
-// issue #59 (Phase 0); renamed from `tenant` per #163.
-export interface Workspace {
-  id: string;
-  slug: string;
-  name: string;
-  created_by: string;
-  created_at: string;
-}
-
-export interface WorkspaceMember {
-  workspace_id: string;
-  user_id: string;
-  joined_at: string;
-  github_login: string | null;
-  github_name: string | null;
-  github_avatar_url: string | null;
-}
-
-export type GitHubAccountType = 'user' | 'organization';
-
-export interface GitHubAppInstallation {
-  id: string;
-  workspace_id: string;
-  install_id: number;
-  account_login: string;
-  account_type: GitHubAccountType;
-  created_at: string;
-}
-
-// Webhook delivery health for one installation (spec #120 item 3).
-// `checked` may be 0 when GitHub hasn't routed any deliveries to this
-// installation in the recent window — distinguishable from "App not
-// configured on this server", which manifests as the whole response
-// having `window: 0` and `checked: 0` for every installation.
-export interface InstallationDeliveryHealth {
-  install_id: number;
-  checked: number;
-  non_2xx: number;
-  last_delivered_at: string | null;
-  last_non_2xx_at: string | null;
-  last_non_2xx_status_code: number | null;
-}
-
-export interface WorkspaceDeliveryHealthResponse {
-  installations: InstallationDeliveryHealth[];
-  window: number;
-}
-
-export interface Project {
-  id: string;
-  workspace_id: string;
-  github_app_installation_id: string;
-  repo_owner: string;
-  repo_name: string;
-  default_branch: string;
-  created_at: string;
-}
-
-export interface AccessibleRepo {
-  owner: string;
-  name: string;
-  default_branch: string | null;
-  private: boolean;
-}
-
-// Governance types (proxied to synodic via /api/governance/*)
+// Governance proxy types (`/api/governance/*`) — portal forwards bytes to
+// synodic without parsing. Deriving these would require teaching ts-rs
+// about synodic structs (out of scope for this PR; tracked under #298).
 export interface GovernanceEvent {
   id: string;
   event_type: string;
@@ -170,9 +103,9 @@ export interface GovernanceRule {
   enabled: boolean;
 }
 
-// Ising insight surface (issue #36). The emitter writes events to the spine
-// as `ising.insight_emitted`; the dashboard reads them back via the spine
-// events endpoint and presents the structured fields directly.
+// Ising insight surface (issue #36). Persisted as a spine event row
+// (`ising.insight_emitted`); the dashboard reads via the events endpoint.
+// Same reason as the governance types — derivation lives outside portal.
 export interface IsingInsightEmittedEvent {
   id: number;
   created_at: string;
@@ -182,9 +115,7 @@ export interface IsingInsightEmittedEvent {
   evidence: { event_id: number; event_type: string }[];
 }
 
-// Ising rule proposal queue (issue #36 Step 2). Proxied through Synodic —
-// each row corresponds to one `ising.rule_proposed` event the listener
-// ingested and is awaiting human (or supervisor-agent) resolution.
+// Ising rule proposal queue (issue #36 Step 2). Proxied through Synodic.
 export interface RuleProposal {
   id: string;
   insight_id: string;
@@ -200,114 +131,9 @@ export interface RuleProposal {
   resolved_at: string | null;
 }
 
-// Token usage carried by `stiglab.session_completed` events (issue #39).
-export interface TokenUsage {
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens?: number;
-  cache_write_tokens?: number;
-  model?: string;
-}
-
-// Denormalized session-completion spend row (issue #39), projected from
-// `stiglab.session_completed` spine events.
-export interface SessionSpend {
-  id: number;
-  created_at: string;
-  session_id: string;
-  artifact_id: string | null;
-  duration_ms: number;
-  token_usage: TokenUsage | null;
-}
-
-// Spine types (direct from stiglab)
-export interface SpineEvent {
-  id: number;
-  stream_id: string;
-  stream_type: string;
-  event_type: string;
-  data: Record<string, unknown>;
-  actor: string;
-  created_at: string;
-}
-
-export interface SpineArtifact {
-  id: string;
-  kind: string;
-  /// Reference-only artifacts (`kind in ['github_issue', 'pull_request']`,
-  /// per spec #170) carry NULL here — the title is GitHub-authored and is
-  /// served by the live-hydration proxy at `/api/projects/:id/{issues,pulls}`.
-  /// Older PR rows materialized before the migration retain their stale
-  /// titles as best-effort fallback display.
-  name: string | null;
-  /// Reference-only artifacts carry NULL — see `name` for rationale.
-  owner: string | null;
-  state: string;
-  current_version: number;
-  consumers?: string[];
-  /// Stable handle for joining skeleton rows with live proxy responses
-  /// (`github:project:{project_id}:{issue,pr}:{number}`).
-  external_ref?: string | null;
-  created_at: string;
-  updated_at: string;
-  /// Last webhook touch — drives the "last seen N min ago" placeholder
-  /// when the proxy is rate-limited (#170 fail-open).
-  last_observed_at?: string | null;
-}
-
-/// Live-hydrated GitHub issue from `GET /api/projects/:id/issues`. Joined
-/// with `SpineArtifact` rows (kind=`github_issue`) on `external_ref` to
-/// build the dashboard inbox view (#168).
-export interface ProjectIssueRow {
-  number: number;
-  title: string;
-  state: string;
-  html_url: string;
-  author: string | null;
-  labels: string[];
-  comments: number;
-  updated_at: string;
-}
-
-/// Detail-shape counterpart to `ProjectIssueRow` (#205). Adds the
-/// fields the list endpoint omits — body, assignees, milestone, and
-/// the created/closed timestamps. Hits the same proxy cache as the
-/// list endpoint and uses the same fail-open envelope: `issue` is
-/// null and `error` is set when the upstream is rate-limited or
-/// unreachable.
-export interface ProjectIssueDetail {
-  number: number;
-  title: string;
-  state: string;
-  html_url: string;
-  author: string | null;
-  labels: string[];
-  assignees: string[];
-  comments: number;
-  body: string | null;
-  milestone: { title: string; state: string } | null;
-  created_at: string | null;
-  updated_at: string;
-  closed_at: string | null;
-}
-
-export interface ProjectIssueDetailResponse {
-  issue: ProjectIssueDetail | null;
-  error?: string;
-}
-
-export interface ProjectPullRow {
-  number: number;
-  title: string;
-  state: string;
-  html_url: string;
-  author: string | null;
-  labels: string[];
-  draft: boolean;
-  merged: boolean;
-  updated_at: string;
-}
-
+// Generic envelope shared by every `/api/projects/:id/{issues,pulls}` list
+// endpoint (#170 fail-open). Stays hand-written because ts-rs has no
+// generic-output support; the two instantiations are concrete elsewhere.
 export interface ProjectLiveListResponse<T> {
   issues?: T[];
   pulls?: T[];
@@ -316,84 +142,14 @@ export interface ProjectLiveListResponse<T> {
   error?: string;
 }
 
-export interface BackfillRequestBody {
-  cap?: number;
-  strategy?: 'recent' | 'active' | 'prioritized';
-  state?: 'open' | 'closed' | 'all';
-}
-
-/// Manual replay of a `workflow.trigger_fired` event for one issue
-/// (spec #203). Active counterpart to the passive
-/// `issues.labeled` webhook path — used for debugging when no e2e
-/// workflow run has fired yet.
-export interface ReplayIssueTriggerRequest {
-  /// `true` (default on the server) returns the matched workflow list
-  /// without emitting; `false` emits one event per match.
-  dry_run?: boolean;
-}
-
-export interface ReplayMatch {
-  workflow_id: string;
-  workflow_name: string;
-  label: string;
-}
-
-export interface ReplayIssueTriggerResponse {
-  project_id: string;
-  issue_number: number;
-  dry_run: boolean;
-  matches: ReplayMatch[];
-  /// Spine event IDs for the emitted events. Empty in dry-run mode and
-  /// when there were zero matches.
-  event_ids: number[];
-}
-
-export interface BackfillReport {
-  project_id: string;
-  repo: string;
-  cap: number;
-  issues_ingested: number;
-  pulls_ingested: number;
-  skipped: number;
-}
-
-export interface ArtifactVersion {
-  version: number;
-  content_ref_uri: string;
-  content_ref_checksum: string | null;
-  change_summary: string;
-  created_by_session: string;
-  parent_version: number | null;
-  created_at: string;
-}
-
-export interface ArtifactLineageEntry {
-  version: number;
-  session_id: string;
-  recorded_at: string;
-}
-
-// Horizontal lineage — cross-artifact dependency edges, e.g. a PR's
-// `closes_issue` link back to the spec issue it implements.
-export interface ArtifactHorizontalLineageEntry {
-  source_artifact_id: string;
-  source_version: number;
-  role: string;
-  recorded_at: string;
-}
-
-// Workflows (issue #82). A workflow is a trigger + an ordered list of stage
-// cards. Triggers fire on external events (currently GitHub issue labels);
-// each stage runs a gate that moves artifacts along — agent sessions,
-// external checks, governance verdicts, or manual approvals.
-//
-// The CRUD API is delivered by a parallel sibling sub-issue of #79; this
-// client is the typed surface the dashboard UI talks to.
+// Workflows (issue #82). The full CRUD surface is hand-written because
+// `WorkflowTrigger` cascades into `onsager-spine::TriggerKind` whose
+// 6+ variant tree (`PullRequestClosedPredicate`, `DelayAnchor`,
+// `JsonFilter`, …) needs ts-rs derives across the spine crate first.
+// Tracked as #298 sub-issue B.
 //
 // Artifact kinds are registry-backed as of #102. `WorkflowArtifactKind` is
-// a string so any kind registered server-side is representable on the wire;
-// the static-fallback list in `workflow-meta.ts` is what the UI renders
-// when the runtime fetch fails (offline / dev without stiglab).
+// a string so any kind registered server-side is representable on the wire.
 export type WorkflowArtifactKind = string;
 
 export interface WorkflowTrigger {
@@ -413,15 +169,7 @@ export interface WorkflowTrigger {
   manual_name?: string;
 }
 
-export type WorkflowGateKind =
-  | 'agent-session'
-  | 'external-check'
-  | 'governance'
-  | 'manual-approval';
-
-// Shape returned by `GET /api/workflow/kinds` (issue #102). The registry
-// owns the canonical list; the dashboard's hardcoded set in
-// `workflow-meta.ts` is only a fallback for offline/dev.
+// Shape returned by `GET /api/workflow/kinds` (issue #102).
 export type WorkflowMergeRule = 'overwrite' | 'merge_by_key' | 'append' | 'deep_merge';
 
 // `intrinsic_schema` arrives as a `serde_json::Value`, which is any JSON
@@ -498,10 +246,14 @@ export interface TriggerManifestEntry {
   description: string;
 }
 
+// Workflow CRUD wrapper shape used by the dashboard's workflow client.
+// The generated `WorkflowStage` describes the spine row; this richer
+// wrapper carries the UI-side `name` / `artifact_kind` / `config`. Phase B
+// (#298 sub-issue B) collapses these.
 export interface WorkflowStage {
   id: string;
   name: string;
-  gate_kind: WorkflowGateKind;
+  gate_kind: import('./generated/WorkflowGateKind').WorkflowGateKind;
   artifact_kind: WorkflowArtifactKind;
   config: Record<string, unknown>;
 }
@@ -542,14 +294,14 @@ export interface CreateWorkflowRequest {
 }
 
 export interface CreateWorkflowStage {
-  gate_kind: WorkflowGateKind;
+  gate_kind: import('./generated/WorkflowGateKind').WorkflowGateKind;
   params: Record<string, unknown>;
 }
 
 /** A session linked back to a run via `sessions.artifact_id` (spec #303). */
 export interface RunLinkedSession {
   id: string;
-  state: Session['state'];
+  state: import('./generated/SessionState').SessionState;
   node_id: string;
   created_at: string;
   updated_at: string;
@@ -563,6 +315,9 @@ export interface RunDetail {
   sessions: RunLinkedSession[];
 }
 
+// GitHub label mirror used by the workflow-builder UI. Hand-written
+// because the same shape is produced by stiglab's project label proxy,
+// not portal.
 export interface GitHubLabel {
   name: string;
   color: string | null;

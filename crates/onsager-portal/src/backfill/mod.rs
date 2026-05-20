@@ -17,6 +17,7 @@ use std::str::FromStr;
 
 use serde::Serialize;
 use sqlx::postgres::PgPool;
+use ts_rs::TS;
 
 use onsager_artifact::ArtifactId;
 use onsager_spine::factory_event::FactoryEventKind;
@@ -48,13 +49,14 @@ impl FromStr for Strategy {
     }
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, TS)]
+#[ts(export)]
 pub struct BackfillReport {
     pub strategy: String,
     pub project_id: String,
     pub repo: String,
     pub cap: usize,
-    pub prs_ingested: usize,
+    pub pulls_ingested: usize,
     pub issues_ingested: usize,
     pub skipped: usize,
 }
@@ -149,7 +151,7 @@ pub async fn run(
                 None,
             )
             .await?;
-        report.prs_ingested += 1;
+        report.pulls_ingested += 1;
     }
 
     for issue in issues {
