@@ -2,6 +2,7 @@
 //! plus the label toggle and issue-comment write paths used by the
 //! portal's Phase 2 surfaces today.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::api::http::{GITHUB_API, client};
@@ -21,6 +22,12 @@ pub struct Issue {
     pub labels: Vec<Label>,
     #[serde(default)]
     pub pull_request: Option<serde_json::Value>,
+    /// Server-reported `updated_at`. Used by the reconciliation
+    /// poller as the cursor field (#121); optional so existing
+    /// fixtures and unauthenticated calls without this field still
+    /// deserialize.
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -141,6 +141,32 @@ Services:
 
 To stop: `Ctrl+C` for services, `just dev-down` for Postgres.
 
+### Ingestion mode (local dev without a public URL)
+
+GitHub webhooks need a public URL and a HMAC secret. For local dev
+where neither is convenient, every project carries an
+`ingestion_mode` column with three values (spec [#121][s121]):
+
+- `webhook+reconciler` (default) — webhooks for low-latency,
+  reconciliation poll (5 min) as a backstop for dropped deliveries.
+- `polling-only` — for local dev or webhook-less installs; the
+  portal poller (60 s) is the only ingest source. No public URL
+  needed.
+- `webhook-only` — opt out of the reconciler. Not recommended
+  (silent drops become permanent).
+
+Set the mode per project with a direct DB update during early dev
+(a dashboard control will land in a follow-up):
+
+```bash
+psql $DATABASE_URL -c \
+  "UPDATE projects SET ingestion_mode = 'polling-only' WHERE id = '<id>'"
+```
+
+Then restart the portal — the scheduler scans projects at boot.
+
+[s121]: https://github.com/onsager-ai/onsager/issues/121
+
 ## Build & Test
 
 ```bash

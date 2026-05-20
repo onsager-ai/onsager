@@ -46,6 +46,7 @@ pub mod migrate;
 pub mod pat_db;
 pub mod preset;
 pub mod proxy_cache;
+pub mod reconciliation;
 pub mod remediation_db;
 pub mod runtime;
 pub mod server;

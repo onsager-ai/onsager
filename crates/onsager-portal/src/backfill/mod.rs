@@ -237,6 +237,7 @@ mod tests {
                 .map(|n| onsager_github::api::issues::Label { name: (*n).into() })
                 .collect(),
             pull_request: None,
+            updated_at: None,
         }
     }
 
