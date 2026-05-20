@@ -181,16 +181,14 @@ is explicitly trivial). This is the local counterpart to the
    mcp__github__list_issues  labels=[spec]   state=open
    ```
 
-   Then filter in memory for `planned` or `in-progress` status labels.
-
    Or read your commit messages (`git log origin/main..HEAD`) for a
    `#N` reference. The SDD loop assumes you already know which spec this
    work closes or is part of — if you don't, stop and create one via
    `issue-spec` (or triage whether this is truly `trivial`).
 
-2. **Confirm the spec's status is `planned` or `in-progress`.** If still
-   `draft`, stop — the human-AI alignment gate has not been passed.
-   Resolve open questions on the spec issue first.
+2. **Confirm any open questions on the spec are resolved.** If the spec's
+   `### Open questions` subsection still has unanswered items, stop and
+   resolve them in the issue thread first — the design isn't pinned yet.
 
 3. **Draft the PR body linking line** so you can paste it into the PR:
 
@@ -313,8 +311,8 @@ git push -u origin <branch>
 Retry up to 4 times with exponential backoff on transient network errors.
 **Never** use `--force` on main or long-lived branches without explicit ask.
 
-After push, the `pr-spec-sync.yml` workflow flips the linked spec to
-`in-progress` automatically on PR open. The `subscribe_pr_activity`
+After push, the `pr-spec-sync.yml` workflow checks the PR has a spec
+link (or `trivial` label) and comments if not. The `subscribe_pr_activity`
 subscription does **not** fire on every CI surface (commit statuses,
 some check_run completions) — once the PR is open run the post-push CI
 sweep in [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md#post-push-ci-sweep-mandatory)

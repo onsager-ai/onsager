@@ -170,27 +170,6 @@ auto-closed or explicitly-closed issue:
 5. If every sub-issue in Progress is now closed, **flag** the tracker as a
    closure candidate — don't close it unilaterally. Author/human decides.
 
-## Spec-issue label transitions (manual fallback)
-
-The `pr-spec-sync.yml` workflow handles open/close-unmerged automatically.
-Use this only when the workflow is disabled or you're flipping `draft → planned`
-intentionally (the latter is **always a human call** — don't do it from a
-session).
-
-```
-mcp__github__issue_write
-  owner: "onsager-ai"
-  repo: "onsager"
-  issueNumber: <int>
-  method: "update"
-  labels: ["spec", "in-progress", ...]   # full label set; replaces
-```
-
-The `labels` field is a **replace**, not a merge — include every label the
-issue should still have, or you'll strip area/priority labels by accident.
-Prefer `add_labels` / `remove_labels` if available on this MCP server;
-otherwise read first, mutate the array, write back.
-
 ## Listing open PRs missing a spec link (audit)
 
 Bulk read-only audits are cheaper as a single API loop than dozens of MCP

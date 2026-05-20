@@ -117,33 +117,18 @@ First slice of the session-timeout work. Timer plumbing only; event
 emission lands in the next PR.
 ```
 
-## Issue progress labels
+## Issue progress
 
-The linked spec issue's status label should always reflect reality:
+Spec issues use only their open/closed state — no status labels. Lifecycle
+moves:
 
-| Spec label | What it means | Who flips it |
-|------------|---------------|--------------|
-| `draft` | AI/human-drafted, not yet reviewed | Human (via `planned` move) |
-| `planned` | Ready for implementation | Human (alignment gate) |
-| `in-progress` | At least one open PR | `pr-spec-sync` workflow |
-| closed | Delivered, tests passing | GitHub (via `Closes` keyword on merge) |
-
-These transitions happen automatically:
-
-- PR open → `planned` becomes `in-progress` (via `pr-spec-sync.yml`).
-- PR closed unmerged with no other open PR → reverts to `planned` (via
-  `pr-spec-sync.yml`).
 - PR merged with `Closes #N` → issue auto-closes (GitHub).
-- PR merged with `Part of #N` → Plan checkboxes on the parent spec are
-  ticked manually by whoever merges (or shortly after).
+- PR merged with `Part of #N` → spec stays open; Plan checkboxes on the
+  parent spec are ticked manually by whoever merges (or shortly after).
+- PR closed unmerged → spec issue stays open as-is.
 
 You are responsible for ticking Plan checkboxes on parent specs after
-merge. The label flips on open/close-unmerged always happen via the
-workflow.
-
-Never bypass the `draft → planned` gate from within this skill — that's a
-human decision. If the linked spec is still `draft`, comment on the PR
-asking the author to drive the spec through review first.
+merge.
 
 ## Umbrella tracker refresh
 
@@ -340,5 +325,5 @@ commit message in chat — the user can see it on the PR.
 | [`onsager-dev-process`](../onsager-dev-process/SKILL.md) | Top-level SDD loop; points here for the post-push stage. |
 | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) | Creates the spec issue this PR links to. Installed globally from `onsager-ai/dev-skills`. |
 | [`onsager-pre-push`](../onsager-pre-push/SKILL.md) | Runs before `git push`; enforces the spec-link check locally. |
-| [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) | Automates the open / close-unmerged label transitions. Plan-item ticks remain manual. |
+| [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) | Checks every non-trivial PR links a spec issue; comments if the link is missing. Plan-item ticks on merge remain manual. |
 | [`ci-triage`](https://github.com/onsager-ai/dev-skills/blob/main/skills/ci-triage/SKILL.md) | Shared failure taxonomy + `main-red` issue convention; called from this skill's CI triage flow. Installed globally from `onsager-ai/dev-skills`. |

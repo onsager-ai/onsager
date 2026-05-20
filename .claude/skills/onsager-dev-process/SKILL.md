@@ -7,11 +7,10 @@ description: The end-to-end spec-issue-driven dev loop for Onsager — spec → 
 
 The spec-issue-driven development (SDD) loop on Onsager. Every non-trivial
 change starts as a GitHub spec issue, proceeds through a PR that references
-it, and closes when the PR merges. The `pr-spec-sync` GitHub Action handles
-the open / close-unmerged label flips deterministically; everything else
-(Plan-checkbox ticks, umbrella tracker refresh, `main-red` issue
-maintenance) is manual and documented in `onsager-pr-lifecycle` and
-`ci-triage`. Humans only touch the `draft → planned` alignment gate.
+it, and closes when the PR merges. Issue open/closed is the only lifecycle
+state — status labels (`draft`, `planned`, `in-progress`) were retired.
+Plan-checkbox ticks, umbrella tracker refresh, and `main-red` issue
+maintenance are documented in `onsager-pr-lifecycle` and `ci-triage`.
 
 ## The loop
 
@@ -22,11 +21,6 @@ maintenance) is manual and documented in `onsager-pr-lifecycle` and
      │        ↓                                                        │
      │   spec(<area>): ...    ← issue-spec skill                       │
      │        │                                                        │
-     │        │ label: draft                                           │
-     │        ↓                                                        │
-     │   human review   ← alignment gate (human sets label=planned)    │
-     │        │                                                        │
-     │        │ label: planned                                         │
      │        ↓                                                        │
      │   branch + implement                                            │
      │        │                                                        │
@@ -36,7 +30,6 @@ maintenance) is manual and documented in `onsager-pr-lifecycle` and
      │        ↓                                                        │
      │   git push → open PR (body: "Closes #N" or "Part of #N")        │
      │        │                                                        │
-     │        │ pr-spec-sync workflow → label: in-progress             │
      │        ↓                                                        │
      │   onsager-pr-lifecycle skill  ← CI triage, review, iterate      │
      │        │                                                        │
@@ -59,7 +52,7 @@ Trigger `issue-spec` (or say "spec this"). It creates a GitHub issue with:
 
 - `## Overview`, `## Design`, `## Plan`, `## Test`, `## Alignment`, `## Notes`
 - Labels: `spec`, one `area:*`, one type (`feat`/`fix`/`refactor`/`perf`),
-  one `priority:*`, status `draft`.
+  one `priority:*`.
 - Open questions under `### Open questions` in the Alignment section.
 
 Hard rule: no spec → no PR, unless the PR is labeled `trivial` (typos,
@@ -69,17 +62,11 @@ Body size: <~2000 tokens. Larger features split into parent + sub-issues
 via `mcp__github__sub_issue_write`. The SDD loop runs independently on each
 sub-issue; the parent tracks overall progress.
 
-### 2. The alignment gate (`draft → planned`)
+### 2. Resolve open questions
 
-Only a human moves the `draft` label to `planned`. This signals:
-
-- Open questions resolved (answered via comments; Alignment section
-  updated).
-- Design approach approved.
-- Scope and priority accepted.
-
-Never bypass this gate automatically. An AI may draft the spec and propose
-the flip; it may not execute the flip.
+Before opening a PR, resolve any open questions on the spec issue thread.
+A spec with unanswered `### Open questions` is not ready to implement —
+its design isn't pinned yet.
 
 ### 3. Branch and implement
 
@@ -179,8 +166,8 @@ respond to a webhook). It covers:
 - Copilot vs real defects.
 - Webhook subscription to stream CI + review events.
 
-The `pr-spec-sync` workflow has already flipped the spec to `in-progress`.
-No human action needed on labels during review.
+No label flips during review — the spec stays open until its PR(s) close
+it.
 
 ### 7. Merge
 
@@ -188,15 +175,12 @@ No human action needed on labels during review.
 - `Part of #N` / `Refs #N` PRs leave the spec open; tick the delivered
   Plan items manually on the parent spec, and if all sub-issues of a
   parent are closed, ping the parent. See `onsager-pr-lifecycle`.
-- The `in-progress` label disappears when the issue closes; for parents,
-  a human closes the parent once the spec is end-to-end verified.
+- A human closes the parent once the spec is end-to-end verified.
 
 ### 8. Closed-unmerged path
 
-If you close a PR without merging (e.g. abandoned approach), the
-`pr-spec-sync` workflow checks whether any other PR still references the
-spec. If none, it flips the spec back to `planned` so the next
-implementer can pick it up.
+If you close a PR without merging (e.g. abandoned approach), the spec
+issue stays open as-is — the next implementer can pick it up from there.
 
 ## The `trivial` escape hatch
 
@@ -219,25 +203,18 @@ with no spec is invisible to the next maintainer.
 
 ## Issue progress is the source of truth
 
-The labels on a spec issue must reflect reality at all times:
-
-| Label | Meaning |
-|-------|---------|
-| `draft` | AI-drafted or human-drafted, human review pending. |
-| `planned` | Ready for implementation. Preconditions met. |
-| `in-progress` | At least one PR is open against this spec. |
-| (closed) | All Plan items delivered, spec closed. |
-
-The `pr-spec-sync` workflow handles the open and close-unmerged
-transitions. Plan-item ticks on merge are manual; the
-`onsager-pr-lifecycle` skill documents the procedure.
+A spec issue's open/closed state plus its Plan checkboxes are the source
+of truth. The issue is `open` while any Plan item is unticked or any
+linked PR is in flight; it closes when GitHub fires `Closes #N` on PR
+merge (or a human closes it manually after the last `Part of #N` PR
+lands). Plan-item ticks on merge are manual; the `onsager-pr-lifecycle`
+skill documents the procedure.
 
 ## Anti-patterns (don't)
 
 - **PR without a spec and no `trivial` label.** The `pr-spec-sync`
   workflow will comment; the PR should not merge until the author either
   adds a spec link or the `trivial` label.
-- **Moving `draft → planned` as the AI.** Human-only transition.
 - **Closing a spec manually when you meant `Closes #N`.** Let GitHub do it
   via the PR merge so the timeline has the auditable link.
 - **Editing Plan checkboxes to mark items done before the PR merges.**
@@ -264,7 +241,6 @@ transitions. Plan-item ticks on merge are manual; the
 |-------|------------------|
 | Write the spec | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) (installed globally from `onsager-ai/dev-skills`) |
 | Pre-push checks | [`onsager-pre-push`](../onsager-pre-push/SKILL.md) |
-| On PR open → flip to `in-progress` | [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) |
+| On PR open → spec-link check | [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) |
 | CI triage, review, iterate | [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md) |
 | On PR merge → tick Plan items / refresh tracker | [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md) (manual) |
-| On PR close (unmerged) → revert label | [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) |
