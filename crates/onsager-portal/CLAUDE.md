@@ -191,6 +191,53 @@ While the migration is in flight, stiglab still hosts most of the
 external HTTP surface — that is the drift #222 closes, not a pattern
 to extend. New external concerns attach to portal.
 
+## Reconciliation poller (spec #121)
+
+Webhooks miss deliveries — GitHub's docs are explicit that delivery
+is best-effort. The reconciliation poller is the backstop. One
+tokio task per project ticks at the mode-derived interval, calls
+the [`Adapter::poll_since`] trait, and persists the cursor in
+`adapter_reconciliation_state`. Idempotency between the webhook
+path and the poll path is enforced by the partial unique index
+on `events_ext (adapter_id, external_ref)` (spine migration 032)
+— whichever side arrives first wins; the loser is a silent
+no-op via DB constraint, not coordination.
+
+Three ingestion modes (column `projects.ingestion_mode`, default
+`webhook+reconciler`):
+
+- `webhook+reconciler` — webhooks for low latency, reconciler at
+  300 s as a backstop.
+- `polling-only` — local-dev / webhook-less; the poller at 60 s
+  is the only ingest path.
+- `webhook-only` — opt out of the reconciler (not recommended;
+  silent drops become permanent).
+
+Interval floor is 30 s (`MIN_POLL_INTERVAL`) — protects against
+runaway configs hammering GitHub.
+
+Code lives at `crates/onsager-portal/src/reconciliation/`:
+
+- `mode.rs` — `IngestionMode` enum + interval policy.
+- `state.rs` — `adapter_reconciliation_state` read/write helpers.
+- `scheduler.rs` — boot-time scan + per-project poll loop.
+
+The GitHub `Adapter` impl lives at
+`crates/onsager-github/src/polling.rs`. v1 resource scope is
+`issue` + `pull_request` (closed+merged) per #121 § "v1 resource
+scope"; `check_*` polling is explicitly out of scope (webhook
+remains the only path) until a v2 spec adds GraphQL bulk fetch.
+
+Open follow-ups under #121:
+
+- Wire the poller's `NormalizedEvent` output through the webhook
+  translator path so it actually emits to the spine; today the
+  scheduler logs observations and advances the cursor.
+- ETag / `If-None-Match` round-trip in `GitHubAdapter` so a 304
+  skips work and doesn't count against the 5000/hr rate limit.
+- Per-project / per-installation credential resolution in the
+  scheduler — v1 polls unauthenticated.
+
 ## Build & Test
 
 ```bash

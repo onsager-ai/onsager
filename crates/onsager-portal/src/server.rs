@@ -409,6 +409,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let listener_spine = state.spine.clone();
     let activation_pool = state.pool.clone();
     let activation_spine = state.spine.clone();
+    let reconciliation_pool = state.pool.clone();
     let activation_is_oss = !state
         .config
         .deployment
@@ -442,6 +443,14 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             tracing::error!("portal: workflow_activated listener exited: {e}");
         }
     });
+
+    // Spawn the per-project reconciliation poller (spec #121). One
+    // tokio task per project polls the configured adapter at the
+    // mode-derived interval; emit-to-spine wiring lands with the
+    // webhook-translator refactor (#121 follow-up). Skipping the
+    // scheduler on databases without a `projects` table is fine —
+    // the boot scan logs and exits.
+    crate::reconciliation::spawn_all(reconciliation_pool);
 
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;
     tracing::info!(bind = %config.bind, "onsager-portal listening");

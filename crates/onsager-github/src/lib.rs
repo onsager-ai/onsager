@@ -32,7 +32,11 @@ pub mod adapter;
 pub mod api;
 pub mod credential;
 pub mod error;
+pub mod polling;
 pub mod webhook;
 
 pub use credential::{AccountKind, Credential, GithubAuth};
 pub use error::GithubError;
+pub use polling::{
+    Adapter, AdapterReconciliationState, GitHubAdapter, NormalizedEvent, PollOutcome,
+};
