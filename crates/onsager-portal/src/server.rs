@@ -16,9 +16,9 @@ use crate::handlers::{
     registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
     runs as run_handlers, sessions as session_handlers, showcase as showcase_handlers,
     spine as spine_handlers, tasks as task_handlers, telegram_webhook,
-    triggers as trigger_handlers, webhook, workflow_kinds as workflow_kind_handlers,
-    workflow_views as workflow_view_handlers, workflows as workflow_handlers,
-    workspaces as workspace_handlers,
+    triggers as trigger_handlers, webhook, webhook_health as webhook_health_handlers,
+    workflow_kinds as workflow_kind_handlers, workflow_views as workflow_view_handlers,
+    workflows as workflow_handlers, workspaces as workspace_handlers,
 };
 use crate::proxy_cache::ProxyCache;
 use crate::state::AppState;
@@ -79,8 +79,14 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // Caddy in both dev and production routes `/agent/ws` here.
         .route("/agent/ws", get(agent_ws::proxy_handler))
         .route("/webhooks/github", post(webhook::handle))
-        .route("/api/webhooks/github", post(webhook::handle))
-        .route("/api/github-app/webhook", post(webhook::handle))
+        // Alias routes log at `info` on entry so operators can identify
+        // tenants whose App is still configured to post to a non-canonical
+        // URL (spec #120 item 2a).
+        .route("/api/webhooks/github", post(webhook::handle_alias_legacy))
+        .route(
+            "/api/github-app/webhook",
+            post(webhook::handle_alias_github_app),
+        )
         // Auth routes (#222 Slice 5). Stiglab proxies `/api/auth/*`
         // here so dashboard fetches keep working pre–API_BASE cutover.
         .route("/api/auth/github", get(auth_handlers::github_login))
@@ -161,6 +167,17 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route(
             "/api/workspaces/{workspace_id}/github-installations/{install_row_id}/accessible-repos",
             get(installation_handlers::list_accessible_repos),
+        )
+        // Webhook delivery health surface (spec #120 item 3). One call
+        // returns one row per workspace installation, summarising the
+        // last K = 30 deliveries the App emitted (filtered to this
+        // workspace). Powers the warning badge on the workflow card.
+        // Lives under `/webhook-deliveries-health` (not nested in
+        // `/github-installations/`) to avoid collision with the
+        // `/github-installations/{install_row_id}` placeholder route.
+        .route(
+            "/api/workspaces/{workspace_id}/webhook-deliveries-health",
+            get(webhook_health_handlers::workspace_webhook_deliveries_health),
         )
         .route(
             "/api/workspaces/{workspace_id}/github-installations/{install_row_id}/repos/{owner}/{repo}/labels",

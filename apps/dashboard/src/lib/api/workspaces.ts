@@ -7,6 +7,7 @@ import type {
   Project,
   AccessibleRepo,
   GitHubLabel,
+  WorkspaceDeliveryHealthResponse,
 } from './types';
 
 export const workspaces = {
@@ -83,5 +84,12 @@ export const workspaces = {
   listRepoLabels: (workspaceId: string, installId: string, owner: string, repo: string) =>
     request<{ labels: GitHubLabel[] }>(
       `/workspaces/${encodeURIComponent(workspaceId)}/github-installations/${encodeURIComponent(installId)}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/labels`,
+    ),
+  // Webhook delivery health for every installation in the workspace —
+  // last K=30 deliveries summarised per install (spec #120 item 3).
+  // Powers the workflow card's "webhook deliveries failing" warning.
+  getWorkspaceWebhookDeliveriesHealth: (workspaceId: string) =>
+    request<WorkspaceDeliveryHealthResponse>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/webhook-deliveries-health`,
     ),
 };

@@ -28,6 +28,7 @@ import { WorkflowArtifactsTab } from "@/components/factory/workflows/WorkflowArt
 import { WorkflowEventsCard } from "@/components/factory/workflows/WorkflowEventsCard"
 import { WorkflowSessionsCard } from "@/components/factory/workflows/WorkflowSessionsCard"
 import { WorkflowVerdictsTab } from "@/components/factory/workflows/WorkflowVerdictsTab"
+import { WebhookHealthWarning } from "@/components/factory/workflows/WebhookHealthWarning"
 import { outputArtifactKind } from "@/components/factory/workflows/workflow-meta"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { useOSSFlag } from "@/hooks/useOSSFlag"
@@ -114,6 +115,22 @@ export function WorkflowDetailPage() {
     return isOss ? filterRunsToLastSevenDays(all) : all
   }, [runsData, isOss])
 
+  // Spec #120 item 3 — webhook delivery health for this workflow's
+  // installation. The workspace-scoped endpoint returns every
+  // installation in one call; we pick our row by install_id.
+  const { data: healthData } = useQuery({
+    queryKey: ["webhook-deliveries-health", workspace.id],
+    queryFn: () => api.getWorkspaceWebhookDeliveriesHealth(workspace.id),
+    enabled: !!workflow,
+    staleTime: 60_000,
+  })
+  const installHealth = useMemo(() => {
+    if (!workflow) return undefined
+    return healthData?.installations.find(
+      (h) => String(h.install_id) === workflow.trigger.install_id,
+    )
+  }, [healthData, workflow])
+
   const [tab, setTab] = useState<TabValue>(() => readTabFromHash())
 
   // Keep state and the URL hash in sync. Initial state is seeded from the
@@ -194,6 +211,9 @@ export function WorkflowDetailPage() {
           {workflow.status}
         </Badge>
       </div>
+
+      <WebhookHealthWarning health={installHealth} variant="block" />
+
 
       <Tabs value={tab} onValueChange={(v) => handleTabChange(v as TabValue)}>
         <TabsList className="w-full justify-start overflow-x-auto md:w-auto">

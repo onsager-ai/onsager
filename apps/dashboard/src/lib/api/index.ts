@@ -59,6 +59,8 @@ export type {
   ArtifactActionRequest,
   OverrideGateRequestBody,
   ArtifactActionResponse,
+  InstallationDeliveryHealth,
+  WorkspaceDeliveryHealthResponse,
 } from './types';
 
 // Re-export workflow helpers

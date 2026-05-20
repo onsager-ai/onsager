@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ActiveRunsBanner } from "@/components/factory/workflows/ActiveRunsBanner"
+import { WebhookHealthWarning } from "@/components/factory/workflows/WebhookHealthWarning"
 import { WorkflowBuilderSheet } from "@/components/factory/workflows/WorkflowBuilderSheet"
 import { usePageHeader } from "@/components/layout/PageHeader"
 
@@ -21,6 +22,21 @@ export function WorkflowsPage() {
     queryFn: () => api.listWorkflows(workspace.id),
   })
   const workflows = data?.workflows ?? []
+
+  // Spec #120 item 3 — warn inline on the card when the installation's
+  // recent GitHub deliveries include non-2xx responses. One workspace-
+  // scoped fetch covers every workflow's installation; the card looks up
+  // its row by install_id. Skipped when there are no workflows yet (no
+  // installations to grade either).
+  const { data: healthData } = useQuery({
+    queryKey: ["webhook-deliveries-health", workspace.id],
+    queryFn: () => api.getWorkspaceWebhookDeliveriesHealth(workspace.id),
+    enabled: workflows.length > 0,
+    staleTime: 60_000,
+  })
+  const healthByInstall = new Map(
+    (healthData?.installations ?? []).map((h) => [String(h.install_id), h]),
+  )
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -79,6 +95,9 @@ export function WorkflowsPage() {
                     Trigger: {w.trigger.repo_owner}/{w.trigger.repo_name}
                     {w.trigger.label ? ` · ${w.trigger.label}` : ""}
                   </div>
+                  <WebhookHealthWarning
+                    health={healthByInstall.get(w.trigger.install_id)}
+                  />
                 </CardContent>
               </Card>
             </Link>
