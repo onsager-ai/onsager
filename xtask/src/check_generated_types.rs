@@ -14,7 +14,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
@@ -101,22 +101,52 @@ fn walk(root: &Path, here: &Path, out: &mut BTreeMap<PathBuf, String>) -> Result
 }
 
 fn regenerate(root: &Path) -> Result<()> {
-    let status = Command::new("cargo")
-        .args([
-            "test",
-            "-p",
-            "onsager-portal",
-            "--lib",
-            "--quiet",
-            "export_bindings",
-        ])
+    // Drop `--quiet` so the harness summary ("test result: ok. N passed; …")
+    // is in stdout — we parse N below to defend against the filter matching
+    // zero tests (e.g. ts-rs renames its generated test prefix, or someone
+    // drops `#[ts(export)]` from every type). Without that guard the drift
+    // check would silently pass while doing no actual regeneration.
+    let output = Command::new("cargo")
+        .args(["test", "-p", "onsager-portal", "--lib", "export_bindings"])
         .current_dir(root)
-        .status()
+        .stdin(Stdio::null())
+        .output()
         .context("spawn `cargo test -p onsager-portal --lib export_bindings`")?;
-    if !status.success() {
-        bail!("`cargo test export_bindings` failed (exit {status})");
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        bail!(
+            "`cargo test export_bindings` failed (exit {}):\n--- stdout ---\n{}\n--- stderr ---\n{}",
+            output.status,
+            stdout.trim(),
+            stderr.trim()
+        );
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let passed = parse_test_passed(&stdout).context(
+        "could not find `test result: ok. N passed` summary in cargo test output — \
+         the harness format may have changed",
+    )?;
+    if passed == 0 {
+        bail!(
+            "`cargo test ... export_bindings` matched 0 tests — the ts-rs auto-generated \
+             `export_bindings_*` tests didn't run, so no regeneration happened.\n\
+             Check that `#[ts(export)]` is still present on the portal serde structs, and \
+             that ts-rs hasn't renamed its generated test prefix.\n\n\
+             cargo test output:\n{stdout}"
+        );
     }
     Ok(())
+}
+
+/// Parse the cargo test harness summary line for the passed count.
+/// Format (libtest stable): `test result: ok. N passed; M failed; …`.
+fn parse_test_passed(stdout: &str) -> Option<usize> {
+    stdout.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("test result: ok. ")?;
+        let n_str = rest.split(" passed").next()?;
+        n_str.trim().parse::<usize>().ok()
+    })
 }
 
 fn diff(before: &BTreeMap<PathBuf, String>, after: &BTreeMap<PathBuf, String>) -> Vec<String> {
@@ -135,4 +165,38 @@ fn diff(before: &BTreeMap<PathBuf, String>, after: &BTreeMap<PathBuf, String>) -
     }
     out.sort();
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_test_passed;
+
+    #[test]
+    fn parses_libtest_summary() {
+        let stdout = "\
+running 4 tests
+test workflow::export_bindings_gatekind ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 206 filtered out; finished in 0.17s
+";
+        assert_eq!(parse_test_passed(stdout), Some(4));
+    }
+
+    #[test]
+    fn parses_zero_passed() {
+        let stdout = "\
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 210 filtered out; finished in 0.00s
+";
+        assert_eq!(parse_test_passed(stdout), Some(0));
+    }
+
+    #[test]
+    fn returns_none_when_no_summary_line() {
+        assert_eq!(
+            parse_test_passed("compiling onsager-portal\nerror: ..."),
+            None
+        );
+    }
 }
