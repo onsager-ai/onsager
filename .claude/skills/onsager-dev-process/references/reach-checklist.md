@@ -80,7 +80,7 @@ primitive at all.
 
 ## How to verify
 
-Before marking the spec `planned`:
+Before opening a PR against the spec:
 
 1. Walk through the flow as a brand-new user with empty database state.
 2. If at any point there's a page with no content and no actionable

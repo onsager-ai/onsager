@@ -21,7 +21,6 @@ pub mod registry_triggers;
 pub mod runs;
 pub mod sessions;
 pub mod showcase;
-pub mod spec_link;
 pub mod spine;
 pub mod tasks;
 pub mod telegram_webhook;

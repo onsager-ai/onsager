@@ -101,11 +101,6 @@ pub async fn handle(
         .unwrap_or_default()
         .to_string();
     let merged = pr.get("merged").and_then(|m| m.as_bool()).unwrap_or(false);
-    let body = pr
-        .get("body")
-        .and_then(|b| b.as_str())
-        .unwrap_or("")
-        .to_string();
     let merge_sha = pr
         .get("merge_commit_sha")
         .and_then(|s| s.as_str())
@@ -325,45 +320,6 @@ pub async fn handle(
             }
 
             gate_outcome = Some(v);
-        }
-    }
-
-    // Phase 2 label-sync migration (`.github/workflows/pr-spec-sync.yml`).
-    // Best-effort: only attempted when a github_token is configured. Failures
-    // are logged so the workflow can stay live as a safety net during rollout.
-    if let Some(tok) = state.config.github_token.as_deref()
-        && !body.is_empty()
-    {
-        let linked = crate::handlers::spec_link::linked_issues(&body);
-        if !linked.is_empty() {
-            use onsager_github::api::issues::set_label;
-            for issue_number in linked {
-                let result = match (act, merged) {
-                    (PrAction::Opened, _) => {
-                        set_label(Some(tok), owner, name, issue_number, "in-progress", true).await
-                    }
-                    (PrAction::Closed, true) => {
-                        // PR merged — move spec from `in-progress` to `done`
-                        // to mirror the human-driven label progression.
-                        let _ =
-                            set_label(Some(tok), owner, name, issue_number, "in-progress", false)
-                                .await;
-                        set_label(Some(tok), owner, name, issue_number, "done", true).await
-                    }
-                    (PrAction::Closed, false) => {
-                        // Closed without merge — revert to `planned` so the
-                        // spec re-enters the queue cleanly.
-                        let _ =
-                            set_label(Some(tok), owner, name, issue_number, "in-progress", false)
-                                .await;
-                        set_label(Some(tok), owner, name, issue_number, "planned", true).await
-                    }
-                    (PrAction::Synchronize, _) => Ok(()),
-                };
-                if let Err(e) = result {
-                    tracing::warn!(error = %e, issue = issue_number, "spec label sync failed");
-                }
-            }
         }
     }
 
