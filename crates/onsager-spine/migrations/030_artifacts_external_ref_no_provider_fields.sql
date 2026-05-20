@@ -16,22 +16,30 @@
 -- `owner`. Internal-origin artifacts (no `external_ref`) still write
 -- `name` / `owner` freely — the constraint only binds the external case.
 --
--- `NOT VALID` skips validation of the existing rows. The pre-spec-#170
--- soft-fallback rows kept their stale denormalized `name` / `owner` as
--- best-effort cached display under proxy outage (migration 011's "no
--- data migration" decision); the umbrella's resolved policy was "leave
--- them" and this migration preserves that. New INSERTs and UPDATEs are
--- still checked — `NOT VALID` is forward-looking only.
+-- Two-step ordering matters:
 --
--- If a future spec re-decides the soft-fallback policy, the followup
--- migration nulls the legacy rows and runs
--- `ALTER TABLE artifacts VALIDATE CONSTRAINT artifacts_external_ref_no_provider_fields`
--- to retrofit the check across the whole table.
+--   1. NULL out pre-#170 soft-fallback rows that kept their stale
+--      denormalized `name` / `owner` (migration 011's "no data migration"
+--      decision). Pre-launch posture (CLAUDE.md): no users to protect,
+--      the proxy is the canonical source for those fields, no reason to
+--      preserve a cached fallback that's just drift waiting to surface.
+--   2. Add the CHECK constraint fully validated (no `NOT VALID`).
+--      `NOT VALID` would have skipped only the creation-time scan —
+--      Postgres still evaluates the CHECK on every subsequent UPDATE,
+--      so leaving the legacy rows in place would have broken the next
+--      webhook touch (`upsert_pr_artifact_ref`'s
+--      `UPDATE artifacts SET state = $2, last_observed_at = NOW()`
+--      writes a row whose post-image still violates the predicate).
+--      Backfilling first lets the constraint be fully VALID end-to-end.
+
+UPDATE artifacts
+    SET name = NULL, owner = NULL
+    WHERE external_ref IS NOT NULL
+      AND (name IS NOT NULL OR owner IS NOT NULL);
 
 ALTER TABLE artifacts
     DROP CONSTRAINT IF EXISTS artifacts_external_ref_no_provider_fields;
 
 ALTER TABLE artifacts
     ADD CONSTRAINT artifacts_external_ref_no_provider_fields
-        CHECK (external_ref IS NULL OR (name IS NULL AND owner IS NULL))
-        NOT VALID;
+        CHECK (external_ref IS NULL OR (name IS NULL AND owner IS NULL));
