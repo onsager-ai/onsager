@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react"
-import { api, type SessionKind, type User } from "./api"
+import { api, type SessionKind, type MeUser } from "./api"
 
 interface AuthContextValue {
-  user: User | null
+  user: MeUser | null
   loading: boolean
   /**
    * How the session was minted, surfaced by `/api/auth/me`. `"github"` for
@@ -26,7 +26,7 @@ export function useAuth() {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<MeUser | null>(null)
   const [sessionKind, setSessionKind] = useState<SessionKind | null>(null)
   const [loading, setLoading] = useState(true)
 

@@ -6,7 +6,9 @@ export type {
   Node,
   Session,
   TaskRequest,
-  User,
+  MeUser,
+  MeResponse,
+  MeVia,
   SessionKind,
   Credential,
   Pat,
@@ -19,7 +21,6 @@ export type {
   AccessibleRepo,
   GovernanceEvent,
   TokenUsage,
-  SessionSpend,
   SpineEvent,
   SpineArtifact,
   ProjectIssueDetail,
@@ -64,6 +65,10 @@ export type { ArtifactDetail } from './generated/ArtifactDetail';
 export type { WorkflowRun } from './generated/WorkflowRun';
 export type { WorkflowRunStage } from './generated/WorkflowRunStage';
 export type { StageRunStatus } from './generated/StageRunStatus';
+
+// `SessionSpend` is co-located with its derivation (spec #441) — there is
+// no portal endpoint that produces this shape.
+export type { SessionSpend } from './sessions';
 
 // Re-export workflow helpers
 export { normalizeWorkflowArtifactKind, stageToCreateStage } from './workflows';

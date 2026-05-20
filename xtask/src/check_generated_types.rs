@@ -45,7 +45,7 @@ pub fn run() -> Result<()> {
     }
 
     let mut msg = format!(
-        "{} is out of date.\n\nRegenerate with:\n    cargo test -p onsager-portal -p onsager-spine --lib export_bindings\n\nThen commit the result. Differences:\n",
+        "{} is out of date.\n\nRegenerate with:\n    cargo test -p onsager-portal -p onsager-spine -p synodic --lib export_bindings\n\nThen commit the result. Differences:\n",
         GENERATED_DIR
     );
     for line in &drift {
@@ -108,12 +108,13 @@ fn regenerate(root: &Path) -> Result<()> {
     // zero tests (e.g. ts-rs renames its generated test prefix, or someone
     // drops `#[ts(export)]` from every type). Without that guard the drift
     // check would silently pass while doing no actual regeneration.
-    // Portal and spine both host `#[ts(export)]` types whose generated
-    // bindings land in `GENERATED_DIR` (spine joined the cascade with
-    // spec #434 — `TriggerKind` and its variant tree). Each `-p` runs
-    // its own libtest harness invocation, so we drive them in sequence
-    // and require at least one matched test per crate.
-    for pkg in ["onsager-portal", "onsager-spine"] {
+    // Portal, spine, and synodic all host `#[ts(export)]` types whose
+    // generated bindings land in `GENERATED_DIR` (spine joined the
+    // cascade with spec #434 — `TriggerKind` and its variant tree;
+    // synodic joined with spec #441 — `GovernanceEvent`). Each `-p`
+    // runs its own libtest harness invocation, so we drive them in
+    // sequence and require at least one matched test per crate.
+    for pkg in ["onsager-portal", "onsager-spine", "synodic"] {
         let output = Command::new("cargo")
             .args(["test", "-p", pkg, "--lib", "export_bindings"])
             .current_dir(root)

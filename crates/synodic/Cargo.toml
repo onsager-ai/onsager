@@ -42,3 +42,4 @@ tower-http = { workspace = true, features = ["fs", "cors"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+ts-rs = { workspace = true }

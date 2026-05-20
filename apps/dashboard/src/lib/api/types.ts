@@ -1,10 +1,10 @@
 // Wire-shape types for the dashboard API. Per spec #298, Rust serde structs
-// in `crates/onsager-portal/` are the single source of truth — `ts-rs`
-// emits the canonical bindings into `./generated/`. This file re-exports
-// the generated types alongside the residual hand-written types that
-// haven't been derived yet (workflow cascade, run/stage typing, synodic
-// proxy types). Once those land (umbrella #298 Phase 3) this file collapses
-// to a pure re-export barrel.
+// in `crates/onsager-portal/`, `crates/onsager-spine/`, and `crates/synodic/`
+// are the single source of truth — `ts-rs` emits the canonical bindings into
+// `./generated/`. This file re-exports the generated types alongside the
+// residual hand-written types that haven't been derived yet (workflow CRUD
+// cascade, registry manifests, generic envelopes). Once those land the file
+// collapses to a pure re-export barrel.
 
 // ── Generated (Rust is SSOT) ─────────────────────────────────────────────
 
@@ -18,7 +18,11 @@ export type { CreatePatResponse } from './generated/CreatePatResponse';
 export type { Credential } from './generated/Credential';
 export type { GitHubAccountType } from './generated/GitHubAccountType';
 export type { GitHubAppInstallation } from './generated/GitHubAppInstallation';
+export type { GovernanceEvent } from './generated/GovernanceEvent';
 export type { InstallationDeliveryHealth } from './generated/InstallationDeliveryHealth';
+export type { MeResponse } from './generated/MeResponse';
+export type { MeUser } from './generated/MeUser';
+export type { MeVia } from './generated/MeVia';
 export type { Node } from './generated/Node';
 export type { NodeStatus } from './generated/NodeStatus';
 export type { Pat } from './generated/Pat';
@@ -41,95 +45,7 @@ export type { Workspace } from './generated/Workspace';
 export type { WorkspaceDeliveryHealthResponse } from './generated/WorkspaceDeliveryHealthResponse';
 export type { WorkspaceMember } from './generated/WorkspaceMember';
 
-// Local imports for the residual hand-written wrappers below. `TokenUsage`
-// is consumed by the client-side-only `SessionSpend` row.
-import type { TokenUsage } from './generated/TokenUsage';
-
 // ── Hand-written (pending derive) ────────────────────────────────────────
-
-// User identity returned by `/api/auth/me`. The portal-side `User` struct
-// in `auth_db.rs` carries extra audit fields (`github_id`, `created_at`,
-// `updated_at`) that don't appear on the wire. Deriving directly would
-// require typing the `me` handler response — tracked as a Phase 2
-// follow-up.
-export interface User {
-  id: string;
-  github_login: string;
-  github_name: string | null;
-  github_avatar_url: string | null;
-}
-
-// Denormalized session-completion spend row (issue #39). Constructed
-// client-side from `stiglab.session_completed` events — there is no
-// portal-side endpoint that produces this shape, so it stays hand-written.
-export interface SessionSpend {
-  id: number;
-  created_at: string;
-  session_id: string;
-  artifact_id: string | null;
-  duration_ms: number;
-  token_usage: TokenUsage | null;
-}
-
-// Governance proxy types (`/api/governance/*`) — portal forwards bytes to
-// synodic without parsing. Deriving these would require teaching ts-rs
-// about synodic structs (out of scope for this PR; tracked under #298).
-export interface GovernanceEvent {
-  id: string;
-  event_type: string;
-  title: string;
-  severity: string;
-  source: string;
-  metadata: Record<string, unknown>;
-  resolved: boolean;
-  resolution_notes: string | null;
-  created_at: string;
-  resolved_at: string | null;
-}
-
-export interface GovernanceStats {
-  total: number;
-  unresolved: number;
-  by_type: Record<string, number>;
-  by_severity: Record<string, number>;
-}
-
-export interface GovernanceRule {
-  name: string;
-  description: string;
-  pattern: string;
-  event_type: string;
-  severity: string;
-  enabled: boolean;
-}
-
-// Ising insight surface (issue #36). Persisted as a spine event row
-// (`ising.insight_emitted`); the dashboard reads via the events endpoint.
-// Same reason as the governance types — derivation lives outside portal.
-export interface IsingInsightEmittedEvent {
-  id: number;
-  created_at: string;
-  signal_kind: string;
-  subject_ref: string;
-  confidence: number;
-  evidence: { event_id: number; event_type: string }[];
-}
-
-// Ising rule proposal queue (issue #36 Step 2). Proxied through Synodic.
-export interface RuleProposal {
-  id: string;
-  insight_id: string;
-  signal_kind: string;
-  subject_ref: string;
-  proposed_action: Record<string, unknown>;
-  class: 'safe_auto' | 'review_required';
-  rationale: string;
-  confidence: number;
-  status: 'pending' | 'approved' | 'rejected';
-  resolution_notes: string | null;
-  created_at: string;
-  resolved_at: string | null;
-}
 
 // Generic envelope shared by every `/api/projects/:id/{issues,pulls}` list
 // endpoint (#170 fail-open). Stays hand-written because ts-rs has no
