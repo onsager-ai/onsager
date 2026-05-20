@@ -1,3 +1,7 @@
+// occam-allow: Observer runtime wiring lands with OBS-01 (#361). Until then the
+// crate is a designed-for-future-use library with no in-tree reverse dep — the
+// substrate scheduler will pull it in once the OBS-01 runtime spawns observer
+// tasks. Remove this allow when the dep edge appears.
 //! # onsager-observers
 //!
 //! The 0.2 substrate's **second citizen**: non-blocking observers that

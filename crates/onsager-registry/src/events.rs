@@ -106,6 +106,14 @@ pub struct EventDefinition {
     /// `diagnostic_only` is `true`; `None` for real rows. Free-form by
     /// design.
     pub reason: Option<&'static str>,
+    /// Open follow-up issue tracking the path from diagnostic-only to a
+    /// real consumer. Surfaces in `xtask check-events` so dangling
+    /// skeletons can be re-examined: an event that has been
+    /// diagnostic-only for an extended period either gets a real
+    /// consumer or the row gets removed. `None` is allowed today (warn-
+    /// mode landing per spec #275); ratchet to required is a follow-up.
+    /// Has no meaning for real rows (`diagnostic_only = false`).
+    pub tracking_issue: Option<u32>,
     /// One-line description for the manifest read API and dashboard.
     pub description: &'static str,
 }
@@ -134,6 +142,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "New artifact accepted and ID assigned.",
         },
         EventDefinition {
@@ -143,6 +152,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "Artifact transitioned between lifecycle states.",
         },
         EventDefinition {
@@ -152,6 +162,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "Artifact reached terminal state (archived).",
         },
         // -- Git lifecycle (onsager-portal webhooks) ------------------------
@@ -162,6 +173,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "A pull request was opened for an artifact.",
         },
         EventDefinition {
@@ -171,6 +183,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "A CI check finished for a PR.",
         },
         EventDefinition {
@@ -180,6 +193,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate, Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "A PR was merged.",
         },
         EventDefinition {
@@ -189,6 +203,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "A PR was closed without merging.",
         },
         // -- Forge process events -------------------------------------------
@@ -199,6 +214,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Stiglab],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "ShapingRequest sent to Stiglab via the spine (replaces POST /api/shaping).",
         },
         EventDefinition {
@@ -208,6 +224,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "ShapingResult received from Stiglab and recorded by Forge.",
         },
         EventDefinition {
@@ -217,6 +234,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Synodic],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "GateRequest sent to Synodic via the spine (replaces POST /api/gate).",
         },
         EventDefinition {
@@ -226,6 +244,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Ising],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "GateVerdict observed by Forge after Synodic responded.",
         },
         EventDefinition {
@@ -235,6 +254,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "Insight forwarded to the scheduling kernel.",
         },
         EventDefinition {
@@ -244,6 +264,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("diagnostic trace of forge scheduling kernel; no downstream action"),
+            tracking_issue: None,
             description: "Scheduling kernel produced a ShapingDecision.",
         },
         // -- Stiglab events -------------------------------------------------
@@ -254,6 +275,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "A session finished successfully; carries optional artifact_id, token usage, branch, and PR number.",
         },
         EventDefinition {
@@ -263,6 +285,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "Full session ShapingResult ready for Forge to act on (replaces POST /api/shaping response). Renamed from stiglab.shaping_result_ready per spec #285.",
         },
         EventDefinition {
@@ -272,6 +295,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "A session terminated with an error.",
         },
         EventDefinition {
@@ -281,6 +305,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("dashboard event-timeline troubleshooting for node/deadline failures"),
+            tracking_issue: None,
             description: "A session was aborted (node lost, deadline exceeded).",
         },
         // -- Portal intents (dashboard → agent dispatch) --------------------
@@ -291,6 +316,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Stiglab],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "Dashboard task request from portal; stiglab dispatches the session to an agent node.",
         },
         EventDefinition {
@@ -300,6 +326,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Stiglab],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "Dashboard cancel-session request from portal (spec #303); stiglab forwards a CancelSession to the session's agent node.",
         },
         EventDefinition {
@@ -311,6 +338,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "observable in dashboard event timeline for operator troubleshooting when portal cannot open a PR for a completed session",
             ),
+            tracking_issue: None,
             description: "Portal failed to open a GitHub PR for a completed session (empty branch, GitHub API error, or missing App config).",
         },
         // -- Synodic events -------------------------------------------------
@@ -325,6 +353,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "Full GateVerdict in response to forge.gate_requested (replaces POST /api/gate response).",
         },
         EventDefinition {
@@ -334,6 +363,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("audit trail for escalation context"),
+            tracking_issue: None,
             description: "An escalation was initiated.",
         },
         EventDefinition {
@@ -343,6 +373,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
+            tracking_issue: None,
             description: "An escalation was resolved (human, delegate, or timeout).",
         },
         EventDefinition {
@@ -352,6 +383,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
+            tracking_issue: None,
             description: "An escalation timed out and the default verdict was applied.",
         },
         EventDefinition {
@@ -361,6 +393,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
+            tracking_issue: None,
             description: "A delegate proposed a resolution for an active escalation.",
         },
         EventDefinition {
@@ -370,6 +403,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
+            tracking_issue: None,
             description: "A crystallization candidate rule was created.",
         },
         EventDefinition {
@@ -379,6 +413,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
+            tracking_issue: None,
             description: "A proposed rule was approved and entered the active set.",
         },
         EventDefinition {
@@ -388,6 +423,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
+            tracking_issue: None,
             description: "A rule was disabled.",
         },
         EventDefinition {
@@ -397,6 +433,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
+            tracking_issue: None,
             description: "A rule was modified, producing a new version.",
         },
         // -- Ising events ---------------------------------------------------
@@ -407,6 +444,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in dashboard ising views"),
+            tracking_issue: None,
             description: "An insight passed validation and was recorded on the spine.",
         },
         EventDefinition {
@@ -416,6 +454,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "Machine-readable signal emitted on the spine for other subsystems to consume.",
         },
         EventDefinition {
@@ -425,6 +464,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in dashboard ising views"),
+            tracking_issue: None,
             description: "An insight was deduplicated or fell below confidence threshold.",
         },
         EventDefinition {
@@ -434,6 +474,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Synodic],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "An insight was packaged as a rule proposal for Synodic.",
         },
         EventDefinition {
@@ -443,6 +484,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("operator troubleshooting in dashboard"),
+            tracking_issue: None,
             description: "An analyzer encountered an error during its run.",
         },
         EventDefinition {
@@ -452,6 +494,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("ising health monitoring in dashboard"),
+            tracking_issue: None,
             description: "Ising finished catching up from a lag position.",
         },
         // -- Refract (intent decomposition) ---------------------------------
@@ -462,6 +505,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in refract intent timeline"),
+            tracking_issue: None,
             description: "A new intent was submitted for decomposition.",
         },
         EventDefinition {
@@ -471,6 +515,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in refract intent timeline"),
+            tracking_issue: None,
             description: "A decomposer produced an artifact tree for an intent.",
         },
         EventDefinition {
@@ -480,6 +525,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in refract intent timeline"),
+            tracking_issue: None,
             description: "Decomposition failed — no decomposer matched, or the matched decomposer errored out.",
         },
         // -- Workflow runtime (issue #80 / #81) -----------------------------
@@ -500,6 +546,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "A trigger fired (webhook / schedule / event / manual).",
         },
         EventDefinition {
@@ -514,6 +561,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("audit trail for manual / CLI / replay fires"),
+            tracking_issue: None,
             description: "Audit record for a manual / CLI / replay trigger fire (actor + workflow).",
         },
         EventDefinition {
@@ -523,6 +571,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in workflow run timeline"),
+            tracking_issue: None,
             description: "A workflow-tagged artifact entered a new stage.",
         },
         // Per spec #285: per-gate `stage.gate_passed` / `stage.gate_failed`
@@ -535,6 +584,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some("rendered in workflow run timeline"),
+            tracking_issue: None,
             description: "All gates on a stage resolved and the artifact advanced.",
         },
         // -- Registry events removed by spec #285 ---------------------------
@@ -561,6 +611,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "rendered in dashboard run timeline; Observer consumer arrives with OBS-01 (#361)",
             ),
+            tracking_issue: Some(361),
             description: "Substrate scheduler dispatched a node — execution began.",
         },
         EventDefinition {
@@ -572,6 +623,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "rendered in dashboard run timeline; Observer consumer arrives with OBS-01 (#361)",
             ),
+            tracking_issue: Some(361),
             description: "A node finished successfully; outputs persisted under the edge's ArtifactId.",
         },
         EventDefinition {
@@ -583,6 +635,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "rendered in dashboard run timeline; Observer consumer arrives with OBS-01 (#361)",
             ),
+            tracking_issue: Some(361),
             description: "A node's executor returned Err; the plan is aborted (v1 — no retries).",
         },
         EventDefinition {
@@ -594,6 +647,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "rendered in dashboard HITL inbox; Human executor approval round-trips via portal (#357)",
             ),
+            tracking_issue: Some(357),
             description: "A Human executor is waiting on an out-of-band approval decision.",
         },
         EventDefinition {
@@ -605,6 +659,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "rendered in dashboard HITL audit; the substrate's own Human executor consumes the approval inline",
             ),
+            tracking_issue: None,
             description: "A pending Human executor node received an approval decision.",
         },
         EventDefinition {
@@ -616,6 +671,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "rendered in dashboard HITL audit; the substrate's own Human executor consumes the rejection inline",
             ),
+            tracking_issue: None,
             description: "A pending Human executor node received a rejection decision.",
         },
         EventDefinition {
@@ -627,6 +683,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "rendered in dashboard run timeline as gate outcome; Observer / dashboard read it directly — distinct from the legacy `synodic.gate_verdict` emitted by the 0.1 Synodic subsystem (retired by MIG-03)",
             ),
+            tracking_issue: None,
             description: "Verify executor produced a verdict — pass / fail outcome with per-check details.",
         },
         EventDefinition {
@@ -638,6 +695,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "rendered in dashboard agent timeline; supersedes the 0.1 `stiglab.session_*` events once MIG-01 retires stiglab",
             ),
+            tracking_issue: None,
             description: "Agent executor opened an LLM session.",
         },
         EventDefinition {
@@ -649,6 +707,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "rendered in dashboard agent timeline; carries optional token usage for budget consumers",
             ),
+            tracking_issue: None,
             description: "Agent executor's LLM session finished successfully.",
         },
         EventDefinition {
@@ -660,6 +719,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: Some(
                 "rendered in dashboard agent timeline; the executor wraps this into ExecutorError::Failed for the scheduler",
             ),
+            tracking_issue: None,
             description: "Agent executor's LLM session terminated with an error.",
         },
         // -- Gate adapters (GitHub webhooks) --------------------------------
@@ -671,6 +731,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "A GitHub check_suite/check_run/status arrived for a tracked PR.",
         },
         EventDefinition {
@@ -681,6 +742,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
+            tracking_issue: None,
             description: "A manual-approval gate received a signal (e.g. PR merged).",
         },
     ],
@@ -748,6 +810,7 @@ mod tests {
         assert!(first.get("consumers").is_some());
         assert!(first.get("diagnostic_only").is_some());
         assert!(first.get("reason").is_some());
+        assert!(first.get("tracking_issue").is_some());
     }
 
     #[test]

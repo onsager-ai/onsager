@@ -56,6 +56,28 @@ pub fn run() -> Result<()> {
         }
     }
 
+    // Soft-warn: diagnostic-only rows that have no tracking_issue
+    // (spec #275). Surfaces dangling skeletons so review can decide
+    // whether they're real or whether the row should be removed.
+    // Warn-mode only — does not fail the build. Ratchet to required
+    // is a follow-up once the floor is clean.
+    let missing_tracking: Vec<&'static str> = EVENTS
+        .events
+        .iter()
+        .filter(|e| e.diagnostic_only && e.tracking_issue.is_none())
+        .map(|e| e.kind)
+        .collect();
+    if !missing_tracking.is_empty() {
+        eprintln!(
+            "check-events: {} diagnostic-only row(s) lack a tracking_issue (spec #275, warn):",
+            missing_tracking.len()
+        );
+        for kind in &missing_tracking {
+            eprintln!("  {kind}");
+        }
+        eprintln!();
+    }
+
     if !errors.is_empty() {
         eprintln!("check-events: {} violation(s)", errors.len());
         for e in &errors {
@@ -67,9 +89,10 @@ pub fn run() -> Result<()> {
     }
 
     println!(
-        "check-events: clean ({} events, {} subsystems scanned)",
+        "check-events: clean ({} events, {} subsystems scanned, {} diagnostic-only row(s) missing tracking_issue)",
         EVENTS.events.len(),
-        Subsystem::SCANNED.len()
+        Subsystem::SCANNED.len(),
+        missing_tracking.len()
     );
     Ok(())
 }

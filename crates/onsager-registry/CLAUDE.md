@@ -38,6 +38,11 @@ reviewed table of every `FactoryEventKind` variant. Each row declares:
   today (e.g. `"rendered in dashboard event timeline"`). Required
   when `diagnostic_only` is `true`; `None` for real rows. Free-form
   by design.
+- `tracking_issue` — `Option<u32>` pointing at the follow-up issue
+  that tracks moving this row from diagnostic-only to a real
+  consumer (or removing it). Surfaced by `xtask check-events` as a
+  warn-mode signal per spec #275; ratchet to required for
+  diagnostic-only rows is a follow-up.
 
 Every row is in one of two states: **real** (non-empty `consumers`)
 or **diagnostic-only** (`diagnostic_only: true` plus a non-empty

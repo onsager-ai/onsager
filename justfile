@@ -40,6 +40,9 @@ lint-rust: _check-tools-and-skills
     cargo run -p xtask --quiet -- lint-seams
     cargo run -p xtask --quiet -- check-api-contract
     cargo run -p xtask --quiet -- check-file-budget --mode=fail
+    cargo run -p xtask --quiet -- check-orphan-crates --mode=warn
+    cargo run -p xtask --quiet -- check-single-impl-traits --mode=warn
+    cargo run -p xtask --quiet -- check-deferred-todos --mode=warn
 
 # Resolve the skills bundle then run check-tools-and-skills.
 # Override: ONSAGER_SKILLS_DIR=../onsager-skills just lint  (two-checkout local dev)

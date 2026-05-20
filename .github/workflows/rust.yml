@@ -108,6 +108,12 @@ jobs:
         run: cargo run -p xtask --quiet -- check-events
       - name: File-budget check (spec #261)
         run: cargo run -p xtask --quiet -- check-file-budget --mode=fail
+      - name: Orphan-crate check (spec #275, warn-mode landing)
+        run: cargo run -p xtask --quiet -- check-orphan-crates --mode=warn
+      - name: Single-impl-trait check (spec #275, warn-mode landing)
+        run: cargo run -p xtask --quiet -- check-single-impl-traits --mode=warn
+      - name: Deferred-TODO check (spec #275, warn-mode landing)
+        run: cargo run -p xtask --quiet -- check-deferred-todos --mode=warn
       - name: Checkout onsager-skills (spec #323)
         uses: actions/checkout@v4
         with:
