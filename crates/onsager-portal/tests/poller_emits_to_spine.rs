@@ -22,8 +22,7 @@
 use std::collections::HashMap;
 
 use onsager_github::api::issues::{Issue, Label};
-use onsager_portal::reconciliation::emit::emit_routed_events;
-use onsager_portal::reconciliation::translator::{GITHUB_ADAPTER_ID, translate_issue};
+use onsager_portal::reconciliation::{GITHUB_ADAPTER_ID, emit_routed_events, translate_issue};
 use onsager_spine::{EventStore, WorkflowMatch};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -70,8 +69,9 @@ async fn poller_emit_lands_with_dedup_key() {
 
     let routed = translate_issue(&issue, "acme", "widgets", Some(&project_id), &by_label);
     assert_eq!(routed.len(), 1, "translator must produce one TriggerFired");
-    let written = emit_routed_events(&spine, routed, &workspace_id, "test").await;
-    assert_eq!(written, 1, "emit must persist the routed event");
+    let outcome = emit_routed_events(&spine, routed, &workspace_id, "test").await;
+    assert_eq!(outcome.written, 1, "emit must persist the routed event");
+    assert_eq!(outcome.failed, 0);
 
     // Pin: the row carries the dedup key the partial unique index
     // (adapter_id, external_ref) checks. A second emit must collapse.
@@ -99,11 +99,13 @@ async fn poller_emit_lands_with_dedup_key() {
     // dedup index — the load-bearing property the webhook/reconciler
     // race relies on.
     let routed_again = translate_issue(&issue, "acme", "widgets", Some(&project_id), &by_label);
-    let second_written = emit_routed_events(&spine, routed_again, &workspace_id, "test").await;
+    let second = emit_routed_events(&spine, routed_again, &workspace_id, "test").await;
+    assert_eq!(second.written, 0, "no new rows on re-emit");
     assert_eq!(
-        second_written, 0,
+        second.deduped, 1,
         "re-emit must be deduped by the partial unique index"
     );
+    assert_eq!(second.failed, 0);
 
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM events_ext \

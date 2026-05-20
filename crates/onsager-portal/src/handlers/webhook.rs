@@ -224,8 +224,8 @@ pub async fn handle(
     // against any reconciliation-poller emit for the same resource
     // update. Best-effort: when project resolution fails we still
     // emit, just without the dedup key, matching pre-#430 behavior.
-    let decorated = decorate_routed_with_dedup(&state, &parsed, install_id, routed).await;
-    emit_routed_events(&state.spine, decorated, workspace_id, "portal").await;
+    let decorated = decorate_routed_with_dedup(&state, &parsed, &installation.id, routed).await;
+    let _ = emit_routed_events(&state.spine, decorated, workspace_id, "portal").await;
 
     let body = outcome.unwrap_or_else(|_| serde_json::json!({"event": event, "ignored": true}));
     (StatusCode::ACCEPTED, Json(body)).into_response()
@@ -393,14 +393,17 @@ async fn route_workflow_events(
 ///
 /// The `external_ref` is keyed on Onsager-side `project_id`, so we
 /// resolve `(install, owner, repo) → project` once for the delivery
-/// and reuse it. When the project can't be resolved (e.g. opt-in not
-/// completed), the event is emitted *without* a dedup key — at worst
-/// a reconciliation tick will write a duplicate row, which is a
+/// and reuse it. The caller passes the already-resolved
+/// installation row id from `handle()` so we don't re-query the
+/// `github_app_installations` table on every webhook delivery. When
+/// the project can't be resolved (e.g. opt-in not completed), the
+/// event is emitted *without* a dedup key — at worst a
+/// reconciliation tick will write a duplicate row, which is a
 /// degradation of dedup, not of correctness.
 async fn decorate_routed_with_dedup(
     state: &AppState,
     payload: &Value,
-    install_id: i64,
+    installation_id: &str,
     events: Vec<RoutedEvent>,
 ) -> Vec<RoutedEvent> {
     let repo_owner = payload
@@ -414,22 +417,13 @@ async fn decorate_routed_with_dedup(
     if repo_owner.is_empty() || repo_name.is_empty() {
         return events;
     }
-    let installation_id =
-        match crate::db::find_installation_by_install_id(&state.pool, install_id).await {
-            Ok(Some(row)) => row.id,
+    let project =
+        match crate::db::find_project_for_repo(&state.pool, installation_id, repo_owner, repo_name)
+            .await
+        {
+            Ok(Some(p)) => p,
             _ => return events,
         };
-    let project = match crate::db::find_project_for_repo(
-        &state.pool,
-        &installation_id,
-        repo_owner,
-        repo_name,
-    )
-    .await
-    {
-        Ok(Some(p)) => p,
-        _ => return events,
-    };
 
     events
         .into_iter()

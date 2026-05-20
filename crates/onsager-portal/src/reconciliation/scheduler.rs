@@ -35,7 +35,7 @@ use onsager_spine::{EventStore, RoutedEvent, WorkflowMatch, WorkflowTrigger};
 use sqlx::PgPool;
 use tokio::time::{self, Instant};
 
-use super::emit::emit_routed_events;
+use super::emit::{EmitOutcome, emit_routed_events};
 use super::mode::IngestionMode;
 use super::state::{load_state, touch_polled_at, upsert_state};
 use super::translator::{translate_issue, translate_pull_request};
@@ -201,21 +201,52 @@ async fn tick_project(
         match adapter.poll_since(&state).await {
             Ok(PollOutcome { events, advance }) => {
                 let observed = events.len();
-                let emit_ok = emit_normalized(pool, spine, project, kind, &events).await;
-                // Advance the cursor ONLY when emit succeeded. The
-                // "cursor advances only on successful emit" contract
-                // (see `onsager-github::polling`) means a failure
-                // leaves the cursor where it was so the next tick
-                // retries the same window. Dedup at the spine layer
-                // turns the retry of an already-emitted event into a
-                // silent no-op.
-                if emit_ok && let Some(advanced) = advance.as_ref() {
+                // Advance the cursor ONLY when every event in the
+                // batch landed (or was already deduped against a
+                // sibling-path write). The "cursor advances only on
+                // successful emit" contract from
+                // `onsager-github::polling` means any DB write
+                // failure leaves the cursor where it was so the next
+                // tick retries the same window — dedup at the spine
+                // layer turns the retry of an already-emitted event
+                // into a silent no-op.
+                let outcome = match emit_normalized(pool, spine, project, kind, &events).await {
+                    Ok(o) => o,
+                    Err(e) => {
+                        tracing::warn!(
+                            project_id = %project.id,
+                            adapter_id = adapter.adapter_id(),
+                            resource_kind = kind,
+                            error = %e,
+                            "reconciliation: emit pipeline errored; cursor will not advance"
+                        );
+                        touch_polled_at(pool, adapter.adapter_id(), &project.workspace_id, kind)
+                            .await?;
+                        continue;
+                    }
+                };
+                if outcome.failed > 0 {
+                    tracing::warn!(
+                        project_id = %project.id,
+                        adapter_id = adapter.adapter_id(),
+                        resource_kind = kind,
+                        written = outcome.written,
+                        deduped = outcome.deduped,
+                        failed = outcome.failed,
+                        "reconciliation: partial emit failure; cursor will not advance"
+                    );
+                }
+                if outcome.all_succeeded()
+                    && let Some(advanced) = advance.as_ref()
+                {
                     upsert_state(pool, advanced).await?;
                     tracing::info!(
                         project_id = %project.id,
                         adapter_id = adapter.adapter_id(),
                         resource_kind = kind,
                         observed,
+                        written = outcome.written,
+                        deduped = outcome.deduped,
                         "reconciliation: poll emitted + cursor advanced"
                     );
                 } else {
@@ -246,39 +277,34 @@ async fn tick_project(
 
 /// Translate a batch of [`NormalizedEvent`]s for one resource kind
 /// into [`RoutedEvent`]s via the shared translator and emit them to
-/// the spine. Returns `true` when every event in the batch was
-/// translated and emit was attempted without an error; the caller
-/// uses this signal to decide whether to advance the cursor. An
-/// empty batch is a trivial success.
+/// the spine. The returned [`EmitOutcome`] carries `written` /
+/// `deduped` / `failed` counts — the caller (`tick_project`) gates
+/// the cursor advance on `failed == 0` so any DB write failure (or
+/// pre-emit failure like a parse error) keeps the cursor pinned for
+/// the next tick to retry.
+///
+/// Returns `Err(_)` only on a DB-level error while loading the
+/// workflow lookup — the caller propagates it up via `?` and the
+/// tick loop logs and retries on the next interval.
 async fn emit_normalized(
     pool: &PgPool,
     spine: &EventStore,
     project: &ProjectRow,
     resource_kind: &str,
     events: &[NormalizedEvent],
-) -> bool {
+) -> anyhow::Result<EmitOutcome> {
     if events.is_empty() {
-        return true;
+        return Ok(EmitOutcome::default());
     }
     let mut routed: Vec<RoutedEvent> = Vec::new();
+    let mut pre_emit_failures: usize = 0;
 
     for ev in events {
         match resource_kind {
             GitHubAdapter::KIND_ISSUE => {
                 match serde_json::from_value::<Issue>(ev.payload.clone()) {
                     Ok(issue) => {
-                        let by_label = match collect_label_workflows(pool, project, &issue).await {
-                            Ok(m) => m,
-                            Err(e) => {
-                                tracing::warn!(
-                                    project_id = %project.id,
-                                    issue_number = issue.number,
-                                    error = %e,
-                                    "reconciliation: failed to load label workflows"
-                                );
-                                return false;
-                            }
-                        };
+                        let by_label = collect_label_workflows(pool, project, &issue).await?;
                         if by_label.is_empty() {
                             continue;
                         }
@@ -291,13 +317,18 @@ async fn emit_normalized(
                         ));
                     }
                     Err(e) => {
+                        // A bad payload is a deserialize bug, not a
+                        // transport failure — count it as failed so the
+                        // cursor doesn't skip past it on the next tick
+                        // (a redeploy with the fix re-runs the same
+                        // window).
                         tracing::warn!(
                             project_id = %project.id,
                             external_ref = %ev.external_ref,
                             error = %e,
                             "reconciliation: failed to parse Issue payload"
                         );
-                        return false;
+                        pre_emit_failures += 1;
                     }
                 }
             }
@@ -305,24 +336,12 @@ async fn emit_normalized(
                 match serde_json::from_value::<Pull>(ev.payload.clone()) {
                     Ok(pull) => {
                         let candidates =
-                            match crate::workflow_db::find_active_pull_request_closed_workflows(
+                            crate::workflow_db::find_active_pull_request_closed_workflows(
                                 pool,
                                 &project.repo_owner,
                                 &project.repo_name,
                             )
-                            .await
-                            {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        project_id = %project.id,
-                                        pr_number = pull.number,
-                                        error = %e,
-                                        "reconciliation: failed to load PR workflows"
-                                    );
-                                    return false;
-                                }
-                            };
+                            .await?;
                         let triggers: Vec<WorkflowTrigger> = candidates
                             .into_iter()
                             .map(|w| WorkflowTrigger {
@@ -346,7 +365,7 @@ async fn emit_normalized(
                             error = %e,
                             "reconciliation: failed to parse Pull payload"
                         );
-                        return false;
+                        pre_emit_failures += 1;
                     }
                 }
             }
@@ -360,8 +379,10 @@ async fn emit_normalized(
         }
     }
 
-    emit_routed_events(spine, routed, &project.workspace_id, "portal-reconciler").await;
-    true
+    let mut outcome =
+        emit_routed_events(spine, routed, &project.workspace_id, "portal-reconciler").await;
+    outcome.failed += pre_emit_failures;
+    Ok(outcome)
 }
 
 /// Look up the workflows that match each of `issue`'s labels. The

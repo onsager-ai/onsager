@@ -1,18 +1,21 @@
-//! Typed-shape webhook translator — the shared seam between the live
-//! webhook handler and the reconciliation poller.
+//! Typed-shape translator — the poller's path from observed GitHub
+//! resources to spine `RoutedEvent`s.
 //!
-//! Both call paths converge on this module: a `(parsed shape →
-//! Vec<RoutedEvent> → emit)` pipeline that produces the same spine
-//! events regardless of whether GitHub delivered them over a webhook
-//! or the poller observed them via REST. The webhook handler parses
-//! its `serde_json::Value` payload as today and then delegates to
-//! these functions; the poller hands typed `Issue` / `Pull` shapes
-//! straight in.
+//! The reconciliation poller (`scheduler.rs::tick_project`) hands a
+//! typed `Issue` / `Pull` straight in and gets back the events the
+//! spine expects. The webhook handler keeps using the spine-side
+//! `route_*` family (`onsager_spine::webhook_routing::{
+//! route_issues_labeled, route_pull_request_closed, ...}`) — those
+//! routers and the functions here share a contract, not a call site:
+//! both produce identical `RoutedEvent.kind` shapes for the same
+//! resource update, and both populate the same dedup key
+//! (`(adapter_id, external_ref)`) so the webhook ↔ poller race
+//! collapses on the spine migration 032 partial unique index.
 //!
-//! Symmetry is the load-bearing property — the
-//! `(adapter_id, external_ref)` dedup index (spine migration 032)
-//! collapses webhook/poller races to one events_ext row only because
-//! both sides emit the same shapes with the same dedup key.
+//! Byte-equivalence of `RoutedEvent.kind` between the two paths is
+//! exercised by the
+//! `webhook_and_poller_paths_produce_equivalent_routed_events_*`
+//! tests in this module.
 //!
 //! v1 resource scope (matches #121): issues + PR closed-merged only.
 //! `check_*` stays webhook-only (`route_check_event` on the spine).
@@ -29,30 +32,21 @@ use onsager_spine::{
     trigger::TriggerKind, trigger_source,
 };
 
+use crate::db::{issue_external_ref, pr_external_ref};
+
 /// Adapter identifier the GitHub translator stamps on emitted
 /// events for the (adapter_id, external_ref) dedup index. Centralised
 /// so the webhook and poller agree on the spelling and the partial
 /// unique index actually collapses races.
 pub const GITHUB_ADAPTER_ID: &str = "github";
 
-/// Render the canonical GitHub `external_ref` for an issue. Must
-/// match `onsager_github::GitHubAdapter::external_ref_for_issue` and
-/// `crate::db::issue_external_ref` so the dedup index sees both
-/// emitters' rows as the same key.
-pub fn issue_external_ref(project_id: &str, issue_number: u64) -> String {
-    format!("github:project:{project_id}:issue:{issue_number}")
-}
-
-/// Render the canonical GitHub `external_ref` for a pull request.
-pub fn pr_external_ref(project_id: &str, pr_number: u64) -> String {
-    format!("github:project:{project_id}:pr:{pr_number}")
-}
-
 /// Decorate the `TriggerFired` events with a per-workflow dedup key.
 /// We append `:trigger:<workflow_id>` to the resource-level ref so two
 /// workflows matching the same issue don't dedup against each other —
 /// only webhook + poller races for the *same* (issue, workflow) pair
-/// collapse.
+/// collapse. The resource-level prefix comes from
+/// `crate::db::{issue_external_ref, pr_external_ref}` so a webhook
+/// emit and a poller emit produce the same key.
 fn trigger_external_ref(resource_ref: &str, workflow_id: &str) -> String {
     format!("{resource_ref}:trigger:{workflow_id}")
 }

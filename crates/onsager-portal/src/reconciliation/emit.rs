@@ -9,32 +9,68 @@
 //! `events_ext (adapter_id, external_ref)` (spine migration 032)
 //! collapses webhook/reconciler races to one row, silently.
 //!
-//! Returns the number of events that were *actually* persisted (i.e.
-//! not deduplicated). The poller uses this only as a diagnostic
-//! signal — it advances the cursor on `Ok(_)` regardless, since a
-//! dedupe means "the sibling path already covered this update".
+//! The return value separates three outcomes the poller's cursor
+//! advance depends on:
+//!   * `written` — a brand-new row landed.
+//!   * `deduped` — the sibling path already wrote this resource
+//!     update; treated as success because the spine is consistent.
+//!   * `failed` — a DB write returned an error (caller should retry
+//!     by *not* advancing the cursor).
+//!
+//! The reconciler's "advance only on successful emit" contract uses
+//! `failed == 0` as the gate; treating dedup as success is correct
+//! because the row already exists.
 
 use onsager_spine::{EventMetadata, EventStore, RoutedEvent, spine_namespace};
 use serde_json::Value;
 
+/// Outcome of a batch emit. Counts are disjoint: every event lands
+/// in exactly one of `written`, `deduped`, or `failed`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EmitOutcome {
+    /// New rows successfully inserted.
+    pub written: usize,
+    /// Inserts collapsed by the partial unique index — the sibling
+    /// path (webhook ↔ reconciler) already wrote the same resource
+    /// update. Treated as success for cursor-advance purposes.
+    pub deduped: usize,
+    /// DB writes that errored. When `> 0` the caller (poller) MUST
+    /// NOT advance its reconciliation cursor — the next tick has to
+    /// retry the same window.
+    pub failed: usize,
+}
+
+impl EmitOutcome {
+    /// All events landed (no errors). Dedup counts as success.
+    pub fn all_succeeded(&self) -> bool {
+        self.failed == 0
+    }
+}
+
 /// Emit a batch of routed events, stamping `workspace_id` on each and
 /// applying `(adapter_id, external_ref)` dedup when both are set.
 ///
-/// Errors are logged and skipped — one bad event must not stop the
-/// rest of the batch. Returns the number of rows actually written
-/// (skipped/deduplicated rows aren't counted).
+/// Errors are logged AND counted into [`EmitOutcome::failed`] so the
+/// caller can decide whether to advance its cursor. We intentionally
+/// keep going on the first failure — one bad event must not stop the
+/// rest of the batch from landing (the unaffected events will still
+/// dedup correctly on a future retry).
 pub async fn emit_routed_events(
     spine: &EventStore,
     events: Vec<RoutedEvent>,
     workspace_id: &str,
     actor: &str,
-) -> usize {
-    let mut written = 0usize;
+) -> EmitOutcome {
+    let mut outcome = EmitOutcome::default();
     for ev in events {
         let mut data = match serde_json::to_value(&ev.kind) {
             Ok(v) => v,
             Err(e) => {
+                // Encoding the in-process enum should not fail; if it
+                // does we count it as a failure so the cursor doesn't
+                // advance over an event we never tried to write.
                 tracing::error!("failed to serialize spine event: {e}");
+                outcome.failed += 1;
                 continue;
             }
         };
@@ -72,9 +108,7 @@ pub async fn emit_routed_events(
                     )
                     .await
                 {
-                    Ok(Some(_id)) => {
-                        written += 1;
-                    }
+                    Ok(Some(_id)) => outcome.written += 1,
                     Ok(None) => {
                         // Sibling path (webhook ↔ reconciler) already
                         // wrote this resource update — silent no-op
@@ -85,6 +119,7 @@ pub async fn emit_routed_events(
                             event_type,
                             "spine event deduplicated against existing (adapter_id, external_ref)"
                         );
+                        outcome.deduped += 1;
                     }
                     Err(e) => {
                         tracing::warn!(
@@ -92,28 +127,29 @@ pub async fn emit_routed_events(
                             external_ref,
                             "failed to emit deduped spine event: {e}"
                         );
+                        outcome.failed += 1;
                     }
                 }
             }
-            _ => {
-                if let Err(e) = spine
-                    .append_ext(
-                        workspace_id,
-                        &stream_id,
-                        namespace,
-                        event_type,
-                        data,
-                        &metadata,
-                        None,
-                    )
-                    .await
-                {
+            _ => match spine
+                .append_ext(
+                    workspace_id,
+                    &stream_id,
+                    namespace,
+                    event_type,
+                    data,
+                    &metadata,
+                    None,
+                )
+                .await
+            {
+                Ok(_) => outcome.written += 1,
+                Err(e) => {
                     tracing::warn!("failed to emit spine event: {e}");
-                } else {
-                    written += 1;
+                    outcome.failed += 1;
                 }
-            }
+            },
         }
     }
-    written
+    outcome
 }
