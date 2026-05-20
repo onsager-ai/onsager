@@ -66,6 +66,10 @@ jobs:
               # cross-check. The bundle is cloned at run time, so there
               # is no in-repo path to watch for it.
               - 'crates/onsager-portal/**'
+              # Spec #298 — check-generated-types regenerates ts-rs output
+              # under apps/dashboard/src/lib/api/generated/ and diffs against
+              # the committed tree. Either side changing must re-trigger.
+              - 'apps/dashboard/src/lib/api/generated/**'
               - '.github/workflows/rust.yml'
 
   check:
@@ -106,6 +110,8 @@ jobs:
         run: cargo run -p xtask --quiet -- check-api-contract
       - name: Event-type registry manifest check (spec #131 Lever E / #150)
         run: cargo run -p xtask --quiet -- check-events
+      - name: Generated dashboard API types drift check (spec #298)
+        run: cargo run -p xtask --quiet -- check-generated-types
       - name: File-budget check (spec #261)
         run: cargo run -p xtask --quiet -- check-file-budget --mode=fail
       - name: Orphan-crate check (spec #275, warn-mode landing)

@@ -1,0 +1,14 @@
+# Workspace-wide cargo config.
+
+[env]
+# Spec #298 — Rust serde structs are the SSOT for dashboard API types.
+# `ts-rs` derives in `crates/onsager-portal/` emit `.ts` files under
+# `apps/dashboard/src/lib/api/generated/` when `cargo test` runs the
+# auto-generated `export_bindings_*` tests. `xtask check-generated-types`
+# regenerates and diffs against the committed tree.
+#
+# Setting the base dir here keeps the per-type `#[ts(export)]` attributes
+# free of long `../../..` paths and keeps the import paths between
+# generated files relative (e.g. `./WorkflowGateKind`, not deep climbs
+# back into `crates/`).
+TS_RS_EXPORT_DIR = { value = "apps/dashboard/src/lib/api/generated", relative = true }

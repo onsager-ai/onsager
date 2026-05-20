@@ -7,6 +7,7 @@
 //!     cargo run -p xtask -- check-events             # check event-type registry manifest (#150)
 //!     cargo run -p xtask -- check-tools-and-skills   # check MCP tools ↔ public skills bundle (#288)
 //!     cargo run -p xtask -- check-hitl-coverage      # check MCP tools ↔ dashboard HitlCard bindings (#311)
+//!     cargo run -p xtask -- check-generated-types    # check Rust → TS generated dashboard types (#298)
 //!     cargo run -p xtask -- check-file-budget        # bound per-file token cost (#261)
 //!     cargo run -p xtask -- slot <subcommand>        # per-worktree dev slot allocator (#194)
 //!
@@ -36,6 +37,7 @@
 mod check_deferred_todos;
 mod check_events;
 mod check_file_budget;
+mod check_generated_types;
 mod check_hitl_coverage;
 mod check_orphan_crates;
 mod check_single_impl_traits;
@@ -104,6 +106,13 @@ fn main() -> ExitCode {
                 check_hitl_coverage::run()
             }
         }
+        Some("check-generated-types") => {
+            if args.next().is_some() {
+                Err(anyhow!("check-generated-types takes no arguments"))
+            } else {
+                check_generated_types::run()
+            }
+        }
         Some("check-file-budget") => check_file_budget::run(args.collect()),
         Some("check-orphan-crates") => check_orphan_crates::run(args.collect()),
         Some("check-single-impl-traits") => check_single_impl_traits::run(args.collect()),
@@ -112,7 +121,7 @@ fn main() -> ExitCode {
         Some("slot") => slot::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- check-tools-and-skills\n  cargo run -p xtask -- check-hitl-coverage\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- check-orphan-crates [--mode=warn|fail]\n  cargo run -p xtask -- check-single-impl-traits [--mode=warn|fail]\n  cargo run -p xtask -- check-deferred-todos [--mode=warn|fail]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
+            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- check-tools-and-skills\n  cargo run -p xtask -- check-hitl-coverage\n  cargo run -p xtask -- check-generated-types\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- check-orphan-crates [--mode=warn|fail]\n  cargo run -p xtask -- check-single-impl-traits [--mode=warn|fail]\n  cargo run -p xtask -- check-deferred-todos [--mode=warn|fail]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
         )),
     };
 
