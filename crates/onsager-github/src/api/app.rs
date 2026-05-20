@@ -286,6 +286,50 @@ pub async fn list_repo_labels(
     Ok(out)
 }
 
+/// One row from `GET /app/hook/deliveries`. Returned by GitHub's App-
+/// scoped webhook deliveries API; includes the `installation_id` so the
+/// caller can filter to a single tenant.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AppWebhookDelivery {
+    pub id: i64,
+    pub guid: String,
+    pub delivered_at: DateTime<Utc>,
+    #[serde(default)]
+    pub redelivery: bool,
+    /// HTTP status text (e.g. `"OK"`, `"Bad Request"`). Free-form per GitHub.
+    pub status: String,
+    pub status_code: i32,
+    pub event: String,
+    pub action: Option<String>,
+    pub installation_id: Option<i64>,
+}
+
+/// Fetch the most recent deliveries to the App's configured webhook URL.
+/// App-scoped (single URL across all installations); callers filter by
+/// `installation_id` to scope to a tenant. `per_page` is clamped to GitHub's
+/// max of 100. Returns one page only — pagination is the caller's problem
+/// when more history is needed.
+pub async fn list_app_webhook_deliveries(
+    app_jwt: &str,
+    per_page: u32,
+) -> Result<Vec<AppWebhookDelivery>, GithubError> {
+    let per_page = per_page.clamp(1, 100);
+    let url = format!("https://api.github.com/app/hook/deliveries?per_page={per_page}");
+    let resp = client()
+        .get(&url)
+        .bearer_auth(app_jwt)
+        .header("Accept", "application/vnd.github+json")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(GithubError::from_response(resp).await);
+    }
+    resp.json::<Vec<AppWebhookDelivery>>()
+        .await
+        .map_err(|e| GithubError::Decode(e.to_string()))
+}
+
 /// Fetch a repo's default branch via the installation token.
 pub async fn get_repo_default_branch(
     token: &InstallationToken,

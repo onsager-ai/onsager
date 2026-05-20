@@ -36,11 +36,53 @@ const HDR_EVENT: &str = "x-github-event";
 /// Header carrying the HMAC signature.
 const HDR_SIG: &str = "x-hub-signature-256";
 
+/// Wrapper for `/api/github-app/webhook` — the "plausible-looking but
+/// wrong" path PR #119 healed (spec #120). Logs the install ID at `info`
+/// before delegating so operators can identify tenants whose App is
+/// still configured to post here and reach out to migrate them. The
+/// other accepted URLs (`/webhooks/github`, `/api/webhooks/github`) are
+/// both paths portal itself uses for registration (`WEBHOOK_PATH` in
+/// `workflow_activation.rs`) — those deliveries are normal traffic and
+/// must NOT be logged at this volume.
+pub async fn handle_alias_github_app(
+    state: State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    log_alias_delivery("/api/github-app/webhook", &body);
+    handle(state, headers, body).await
+}
+
+/// Emit a structured `info` log identifying a delivery that arrived on a
+/// misconfigured URL. `install_id` is extracted from the body when the
+/// payload is well-formed JSON with an `installation.id` field; otherwise
+/// `None`. Operators use this log to identify tenants who should
+/// reconfigure their App's webhook URL to `/webhooks/github`.
+fn log_alias_delivery(alias_path: &str, body: &Bytes) {
+    let install_id = extract_install_id_from_payload(body);
+    tracing::info!(
+        target: "portal::webhook::alias",
+        alias_path,
+        install_id,
+        "webhook delivery received on misconfigured alias path; tenant should reconfigure App webhook URL to /webhooks/github"
+    );
+}
+
+/// Parse the webhook body just enough to surface `installation.id`. Best
+/// effort: any parse failure or missing field yields `None`. Kept
+/// independent of the main handler's parse so the alias log can fire
+/// before signature verification (which is the point — we want to know
+/// who's using the wrong URL even if the delivery later fails auth).
+fn extract_install_id_from_payload(body: &Bytes) -> Option<i64> {
+    let parsed: Value = serde_json::from_slice(body).ok()?;
+    parsed.get("installation")?.get("id")?.as_i64()
+}
+
 pub async fn handle(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     let event = headers
         .get(HDR_EVENT)
         .and_then(|v| v.to_str().ok())
@@ -399,4 +441,33 @@ fn decrypt(key_hex: &str, encrypted_hex: &str) -> anyhow::Result<String> {
         .open_in_place(nonce, aead::Aad::empty(), &mut in_out)
         .map_err(|_| anyhow::anyhow!("decryption failed"))?;
     Ok(String::from_utf8(plaintext.to_vec())?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_install_id_returns_id_for_canonical_payload() {
+        let body = Bytes::from(r#"{"installation":{"id":42},"action":"labeled"}"#);
+        assert_eq!(extract_install_id_from_payload(&body), Some(42));
+    }
+
+    #[test]
+    fn extract_install_id_returns_none_for_missing_installation() {
+        let body = Bytes::from(r#"{"action":"labeled"}"#);
+        assert_eq!(extract_install_id_from_payload(&body), None);
+    }
+
+    #[test]
+    fn extract_install_id_returns_none_for_malformed_json() {
+        let body = Bytes::from("not json at all");
+        assert_eq!(extract_install_id_from_payload(&body), None);
+    }
+
+    #[test]
+    fn extract_install_id_returns_none_when_id_is_not_integer() {
+        let body = Bytes::from(r#"{"installation":{"id":"forty-two"}}"#);
+        assert_eq!(extract_install_id_from_payload(&body), None);
+    }
 }

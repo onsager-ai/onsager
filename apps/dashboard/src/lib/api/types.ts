@@ -104,6 +104,25 @@ export interface GitHubAppInstallation {
   created_at: string;
 }
 
+// Webhook delivery health for one installation (spec #120 item 3).
+// `checked` may be 0 when GitHub hasn't routed any deliveries to this
+// installation in the recent window — distinguishable from "App not
+// configured on this server", which manifests as the whole response
+// having `window: 0` and `checked: 0` for every installation.
+export interface InstallationDeliveryHealth {
+  install_id: number;
+  checked: number;
+  non_2xx: number;
+  last_delivered_at: string | null;
+  last_non_2xx_at: string | null;
+  last_non_2xx_status_code: number | null;
+}
+
+export interface WorkspaceDeliveryHealthResponse {
+  installations: InstallationDeliveryHealth[];
+  window: number;
+}
+
 export interface Project {
   id: string;
   workspace_id: string;
