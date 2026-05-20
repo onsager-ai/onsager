@@ -1,5 +1,7 @@
-//! Spec Plan — the external contract authored by humans / Refract / MCP
-//! clients and consumed by the Plan Compiler (SUB-05, #352).
+//! Spec Plan — the external contract authored by humans (GitHub
+//! issues via the `issue-spec` skill) and MCP clients (the dashboard
+//! chat at `apps/dashboard/src/pages/ChatPage.tsx`, and any other
+//! external MCP client), consumed by the Plan Compiler (SUB-05, #352).
 //!
 //! See [ADR 0015](../../../docs/adr/0015-spec-plan-as-dag-external-contract.md)
 //! for the design rationale. A Spec Plan is a DAG: a list of [`SpecRef`]
@@ -22,8 +24,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// Externally-assigned identity for a spec. GitHub issue number,
-/// Refract-allocated UUID, `mcp:<uuid>` — anything stable and
-/// stringable.
+/// `mcp:<uuid>` allocated by an MCP client, or anything else stable
+/// and stringable.
 ///
 /// The compiler uses `SpecId` as the namespace key when instantiating
 /// a workflow (see [`crate::compiler::compile`]), so renumbering

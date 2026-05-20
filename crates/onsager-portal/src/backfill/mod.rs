@@ -6,11 +6,9 @@
 //!   Cheap; the right default for onboarding a fresh project.
 //! - `active`: strips stale items (closed-but-unmerged PRs, closed issues)
 //!   so a long-tail repo doesn't spend its cap on year-old chatter.
-//! - `refract`: ranks the candidate set with a local priority heuristic
-//!   (open-before-closed, more labels first) — a placeholder for the future
-//!   LLM-backed scorer. The decomposer itself now lives in the external
-//!   `onsager-ai/onsager-refract` repo (ADR 0014); a real scorer will reach
-//!   it via the MCP `submit_spec_plan` tool, not an in-tree call.
+//! - `prioritized`: ranks the candidate set with a local priority heuristic
+//!   (open-before-closed, more labels first). Honest local ranking — no
+//!   external scorer, no hidden LLM hop.
 //!
 //! Output shape is a `BackfillReport` summarizing per-strategy counts so
 //! the CLI can print a single JSON blob the dashboard can later render.
@@ -35,7 +33,7 @@ use crate::db::{self, IssueLifecycleState, PrLifecycleState};
 pub enum Strategy {
     Recent,
     Active,
-    Refract,
+    Prioritized,
 }
 
 impl FromStr for Strategy {
@@ -44,7 +42,7 @@ impl FromStr for Strategy {
         match s.to_ascii_lowercase().as_str() {
             "recent" => Ok(Strategy::Recent),
             "active" => Ok(Strategy::Active),
-            "refract" => Ok(Strategy::Refract),
+            "prioritized" => Ok(Strategy::Prioritized),
             other => anyhow::bail!("unknown strategy: {other}"),
         }
     }
@@ -89,16 +87,10 @@ pub async fn run(
                 .filter(|p| p.state == "open" || p.merged_at.is_some())
                 .collect(),
         ),
-        Strategy::Refract => {
-            // Placeholder ranking: open-before-closed, more-labelled first.
-            // The real LLM-backed scorer lives in the external Refract repo
-            // (ADR 0014); it will reach the portal via the MCP
-            // `submit_spec_plan` tool, not a direct call.
-            (
-                refract_prioritize_issues(issues, cap),
-                refract_prioritize_pulls(pulls, cap),
-            )
-        }
+        Strategy::Prioritized => (
+            prioritize_issues(issues, cap),
+            prioritize_pulls(pulls, cap),
+        ),
     };
 
     let mut report = BackfillReport {
@@ -202,11 +194,9 @@ pub async fn run(
     Ok(report)
 }
 
-/// Refract-style prioritization for issues. Today the heuristic is "open
-/// before closed, more labels first" — a placeholder that demonstrates the
-/// shape; the future LLM-backed scorer slots in here without changing the
-/// portal call site.
-fn refract_prioritize_issues(mut issues: Vec<Issue>, cap: usize) -> Vec<Issue> {
+/// Local priority ranking for issues: open before closed, then more
+/// labels first. Honest local heuristic — no external scorer.
+fn prioritize_issues(mut issues: Vec<Issue>, cap: usize) -> Vec<Issue> {
     issues.sort_by(|a, b| {
         let key = |i: &Issue| {
             let open = i.state == "open";
@@ -219,9 +209,9 @@ fn refract_prioritize_issues(mut issues: Vec<Issue>, cap: usize) -> Vec<Issue> {
     issues
 }
 
-/// Refract-style prioritization for pulls. Open-then-merged-then-closed,
-/// plus prefer base-branch=main as the most likely workflow signal.
-fn refract_prioritize_pulls(mut pulls: Vec<Pull>, cap: usize) -> Vec<Pull> {
+/// Local priority ranking for pulls: open-then-merged-then-closed, plus
+/// prefer base-branch=main as the most likely workflow signal.
+fn prioritize_pulls(mut pulls: Vec<Pull>, cap: usize) -> Vec<Pull> {
     pulls.sort_by(|a, b| {
         let key = |p: &Pull| {
             let open = p.state == "open";
@@ -254,14 +244,14 @@ mod tests {
     }
 
     #[test]
-    fn refract_orders_open_before_closed() {
+    fn prioritized_orders_open_before_closed() {
         let mixed = vec![
             issue(1, "closed", &[]),
             issue(2, "open", &["bug"]),
             issue(3, "open", &["bug", "spec"]),
             issue(4, "closed", &["spec", "perf", "ux"]),
         ];
-        let prioritized = refract_prioritize_issues(mixed, 4);
+        let prioritized = prioritize_issues(mixed, 4);
         // Most-labeled open first, then less-labeled open, then most-labeled closed.
         assert_eq!(prioritized[0].number, 3);
         assert_eq!(prioritized[1].number, 2);
@@ -270,9 +260,9 @@ mod tests {
     }
 
     #[test]
-    fn refract_respects_cap() {
+    fn prioritized_respects_cap() {
         let many: Vec<Issue> = (0..20).map(|n| issue(n, "open", &[])).collect();
-        let cut = refract_prioritize_issues(many, 5);
+        let cut = prioritize_issues(many, 5);
         assert_eq!(cut.len(), 5);
     }
 
@@ -280,7 +270,10 @@ mod tests {
     fn strategy_parses() {
         assert_eq!("recent".parse::<Strategy>().unwrap(), Strategy::Recent);
         assert_eq!("ACTIVE".parse::<Strategy>().unwrap(), Strategy::Active);
-        assert_eq!("Refract".parse::<Strategy>().unwrap(), Strategy::Refract);
+        assert_eq!(
+            "Prioritized".parse::<Strategy>().unwrap(),
+            Strategy::Prioritized
+        );
         assert!("nope".parse::<Strategy>().is_err());
     }
 }

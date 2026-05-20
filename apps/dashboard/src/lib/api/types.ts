@@ -299,7 +299,7 @@ export interface ProjectLiveListResponse<T> {
 
 export interface BackfillRequestBody {
   cap?: number;
-  strategy?: 'recent' | 'active' | 'refract';
+  strategy?: 'recent' | 'active' | 'prioritized';
   state?: 'open' | 'closed' | 'all';
 }
 

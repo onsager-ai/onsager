@@ -32,10 +32,11 @@ zero business deps that discovers subsystem binaries on `PATH`.
   concerns. Coordinate exclusively via the spine.
 - **Library plane:** `onsager-{spine, artifact, warehouse, delivery, registry,
   github}` — typed shared building blocks. No runtime of their own.
-- **External Spec Plan author:** Refract — lives in its own repo
-  (`onsager-ai/onsager-refract`, [ADR 0014](adr/0014-onsager-refract-boundary.md))
-  and submits Spec Plans through the portal's MCP surface, not as a sibling
-  crate. See [`docs/related-work/refract.md`](related-work/refract.md).
+- **Spec Plan authors:** the dashboard chat (`apps/dashboard/src/pages/ChatPage.tsx`,
+  a same-origin MCP client) and humans writing GitHub issues with the
+  `issue-spec` skill. Both drive portal's public MCP surface (ADR 0007). The
+  original plan to ship a separate Refract author was retired in #396 — see
+  the amendment on [ADR 0014](adr/0014-onsager-refract-boundary.md).
 
 The dashboard (`apps/dashboard/`) is a single React app surfacing every
 subsystem.
@@ -80,10 +81,11 @@ flight" below.
 | [`synodic`](../crates/synodic/) | AI agent governance (gates, verdicts, escalations) | [crates/synodic/.claude/](../crates/synodic/.claude/) |
 | [`ising`](../crates/ising/) | Continuous improvement — observes spine, surfaces insights, proposes rules | — |
 
-Refract — the Spec Plan author — lives outside the monorepo at
-[`onsager-ai/onsager-refract`](https://github.com/onsager-ai/onsager-refract)
-per [ADR 0014](adr/0014-onsager-refract-boundary.md); see
-[`related-work/refract.md`](related-work/refract.md).
+Spec Plans (the factory's input contract) are authored externally — by the
+dashboard chat and by humans-via-issues — through portal's MCP surface, not
+by an in-tree algorithm. See the amendment on
+[ADR 0014](adr/0014-onsager-refract-boundary.md) for the retirement of the
+original separate-Refract-repo plan.
 
 Library crates (no runtime; consumed by subsystems):
 
