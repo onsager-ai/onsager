@@ -32,11 +32,14 @@ zero business deps that discovers subsystem binaries on `PATH`.
   concerns. Coordinate exclusively via the spine.
 - **Library plane:** `onsager-{spine, artifact, warehouse, delivery, registry,
   github}` — typed shared building blocks. No runtime of their own.
-- **Spec Plan authors:** the dashboard chat (`apps/dashboard/src/pages/ChatPage.tsx`,
-  a same-origin MCP client) and humans writing GitHub issues with the
-  `issue-spec` skill. Both drive portal's public MCP surface (ADR 0007). The
-  original plan to ship a separate Refract author was retired in #396 — see
-  the amendment on [ADR 0014](adr/0014-onsager-refract-boundary.md).
+- **Spec Plan authors:** two ingress paths.
+  - The dashboard chat (`apps/dashboard/src/pages/ChatPage.tsx`) is a
+    same-origin MCP client that calls portal's public MCP surface (ADR 0007).
+  - Humans writing GitHub issues with the `issue-spec` skill — those issues
+    arrive via the GitHub webhook → portal → forge trigger path, not MCP.
+
+  The original plan to ship a separate Refract author was retired in #396 —
+  see the amendment on [ADR 0014](adr/0014-onsager-refract-boundary.md).
 
 The dashboard (`apps/dashboard/`) is a single React app surfacing every
 subsystem.
@@ -82,8 +85,9 @@ flight" below.
 | [`ising`](../crates/ising/) | Continuous improvement — observes spine, surfaces insights, proposes rules | — |
 
 Spec Plans (the factory's input contract) are authored externally — by the
-dashboard chat and by humans-via-issues — through portal's MCP surface, not
-by an in-tree algorithm. See the amendment on
+dashboard chat (an MCP client calling portal's public MCP surface) and by
+humans writing GitHub issues (ingested via GitHub webhooks). No in-tree
+algorithm authors Spec Plans; see the amendment on
 [ADR 0014](adr/0014-onsager-refract-boundary.md) for the retirement of the
 original separate-Refract-repo plan.
 

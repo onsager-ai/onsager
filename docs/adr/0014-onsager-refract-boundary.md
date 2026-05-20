@@ -33,6 +33,12 @@ Keeping Refract inside the monorepo:
 
 ## Decision
 
+> **2026-05-20:** The "Refract moves to its own repository" plan was
+> retracted by the Amendment below (#396). The Decision section is kept
+> for historical record; references to a future sibling repo or to
+> `docs/related-work/refract.md` (since deleted) are stale — see the
+> Amendment for the current author set.
+
 **Refract moves to its own repository** (`onsager-ai/onsager-refract`,
 sibling to `onsager-ai/onsager-skills`). Its public interface to
 Onsager is the Spec Plan format (ADR 0015) and the MCP tools (ADR
@@ -43,7 +49,8 @@ The Onsager monorepo retains:
 - The Spec Plan type definitions in `onsager-substrate`.
 - The MCP tools Refract calls (`submit_spec_plan`, `update_spec`,
   etc.).
-- ADR 0014 and a `docs/related-work/refract.md` pointer.
+- ADR 0014 and a `docs/related-work/refract.md` pointer. _(Stale: the
+  related-work doc was deleted by the 2026-05-20 amendment.)_
 
 The Onsager monorepo loses:
 
@@ -99,14 +106,21 @@ skill in `onsager-skills` rather than in `crates/`.
 
 ## Adoption checklist
 
-- [ ] Create `onsager-ai/onsager-refract` repository.
-- [ ] Port `crates/refract/src/` to the new repo.
-- [ ] Add `submit_spec_plan` MCP tool to portal (#347-derived
-      follow-up, references ADR 0009 and ADR 0015).
-- [ ] Refract becomes an MCP client of `submit_spec_plan` instead of
-      writing directly to the spine.
-- [ ] MIG-02 deletes `crates/refract/` from this monorepo.
-- [ ] `docs/related-work/refract.md` points to the new repo.
+> **2026-05-20:** Retracted by the Amendment below (#396). Only the
+> MIG-02 item completed; everything else was abandoned along with the
+> sibling-repo plan. The list is kept for historical record.
+
+- [ ] ~~Create `onsager-ai/onsager-refract` repository.~~ (retracted)
+- [ ] ~~Port `crates/refract/src/` to the new repo.~~ (retracted)
+- [ ] ~~Add `submit_spec_plan` MCP tool to portal (#347-derived
+      follow-up, references ADR 0009 and ADR 0015).~~ (lands via #395
+      for the chat + humans-via-issues author set, not as a Refract
+      entry point)
+- [ ] ~~Refract becomes an MCP client of `submit_spec_plan` instead of
+      writing directly to the spine.~~ (retracted)
+- [x] MIG-02 deletes `crates/refract/` from this monorepo. (#364)
+- [ ] ~~`docs/related-work/refract.md` points to the new repo.~~
+      (deleted by #396; this ADR's Amendment is the historical record)
 
 ## Out of scope
 
@@ -123,16 +137,22 @@ This ADR framed Refract as *the* Spec Plan author — singular — and
 committed the monorepo to creating an `onsager-ai/onsager-refract`
 sibling repo as Refract's destination. That framing is retracted.
 
-**Plural authors, no singular Refract.** The Spec Plan author set is
-the dashboard chat (spec #311 — `apps/dashboard/src/pages/ChatPage.tsx`,
-a same-origin MCP client driving the portal tools) and humans
-authoring GitHub issues with the `issue-spec` skill. Once spec
-[#395](https://github.com/onsager-ai/onsager/issues/395) lands
-`submit_spec_plan` / `submit_workflow`, both authors drive substrate
-authoring directly through portal's MCP surface. Refract — sized as a
-separate algorithm with its own repo, prompts, and event variants —
-no longer pays for itself: it would be Claude plus the same MCP tools
-the chat already uses, just running headless.
+**Plural authors, no singular Refract.** The Spec Plan author set has
+two ingress paths:
+
+- The dashboard chat (spec #311 — `apps/dashboard/src/pages/ChatPage.tsx`,
+  a same-origin MCP client) calls portal's public MCP surface. Once
+  spec [#395](https://github.com/onsager-ai/onsager/issues/395) lands
+  `submit_spec_plan` / `submit_workflow`, this is the direct authoring
+  path.
+- Humans writing GitHub issues with the `issue-spec` skill. Those
+  issues arrive via the GitHub webhook → portal → forge trigger path
+  — not MCP. The skill helps shape the issue; the ingestion is
+  webhook-driven.
+
+Refract — sized as a separate algorithm with its own repo, prompts,
+and event variants — no longer pays for itself: it would be Claude
+plus the same MCP tools the chat already uses, just running headless.
 
 **Adoption checklist retracted.** Of the six items above:
 

@@ -50,11 +50,13 @@ direct calls.
      (edge)
 ```
 
-Spec Plans are authored by the dashboard chat (an MCP client at
-`apps/dashboard/src/pages/ChatPage.tsx`) and by humans writing GitHub
-issues with the `issue-spec` skill — both drive portal's public MCP
-surface (ADR 0007). The original plan to ship a separate Refract
-Spec-Plan-author algorithm was retired in #396; see the amendment on
+Spec Plans reach the factory through two ingress paths: the dashboard
+chat (an MCP client at `apps/dashboard/src/pages/ChatPage.tsx` that
+calls portal's public MCP surface — ADR 0007), and humans writing
+GitHub issues with the `issue-spec` skill (which arrive via the
+GitHub webhook → portal → forge trigger path). The original plan to
+ship a separate Refract Spec-Plan-author algorithm was retired in
+#396; see the amendment on
 [ADR 0014](docs/adr/0014-onsager-refract-boundary.md).
 
 The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md)):
@@ -93,8 +95,9 @@ and the ADRs under [`docs/adr/`](docs/adr/).
 | `ising`          | Continuous improvement — observes the spine and surfaces insights                |
 
 Spec Plans (the factory's input contract) are authored externally —
-by the dashboard chat and by humans-via-issues — through portal's MCP
-surface, not by an in-tree algorithm. See the amendment on
+by the dashboard chat (an MCP client) and by humans writing GitHub
+issues (ingested via GitHub webhooks). No in-tree algorithm authors
+Spec Plans; see the amendment on
 [ADR 0014](docs/adr/0014-onsager-refract-boundary.md) for the
 retirement of the original separate-Refract-repo plan.
 
