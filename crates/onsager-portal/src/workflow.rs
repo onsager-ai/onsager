@@ -22,11 +22,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+use ts_rs::TS;
 
 /// Gate kind attached to a workflow stage. These map to the four gate runtime
 /// implementations forge ships.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export, rename = "WorkflowGateKind")]
 pub enum GateKind {
     AgentSession,
     ExternalCheck,
@@ -59,7 +61,8 @@ impl FromStr for GateKind {
 }
 
 /// One ordered stage in a workflow's stage chain.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export)]
 pub struct WorkflowStage {
     pub id: String,
     pub workflow_id: String,

@@ -20,6 +20,7 @@ use axum::response::{IntoResponse, Response};
 use onsager_spine::EventMetadata;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use ts_rs::TS;
 
 use crate::auth::AuthUser;
 use crate::handlers::workspaces::require_workspace_access;
@@ -57,7 +58,8 @@ pub struct SpineEvent {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Serialize, FromRow, TS)]
+#[ts(export)]
 pub struct SpineArtifact {
     pub id: String,
     pub kind: String,
@@ -80,7 +82,8 @@ pub struct SpineArtifact {
     pub last_observed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Serialize, FromRow, TS)]
+#[ts(export, rename = "ArtifactVersion")]
 pub struct ArtifactVersionRow {
     pub version: i32,
     pub content_ref_uri: String,

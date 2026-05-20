@@ -466,6 +466,31 @@ subsystems. Internal-quality work that doesn't fit those projections —
 interior-to-a-subsystem hygiene — is equally in scope and should be specced
 and shipped on the same footing as feature work.
 
+### Dashboard API types: Rust is the SSOT
+
+Portal's serde structs are the single source of truth for the wire
+shapes the dashboard consumes. `#[derive(ts_rs::TS)]` on a portal
+struct emits a matching `.ts` file under
+`apps/dashboard/src/lib/api/generated/` when `cargo test` runs the
+auto-generated `export_bindings_*` tests (the export base directory
+is wired in `.cargo/config.toml` via `TS_RS_EXPORT_DIR`). The
+generated files are committed so the dashboard's `pnpm tsc --noEmit`
+resolves them without a prior Rust build, and `xtask
+check-generated-types` (wired into `just lint` and CI) regenerates +
+diffs against the committed tree — drift is hard-fail. Same shape as
+the symmetry around spine tables (Lever D) and event types (Lever E),
+applied here to the REST API surface (spec #298). Companion to
+spec #288, which uses the same Rust structs as the SSOT for MCP tool
+schemas (via `schemars`).
+
+Migration is phased: this commitment lands with Phase 1 (the
+generator infrastructure plus the first set of derives —
+`GateKind` / `WorkflowGateKind`, `WorkflowStage`, `SpineArtifact`,
+`ArtifactVersion`). Subsequent PRs switch dashboard imports from the
+hand-written `apps/dashboard/src/lib/api/types.ts` to the
+`generated/` files one resource group at a time, then delete the
+residual hand-written entries.
+
 ## User-facing vocabulary (canonical 4 nouns)
 
 Per spec #286 the dashboard, public API field names, route segments,

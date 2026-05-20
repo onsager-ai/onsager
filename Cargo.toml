@@ -70,3 +70,9 @@ ring = "0.17"
 hex = "0.4"
 tempfile = "3"
 jsonwebtoken = "9"
+
+# Rust → TS codegen for the dashboard API surface (spec #298).
+# Single source of truth: portal serde structs; generated files land in
+# `apps/dashboard/src/lib/api/generated/` and are checked by
+# `xtask check-generated-types`.
+ts-rs = { version = "12", features = ["chrono-impl", "serde-json-impl"] }
