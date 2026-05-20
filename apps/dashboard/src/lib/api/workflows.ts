@@ -108,6 +108,12 @@ function workflowFromBackend(
   };
 }
 
+// Exhaustive over every `TriggerKind` variant — when a new trigger
+// kind lands in `onsager-spine::TriggerKind`, ts-rs widens this union
+// and the `_exhaustive: never` assignment below fails to compile,
+// forcing this function to decide how the new variant maps onto the
+// UI's flat `WorkflowTrigger` shape (instead of silently rendering
+// with blank fields).
 function extractTriggerFields(t: BackendTrigger): {
   repo: string;
   label: string;
@@ -121,8 +127,20 @@ function extractTriggerFields(t: BackendTrigger): {
       return { repo: t.repo, label: '', manualName: '' };
     case 'manual':
       return { repo: '', label: '', manualName: t.name };
-    default:
+    case 'telegram_webhook':
+    case 'cron':
+    case 'delay':
+    case 'interval':
+    case 'spine_event':
+    case 'pg_notify':
+    case 'outbox_row':
+    case 'replay':
       return { repo: '', label: '', manualName: '' };
+    default: {
+      const _exhaustive: never = t;
+      void _exhaustive;
+      return { repo: '', label: '', manualName: '' };
+    }
   }
 }
 

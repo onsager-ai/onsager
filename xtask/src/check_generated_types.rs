@@ -1,12 +1,14 @@
 //! Spec #298 — drift check for `apps/dashboard/src/lib/api/generated/`.
 //!
-//! The dashboard's API types are generated from portal's serde structs
-//! via `ts-rs` at `cargo test` time. The generated files are committed
-//! so the dashboard's `pnpm tsc --noEmit` can resolve them without a
-//! prior Rust build. This check enforces "what's committed == what the
+//! The dashboard's API types are generated from `onsager-portal` and
+//! `onsager-spine` serde structs via `ts-rs` at `cargo test` time
+//! (spine joined the cascade with spec #434 — `TriggerKind` and its
+//! variant tree). The generated files are committed so the
+//! dashboard's `pnpm tsc --noEmit` can resolve them without a prior
+//! Rust build. This check enforces "what's committed == what the
 //! current Rust would emit": snapshot the dir, regenerate via
-//! `cargo test -p onsager-portal --lib export_bindings`, and bail on
-//! any add / remove / content change.
+//! `cargo test -p onsager-portal -p onsager-spine --lib
+//! export_bindings`, and bail on any add / remove / content change.
 //!
 //! Same shape as `gen-event-docs --check`: hard-fail with a
 //! reproducible command in the error message.

@@ -74,9 +74,16 @@ pub enum TriggerKind {
     /// matches every chat the bot can see. `command_prefix`, when set,
     /// matches against the `text`/`message.text` field — typical use
     /// is `/onsager`.
+    ///
+    /// `chat_id_allowlist`, `Delay::seconds`, and `Interval::period_seconds`
+    /// are annotated `ts(type = ...)` to override ts-rs v12's default
+    /// `bigint` mapping for i64/u64. The dashboard's JSON client (`res.json()`)
+    /// returns a JS `number`, not a `bigint`, and Telegram chat IDs +
+    /// reasonable schedule deltas comfortably fit `Number.MAX_SAFE_INTEGER`.
     TelegramWebhook {
         bot_username: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[ts(type = "Array<number>")]
         chat_id_allowlist: Vec<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         command_prefix: Option<String>,
@@ -97,6 +104,7 @@ pub enum TriggerKind {
     /// anchor is the workflow's activation time; future anchors include
     /// "delay relative to a received spine event".
     Delay {
+        #[ts(type = "number")]
         seconds: u64,
         #[serde(default)]
         anchor: DelayAnchor,
@@ -105,7 +113,10 @@ pub enum TriggerKind {
     /// Fire periodically every `period_seconds`. Catch-up policy after an
     /// outage is "skip missed, fire only the next due firing" (per #238
     /// resolution); replay-of-missed is a per-workflow follow-up.
-    Interval { period_seconds: u64 },
+    Interval {
+        #[ts(type = "number")]
+        period_seconds: u64,
+    },
 
     // -- Event (#239) -------------------------------------------------------
     /// Fire when the spine emits a `FactoryEventKind` whose `type` matches
