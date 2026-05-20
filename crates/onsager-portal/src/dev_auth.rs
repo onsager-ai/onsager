@@ -215,6 +215,7 @@ pub async fn dev_login(State(state): State<AppState>) -> Response {
                     "id": user.id,
                     "github_login": user.github_login,
                     "github_name": user.github_name,
+                    "github_avatar_url": user.github_avatar_url,
                 },
             }))
             .expect("dev-login response serializes"),

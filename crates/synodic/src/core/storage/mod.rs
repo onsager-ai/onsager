@@ -19,6 +19,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -194,7 +195,12 @@ pub struct PipelineRun {
 }
 
 /// A governance event displayed on the web dashboard.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `ts(export)` per spec #441 — the dashboard imports the generated TS
+/// shape from `apps/dashboard/src/lib/api/generated/GovernanceEvent.ts`
+/// so synodic's serde struct stays the single source of truth.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct GovernanceEvent {
     pub id: String,
     pub event_type: String,

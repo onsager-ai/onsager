@@ -1,5 +1,30 @@
 import { request, scoped } from './client';
-import type { Node, Session, TaskRequest, SessionKind, User, SessionSpend, SpineEvent, TokenUsage } from './types';
+import type {
+  Node,
+  Session,
+  TaskRequest,
+  SessionKind,
+  MeUser,
+  MeResponse,
+  SpineEvent,
+  TokenUsage,
+} from './types';
+
+/**
+ * Denormalized session-completion spend row (issue #39). Constructed
+ * client-side from `stiglab.session_completed` events — there is no
+ * portal-side endpoint that produces this shape, so it lives next to
+ * the derivation. Spec #441 moved this out of the SSOT API types
+ * surface because it isn't a wire shape.
+ */
+export interface SessionSpend {
+  id: number;
+  created_at: string;
+  session_id: string;
+  artifact_id: string | null;
+  duration_ms: number;
+  token_usage: TokenUsage | null;
+}
 
 export const sessions = {
   getNodes: (workspaceId: string) =>
@@ -21,10 +46,7 @@ export const sessions = {
     }),
   getHealth: () => request<{ status: string; version: string }>('/health'),
   // Auth
-  getMe: () =>
-    request<{ user: User; session_kind: SessionKind; via?: 'session' | 'pat' }>(
-      '/auth/me',
-    ),
+  getMe: () => request<MeResponse>('/auth/me'),
   logout: () =>
     request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
   /**
@@ -34,7 +56,7 @@ export const sessions = {
    * render the "Dev Login" button.
    */
   devLogin: () =>
-    request<{ ok: boolean; session_kind: SessionKind; user: User }>(
+    request<{ ok: boolean; session_kind: SessionKind; user: MeUser }>(
       '/auth/dev-login',
       { method: 'POST' },
     ),

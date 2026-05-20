@@ -10,11 +10,13 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use chrono::Utc;
+use serde::Serialize;
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::auth::{
-    self, AuthUser, RequestPrincipal, exchange_code, generate_session_token, generate_state,
-    get_github_user, github_authorize_url,
+    self, AuthUser, RequestPrincipal, SessionKind, exchange_code, generate_session_token,
+    generate_state, get_github_user, github_authorize_url,
 };
 use crate::auth_db::{self, User};
 use crate::config::Config;
@@ -505,27 +507,56 @@ pub async fn sso_finish(
 
 // ── /api/auth/me + logout ──
 
+/// Wire-shape projection of the authenticated user returned by
+/// `/api/auth/me`. Mirrors the subset of [`auth_db::User`] that's
+/// safe to expose — timestamps and the raw `github_id` stay
+/// portal-internal.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct MeUser {
+    pub id: String,
+    pub github_login: String,
+    pub github_name: Option<String>,
+    pub github_avatar_url: Option<String>,
+}
+
+/// How the current request authenticated. Returned alongside the user so
+/// the dashboard can render a "you are signed in via PAT" affordance and
+/// CLI smoke tests can confirm their token (not a stray browser cookie)
+/// is the principal in scope.
+#[derive(Debug, Clone, Copy, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum MeVia {
+    Session,
+    Pat,
+}
+
+/// Wire-shape envelope for `GET /api/auth/me`.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct MeResponse {
+    pub user: MeUser,
+    pub session_kind: SessionKind,
+    pub via: MeVia,
+}
+
 /// GET /api/auth/me — Return current authenticated user.
-///
-/// `via` distinguishes a cookie-authenticated browser session from a PAT
-/// bearer call so dashboards can render a "you are signed in via PAT"
-/// affordance and CLI smoke tests can confirm their token is the
-/// principal in scope (not a stray browser cookie).
-pub async fn me(State(_state): State<AppState>, auth_user: AuthUser) -> impl IntoResponse {
+pub async fn me(State(_state): State<AppState>, auth_user: AuthUser) -> Json<MeResponse> {
     let via = match auth_user.principal {
-        RequestPrincipal::Pat { .. } => "pat",
-        RequestPrincipal::Session => "session",
+        RequestPrincipal::Pat { .. } => MeVia::Pat,
+        RequestPrincipal::Session => MeVia::Session,
     };
-    Json(serde_json::json!({
-        "user": {
-            "id": auth_user.user_id,
-            "github_login": auth_user.github_login,
-            "github_name": auth_user.github_name,
-            "github_avatar_url": auth_user.github_avatar_url,
+    Json(MeResponse {
+        user: MeUser {
+            id: auth_user.user_id,
+            github_login: auth_user.github_login,
+            github_name: auth_user.github_name,
+            github_avatar_url: auth_user.github_avatar_url,
         },
-        "session_kind": auth_user.session_kind,
-        "via": via,
-    }))
+        session_kind: auth_user.session_kind,
+        via,
+    })
 }
 
 /// GET /api/auth/providers — Which login methods are available.
