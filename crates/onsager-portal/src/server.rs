@@ -79,10 +79,13 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // Caddy in both dev and production routes `/agent/ws` here.
         .route("/agent/ws", get(agent_ws::proxy_handler))
         .route("/webhooks/github", post(webhook::handle))
-        // Alias routes log at `info` on entry so operators can identify
-        // tenants whose App is still configured to post to a non-canonical
-        // URL (spec #120 item 2a).
-        .route("/api/webhooks/github", post(webhook::handle_alias_legacy))
+        .route("/api/webhooks/github", post(webhook::handle))
+        // `/api/github-app/webhook` is the misconfigured path the
+        // tenant in spec #120 mistakenly typed. The wrapper logs at
+        // `info` with the install ID so operators can identify and
+        // migrate affected tenants. The other two URLs above are both
+        // paths portal itself registers (`WEBHOOK_PATH` in
+        // `workflow_activation.rs`) — normal traffic, not logged.
         .route(
             "/api/github-app/webhook",
             post(webhook::handle_alias_github_app),

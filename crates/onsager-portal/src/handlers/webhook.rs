@@ -36,27 +36,14 @@ const HDR_EVENT: &str = "x-github-event";
 /// Header carrying the HMAC signature.
 const HDR_SIG: &str = "x-hub-signature-256";
 
-/// Canonical webhook path. `/api/webhooks/github` and
-/// `/api/github-app/webhook` accept the same deliveries (spec #120 item 1,
-/// PR #119), but log at `info` on entry so we can identify tenants whose
-/// App is still configured to post to a non-canonical URL.
-const CANONICAL_WEBHOOK_PATH: &str = "/webhooks/github";
-
-/// Wrapper for `/api/webhooks/github`. Logs the alias hit with the
-/// install ID, then delegates to the shared handler.
-pub async fn handle_alias_legacy(
-    state: State<AppState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> axum::response::Response {
-    log_alias_delivery("/api/webhooks/github", &body);
-    handle(state, headers, body).await
-}
-
-/// Wrapper for `/api/github-app/webhook`. Logs the alias hit with the
-/// install ID, then delegates to the shared handler. This is the alias
-/// PR #119 added to heal the "plausible-looking but wrong" path that
-/// triggered the silent-drop incident #120 describes.
+/// Wrapper for `/api/github-app/webhook` — the "plausible-looking but
+/// wrong" path PR #119 healed (spec #120). Logs the install ID at `info`
+/// before delegating so operators can identify tenants whose App is
+/// still configured to post here and reach out to migrate them. The
+/// other accepted URLs (`/webhooks/github`, `/api/webhooks/github`) are
+/// both paths portal itself uses for registration (`WEBHOOK_PATH` in
+/// `workflow_activation.rs`) — those deliveries are normal traffic and
+/// must NOT be logged at this volume.
 pub async fn handle_alias_github_app(
     state: State<AppState>,
     headers: HeaderMap,
@@ -67,18 +54,17 @@ pub async fn handle_alias_github_app(
 }
 
 /// Emit a structured `info` log identifying a delivery that arrived on a
-/// non-canonical URL. `install_id` is extracted from the body when the
+/// misconfigured URL. `install_id` is extracted from the body when the
 /// payload is well-formed JSON with an `installation.id` field; otherwise
 /// `None`. Operators use this log to identify tenants who should
-/// reconfigure their App's webhook URL.
+/// reconfigure their App's webhook URL to `/webhooks/github`.
 fn log_alias_delivery(alias_path: &str, body: &Bytes) {
     let install_id = extract_install_id_from_payload(body);
     tracing::info!(
         target: "portal::webhook::alias",
         alias_path,
-        canonical_path = CANONICAL_WEBHOOK_PATH,
         install_id,
-        "webhook delivery received on non-canonical alias path; tenant should reconfigure App webhook URL"
+        "webhook delivery received on misconfigured alias path; tenant should reconfigure App webhook URL to /webhooks/github"
     );
 }
 

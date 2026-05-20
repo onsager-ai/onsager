@@ -64,10 +64,13 @@ pub struct WorkspaceDeliveryHealthResponse {
     pub window: usize,
 }
 
-/// GET /api/workspaces/:workspace_id/github-installations/webhook-deliveries-health
+/// GET /api/workspaces/:workspace_id/webhook-deliveries-health
 ///
 /// Per spec #120, surfaces non-2xx delivery counts so a misconfigured App
-/// webhook URL self-diagnoses on the workflow card.
+/// webhook URL self-diagnoses on the workflow card. Lives directly under
+/// the workspace (not nested in `/github-installations/{install_row_id}/…`)
+/// to avoid path collision with the existing install-row-id placeholder
+/// route.
 pub async fn workspace_webhook_deliveries_health(
     State(state): State<AppState>,
     auth_user: AuthUser,
