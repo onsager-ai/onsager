@@ -25,9 +25,43 @@ use crate::factory_event::FactoryEventKind;
 use crate::trigger::TriggerKind;
 
 /// A single spine event the webhook handler should emit.
+///
+/// `adapter_id` + `external_ref` are the spine-side dedup key (spine
+/// migration 032 — partial unique index on `events_ext (adapter_id,
+/// external_ref)`). The shared routing rules don't know an emitter's
+/// adapter identity, so they leave these `None`; the caller
+/// (portal webhook handler, reconciliation poller) decorates each
+/// event before emit. When both fields are `Some`, [`EventStore::
+/// append_ext_dedup`] inserts with `ON CONFLICT DO NOTHING` and a
+/// race between the webhook + reconciler paths collapses to one row.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RoutedEvent {
     pub kind: FactoryEventKind,
+    pub adapter_id: Option<String>,
+    pub external_ref: Option<String>,
+}
+
+impl RoutedEvent {
+    pub fn new(kind: FactoryEventKind) -> Self {
+        Self {
+            kind,
+            adapter_id: None,
+            external_ref: None,
+        }
+    }
+
+    /// Set the dedup key. Use the same `(adapter_id, external_ref)`
+    /// the sibling path (webhook ↔ reconciler) would set so the
+    /// partial unique index collapses races.
+    pub fn with_dedup(
+        mut self,
+        adapter_id: impl Into<String>,
+        external_ref: impl Into<String>,
+    ) -> Self {
+        self.adapter_id = Some(adapter_id.into());
+        self.external_ref = Some(external_ref.into());
+        self
+    }
 }
 
 /// Source tag stamped into every `workflow.trigger_fired` payload so
@@ -87,13 +121,11 @@ pub fn build_trigger_fired_events(
             {
                 obj.insert("replayed_by".into(), Value::String(uid.to_string()));
             }
-            RoutedEvent {
-                kind: FactoryEventKind::TriggerFired {
-                    workflow_id: w.id.clone(),
-                    trigger_kind: w.trigger_kind_tag.clone(),
-                    payload,
-                },
-            }
+            RoutedEvent::new(FactoryEventKind::TriggerFired {
+                workflow_id: w.id.clone(),
+                trigger_kind: w.trigger_kind_tag.clone(),
+                payload,
+            })
         })
         .collect()
 }
@@ -209,15 +241,13 @@ pub fn route_check_event(event: &str, payload: &Value) -> Option<RoutedEvent> {
         _ => return None,
     };
 
-    Some(RoutedEvent {
-        kind: FactoryEventKind::GateCheckUpdated {
-            repo_owner,
-            repo_name,
-            pr_number,
-            check_name,
-            conclusion,
-        },
-    })
+    Some(RoutedEvent::new(FactoryEventKind::GateCheckUpdated {
+        repo_owner,
+        repo_name,
+        pr_number,
+        check_name,
+        conclusion,
+    }))
 }
 
 /// Per-workflow `pull_request.closed` routing (#240). For each matching
@@ -281,13 +311,11 @@ pub fn route_pull_request_closed_workflows(
                 "source": trigger_source::WEBHOOK,
                 "trigger_kind": "github_pull_request_closed",
             });
-            RoutedEvent {
-                kind: FactoryEventKind::TriggerFired {
-                    workflow_id: w.id.clone(),
-                    trigger_kind: "github_pull_request_closed".to_string(),
-                    payload,
-                },
-            }
+            RoutedEvent::new(FactoryEventKind::TriggerFired {
+                workflow_id: w.id.clone(),
+                trigger_kind: "github_pull_request_closed".to_string(),
+                payload,
+            })
         })
         .collect()
 }
@@ -369,13 +397,11 @@ pub fn route_workflow_run_completed_workflows(
                 "source": trigger_source::WEBHOOK,
                 "trigger_kind": "github_workflow_run_completed",
             });
-            RoutedEvent {
-                kind: FactoryEventKind::TriggerFired {
-                    workflow_id: w.id.clone(),
-                    trigger_kind: "github_workflow_run_completed".to_string(),
-                    payload,
-                },
-            }
+            RoutedEvent::new(FactoryEventKind::TriggerFired {
+                workflow_id: w.id.clone(),
+                trigger_kind: "github_workflow_run_completed".to_string(),
+                payload,
+            })
         })
         .collect()
 }
@@ -412,14 +438,14 @@ pub fn route_pull_request_closed(payload: &Value) -> Option<RoutedEvent> {
     let repo_name = repo.get("name").and_then(Value::as_str)?.to_string();
     let pr_number = pr.get("number").and_then(Value::as_u64)?;
 
-    Some(RoutedEvent {
-        kind: FactoryEventKind::GateManualApprovalSignal {
+    Some(RoutedEvent::new(
+        FactoryEventKind::GateManualApprovalSignal {
             repo_owner,
             repo_name,
             pr_number,
             source: "github.pull_request.closed".to_string(),
         },
-    })
+    ))
 }
 
 /// Namespace partition for webhook-sourced spine events. Both the live

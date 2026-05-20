@@ -19,10 +19,16 @@
 //! 30 s floor (spec #121 § Alignment / "Human decides"). The floor
 //! prevents a runaway config from hammering GitHub.
 
+pub mod emit;
 pub mod mode;
 pub mod scheduler;
 pub mod state;
+pub mod translator;
 
+pub use emit::emit_routed_events;
 pub use mode::{IngestionMode, MIN_POLL_INTERVAL, POLLING_ONLY_INTERVAL, RECONCILER_INTERVAL};
 pub use scheduler::spawn_all;
 pub use state::{load_state, touch_polled_at, upsert_state};
+pub use translator::{
+    GITHUB_ADAPTER_ID, issue_external_ref, pr_external_ref, translate_issue, translate_pull_request,
+};

@@ -66,6 +66,8 @@ pub use store::{
 };
 pub use trigger::{DelayAnchor, JsonFilter, TriggerKind, TriggerStorageError};
 pub use webhook_routing::{
-    IssueTriggerContext, RoutedEvent, WorkflowMatch, build_trigger_fired_events, route_check_event,
-    route_issues_labeled, route_pull_request_closed, spine_namespace, trigger_source,
+    IssueTriggerContext, RoutedEvent, WorkflowMatch, WorkflowTrigger, build_trigger_fired_events,
+    route_check_event, route_issues_labeled, route_pull_request_closed,
+    route_pull_request_closed_workflows, route_workflow_run_completed_workflows, spine_namespace,
+    trigger_source,
 };

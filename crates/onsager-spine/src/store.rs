@@ -144,6 +144,55 @@ impl EventStore {
         Ok(row.0)
     }
 
+    /// Append an extension event with `(adapter_id, external_ref)`
+    /// dedup applied at the storage layer (spine migration 032 — the
+    /// partial unique index on `events_ext (adapter_id, external_ref)`).
+    /// Returns `Ok(None)` when the insert was suppressed by the
+    /// index — that's the silent no-op the webhook ↔ reconciler race
+    /// is designed to collapse to. The first writer wins; the second
+    /// is a no-op via DB constraint, not application coordination.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn append_ext_dedup(
+        &self,
+        workspace_id: &str,
+        stream_id: &str,
+        namespace: &str,
+        event_type: &str,
+        data: serde_json::Value,
+        metadata: &EventMetadata,
+        adapter_id: &str,
+        external_ref: &str,
+    ) -> Result<Option<i64>, sqlx::Error> {
+        let meta = serde_json::to_value(metadata).expect("EventMetadata must be serializable");
+        let correlation_id = parse_correlation_id(metadata.correlation_id.as_deref());
+
+        let row: Option<(i64,)> = sqlx::query_as(
+            r#"
+            INSERT INTO events_ext
+                (stream_id, namespace, event_type, data, metadata, correlation_id,
+                 workspace_id, adapter_id, external_ref)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (adapter_id, external_ref)
+                WHERE adapter_id IS NOT NULL AND external_ref IS NOT NULL
+                DO NOTHING
+            RETURNING id
+            "#,
+        )
+        .bind(stream_id)
+        .bind(namespace)
+        .bind(event_type)
+        .bind(&data)
+        .bind(&meta)
+        .bind(correlation_id)
+        .bind(workspace_id)
+        .bind(adapter_id)
+        .bind(external_ref)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| r.0))
+    }
+
     /// Resolve an artifact's workspace_id. Returns `Ok(None)` when the
     /// artifact isn't in the spine (e.g. system events that name a
     /// stream key but no row). Producers feed this into
