@@ -587,6 +587,35 @@ cover the first five; the spine `artifacts_external_ref_no_provider_fields`
 CHECK constraint covers the sixth. The bullets stay as a glossary of the
 failure modes those checks were designed against.
 
+### Occam's-razor checklist (spec #275)
+
+The patterns above all share one shape: a wire connected at one end. The
+seam rule's six levers caught seam-level instances; spec #275 adds three
+xtask lints that catch the **interior** instances — speculative
+abstractions and untracked defers that drift inside a single subsystem.
+Same warn-then-ratchet rollout as `check-file-budget`.
+
+- **`xtask check-orphan-crates`** — flags library crates (non-`[[bin]]`)
+  with zero in-tree reverse deps. Would have caught the warehouse /
+  delivery skeleton on day one. Escape: `// occam-allow: <reason>` in
+  `src/lib.rs`.
+- **`xtask check-single-impl-traits`** — flags `pub trait` defs with
+  exactly one implementor in the workspace (counting test impls so a
+  mock doesn't false-trigger). A trait with one impl is a speculative
+  seam; inline it or wait for the second implementor. Escape: `//
+  occam-allow: <reason>` on the line above the `pub trait`.
+- **`xtask check-deferred-todos`** — flags `TODO` / `FIXME` /
+  `#[allow(dead_code)]` / `// phase N` / `// vN.M` without a same-line
+  `#NNN` issue reference. Untracked defers evaporate at squash-merge;
+  every "for later" must point at a real spec or carry `// occam-allow:
+  <reason>`.
+- **`xtask check-events`** also surfaces diagnostic-only event rows
+  without a `tracking_issue` (warn-mode), so dangling skeletons in the
+  manifest get re-examined too.
+
+All four land in warn mode initially (warn-then-ratchet); a follow-up
+spec will ratchet them to fail once the floor is clean.
+
 ## Workspace layout
 
 ```
