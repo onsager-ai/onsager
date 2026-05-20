@@ -223,10 +223,11 @@ pub async fn get_run(
         row.updated_at,
         &stages,
     );
+    let artifact_id = row.artifact_id;
     let run = WorkflowRun {
-        id: row.artifact_id.clone(),
+        id: artifact_id.clone(),
         workflow_id,
-        artifact_id: row.artifact_id.clone(),
+        artifact_id,
         status,
         stages: stage_entries,
         started_at: row.created_at,

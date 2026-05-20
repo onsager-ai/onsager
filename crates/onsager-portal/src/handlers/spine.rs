@@ -136,6 +136,13 @@ pub struct ArtifactDetail {
     pub related_events: Vec<SpineEvent>,
 }
 
+/// Envelope for `GET /api/spine/artifacts/:id` — keeps the response
+/// fully typed without an intermediate `serde_json::Value` round-trip.
+#[derive(Debug, Serialize)]
+struct ArtifactDetailEnvelope {
+    artifact: ArtifactDetail,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct RetryRequest {
     #[serde(default)]
@@ -483,7 +490,7 @@ pub async fn get_artifact(
         horizontal_lineage: horizontal,
         related_events,
     };
-    Json(serde_json::json!({ "artifact": detail })).into_response()
+    Json(ArtifactDetailEnvelope { artifact: detail }).into_response()
 }
 
 /// Fetch spine events related to an artifact for the per-run DAG (issue #14
