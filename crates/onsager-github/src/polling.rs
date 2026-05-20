@@ -217,11 +217,15 @@ impl GitHubAdapter {
                 continue;
             }
             let external_ref = Self::external_ref_for_issue(&self.project_id, issue.number);
-            let payload = serde_json::json!({
-                "number": issue.number,
-                "title": issue.title,
-                "state": issue.state,
-            });
+            // Stash the full typed `Issue` on the payload so the
+            // portal scheduler can round-trip it through
+            // `serde_json::from_value` and feed the shared translator
+            // a typed shape (matching the webhook path). Serializing
+            // the API row is cheaper than re-fetching it and keeps
+            // the (poller ↔ webhook) input symmetry the
+            // reconciliation contract relies on.
+            let payload =
+                serde_json::to_value(&issue).map_err(|e| GithubError::Decode(e.to_string()))?;
             if max_updated.is_none_or(|c| updated_at >= c) {
                 max_updated = Some(updated_at);
                 max_external = Some(issue.number.to_string());
@@ -301,13 +305,10 @@ impl GitHubAdapter {
                 max_updated = Some(updated_at);
                 max_external = Some(pull.number.to_string());
             }
-            let payload = serde_json::json!({
-                "number": pull.number,
-                "title": pull.title,
-                "state": pull.state,
-                "merged_at": pull.merged_at,
-                "merge_commit_sha": pull.merge_commit_sha,
-            });
+            // See the issue-poll branch above for why we stash the
+            // full typed shape.
+            let payload =
+                serde_json::to_value(&pull).map_err(|e| GithubError::Decode(e.to_string()))?;
             events.push(NormalizedEvent {
                 external_ref,
                 adapter_id: self.adapter_id().to_string(),

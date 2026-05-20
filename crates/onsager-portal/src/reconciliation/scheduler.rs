@@ -2,30 +2,43 @@
 //! ticking at the mode-derived interval.
 //!
 //! The scheduler is the load-bearing surface for the reconciliation
-//! contract — it is what catches missed webhook deliveries. v1 wires
-//! the load-cursor → poll → log-observation path end-to-end but
-//! deliberately does NOT call `upsert_state` to advance the cursor:
-//! the contract documented in `onsager-github::polling` is "cursor
-//! advances only on successful emit", and the spine emit path is
-//! deferred to the webhook-translator refactor (#121 follow-up).
-//! Advancing the cursor before emit lands would permanently skip
-//! reconciliation on the affected window once the emit slice ships.
+//! contract — it is what catches missed webhook deliveries. Each
+//! tick:
+//!
+//!   1. Loads the cursor for `(adapter, workspace, resource_kind)`.
+//!   2. Calls `Adapter::poll_since` and gets a `Vec<NormalizedEvent>`
+//!      plus a proposed cursor advance.
+//!   3. Routes every event through the shared
+//!      [`super::translator`] (the same one the webhook handler calls
+//!      after parsing) and emits the resulting `RoutedEvent`s via
+//!      [`super::emit::emit_routed_events`]. `(adapter_id,
+//!      external_ref)` dedup on `events_ext` collapses any race with
+//!      a sibling webhook delivery to a silent no-op.
+//!   4. Advances the cursor only on successful emit — the
+//!      "advance only on emit" contract from
+//!      `onsager-github::polling` means a failure leaves the cursor
+//!      where it was so the next tick retries the same window.
 //!
 //! Boot scan happens once at startup; project-add / project-remove
 //! lifecycle is a follow-up. Restart the portal to pick up new
 //! projects in the v1 slice.
 
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
+use onsager_github::api::issues::Issue;
+use onsager_github::api::pulls::Pull;
+use onsager_github::{Adapter, GitHubAdapter, NormalizedEvent, PollOutcome};
+use onsager_spine::{EventStore, RoutedEvent, WorkflowMatch, WorkflowTrigger};
 use sqlx::PgPool;
 use tokio::time::{self, Instant};
 
-use onsager_github::{Adapter, GitHubAdapter, PollOutcome};
-
+use super::emit::{EmitOutcome, emit_routed_events};
 use super::mode::IngestionMode;
-use super::state::{load_state, touch_polled_at};
+use super::state::{load_state, touch_polled_at, upsert_state};
+use super::translator::{translate_issue, translate_pull_request};
 
 /// Project row shape the scheduler needs. A narrow projection over
 /// `projects` — we don't want the full row coupling.
@@ -43,7 +56,7 @@ struct ProjectRow {
 /// Returns immediately; the spawned tasks run for the lifetime of
 /// the portal (no graceful shutdown wired today — the listener
 /// pattern across portal uses the same posture).
-pub fn spawn_all(pool: PgPool) {
+pub fn spawn_all(pool: PgPool, spine: EventStore) {
     tokio::spawn(async move {
         let projects = match load_polling_projects(&pool).await {
             Ok(rows) => rows,
@@ -84,8 +97,9 @@ pub fn spawn_all(pool: PgPool) {
                 continue;
             }
             let pool = pool.clone();
+            let spine = spine.clone();
             tokio::spawn(async move {
-                run_project_loop(pool, project, mode).await;
+                run_project_loop(pool, spine, project, mode).await;
             });
         }
     });
@@ -129,7 +143,12 @@ fn project_offset(project_id: &str, interval: Duration) -> Duration {
     Duration::from_nanos(h % interval_nanos)
 }
 
-async fn run_project_loop(pool: PgPool, project: ProjectRow, mode: IngestionMode) {
+async fn run_project_loop(
+    pool: PgPool,
+    spine: EventStore,
+    project: ProjectRow,
+    mode: IngestionMode,
+) {
     let interval = mode.poll_interval();
     let offset = project_offset(&project.id, interval);
     // Start the ticker at `now + offset` so two projects with the
@@ -150,7 +169,7 @@ async fn run_project_loop(pool: PgPool, project: ProjectRow, mode: IngestionMode
 
     loop {
         ticker.tick().await;
-        if let Err(e) = tick_project(&pool, &project).await {
+        if let Err(e) = tick_project(&pool, &spine, &project).await {
             tracing::warn!(
                 project_id = %project.id,
                 error = %e,
@@ -160,13 +179,16 @@ async fn run_project_loop(pool: PgPool, project: ProjectRow, mode: IngestionMode
     }
 }
 
-async fn tick_project(pool: &PgPool, project: &ProjectRow) -> anyhow::Result<()> {
-    // v1: unauthenticated reads. The installation-token path will
-    // land with the webhook-translator refactor (#121 follow-up)
-    // so the poller and the webhook share the credential resolver.
-    // For now an unauth'd poll works for public repos and surfaces
-    // a 401 in logs for private ones, which is the local-dev
-    // baseline the spec calls for.
+async fn tick_project(
+    pool: &PgPool,
+    spine: &EventStore,
+    project: &ProjectRow,
+) -> anyhow::Result<()> {
+    // v1: unauthenticated reads. Per-installation credential
+    // resolution is a deferred follow-up listed on spec #430 (open
+    // questions / Alignment). For now an unauth'd poll works for
+    // public repos and surfaces a 401 in logs for private ones,
+    // which is the local-dev baseline the spec calls for.
     let adapter = GitHubAdapter::new(
         project.id.clone(),
         project.repo_owner.clone(),
@@ -178,31 +200,63 @@ async fn tick_project(pool: &PgPool, project: &ProjectRow) -> anyhow::Result<()>
         let state = load_state(pool, adapter.adapter_id(), &project.workspace_id, kind).await?;
         match adapter.poll_since(&state).await {
             Ok(PollOutcome { events, advance }) => {
-                if !events.is_empty() {
-                    // Spine emit lands with the webhook-translator
-                    // refactor (#121 follow-up). For now we log so
-                    // operators can validate the adapter sees the
-                    // resources it should.
+                let observed = events.len();
+                // Advance the cursor ONLY when every event in the
+                // batch landed (or was already deduped against a
+                // sibling-path write). The "cursor advances only on
+                // successful emit" contract from
+                // `onsager-github::polling` means any DB write
+                // failure leaves the cursor where it was so the next
+                // tick retries the same window — dedup at the spine
+                // layer turns the retry of an already-emitted event
+                // into a silent no-op.
+                let outcome = match emit_normalized(pool, spine, project, kind, &events).await {
+                    Ok(o) => o,
+                    Err(e) => {
+                        tracing::warn!(
+                            project_id = %project.id,
+                            adapter_id = adapter.adapter_id(),
+                            resource_kind = kind,
+                            error = %e,
+                            "reconciliation: emit pipeline errored; cursor will not advance"
+                        );
+                        touch_polled_at(pool, adapter.adapter_id(), &project.workspace_id, kind)
+                            .await?;
+                        continue;
+                    }
+                };
+                if outcome.failed > 0 {
+                    tracing::warn!(
+                        project_id = %project.id,
+                        adapter_id = adapter.adapter_id(),
+                        resource_kind = kind,
+                        written = outcome.written,
+                        deduped = outcome.deduped,
+                        failed = outcome.failed,
+                        "reconciliation: partial emit failure; cursor will not advance"
+                    );
+                }
+                if outcome.all_succeeded()
+                    && let Some(advanced) = advance.as_ref()
+                {
+                    upsert_state(pool, advanced).await?;
                     tracing::info!(
                         project_id = %project.id,
                         adapter_id = adapter.adapter_id(),
                         resource_kind = kind,
-                        observed = events.len(),
-                        proposed_advance = advance.is_some(),
-                        "reconciliation: poll observed events (spine emit + cursor advance deferred)"
+                        observed,
+                        written = outcome.written,
+                        deduped = outcome.deduped,
+                        "reconciliation: poll emitted + cursor advanced"
                     );
+                } else {
+                    // Stamp `last_polled_at` so the liveness signal
+                    // is honest even when there were no events to
+                    // emit, or when the emit pipeline failed and we
+                    // intentionally did not advance.
+                    touch_polled_at(pool, adapter.adapter_id(), &project.workspace_id, kind)
+                        .await?;
                 }
-                // IMPORTANT: do NOT call `upsert_state` here. The
-                // "cursor advances only on successful emit" contract
-                // (see `onsager-github::polling` module docs) means
-                // we can't move the cursor past unemitted events —
-                // doing so would permanently skip reconciliation on
-                // the affected window once the emit path lands.
-                // Stamp `last_polled_at` for liveness instead; the
-                // cursor stays at `state.last_seen_*` until the
-                // follow-up wires `upsert_state` after a successful
-                // spine emit.
-                touch_polled_at(pool, adapter.adapter_id(), &project.workspace_id, kind).await?;
             }
             Err(e) => {
                 // Don't advance the cursor on error — the next tick
@@ -219,6 +273,155 @@ async fn tick_project(pool: &PgPool, project: &ProjectRow) -> anyhow::Result<()>
         }
     }
     Ok(())
+}
+
+/// Translate a batch of [`NormalizedEvent`]s for one resource kind
+/// into [`RoutedEvent`]s via the shared translator and emit them to
+/// the spine. The returned [`EmitOutcome`] carries `written` /
+/// `deduped` / `failed` counts — the caller (`tick_project`) gates
+/// the cursor advance on `failed == 0` so any DB write failure (or
+/// pre-emit failure like a parse error) keeps the cursor pinned for
+/// the next tick to retry.
+///
+/// Returns `Err(_)` only on a DB-level error while loading the
+/// workflow lookup — the caller propagates it up via `?` and the
+/// tick loop logs and retries on the next interval.
+async fn emit_normalized(
+    pool: &PgPool,
+    spine: &EventStore,
+    project: &ProjectRow,
+    resource_kind: &str,
+    events: &[NormalizedEvent],
+) -> anyhow::Result<EmitOutcome> {
+    if events.is_empty() {
+        return Ok(EmitOutcome::default());
+    }
+    let mut routed: Vec<RoutedEvent> = Vec::new();
+    let mut pre_emit_failures: usize = 0;
+
+    for ev in events {
+        match resource_kind {
+            GitHubAdapter::KIND_ISSUE => {
+                match serde_json::from_value::<Issue>(ev.payload.clone()) {
+                    Ok(issue) => {
+                        let by_label = collect_label_workflows(pool, project, &issue).await?;
+                        if by_label.is_empty() {
+                            continue;
+                        }
+                        routed.extend(translate_issue(
+                            &issue,
+                            &project.repo_owner,
+                            &project.repo_name,
+                            Some(&project.id),
+                            &by_label,
+                        ));
+                    }
+                    Err(e) => {
+                        // A bad payload is a deserialize bug, not a
+                        // transport failure — count it as failed so the
+                        // cursor doesn't skip past it on the next tick
+                        // (a redeploy with the fix re-runs the same
+                        // window).
+                        tracing::warn!(
+                            project_id = %project.id,
+                            external_ref = %ev.external_ref,
+                            error = %e,
+                            "reconciliation: failed to parse Issue payload"
+                        );
+                        pre_emit_failures += 1;
+                    }
+                }
+            }
+            GitHubAdapter::KIND_PULL_REQUEST => {
+                match serde_json::from_value::<Pull>(ev.payload.clone()) {
+                    Ok(pull) => {
+                        let candidates =
+                            crate::workflow_db::find_active_pull_request_closed_workflows(
+                                pool,
+                                &project.repo_owner,
+                                &project.repo_name,
+                            )
+                            .await?;
+                        let triggers: Vec<WorkflowTrigger> = candidates
+                            .into_iter()
+                            .map(|w| WorkflowTrigger {
+                                id: w.id,
+                                workspace_id: w.workspace_id,
+                                trigger: w.trigger,
+                            })
+                            .collect();
+                        routed.extend(translate_pull_request(
+                            &pull,
+                            &project.repo_owner,
+                            &project.repo_name,
+                            Some(&project.id),
+                            &triggers,
+                        ));
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            project_id = %project.id,
+                            external_ref = %ev.external_ref,
+                            error = %e,
+                            "reconciliation: failed to parse Pull payload"
+                        );
+                        pre_emit_failures += 1;
+                    }
+                }
+            }
+            other => {
+                tracing::warn!(
+                    project_id = %project.id,
+                    resource_kind = other,
+                    "reconciliation: unsupported resource_kind"
+                );
+            }
+        }
+    }
+
+    let mut outcome =
+        emit_routed_events(spine, routed, &project.workspace_id, "portal-reconciler").await;
+    outcome.failed += pre_emit_failures;
+    Ok(outcome)
+}
+
+/// Look up the workflows that match each of `issue`'s labels. The
+/// poller has no `labeled` action context (only the current shape of
+/// the issue), so we query per-label. Empty map → nothing to fire.
+async fn collect_label_workflows(
+    pool: &PgPool,
+    project: &ProjectRow,
+    issue: &Issue,
+) -> anyhow::Result<HashMap<String, Vec<WorkflowMatch>>> {
+    let mut by_label: HashMap<String, Vec<WorkflowMatch>> = HashMap::new();
+    // The poller polls unauthenticated in v1, so we have no
+    // install_id to scope by. Use the workspace-scoped query so a
+    // matching workflow on this project's workspace is found
+    // regardless of install_id — when the credential follow-up
+    // lands, scope tightens to (install_id, repo, label).
+    for label in &issue.labels {
+        let workflows = crate::workflow_db::find_active_github_workflows_for_label_in_workspace(
+            pool,
+            &project.workspace_id,
+            &project.repo_owner,
+            &project.repo_name,
+            &label.name,
+        )
+        .await?;
+        if workflows.is_empty() {
+            continue;
+        }
+        let matches: Vec<WorkflowMatch> = workflows
+            .into_iter()
+            .map(|w| WorkflowMatch {
+                id: w.id,
+                workspace_id: w.workspace_id,
+                trigger_kind_tag: w.trigger.kind_tag().to_string(),
+            })
+            .collect();
+        by_label.insert(label.name.clone(), matches);
+    }
+    Ok(by_label)
 }
 
 #[cfg(test)]

@@ -230,9 +230,11 @@ remains the only path) until a v2 spec adds GraphQL bulk fetch.
 
 Open follow-ups under #121:
 
-- Wire the poller's `NormalizedEvent` output through the webhook
-  translator path so it actually emits to the spine; today the
-  scheduler logs observations and advances the cursor.
+- Spine-emit wiring **landed** via spec #430 — the scheduler now
+  routes each observed update through `reconciliation::translator`,
+  emits via `reconciliation::emit`, and advances the cursor only on
+  a no-failure batch. Dedup against webhook deliveries happens at the
+  `(adapter_id, external_ref)` partial unique index on `events_ext`.
 - ETag / `If-None-Match` round-trip in `GitHubAdapter` so a 304
   skips work and doesn't count against the 5000/hr rate limit.
 - Per-project / per-installation credential resolution in the

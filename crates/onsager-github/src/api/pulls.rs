@@ -3,13 +3,18 @@
 //! gate verdicts.
 
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::api::http::{GITHUB_API, client};
 use crate::error::GithubError;
 
 /// A pull request as returned by `GET /repos/{owner}/{repo}/pulls`.
-#[derive(Debug, Clone, Deserialize)]
+///
+/// `Serialize` is implemented so the reconciliation poller can stash
+/// the full typed shape on a [`crate::NormalizedEvent`] payload and
+/// the portal scheduler can round-trip it back into this struct when
+/// it calls the shared translator.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Pull {
     pub number: u64,
     pub title: String,
@@ -32,14 +37,14 @@ pub struct Pull {
     pub user: PullUser,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PullRef {
     #[serde(rename = "ref")]
     pub ref_name: String,
     pub sha: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PullUser {
     pub login: String,
 }

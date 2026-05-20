@@ -11,7 +11,12 @@ use crate::error::GithubError;
 /// An issue as returned by `GET /repos/{owner}/{repo}/issues`. GitHub's
 /// REST API includes pull requests in this endpoint; the
 /// `pull_request` field distinguishes them.
-#[derive(Debug, Clone, Deserialize)]
+///
+/// `Serialize` is implemented so the reconciliation poller can stash
+/// the full typed shape on a [`crate::NormalizedEvent`] payload and
+/// the portal scheduler can round-trip it back into this struct when
+/// it calls the shared translator.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Issue {
     pub number: u64,
     pub title: String,

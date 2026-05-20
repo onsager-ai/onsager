@@ -24,10 +24,13 @@ use onsager_github::webhook::{SignatureCheck, verify_signature};
 use onsager_spine::webhook_routing::{
     RoutedEvent, WorkflowTrigger, route_check_event, route_issues_labeled,
     route_pull_request_closed, route_pull_request_closed_workflows,
-    route_workflow_run_completed_workflows, spine_namespace,
+    route_workflow_run_completed_workflows,
 };
 
+use crate::db::{issue_external_ref, pr_external_ref};
 use crate::handlers::{issues, pull_request};
+use crate::reconciliation::emit::emit_routed_events;
+use crate::reconciliation::translator::GITHUB_ADAPTER_ID;
 use crate::state::AppState;
 
 /// Header GitHub sends with the event type (e.g. `pull_request`,
@@ -216,7 +219,13 @@ pub async fn handle(
     // portal's row struct still uses the legacy field name (cleanup
     // tracked separately).
     let workspace_id = installation.tenant_id.as_str();
-    emit_routed_events(&state, routed, workspace_id).await;
+    // Stamp (adapter_id, external_ref) per-event so the spine's
+    // partial unique index (migration 032) deduplicates this delivery
+    // against any reconciliation-poller emit for the same resource
+    // update. Best-effort: when project resolution fails we still
+    // emit, just without the dedup key, matching pre-#430 behavior.
+    let decorated = decorate_routed_with_dedup(&state, &parsed, &installation.id, routed).await;
+    let _ = emit_routed_events(&state.spine, decorated, workspace_id, "portal").await;
 
     let body = outcome.unwrap_or_else(|_| serde_json::json!({"event": event, "ignored": true}));
     (StatusCode::ACCEPTED, Json(body)).into_response()
@@ -377,46 +386,87 @@ async fn route_workflow_events(
     }
 }
 
-async fn emit_routed_events(state: &AppState, events: Vec<RoutedEvent>, workspace_id: &str) {
-    for ev in events {
-        let mut data = match serde_json::to_value(&ev.kind) {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!("failed to serialize spine event: {e}");
-                continue;
-            }
-        };
-        // Stamp workspace_id (#164) so downstream consumers — including
-        // the workspace-scoped `/api/spine/events` listing — can filter
-        // by workspace without re-resolving the install. The
-        // `TriggerFired` payload already includes its workflow's
-        // workspace; we don't overwrite it (a missing entry is the
-        // common case for `gate.*` events from check / PR webhooks).
-        if let Some(obj) = data.as_object_mut() {
-            obj.entry("workspace_id".to_string())
-                .or_insert(serde_json::Value::String(workspace_id.to_string()));
-        }
-        let namespace = spine_namespace(&ev.kind);
-        let metadata = onsager_spine::EventMetadata {
-            correlation_id: None,
-            causation_id: None,
-            actor: "portal".to_string(),
-        };
-        if let Err(e) = state
-            .spine
-            .append_ext(
-                workspace_id,
-                &ev.kind.stream_id(),
-                namespace,
-                ev.kind.event_type(),
-                data,
-                &metadata,
-                None,
-            )
+/// Decorate the routed events with the `(adapter_id, external_ref)`
+/// dedup key the reconciliation poller also stamps. The spine partial
+/// unique index on `events_ext (adapter_id, external_ref)` then
+/// collapses webhook/reconciler races to one row (spec #430).
+///
+/// The `external_ref` is keyed on Onsager-side `project_id`, so we
+/// resolve `(install, owner, repo) → project` once for the delivery
+/// and reuse it. The caller passes the already-resolved
+/// installation row id from `handle()` so we don't re-query the
+/// `github_app_installations` table on every webhook delivery. When
+/// the project can't be resolved (e.g. opt-in not completed), the
+/// event is emitted *without* a dedup key — at worst a
+/// reconciliation tick will write a duplicate row, which is a
+/// degradation of dedup, not of correctness.
+async fn decorate_routed_with_dedup(
+    state: &AppState,
+    payload: &Value,
+    installation_id: &str,
+    events: Vec<RoutedEvent>,
+) -> Vec<RoutedEvent> {
+    let repo_owner = payload
+        .pointer("/repository/owner/login")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let repo_name = payload
+        .pointer("/repository/name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if repo_owner.is_empty() || repo_name.is_empty() {
+        return events;
+    }
+    let project =
+        match crate::db::find_project_for_repo(&state.pool, installation_id, repo_owner, repo_name)
             .await
         {
-            tracing::warn!("failed to emit webhook-sourced spine event: {e}");
+            Ok(Some(p)) => p,
+            _ => return events,
+        };
+
+    events
+        .into_iter()
+        .map(|ev| match dedup_key_for(&ev, &project.id) {
+            Some(external_ref) => ev.with_dedup(GITHUB_ADAPTER_ID, external_ref),
+            None => ev,
+        })
+        .collect()
+}
+
+/// Compute the `external_ref` for one routed event under a given
+/// project. Returns `None` for event kinds whose dedup key we don't
+/// yet model (those continue to emit without a dedup key — a
+/// reconciler race on those is currently impossible because the
+/// reconciler doesn't emit them either).
+fn dedup_key_for(ev: &RoutedEvent, project_id: &str) -> Option<String> {
+    use onsager_spine::FactoryEventKind as K;
+    match &ev.kind {
+        K::TriggerFired {
+            workflow_id,
+            payload,
+            ..
+        } => {
+            // Per-(resource, workflow) dedup. We don't know the resource
+            // identity from the `TriggerFired` payload alone (it
+            // carries `issue_number` for issue-triggers, `pr_number`
+            // for PR-triggers). Sniff which is present.
+            let issue_number = payload.get("issue_number").and_then(Value::as_u64);
+            let pr_number = payload.get("pr_number").and_then(Value::as_u64);
+            let resource = match (issue_number, pr_number) {
+                (Some(n), _) => issue_external_ref(project_id, n),
+                (None, Some(n)) => pr_external_ref(project_id, n),
+                _ => return None,
+            };
+            Some(format!("{resource}:trigger:{workflow_id}"))
         }
+        K::GateManualApprovalSignal { pr_number, .. } => Some(format!(
+            "{}:manual_approval",
+            pr_external_ref(project_id, *pr_number)
+        )),
+        // `gate.check_updated` is webhook-only in v1 (reconciler
+        // doesn't poll `check_*`) so no race exists to dedup against.
+        _ => None,
     }
 }
 
