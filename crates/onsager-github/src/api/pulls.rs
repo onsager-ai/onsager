@@ -2,6 +2,7 @@
 //! plus the `POST /repos/.../check-runs` write path used to record
 //! gate verdicts.
 
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::api::http::{GITHUB_API, client};
@@ -20,6 +21,11 @@ pub struct Pull {
     /// tip of the PR branch itself). `None` for unmerged PRs.
     #[serde(default)]
     pub merge_commit_sha: Option<String>,
+    /// Server-reported `updated_at`. Used by the reconciliation
+    /// poller (#121) as the cursor field for PRs. Optional so
+    /// fixtures without this field still deserialize.
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
     pub head: PullRef,
     pub base: PullRef,
     pub html_url: String,

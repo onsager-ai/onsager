@@ -15,6 +15,12 @@
 //!
 //! Skipped when `DATABASE_URL` is unset — the contract lives in the
 //! spine schema, which only the Postgres-backed harness exercises.
+//! Migrations 031–033 are spine-owned (under
+//! `crates/onsager-spine/migrations/`) and are applied by the test
+//! harness's `just db-migrate` step (or docker-compose's `migrate`
+//! service) before this binary runs. Portal's `migrate::run` only
+//! touches portal-owned tables, not the spine tables we exercise
+//! here — so we don't call it.
 
 use onsager_github::AdapterReconciliationState;
 use onsager_portal::reconciliation::{load_state, upsert_state};
@@ -32,7 +38,6 @@ async fn reconciliation_state_round_trips() {
         eprintln!("DATABASE_URL not set; skipping");
         return;
     };
-    onsager_portal::migrate::run(&pool).await.expect("migrate");
 
     let workspace_id = format!("ws-{}", Uuid::new_v4());
     let adapter_id = "github";
@@ -83,8 +88,6 @@ async fn events_ext_dedup_enforced_by_partial_unique_index() {
         eprintln!("DATABASE_URL not set; skipping");
         return;
     };
-    onsager_portal::migrate::run(&pool).await.expect("migrate");
-
     let workspace_id = format!("ws-{}", Uuid::new_v4());
     let adapter_id = "github";
     // Use a UUID-suffixed external_ref so the test is rerunnable
@@ -148,7 +151,6 @@ async fn ingestion_mode_check_constraint_rejects_unknown_values() {
         eprintln!("DATABASE_URL not set; skipping");
         return;
     };
-    onsager_portal::migrate::run(&pool).await.expect("migrate");
 
     // Need a workspace row so the FK-less projects.workspace_id is
     // at least populated with a plausible value.

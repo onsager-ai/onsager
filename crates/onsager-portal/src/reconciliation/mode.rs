@@ -60,17 +60,28 @@ impl IngestionMode {
         }
     }
 
-    /// Parse the column value. Unknown values fall back to the
-    /// default mode so a forward-rolled project row from a future
-    /// migration doesn't crash the scheduler — the unknown mode
-    /// surfaces in logs (callers should warn) and the project polls
-    /// at the conservative reconciler interval.
-    pub fn parse(s: &str) -> Self {
+    /// Parse the column value, exact-match. Returns `None` for
+    /// unknown values so callers can decide whether to warn, panic,
+    /// or fall back.
+    pub fn try_parse(s: &str) -> Option<Self> {
         match s {
-            "webhook+reconciler" => IngestionMode::WebhookReconciler,
-            "polling-only" => IngestionMode::PollingOnly,
-            "webhook-only" => IngestionMode::WebhookOnly,
-            _ => IngestionMode::WebhookReconciler,
+            "webhook+reconciler" => Some(IngestionMode::WebhookReconciler),
+            "polling-only" => Some(IngestionMode::PollingOnly),
+            "webhook-only" => Some(IngestionMode::WebhookOnly),
+            _ => None,
+        }
+    }
+
+    /// Parse with a default fallback. The second tuple element is
+    /// `true` if the input did not match a known mode (so the
+    /// scheduler can emit a single per-project warning instead of
+    /// silently absorbing forward-rolled or typo'd configs). Use
+    /// [`Self::try_parse`] when you want to handle the unknown case
+    /// explicitly.
+    pub fn parse(s: &str) -> (Self, bool) {
+        match Self::try_parse(s) {
+            Some(mode) => (mode, false),
+            None => (IngestionMode::WebhookReconciler, true),
         }
     }
 
@@ -102,18 +113,21 @@ mod tests {
             IngestionMode::PollingOnly,
             IngestionMode::WebhookOnly,
         ] {
-            assert_eq!(IngestionMode::parse(mode.as_str()), mode);
+            assert_eq!(IngestionMode::try_parse(mode.as_str()), Some(mode));
+            assert_eq!(IngestionMode::parse(mode.as_str()), (mode, false));
         }
     }
 
     #[test]
-    fn unknown_mode_falls_back_to_default() {
+    fn unknown_mode_falls_back_to_default_and_flags_unknown() {
         // Forward-rolled rows or typo'd configs land in the safest
         // available mode (the default) rather than crashing the
-        // scheduler.
+        // scheduler — but the unknown flag lets callers warn so the
+        // misconfiguration surfaces in logs instead of being hidden.
+        assert_eq!(IngestionMode::try_parse("never-heard-of-it"), None);
         assert_eq!(
             IngestionMode::parse("never-heard-of-it"),
-            IngestionMode::WebhookReconciler
+            (IngestionMode::WebhookReconciler, true)
         );
     }
 

@@ -27,8 +27,8 @@
 //! GitHub adapter uses the existing canonical form:
 //! `github:project:<project_id>:issue:<number>` or
 //! `github:project:<project_id>:pr:<number>` — matching what
-//! `crates/onsager-portal/src/db.rs::external_ref_for_*` already
-//! emits for the webhook lineage handlers.
+//! `crates/onsager-portal/src/db.rs::{issue_external_ref,pr_external_ref}`
+//! already emit for the webhook lineage handlers.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -162,14 +162,14 @@ impl GitHubAdapter {
 
     /// Render the canonical GitHub `external_ref` for an issue. Must
     /// stay in sync with `crates/onsager-portal/src/db.rs`'s
-    /// `external_ref_for_issue` (the webhook path).
+    /// `issue_external_ref` (the webhook path).
     pub fn external_ref_for_issue(project_id: &str, issue_number: u64) -> String {
         format!("github:project:{project_id}:issue:{issue_number}")
     }
 
     /// Render the canonical GitHub `external_ref` for a PR. Must stay
     /// in sync with `crates/onsager-portal/src/db.rs`'s
-    /// `external_ref_for_pull_request`.
+    /// `pr_external_ref`.
     pub fn external_ref_for_pull_request(project_id: &str, pr_number: u64) -> String {
         format!("github:project:{project_id}:pr:{pr_number}")
     }
@@ -201,25 +201,27 @@ impl GitHubAdapter {
             if issue.is_pull_request() {
                 continue;
             }
-            // The REST `Issue` struct in this crate doesn't yet expose
-            // `updated_at`; without a cursor field we can't advance
-            // the high-water mark from the typed helper alone. Treat
-            // every observed issue as "since cursor" and rely on the
-            // events_ext idempotency index to dedup against the
-            // webhook path — the index is the load-bearing guard,
-            // not the cursor.
-            //
-            // The webhook-translator refactor (#121 follow-up) widens
-            // the typed `Issue` to carry `updated_at` so we can
-            // advance the cursor precisely; for v1 we record the
-            // most-recent external id seen.
+            // Drive the cursor off the upstream `updated_at`. Issues
+            // without a parsed `updated_at` (older fixtures or an API
+            // response missing the field) emit but do NOT advance the
+            // cursor — the spine idempotency index dedups them on
+            // re-fetch. Misleading-cursor avoidance: a synthetic
+            // `Utc::now()` would jump the cursor past unseen events.
+            let Some(updated_at) = issue.updated_at else {
+                continue;
+            };
+            if cursor.is_some_and(|c| updated_at <= c) {
+                // Already past the high-water mark — the REST `since`
+                // filter would catch this server-side; we replicate
+                // the behaviour here for v1 client-side filtering.
+                continue;
+            }
             let external_ref = Self::external_ref_for_issue(&self.project_id, issue.number);
             let payload = serde_json::json!({
                 "number": issue.number,
                 "title": issue.title,
                 "state": issue.state,
             });
-            let updated_at = chrono::Utc::now();
             if max_updated.is_none_or(|c| updated_at >= c) {
                 max_updated = Some(updated_at);
                 max_external = Some(issue.number.to_string());
@@ -276,13 +278,25 @@ impl GitHubAdapter {
             if pull.state != "closed" || pull.merged_at.is_none() {
                 continue;
             }
+            // Prefer the upstream `updated_at` for cursor purposes;
+            // fall back to a parsed `merged_at` if the row predates
+            // the typed-field rollout. Skip rows that supply neither —
+            // emitting them would either jump the cursor (synthetic
+            // `Utc::now()`) or be silently lost on re-fetch, both
+            // worse than waiting one tick for a fresh API response.
+            let updated_at = pull.updated_at.or_else(|| {
+                pull.merged_at
+                    .as_deref()
+                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                    .map(|d| d.with_timezone(&Utc))
+            });
+            let Some(updated_at) = updated_at else {
+                continue;
+            };
+            if cursor.is_some_and(|c| updated_at <= c) {
+                continue;
+            }
             let external_ref = Self::external_ref_for_pull_request(&self.project_id, pull.number);
-            let updated_at = pull
-                .merged_at
-                .as_deref()
-                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                .map(|d| d.with_timezone(&Utc))
-                .unwrap_or_else(Utc::now);
             if max_updated.is_none_or(|c| updated_at >= c) {
                 max_updated = Some(updated_at);
                 max_external = Some(pull.number.to_string());
