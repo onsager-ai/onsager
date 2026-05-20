@@ -10,14 +10,16 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use ts_rs::TS;
 
 use onsager_github::credential::AccountKind;
 
 /// Whether the GitHub account that installed the App is a personal
 /// account or an organization. Mirrors stiglab's `core::GitHubAccountType`
 /// byte-for-byte so the migration is wire-compatible.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum GitHubAccountType {
     User,
     Organization,
@@ -54,10 +56,12 @@ impl From<AccountKind> for GitHubAccountType {
 /// A GitHub App installation linked to a workspace. A workspace may
 /// have 0..N installations (typical: exactly one; cross-org workspaces
 /// can link more).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct GitHubAppInstallation {
     pub id: String,
     pub workspace_id: String,
+    #[ts(type = "number")]
     pub install_id: i64,
     pub account_login: String,
     pub account_type: GitHubAccountType,

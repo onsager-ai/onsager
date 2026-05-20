@@ -19,6 +19,7 @@ use chrono::{DateTime, Utc};
 use onsager_github::api::app as gh_app;
 use schemars::JsonSchema;
 use serde::Serialize;
+use ts_rs::TS;
 
 use crate::auth::AuthUser;
 use crate::handlers::installations::require_workspace_access;
@@ -34,11 +35,13 @@ const DELIVERIES_PAGE: u32 = 30;
 /// so the cache lives across every workspace served by this replica.
 const CACHE_KEY: &str = "app_webhook_deliveries:per_page=30";
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export)]
 pub struct InstallationDeliveryHealth {
     /// Numeric GitHub installation ID. Workflow rows store this same value
     /// in `install_id` so the dashboard can join by it without an extra
     /// fetch.
+    #[ts(type = "number")]
     pub install_id: i64,
     /// How many of the K=30 most recent deliveries belong to this
     /// installation. Zero is meaningful — it implies GitHub has not
@@ -51,7 +54,8 @@ pub struct InstallationDeliveryHealth {
     pub last_non_2xx_status_code: Option<i32>,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema, TS)]
+#[ts(export)]
 pub struct WorkspaceDeliveryHealthResponse {
     /// One row per installation registered to this workspace. Always
     /// includes every workspace installation, even ones with `checked = 0`,

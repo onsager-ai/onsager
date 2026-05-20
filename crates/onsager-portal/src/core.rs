@@ -9,12 +9,14 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// An Onsager-native workspace identity. Owns membership, GitHub
 /// installations, and projects. Identity is owned by Onsager (not borrowed
 /// from any external provider), so future source providers can hang off
 /// the same workspace.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Workspace {
     pub id: String,
     pub slug: String,
@@ -34,7 +36,12 @@ pub struct WorkspaceMember {
 
 /// `WorkspaceMember` enriched with the member's GitHub profile so the
 /// dashboard can render `@login` + avatar instead of an opaque user UUID.
-#[derive(Debug, Clone, Serialize)]
+///
+/// Wire-shape exposed at `GET /api/workspaces/:id/members` (#298 Phase 2).
+/// The dashboard's `WorkspaceMember` consumes this shape, so the TS
+/// emission is named `WorkspaceMember` rather than the Rust handle.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, rename = "WorkspaceMember")]
 pub struct WorkspaceMemberWithUser {
     pub workspace_id: String,
     pub user_id: String,
@@ -47,7 +54,8 @@ pub struct WorkspaceMemberWithUser {
 /// A repo linked to both a workspace and a specific GitHub App
 /// installation. Opt-in per repo: installing the App on an org does not
 /// auto-mirror all of that org's repos; the user explicitly adds each one.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Project {
     pub id: String,
     pub workspace_id: String,
@@ -65,7 +73,8 @@ pub struct Project {
 // `crates/stiglab/src/core/{session,node,task}.rs`; the wire shape is
 // identical so the dashboard's existing payload contract is preserved.
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Session {
     pub id: String,
     pub task_id: String,
@@ -82,8 +91,9 @@ pub struct Session {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum SessionState {
     Pending,
     Dispatched,
@@ -121,7 +131,8 @@ impl std::str::FromStr for SessionState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Node {
     pub id: String,
     pub name: String,
@@ -133,8 +144,9 @@ pub struct Node {
     pub registered_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum NodeStatus {
     Online,
     Offline,
@@ -165,7 +177,8 @@ pub struct Task {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct TaskRequest {
     pub prompt: String,
     pub node_id: Option<String>,

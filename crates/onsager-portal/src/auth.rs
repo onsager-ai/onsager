@@ -288,8 +288,9 @@ impl RequestPrincipal {
 
 /// How the user behind a request was minted. The dashboard renders a
 /// persistent dev-mode banner when this is `Dev` (issue #193).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum SessionKind {
     /// Real GitHub OAuth user.
     Github,

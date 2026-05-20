@@ -31,6 +31,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use onsager_spine::webhook_routing::{
     IssueTriggerContext, RoutedEvent, WorkflowMatch, build_trigger_fired_events, spine_namespace,
@@ -173,40 +174,62 @@ struct LivePull {
 
 // ── Dashboard-shaped response types ──────────────────────────────────────
 
-#[derive(Debug, Serialize)]
-struct LiveIssueDetailRow {
-    number: u64,
-    title: String,
-    state: String,
-    html_url: String,
-    author: Option<String>,
-    labels: Vec<String>,
-    assignees: Vec<String>,
-    comments: u32,
-    body: Option<String>,
-    milestone: Option<LiveMilestoneRow>,
-    created_at: Option<String>,
-    updated_at: String,
-    closed_at: Option<String>,
+/// Envelope returned by `GET /api/projects/:id/issues/:number`. `issue`
+/// is null and `error` is set when the upstream is rate-limited or
+/// unreachable (#170 fail-open).
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct ProjectIssueDetailResponse {
+    pub issue: Option<LiveIssueDetailRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct LiveMilestoneRow {
-    title: String,
-    state: String,
+/// Single-issue hydrated detail row returned by
+/// `GET /api/projects/:id/issues/:number`. The dashboard joins this with
+/// the spine artifact skeleton on `external_ref` (#170 reference-only
+/// artifacts).
+#[derive(Debug, Serialize, TS)]
+#[ts(export, rename = "ProjectIssueDetail")]
+pub struct LiveIssueDetailRow {
+    #[ts(type = "number")]
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub html_url: String,
+    pub author: Option<String>,
+    pub labels: Vec<String>,
+    pub assignees: Vec<String>,
+    pub comments: u32,
+    pub body: Option<String>,
+    pub milestone: Option<LiveMilestoneRow>,
+    pub created_at: Option<String>,
+    pub updated_at: String,
+    pub closed_at: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct LivePullRow {
-    number: u64,
-    title: String,
-    state: String,
-    html_url: String,
-    author: Option<String>,
-    labels: Vec<String>,
-    draft: bool,
-    merged: bool,
-    updated_at: String,
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct LiveMilestoneRow {
+    pub title: String,
+    pub state: String,
+}
+
+/// Slim PR row returned in the list response (`GET /api/projects/:id/pulls`).
+/// Dashboard's `ProjectPullRow`.
+#[derive(Debug, Serialize, TS)]
+#[ts(export, rename = "ProjectPullRow")]
+pub struct LivePullRow {
+    #[ts(type = "number")]
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub html_url: String,
+    pub author: Option<String>,
+    pub labels: Vec<String>,
+    pub draft: bool,
+    pub merged: bool,
+    pub updated_at: String,
 }
 
 // ── GET /api/projects/:id/issues (list) removed (spec #306) ─────────────
@@ -453,7 +476,8 @@ pub async fn list_project_pulls(
 
 // ── POST /api/projects/:id/backfill ───────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TS)]
+#[ts(export, rename = "BackfillRequestBody")]
 pub struct BackfillBody {
     #[serde(default)]
     pub cap: Option<usize>,
@@ -530,26 +554,31 @@ pub async fn backfill_project(
 
 // ── POST /api/projects/:id/issues/:number/replay-trigger ─────────────────
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, TS)]
+#[ts(export, rename = "ReplayIssueTriggerRequest")]
 pub struct ReplayTriggerBody {
     #[serde(default)]
     pub dry_run: Option<bool>,
 }
 
-#[derive(Debug, Serialize)]
-struct ReplayMatch {
-    workflow_id: String,
-    workflow_name: String,
-    label: String,
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct ReplayMatch {
+    pub workflow_id: String,
+    pub workflow_name: String,
+    pub label: String,
 }
 
-#[derive(Debug, Serialize)]
-struct ReplayResponse {
-    project_id: String,
-    issue_number: u64,
-    dry_run: bool,
-    matches: Vec<ReplayMatch>,
-    event_ids: Vec<i64>,
+#[derive(Debug, Serialize, TS)]
+#[ts(export, rename = "ReplayIssueTriggerResponse")]
+pub struct ReplayResponse {
+    pub project_id: String,
+    #[ts(type = "number")]
+    pub issue_number: u64,
+    pub dry_run: bool,
+    pub matches: Vec<ReplayMatch>,
+    #[ts(type = "Array<number>")]
+    pub event_ids: Vec<i64>,
 }
 
 /// POST `/api/projects/:id/issues/:number/replay-trigger` — debug replay of
