@@ -47,6 +47,16 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_workflow_version
 --    insert a published `workflow_versions` row, and point the workflow
 --    at it. Idempotent — `ON CONFLICT DO NOTHING` covers re-runs and the
 --    UPDATE skips workflows that already have an active version.
+--
+--    Skip workflows with NULL `created_by`. Migration 009 added that
+--    column as nullable and explicitly committed pre-#156 rows to a
+--    "broken until re-activated" state (sessions fail loudly on next
+--    dispatch via `stiglab.session_failed`). `workflow_versions.created_by`
+--    (migration 022) and `workflow_changes.actor` (migration 023) are
+--    NOT NULL, so threading a NULL through here would abort the whole
+--    DO block. Leaving these orphans with `active_version_id = NULL`
+--    matches their existing semantics; re-activation through the
+--    application layer mints a fresh v1 then.
 DO $$
 DECLARE
     w           RECORD;
@@ -58,6 +68,7 @@ BEGIN
                created_at, workspace_id, install_id
           FROM workflows
          WHERE active_version_id IS NULL
+           AND created_by IS NOT NULL
     LOOP
         new_version := 'wfv_' || w.workflow_id;
 
