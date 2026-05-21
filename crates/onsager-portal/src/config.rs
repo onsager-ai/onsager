@@ -139,6 +139,26 @@ impl Config {
                  not — the relying party cannot authenticate to the owner"
             );
         }
+
+        self.assert_public_url_for_release(cfg!(debug_assertions));
+    }
+
+    // Release builds must have PORTAL_PUBLIC_URL set when GitHub OAuth is
+    // configured. Without it, build_callback_url() falls back to
+    // http://localhost:<port>/... and silently emits that into the
+    // redirect_uri sent to GitHub — which GitHub rejects with
+    // "The redirect_uri is not associated with this application."
+    // Debug builds keep the localhost fallback so local OAuth testing
+    // against an app whose callback is registered as
+    // http://localhost:3002/api/auth/github/callback still works.
+    fn assert_public_url_for_release(&self, is_debug_build: bool) {
+        if !is_debug_build && self.github_client_id.is_some() && self.public_url.is_none() {
+            panic!(
+                "invalid SSO config: GITHUB_CLIENT_ID is set but PORTAL_PUBLIC_URL is \
+                 not — release builds would otherwise leak http://localhost into the \
+                 OAuth redirect_uri and GitHub would reject the sign-in flow"
+            );
+        }
     }
 }
 
@@ -275,5 +295,39 @@ mod tests {
             ..base_config()
         };
         c.assert_sso_consistent();
+    }
+
+    #[test]
+    #[should_panic(expected = "PORTAL_PUBLIC_URL")]
+    fn release_panics_when_github_oauth_set_without_public_url() {
+        let c = Config {
+            github_client_id: Some("id".into()),
+            github_client_secret: Some("secret".into()),
+            public_url: None,
+            ..base_config()
+        };
+        c.assert_public_url_for_release(false);
+    }
+
+    #[test]
+    fn release_accepts_github_oauth_with_public_url() {
+        let c = Config {
+            github_client_id: Some("id".into()),
+            github_client_secret: Some("secret".into()),
+            public_url: Some("https://app.onsager.ai".into()),
+            ..base_config()
+        };
+        c.assert_public_url_for_release(false);
+    }
+
+    #[test]
+    fn debug_build_keeps_localhost_fallback() {
+        let c = Config {
+            github_client_id: Some("id".into()),
+            github_client_secret: Some("secret".into()),
+            public_url: None,
+            ..base_config()
+        };
+        c.assert_public_url_for_release(true);
     }
 }
