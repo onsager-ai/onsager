@@ -1,26 +1,9 @@
 //! Portal-owned migrations.
 //!
-//! Runs at server startup. The portal owns:
-//!
-//! - `factory_tasks` — backlog rows materialized from spec-labeled issues.
-//! - `pr_gate_verdicts` — one row per `(pr_artifact_id, head_sha)` for gate
-//!   evaluation idempotency.
-//! - `pr_branch_links` — per-session branch hint, used to attach
-//!   `vertical_lineage` when the PR webhook arrives.
-//! - `portal_webhook_secrets` — per-workspace webhook signature secret for
-//!   self-hosted PAT mode (spec #222 / parent #220). Loaded from the
-//!   `migrations/` directory rather than inline DDL — the first portal-owned
-//!   table that lives in a versioned `.sql` file, setting the precedent for
-//!   the schema-split slices to follow.
-//! - `users`, `auth_sessions`, `sso_exchange_codes` — auth identity +
-//!   cookie sessions + cross-env SSO codes (#222 Slice 5). Stiglab still
-//!   reads from these tables for its `AuthUser` cookie extractor; portal
-//!   is the only writer.
-//! - `user_pats` — server-issued Personal Access Tokens (#143). Portal
-//!   owns mint/list/revoke via `/api/pats*` and verifies presented PATs
-//!   in its own `AuthUser` extractor (#222 Slice 2b). Stiglab still reads
-//!   this table for its `AuthUser` PAT path while non-portal routes
-//!   (credentials, workspaces, projects, workflows) accept PATs.
+//! Runs at server startup. All tables live in versioned `.sql` files under
+//! `crates/onsager-portal/migrations/`; the binary inlines them at compile
+//! time via `include_str!` so no separate migration directory is needed at
+//! runtime.
 //!
 //! Tables managed elsewhere (workspaces / projects / installations / events /
 //! events_ext / artifacts / vertical_lineage) are not touched here.
@@ -75,68 +58,15 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "010_spec_plans",
         include_str!("../migrations/010_spec_plans.sql"),
     ),
+    (
+        "011_portal_internal",
+        include_str!("../migrations/011_portal_internal.sql"),
+    ),
 ];
 
 /// Apply all portal-owned table migrations. Idempotent — safe to call on
 /// every startup.
 pub async fn run(pool: &PgPool) -> anyhow::Result<()> {
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS factory_tasks (
-            id          TEXT        PRIMARY KEY,
-            project_id  TEXT        NOT NULL,
-            source      TEXT        NOT NULL DEFAULT 'manual',
-            source_ref  TEXT        NOT NULL,
-            title       TEXT        NOT NULL,
-            body        TEXT,
-            state       TEXT        NOT NULL DEFAULT 'queued',
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            UNIQUE (project_id, source_ref)
-        )",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_factory_tasks_project ON factory_tasks (project_id)",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_factory_tasks_state ON factory_tasks (state)")
-        .execute(pool)
-        .await?;
-
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS pr_gate_verdicts (
-            pr_artifact_id TEXT        NOT NULL,
-            head_sha       TEXT        NOT NULL,
-            verdict        TEXT        NOT NULL,
-            recorded_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (pr_artifact_id, head_sha)
-        )",
-    )
-    .execute(pool)
-    .await?;
-
-    // `pr_branch_links` is also created by stiglab's startup migrations
-    // (session-side writer) — the DDL here matches the stiglab side so
-    // whoever migrates first wins and the other becomes a no-op.
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS pr_branch_links (
-            session_id  TEXT PRIMARY KEY,
-            project_id  TEXT,
-            branch      TEXT NOT NULL,
-            pr_number   BIGINT,
-            recorded_at TEXT NOT NULL
-        )",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_pr_branch_links_lookup \
-         ON pr_branch_links (project_id, branch)",
-    )
-    .execute(pool)
-    .await?;
-
     for (name, sql) in MIGRATIONS {
         tracing::debug!(migration = name, "portal: applying migration");
         sqlx::raw_sql(sql)

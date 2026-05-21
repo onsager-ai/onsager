@@ -33,91 +33,32 @@ impl PostgresStorage {
 #[async_trait]
 impl Storage for PostgresStorage {
     async fn migrate(&self) -> Result<()> {
-        // Run schema migration
-        let schema = include_str!("../../../migrations/pg/001_initial_schema.sql");
-        for statement in schema.split(';') {
-            let stmt = statement.trim();
-            if !stmt.is_empty() {
-                sqlx::query(stmt)
-                    .execute(&self.pool)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "migration statement failed: {}",
-                            &stmt[..stmt.len().min(80)]
-                        )
-                    })?;
+        const MIGRATIONS: &[(&str, &str)] = &[
+            (
+                "001_schema",
+                include_str!("../../../migrations/pg/001_schema.sql"),
+            ),
+            (
+                "002_seed",
+                include_str!("../../../migrations/pg/002_seed.sql"),
+            ),
+        ];
+        for (name, sql) in MIGRATIONS {
+            for statement in sql.split(';') {
+                let stmt = statement.trim();
+                if !stmt.is_empty() {
+                    sqlx::query(stmt)
+                        .execute(&self.pool)
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "synodic migration {name} failed: {}",
+                                &stmt[..stmt.len().min(80)]
+                            )
+                        })?;
+                }
             }
         }
-
-        // Run pipeline telemetry migration
-        let telemetry = include_str!("../../../migrations/pg/003_pipeline_runs.sql");
-        for statement in telemetry.split(';') {
-            let stmt = statement.trim();
-            if !stmt.is_empty() {
-                sqlx::query(stmt)
-                    .execute(&self.pool)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "pipeline telemetry migration statement failed: {}",
-                            &stmt[..stmt.len().min(80)]
-                        )
-                    })?;
-            }
-        }
-
-        // Run governance events migration
-        let gov_events = include_str!("../../../migrations/pg/004_governance_events.sql");
-        for statement in gov_events.split(';') {
-            let stmt = statement.trim();
-            if !stmt.is_empty() {
-                sqlx::query(stmt)
-                    .execute(&self.pool)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "governance events migration statement failed: {}",
-                            &stmt[..stmt.len().min(80)]
-                        )
-                    })?;
-            }
-        }
-
-        // Run rule proposals migration (issue #36 Step 2)
-        let proposals = include_str!("../../../migrations/pg/005_rule_proposals.sql");
-        for statement in proposals.split(';') {
-            let stmt = statement.trim();
-            if !stmt.is_empty() {
-                sqlx::query(stmt)
-                    .execute(&self.pool)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "rule proposals migration statement failed: {}",
-                            &stmt[..stmt.len().min(80)]
-                        )
-                    })?;
-            }
-        }
-
-        // Run seed data
-        let seed = include_str!("../../../migrations/pg/002_seed_data.sql");
-        for statement in seed.split(';') {
-            let stmt = statement.trim();
-            if !stmt.is_empty() {
-                sqlx::query(stmt)
-                    .execute(&self.pool)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "seed data statement failed: {}",
-                            &stmt[..stmt.len().min(80)]
-                        )
-                    })?;
-            }
-        }
-
         Ok(())
     }
 
