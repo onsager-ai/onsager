@@ -1,6 +1,6 @@
 # ADR 0019 — Dashboard IA: pipeline-centric three-tab surface
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-22
 - **Identity impact**: no
 - **Tracking issues**: #450 (implementation spec). Refines the
