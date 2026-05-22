@@ -329,18 +329,18 @@ pub async fn list_workspace_runs(
     for row in rows {
         let stages = match stages_by_workflow.get(&row.workflow_id) {
             Some(s) => s.clone(),
-            None => match crate::workflow_db::list_stages_for_workflow(spine, &row.workflow_id)
-                .await
-            {
-                Ok(s) => {
-                    stages_by_workflow.insert(row.workflow_id.clone(), s.clone());
-                    s
+            None => {
+                match crate::workflow_db::list_stages_for_workflow(spine, &row.workflow_id).await {
+                    Ok(s) => {
+                        stages_by_workflow.insert(row.workflow_id.clone(), s.clone());
+                        s
+                    }
+                    Err(e) => {
+                        tracing::error!("failed to load stages for {}: {e}", row.workflow_id);
+                        Vec::new()
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("failed to load stages for {}: {e}", row.workflow_id);
-                    Vec::new()
-                }
-            },
+            }
         };
         let (status, stage_entries) = project_run_stages(
             &row.state,

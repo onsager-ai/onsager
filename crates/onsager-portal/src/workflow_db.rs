@@ -297,10 +297,7 @@ pub async fn list_workflows_for_workspace_filtered(
             s.sql_predicate(),
         ),
     };
-    let rows = sqlx::query(&sql)
-        .bind(workspace_id)
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(&sql).bind(workspace_id).fetch_all(pool).await?;
     rows.into_iter().map(row_to_workflow).collect()
 }
 
