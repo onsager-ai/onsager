@@ -1,15 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 
 import { WorkflowDetailPage } from "@/pages/WorkflowDetailPage"
 
-// Smoke coverage for the four-tab hub refactor (#301 / PR 2a of #289):
-// default tab is Runs, hash deep-links to a named tab, clicking a tab
-// updates the URL hash, and a hashchange event from outside flips the
-// active tab. The data-fetching tabs are mocked at the API surface; we
-// only assert the navigation contract here.
+// Anchored timeline contract (#455 / ADR 0019). The legacy four-tab
+// shell was collapsed to a single scroll surface with four anchored
+// sections. Hash anchors (`#definition`, `#runs`, `#artifacts`,
+// `#verdicts`) are preserved as scroll targets so bookmarks survive.
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ user: null, authEnabled: false }),
@@ -19,8 +18,9 @@ const apiMock = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
   getWorkflow: vi.fn(),
   getWorkflowRuns: vi.fn(),
-  getArtifact: vi.fn(),
-  getGovernanceEvents: vi.fn(),
+  getWorkflowArtifacts: vi.fn(),
+  getWorkflowVerdicts: vi.fn(),
+  getWorkspaceWebhookDeliveriesHealth: vi.fn(),
   getSpineEvents: vi.fn(),
   listWorkflows: vi.fn(),
 }))
@@ -97,89 +97,60 @@ function renderPage(initialPath: string) {
   )
 }
 
-describe("WorkflowDetailPage tabbed hub", () => {
+describe("WorkflowDetailPage anchored timeline (#455)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    // Hash persistence is a real browser thing; reset between tests so a
-    // stray `#artifacts` from one case doesn't leak into the next.
     window.history.replaceState(null, "", "/workspaces/acme/workflows/wf_1")
     apiMock.listWorkspaces.mockResolvedValue({ workspaces: [workspace] })
     apiMock.getWorkflow.mockResolvedValue(workflow)
     apiMock.getWorkflowRuns.mockResolvedValue({ runs: [] })
-    apiMock.getArtifact.mockResolvedValue({
-      artifact: {
-        id: "a_1",
-        kind: "Issue",
-        name: "demo",
-        owner: null,
-        state: "active",
-        current_version: 1,
-        created_at: "",
-        updated_at: "",
-        created_by: "u",
-        versions: [],
-        vertical_lineage: [],
-      },
+    apiMock.getWorkflowArtifacts.mockResolvedValue({ artifacts: [] })
+    apiMock.getWorkflowVerdicts.mockResolvedValue({ verdicts: [] })
+    apiMock.getWorkspaceWebhookDeliveriesHealth.mockResolvedValue({
+      installations: [],
     })
-    apiMock.getGovernanceEvents.mockResolvedValue([])
     apiMock.getSpineEvents.mockResolvedValue({ events: [] })
-    apiMock.listWorkflows.mockResolvedValue({ workflows: [] })
+    apiMock.listWorkflows.mockResolvedValue({
+      workflows: [],
+      counts: { drafted: 0, bound: 0, active: 0, paused: 0, all: 0 },
+    })
   })
   afterEach(() => {
     window.location.hash = ""
   })
 
-  it("defaults to the Runs tab on first land", async () => {
+  it("renders all four anchored sections with stable ids", async () => {
     renderPage("/workspaces/acme/workflows/wf_1")
-    const runsTab = await screen.findByRole("tab", { name: "Runs" })
-    await waitFor(() =>
-      expect(runsTab.getAttribute("data-active")).not.toBeNull(),
-    )
-    expect(
-      screen.getByRole("tab", { name: "Definition" }).getAttribute("data-active"),
-    ).toBeNull()
-  })
-
-  it("deep-links to the Artifacts tab via #artifacts in the URL", async () => {
-    window.history.replaceState(
-      null,
-      "",
-      "/workspaces/acme/workflows/wf_1#artifacts",
-    )
-    renderPage("/workspaces/acme/workflows/wf_1#artifacts")
-    const artifactsTab = await screen.findByRole("tab", { name: "Artifacts" })
-    await waitFor(() =>
-      expect(artifactsTab.getAttribute("data-active")).not.toBeNull(),
-    )
-  })
-
-  it("updates window.location.hash when a tab is clicked", async () => {
-    renderPage("/workspaces/acme/workflows/wf_1")
-    const definitionTab = await screen.findByRole("tab", { name: "Definition" })
-    fireEvent.click(definitionTab)
-    await waitFor(() =>
-      expect(definitionTab.getAttribute("data-active")).not.toBeNull(),
-    )
-    expect(window.location.hash).toBe("#definition")
-  })
-
-  it("reacts to an external hashchange (browser back/forward)", async () => {
-    renderPage("/workspaces/acme/workflows/wf_1")
-    await screen.findByRole("tab", { name: "Verdicts" })
-    act(() => {
-      window.history.replaceState(
-        null,
-        "",
-        "/workspaces/acme/workflows/wf_1#verdicts",
-      )
-      window.dispatchEvent(new HashChangeEvent("hashchange"))
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "Definition" }),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("heading", { name: "Runs" }),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("heading", { name: "Artifacts" }),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("heading", { name: "Verdicts" }),
+      ).toBeInTheDocument()
     })
+    expect(document.getElementById("definition")).not.toBeNull()
+    expect(document.getElementById("runs")).not.toBeNull()
+    expect(document.getElementById("artifacts")).not.toBeNull()
+    expect(document.getElementById("verdicts")).not.toBeNull()
+  })
+
+  it("no longer renders the legacy tab UI", async () => {
+    renderPage("/workspaces/acme/workflows/wf_1#runs")
     await waitFor(() =>
       expect(
-        screen
-          .getByRole("tab", { name: "Verdicts" })
-          .getAttribute("data-active"),
-      ).not.toBeNull(),
+        screen.getByRole("heading", { name: "Runs" }),
+      ).toBeInTheDocument(),
     )
+    expect(screen.queryByRole("tab", { name: "Definition" })).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Runs" })).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Artifacts" })).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Verdicts" })).toBeNull()
   })
 })

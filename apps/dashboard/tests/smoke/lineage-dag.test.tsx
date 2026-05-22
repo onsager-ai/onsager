@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { LineageDAG } from "@/components/factory/LineageDAG";
-import { buildLanes } from "@/components/factory/lineage-dag-utils";
+import { LineageDAG } from "@/components/workflows/LineageDAG";
+import { buildLanes } from "@/components/workflows/lineage-dag-utils";
 import type { ArtifactDetail, SpineEvent } from "@/lib/api";
 
 function baseArtifact(overrides: Partial<ArtifactDetail> = {}): ArtifactDetail {

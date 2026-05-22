@@ -3,14 +3,14 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import type { ReactNode } from "react"
-import { StageCard } from "@/components/factory/workflows/StageCard"
-import { TriggerCard } from "@/components/factory/workflows/TriggerCard"
+import { StageCard } from "@/components/workflows/StageCard"
+import { TriggerCard } from "@/components/workflows/TriggerCard"
 import type { WorkflowStage } from "@/lib/api"
-import type { WorkflowTriggerDraft } from "@/components/factory/workflows/workflow-draft"
+import type { WorkflowTriggerDraft } from "@/components/workflows/workflow-draft"
 import {
   draftToRequestTrigger,
   isTriggerReady,
-} from "@/components/factory/workflows/workflow-draft"
+} from "@/components/workflows/workflow-draft"
 
 function mount(node: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })

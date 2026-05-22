@@ -58,7 +58,7 @@ import { useBuildInfo } from "@/lib/build-info"
 import type {
   WorkflowDocument,
   WorkflowDraft,
-} from "@/components/factory/workflows/workflow-draft"
+} from "@/components/workflows/workflow-draft"
 import { type FtueTemplate, templateToDocument } from "@/lib/templates"
 
 // ─── Runtime types ──────────────────────────────────────────────────────────
@@ -835,11 +835,10 @@ function EmptyState({
           </Button>
         ))}
       </div>
-      {/* Spec #408 location 1: factory-metaphor copy on the chat empty state. */}
       <p className="max-w-md text-xs text-muted-foreground">
         <Sparkles className="mr-1 inline h-3 w-3" />
-        Cards along the way are inspection reports — what&apos;s about to
-        change at each QC checkpoint. Nothing ships until you accept.
+        Cards along the way preview each stage&apos;s gate verdict before
+        anything applies. Nothing changes until you accept.
       </p>
     </div>
   )

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
-import { PresetPicker } from "@/components/factory/workflows/PresetPicker"
+import { PresetPicker } from "@/components/workflows/PresetPicker"
 import {
   WORKFLOW_PRESETS,
   emptyDocument,
   type WorkflowDocument,
-} from "@/components/factory/workflows/workflow-draft"
+} from "@/components/workflows/workflow-draft"
 
 describe("PresetPicker", () => {
   it("renders one button per preset", () => {

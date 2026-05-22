@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { Link, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -13,23 +13,16 @@ import { api, type StageRunStatus, type WorkflowRun } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
-import { ActiveRunsBanner } from "@/components/factory/workflows/ActiveRunsBanner"
-import { MetaphorBanner } from "@/components/factory/workflows/MetaphorBanner"
-import { ArtifactBadge } from "@/components/factory/workflows/ArtifactBadge"
-import { ArtifactFlowOverview } from "@/components/factory/workflows/ArtifactFlowOverview"
-import { WorkflowActions } from "@/components/factory/workflows/WorkflowActions"
-import { WorkflowArtifactsTab } from "@/components/factory/workflows/WorkflowArtifactsTab"
-import { WorkflowEventsCard } from "@/components/factory/workflows/WorkflowEventsCard"
-import { WorkflowSessionsCard } from "@/components/factory/workflows/WorkflowSessionsCard"
-import { WorkflowVerdictsTab } from "@/components/factory/workflows/WorkflowVerdictsTab"
-import { WebhookHealthWarning } from "@/components/factory/workflows/WebhookHealthWarning"
-import { outputArtifactKind } from "@/components/factory/workflows/workflow-meta"
+import { ActiveRunsBanner } from "@/components/workflows/ActiveRunsBanner"
+import { ArtifactBadge } from "@/components/workflows/ArtifactBadge"
+import { ArtifactFlowOverview } from "@/components/workflows/ArtifactFlowOverview"
+import { WorkflowActions } from "@/components/workflows/WorkflowActions"
+import { WorkflowArtifactsTab } from "@/components/workflows/WorkflowArtifactsTab"
+import { WorkflowEventsCard } from "@/components/workflows/WorkflowEventsCard"
+import { WorkflowSessionsCard } from "@/components/workflows/WorkflowSessionsCard"
+import { WorkflowVerdictsTab } from "@/components/workflows/WorkflowVerdictsTab"
+import { WebhookHealthWarning } from "@/components/workflows/WebhookHealthWarning"
+import { outputArtifactKind } from "@/components/workflows/workflow-meta"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { useOSSFlag } from "@/hooks/useOSSFlag"
 import { useActiveWorkspace } from "@/lib/workspace"
@@ -46,9 +39,6 @@ const SCHEDULE_TRIGGER_KIND_TAGS = new Set(["cron", "delay", "interval"])
 // Spec #405's run-history view cap on OSS. The locked copy promises
 // "Showing last 7 days"; this is the cutoff that keeps the list
 // honest. Cloud (full server response) does not apply the filter.
-// Hoisted out of the component so `Date.now()` lives outside the
-// render body (the `react-hooks/purity` rule rejects impure calls
-// in render).
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
 function filterRunsToLastSevenDays(runs: WorkflowRun[]): WorkflowRun[] {
@@ -59,7 +49,10 @@ function filterRunsToLastSevenDays(runs: WorkflowRun[]): WorkflowRun[] {
   })
 }
 
-const STATUS_VARIANT: Record<StageRunStatus, "default" | "secondary" | "destructive" | "outline"> = {
+const STATUS_VARIANT: Record<
+  StageRunStatus,
+  "default" | "secondary" | "destructive" | "outline"
+> = {
   pending: "outline",
   blocked: "secondary",
   passed: "default",
@@ -73,17 +66,16 @@ const STATUS_ICON: Record<StageRunStatus, typeof Circle> = {
   failed: CircleX,
 }
 
-const TAB_VALUES = ["definition", "runs", "artifacts", "verdicts"] as const
-type TabValue = (typeof TAB_VALUES)[number]
-const DEFAULT_TAB: TabValue = "runs"
+// Anchored section ids, kept aligned with the legacy `#definition` /
+// `#runs` / `#artifacts` / `#verdicts` hash anchors so bookmarks
+// survive the collapse from tabs to a single scroll surface (#455).
+const SECTION_IDS = ["definition", "runs", "artifacts", "verdicts"] as const
+type SectionId = (typeof SECTION_IDS)[number]
 
-function readTabFromHash(): TabValue {
-  if (typeof window === "undefined") return DEFAULT_TAB
-  const raw = window.location.hash.replace(/^#/, "")
-  return (TAB_VALUES as readonly string[]).includes(raw)
-    ? (raw as TabValue)
-    : DEFAULT_TAB
-}
+// Per-section last_n truncation. Verdicts are denser; show fewer
+// inline and link out to the cross-workflow list for the rest (#455).
+const LAST_N_RUNS = 10
+const LAST_N_VERDICTS = 5
 
 export function WorkflowDetailPage() {
   const { id = "" } = useParams<{ id: string }>()
@@ -95,10 +87,6 @@ export function WorkflowDetailPage() {
     queryFn: () => api.getWorkflow(id),
     enabled: !!id,
   })
-  // Live view of artifacts flowing through stages. The spine bus emits
-  // `forge.stage_*` events. Until a push channel (WebSocket/SSE) lands,
-  // poll at 5s — matches the rest of the dashboard's fast-refresh cadence
-  // without waking the mobile radio every 2s.
   const { data: runsData } = useQuery({
     queryKey: ["workflow-runs", id],
     queryFn: () => api.getWorkflowRuns(id, 50),
@@ -106,18 +94,15 @@ export function WorkflowDetailPage() {
     refetchInterval: 5000,
   })
   const workflow = data?.workflow
-  // Spec #405: keep the OSS "Showing last 7 days" copy truthful.
-  // Backend retention enforcement is the follow-up "Cloud retention
-  // job" spec; the dashboard cap is a view-side filter so the line
-  // and the list agree. Cloud renders the full server response.
   const runs = useMemo(() => {
     const all = runsData?.runs ?? []
     return isOss ? filterRunsToLastSevenDays(all) : all
   }, [runsData, isOss])
+  const visibleRuns = useMemo(() => runs.slice(0, LAST_N_RUNS), [runs])
+  const runsOverflow = runs.length > LAST_N_RUNS
 
   // Spec #120 item 3 — webhook delivery health for this workflow's
-  // installation. The workspace-scoped endpoint returns every
-  // installation in one call; we pick our row by install_id.
+  // installation.
   const { data: healthData } = useQuery({
     queryKey: ["webhook-deliveries-health", workspace.id],
     queryFn: () => api.getWorkspaceWebhookDeliveriesHealth(workspace.id),
@@ -131,33 +116,25 @@ export function WorkflowDetailPage() {
     )
   }, [healthData, workflow])
 
-  const [tab, setTab] = useState<TabValue>(() => readTabFromHash())
-
-  // Keep state and the URL hash in sync. Initial state is seeded from the
-  // hash so a `#artifacts` deep link lands on the right tab; subsequent
-  // navigations (browser back/forward, manual edits) update via the
-  // `hashchange` listener; tab clicks push via `replaceState` so the
-  // back stack doesn't fill with every glance at the page.
+  // Scroll the matched anchored section into view on mount (or when
+  // the hash changes from a browser back/forward). One requestAnimation
+  // Frame waits for lazy section content to mount before scrolling.
+  const scrollRoot = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    const onHashChange = () => setTab(readTabFromHash())
-    window.addEventListener("hashchange", onHashChange)
-    return () => window.removeEventListener("hashchange", onHashChange)
-  }, [])
-
-  const handleTabChange = (value: TabValue) => {
-    setTab(value)
-    const next = `#${value}`
-    if (window.location.hash !== next) {
-      window.history.replaceState(null, "", next)
+    const scrollToHash = () => {
+      const raw = window.location.hash.replace(/^#/, "")
+      if (!SECTION_IDS.includes(raw as SectionId)) return
+      const el = document.getElementById(raw)
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
     }
-  }
+    const raf = window.requestAnimationFrame(scrollToHash)
+    window.addEventListener("hashchange", scrollToHash)
+    return () => {
+      window.cancelAnimationFrame(raf)
+      window.removeEventListener("hashchange", scrollToHash)
+    }
+  }, [workflow])
 
-  // Mobile chrome: back arrow + workflow name + ⋯ overflow with
-  // Pause/Delete live in the global top bar. Desktop renders the
-  // page-level block below (md:flex). Header stays registered while
-  // loading so the bar doesn't flicker between "Onsager" and the
-  // workflow name. Memoize the JSX action node — the dashboard-ui rule
-  // says JSX `actions` should be `useMemo`d.
   const headerActions = useMemo(
     () =>
       workflow ? <WorkflowActions workflow={workflow} variant="menu" /> : null,
@@ -178,9 +155,10 @@ export function WorkflowDetailPage() {
     )
   }
 
+  const runsListHref = `/workspaces/${workspace.slug}/runs?workflow_id=${encodeURIComponent(workflow.id)}`
+
   return (
-    <div className="space-y-4 md:space-y-6">
-      <MetaphorBanner />
+    <div ref={scrollRoot} className="space-y-6 md:space-y-8">
       {/* Desktop-only page header. Mobile uses the global top bar. */}
       <div className="hidden space-y-2 md:block">
         <BackLink workspaceSlug={workspace.slug} />
@@ -200,8 +178,7 @@ export function WorkflowDetailPage() {
         </div>
         <WorkflowActions workflow={workflow} />
       </div>
-      {/* Mobile context strip: repo + status badge sit just under the
-          global header so users still see them on small screens. */}
+      {/* Mobile context strip. */}
       <div className="flex items-center justify-between gap-2 md:hidden">
         <p className="min-w-0 truncate text-sm text-muted-foreground">
           {workflow.trigger.repo_owner}/{workflow.trigger.repo_name}
@@ -214,51 +191,79 @@ export function WorkflowDetailPage() {
 
       <WebhookHealthWarning health={installHealth} variant="block" />
 
+      {/* Anchored timeline — single scroll surface, four sections.
+          `id=` attributes match the legacy `#definition` / `#runs` /
+          `#artifacts` / `#verdicts` hash anchors so bookmarks survive
+          the collapse from tabs (#455). */}
+      <section id="definition" className="scroll-mt-20 space-y-4">
+        <SectionHeader title="Definition" />
+        <DefinitionSection workflow={workflow} isOss={isOss} />
+      </section>
 
-      <Tabs value={tab} onValueChange={(v) => handleTabChange(v as TabValue)}>
-        <TabsList className="w-full justify-start overflow-x-auto md:w-auto">
-          <TabsTrigger value="definition">Definition</TabsTrigger>
-          <TabsTrigger value="runs">Runs</TabsTrigger>
-          <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
-          <TabsTrigger value="verdicts">Verdicts</TabsTrigger>
-        </TabsList>
+      <section id="runs" className="scroll-mt-20 space-y-4">
+        <SectionHeader
+          title="Runs"
+          actionHref={runsOverflow ? runsListHref : undefined}
+          actionLabel="Show all"
+        />
+        <ActiveRunsBanner
+          workflowId={workflow.id}
+          workspaceId={workspace.id}
+          title="In-flight"
+        />
+        <RunsList
+          runs={visibleRuns}
+          stageIds={workflow.stages.map((s) => s.id)}
+          workspaceSlug={workspace.slug}
+          isOss={isOss}
+        />
+        <WorkflowEventsCard workflowId={workflow.id} runs={visibleRuns} />
+        <WorkflowSessionsCard runs={visibleRuns} />
+      </section>
 
-        <TabsContent value="definition" className="space-y-4 pt-4 md:space-y-6">
-          <DefinitionTab workflow={workflow} isOss={isOss} />
-        </TabsContent>
+      <section id="artifacts" className="scroll-mt-20 space-y-4">
+        <SectionHeader title="Artifacts" />
+        <WorkflowArtifactsTab workflowId={workflow.id} />
+      </section>
 
-        <TabsContent value="runs" className="space-y-4 pt-4 md:space-y-6">
-          <ActiveRunsBanner
-            workflowId={workflow.id}
-            workspaceId={workspace.id}
-            title="In-flight"
-          />
-          <RunsList
-            runs={runs}
-            stageIds={workflow.stages.map((s) => s.id)}
-            workspaceSlug={workspace.slug}
-            isOss={isOss}
-          />
-          <WorkflowEventsCard workflowId={workflow.id} runs={runs} />
-          <WorkflowSessionsCard runs={runs} />
-        </TabsContent>
-
-        <TabsContent value="artifacts" className="space-y-4 pt-4 md:space-y-6">
-          <WorkflowArtifactsTab workflowId={workflow.id} />
-        </TabsContent>
-
-        <TabsContent value="verdicts" className="space-y-4 pt-4 md:space-y-6">
-          <WorkflowVerdictsTab
-            workflowId={workflow.id}
-            stages={workflow.stages}
-          />
-        </TabsContent>
-      </Tabs>
+      <section id="verdicts" className="scroll-mt-20 space-y-4">
+        <SectionHeader title="Verdicts" />
+        <WorkflowVerdictsTab
+          workflowId={workflow.id}
+          stages={workflow.stages}
+          limit={LAST_N_VERDICTS}
+        />
+      </section>
     </div>
   )
 }
 
-function DefinitionTab({
+function SectionHeader({
+  title,
+  actionHref,
+  actionLabel,
+}: {
+  title: string
+  actionHref?: string
+  actionLabel?: string
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+      {actionHref && actionLabel && (
+        <Button
+          size="sm"
+          variant="outline"
+          render={<Link to={actionHref} />}
+        >
+          {actionLabel}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+function DefinitionSection({
   workflow,
   isOss,
 }: {
@@ -280,9 +285,6 @@ function DefinitionTab({
             triggerLabel={workflow.trigger.label ?? ""}
             stages={workflow.stages}
           />
-          {/* Spec #405: OSS users running schedule triggers (cron /
-              delay / interval) discover the always-on-scheduler limit
-              here, where it bites. The line is inline, not a modal. */}
           {isOss && isSchedule && (
             <p className="mt-2 text-xs text-muted-foreground">
               Runs while this Onsager process is running. For 24/7
@@ -353,11 +355,6 @@ function RunsList({
     <Card>
       <CardHeader className="px-4 pb-2 pt-4 md:px-6">
         <CardTitle className="text-base">Run history</CardTitle>
-        {/* Spec #405: OSS dashboards cap the run-history view at 7
-            days; the line surfaces the Cloud value (90-day retention)
-            at the moment the user hits the wall. Informative, not
-            promotional. The actual retention enforcement is a follow-
-            up spec; this is the surfacing half. */}
         {isOss && (
           <p className="text-xs text-muted-foreground">
             Showing last 7 days · Cloud retains 90.

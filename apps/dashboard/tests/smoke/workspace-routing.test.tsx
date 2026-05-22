@@ -1,19 +1,38 @@
 import { describe, it, expect } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
-import { MemoryRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
+import {
+  MemoryRouter,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+  useParams,
+} from "react-router-dom"
 
-// Per spec #398 the bare path `/` is the universal landing and redirects
-// unconditionally to `/chat`. ChatPage resolves the user's workspace
-// context internally (last-used or zero-state FTUE), so the redirect
-// no longer needs to read membership state or `localStorage`.
+// ADR 0019 redirect contract. Replaces the legacy spec #398 `/` → `/chat`
+// row. After ADR 0019:
 //
-// The "bounce to first workspace" machinery was deleted in spec #403;
-// this test pins the post-demolition invariant. We replicate the App.tsx
-// redirect row here rather than rendering the full App to keep the test
-// scope tight (no AuthProvider, no lazy chunks).
+// - `/` redirects to the user's first workspace's Workflows tab (or to
+//   the workspace picker when there are zero memberships).
+// - `/chat` is retired as a page route (#457) and redirects to the same
+//   workspace overview as the bare path.
+// - `/workspaces/:slug/chat` redirects to `/workspaces/:slug/workflows`.
+//
+// We replicate the App.tsx redirect rows here rather than rendering the
+// full App so the test stays light (no AuthProvider, no QueryClient).
 
-function BarePathRoute() {
-  return <Navigate to="/chat" replace />
+function BarePathRedirect({ slug }: { slug?: string }) {
+  return (
+    <Navigate
+      to={slug ? `/workspaces/${slug}/workflows` : "/workspaces"}
+      replace
+    />
+  )
+}
+
+function WorkspaceRedirect({ to }: { to: string }) {
+  const { workspace } = useParams<{ workspace: string }>()
+  return <Navigate to={`/workspaces/${workspace}/${to}`} replace />
 }
 
 function LocationProbe() {
@@ -21,33 +40,62 @@ function LocationProbe() {
   return <div data-testid="location">{loc.pathname}</div>
 }
 
-function renderRoute(initial: string) {
+function renderRoute(initial: string, slug = "acme") {
   return render(
     <MemoryRouter initialEntries={[initial]}>
       <Routes>
-        <Route path="/" element={<BarePathRoute />} />
-        <Route path="/chat" element={<LocationProbe />} />
+        <Route path="/" element={<BarePathRedirect slug={slug} />} />
+        <Route path="/chat" element={<BarePathRedirect slug={slug} />} />
+        <Route path="/workspaces" element={<LocationProbe />} />
+        <Route
+          path="/workspaces/:workspace/chat"
+          element={<WorkspaceRedirect to="workflows" />}
+        />
         <Route path="/workspaces/:workspace/*" element={<LocationProbe />} />
       </Routes>
     </MemoryRouter>,
   )
 }
 
-describe("App-level bare-path redirect (#398, #403)", () => {
-  it("bare `/` redirects to /chat regardless of workspace state", async () => {
+describe("ADR 0019 redirect contract (#453, #457)", () => {
+  it("bare `/` lands on the user's first workspace's Workflows tab", async () => {
     renderRoute("/")
     await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent("/chat"),
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/workspaces/acme/workflows",
+      ),
     )
   })
 
-  it("does not bounce to a workspace overview", async () => {
-    renderRoute("/")
-    await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent("/chat"),
+  it("bare `/` falls back to the workspace picker when no workspace exists", async () => {
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route path="/" element={<BarePathRedirect />} />
+          <Route path="/workspaces" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
     )
-    expect(screen.getByTestId("location").textContent).not.toMatch(
-      /^\/workspaces\//,
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent("/workspaces"),
+    )
+  })
+
+  it("`/chat` redirects to the user's workspace overview (#457)", async () => {
+    renderRoute("/chat")
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/workspaces/acme/workflows",
+      ),
+    )
+  })
+
+  it("`/workspaces/:slug/chat` redirects to `/workspaces/:slug/workflows` (#457)", async () => {
+    renderRoute("/workspaces/foo/chat", "foo")
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/workspaces/foo/workflows",
+      ),
     )
   })
 })

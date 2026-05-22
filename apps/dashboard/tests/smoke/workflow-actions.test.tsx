@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import type { ReactNode } from "react"
-import { WorkflowActions } from "@/components/factory/workflows/WorkflowActions"
+import { WorkflowActions } from "@/components/workflows/WorkflowActions"
 import { api, type Workflow } from "@/lib/api"
 
 function mount(node: ReactNode) {

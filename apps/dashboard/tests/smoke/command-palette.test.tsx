@@ -44,6 +44,10 @@ describe("CommandPalette", () => {
       screen.getByPlaceholderText(/type a command or search/i),
     ).toBeInTheDocument()
     expect(screen.getByText(/new workflow/i)).toBeInTheDocument()
-    expect(screen.getByText(/^chat$/i)).toBeInTheDocument()
+    // Three-tab IA (ADR 0019): Workflows / Runs / Activity replace the
+    // legacy `Chat` go-to entry.
+    expect(screen.getByText(/^workflows$/i)).toBeInTheDocument()
+    expect(screen.getByText(/^runs$/i)).toBeInTheDocument()
+    expect(screen.getByText(/^activity$/i)).toBeInTheDocument()
   })
 })

@@ -17,17 +17,22 @@ const SEVERITY_VARIANT: Record<
 export function WorkflowVerdictsTab({
   workflowId,
   stages,
+  limit,
 }: {
   workflowId: string
   stages: { gate_kind: string }[]
+  /// Optional inline truncation (#455). Caller passes `LAST_N_VERDICTS`
+  /// so the timeline section stays scannable; the cross-workflow list
+  /// link in the section header surfaces the rest.
+  limit?: number
 }) {
   const hasGovernanceStage = stages.some(
     (s) => s.gate_kind === "governance",
   )
 
   const { data, isLoading } = useQuery({
-    queryKey: ["workflow-verdicts", workflowId],
-    queryFn: () => api.getWorkflowVerdicts(workflowId),
+    queryKey: ["workflow-verdicts", workflowId, limit],
+    queryFn: () => api.getWorkflowVerdicts(workflowId, limit),
     refetchInterval: 5000,
     enabled: hasGovernanceStage,
   })

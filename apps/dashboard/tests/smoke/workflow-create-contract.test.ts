@@ -4,7 +4,7 @@ import {
   documentToCreateRequest,
   emptyDocument,
   type WorkflowDocument,
-} from "@/components/factory/workflows/workflow-draft"
+} from "@/components/workflows/workflow-draft"
 
 // The stiglab `validate_create_body` is the source of truth for the wire
 // shape. These tests pin the UI → backend adapter against its contract:

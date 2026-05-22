@@ -6,7 +6,7 @@ import type { ReactNode } from "react"
 
 import { BindDraftDialog } from "@/components/chat/BindDraftDialog"
 import { makeDraft, saveDraft } from "@/lib/drafts"
-import { makeStage } from "@/components/factory/workflows/workflow-draft"
+import { makeStage } from "@/components/workflows/workflow-draft"
 import type {
   GitHubAppInstallation,
   Workspace,
@@ -184,7 +184,7 @@ describe("BindDraftDialog (spec #402)", () => {
       />,
     )
     expect(
-      await screen.findByText("First, name your factory floor."),
+      await screen.findByText("First, name your workspace."),
     ).toBeInTheDocument()
     expect(
       await screen.findByPlaceholderText("Personal"),

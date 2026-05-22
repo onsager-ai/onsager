@@ -368,10 +368,15 @@ pub async fn create_workflow(
         .into_response()
 }
 
-/// GET /api/workflows?workspace_id=... — list workflows for a workspace.
+/// GET /api/workflows?workspace_id=...&state=... — list workflows for a
+/// workspace. `state` (`drafted|bound|active|paused`) filters the list and
+/// the response always includes per-status counts for the chip strip
+/// (#456 / ADR 0019).
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
     pub workspace_id: String,
+    #[serde(default)]
+    pub state: Option<String>,
 }
 
 pub async fn list_workflows(
@@ -389,13 +394,41 @@ pub async fn list_workflows(
         Ok(p) => p,
         Err(r) => return r,
     };
-    match workflow_db::list_workflows_for_workspace(spine, &q.workspace_id).await {
-        Ok(workflows) => Json(serde_json::json!({ "workflows": workflows })).into_response(),
+    let status = match q.state.as_deref() {
+        None | Some("") | Some("all") => None,
+        Some(s) => match workflow_db::WorkflowStatus::from_wire(s) {
+            Some(v) => Some(v),
+            None => return bad_request(format!("unknown workflow state: {s}")),
+        },
+    };
+    let workflows =
+        match workflow_db::list_workflows_for_workspace_filtered(spine, &q.workspace_id, status)
+            .await
+        {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::error!("failed to list workflows: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+            }
+        };
+    let counts = match workflow_db::workflow_status_counts(spine, &q.workspace_id).await {
+        Ok(c) => c,
         Err(e) => {
-            tracing::error!("failed to list workflows: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            tracing::error!("failed to compute workflow status counts: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
-    }
+    };
+    Json(serde_json::json!({
+        "workflows": workflows,
+        "counts": {
+            "drafted": counts.drafted,
+            "bound": counts.bound,
+            "active": counts.active,
+            "paused": counts.paused,
+            "all": counts.drafted + counts.bound + counts.active + counts.paused,
+        },
+    }))
+    .into_response()
 }
 
 /// GET /api/workflows/:id — single-workflow detail with stages.

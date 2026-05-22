@@ -335,6 +335,15 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // linked sessions so the dashboard's RunDetailPage tabs render
         // off a single fetch.
         .route("/api/runs/{id}", get(run_handlers::get_run))
+        // Workspace-scoped cross-workflow runs list (#454 / ADR 0019).
+        // Backs the dashboard's Runs tab — every artifact flowing
+        // through a workflow in this workspace, projected the same
+        // way as `/api/workflows/:id/runs`. Optional `workflow_id`
+        // narrows to a single workflow.
+        .route(
+            "/api/workspaces/{workspace_id}/runs",
+            get(run_handlers::list_workspace_runs),
+        )
         .route("/api/nodes", get(node_handlers::list_nodes))
         .route("/api/tasks", post(task_handlers::create_task))
         // Manual / replay trigger endpoints (#241 — Category 4 of the

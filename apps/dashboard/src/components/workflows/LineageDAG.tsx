@@ -3,7 +3,7 @@ import type { ArtifactDetail } from "@/lib/api"
 import {
   buildLanes,
   pairVersions,
-} from "@/components/factory/lineage-dag-utils"
+} from "@/components/workflows/lineage-dag-utils"
 
 interface LineageDAGProps {
   artifact: ArtifactDetail

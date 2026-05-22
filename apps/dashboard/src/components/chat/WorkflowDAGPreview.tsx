@@ -9,7 +9,7 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { AlertTriangle } from "lucide-react"
-import type { WorkflowDocument } from "@/components/factory/workflows/workflow-draft"
+import type { WorkflowDocument } from "@/components/workflows/workflow-draft"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
