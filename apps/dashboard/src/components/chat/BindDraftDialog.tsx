@@ -32,9 +32,9 @@ import {
 } from "@/lib/api"
 import { markDraftBound } from "@/lib/drafts"
 import { trackActivation } from "@/lib/activation"
-import { documentToCreateRequest } from "@/components/factory/workflows/workflow-draft"
-import type { WorkflowDraft } from "@/components/factory/workflows/workflow-draft"
-import { RepoCombobox } from "@/components/factory/workflows/RepoCombobox"
+import { documentToCreateRequest } from "@/components/workflows/workflow-draft"
+import type { WorkflowDraft } from "@/components/workflows/workflow-draft"
+import { RepoCombobox } from "@/components/workflows/RepoCombobox"
 import { WorkspaceCreateForm } from "@/components/workspaces/NewWorkspaceDialog"
 import {
   Dialog,
@@ -183,7 +183,7 @@ export function BindDraftDialog({
           </DialogTitle>
           <DialogDescription>
             {step === "workspace" &&
-              "First, name your factory floor."}
+              "First, name your workspace."}
             {step === "install" &&
               "Give Onsager access to your repos."}
             {step === "project" &&

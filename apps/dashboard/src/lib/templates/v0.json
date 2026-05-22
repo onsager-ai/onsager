@@ -1,4 +1,5 @@
 {
+  "_comment": "Template catalog. Per ADR 0019 (spec #406, #458) the factory metaphor is retired from dashboard chrome / copy / assistant persona, but `factory_framing` strings on each template are user-facing template content — intentionally KEPT. Do not grep-and-purge.",
   "version": 0,
   "templates": [
     {

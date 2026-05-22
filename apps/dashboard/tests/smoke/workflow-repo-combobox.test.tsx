@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
-import { RepoCombobox } from "@/components/factory/workflows/RepoCombobox"
+import { RepoCombobox } from "@/components/workflows/RepoCombobox"
 import type {
   AccessibleRepo,
   GitHubAppInstallation,

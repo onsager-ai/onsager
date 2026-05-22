@@ -10,7 +10,7 @@ import { parse, stringify } from "yaml"
 import type {
   WorkflowDocument,
   WorkflowTriggerDraft,
-} from "@/components/factory/workflows/workflow-draft"
+} from "@/components/workflows/workflow-draft"
 import type {
   WorkflowArtifactKind,
   WorkflowGateKind,

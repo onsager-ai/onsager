@@ -35,6 +35,12 @@ const WorkflowDetailPage = lazy(() =>
 const RunDetailPage = lazy(() =>
   import("@/pages/RunDetailPage").then((m) => ({ default: m.RunDetailPage })),
 )
+const RunsPage = lazy(() =>
+  import("@/pages/RunsPage").then((m) => ({ default: m.RunsPage })),
+)
+const ActivityPage = lazy(() =>
+  import("@/pages/ActivityPage").then((m) => ({ default: m.ActivityPage })),
+)
 const SettingsPage = lazy(() =>
   import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 )
@@ -48,9 +54,9 @@ const PersonalAccessTokensPage = lazy(() =>
     default: m.PersonalAccessTokensPage,
   })),
 )
-const ChatPage = lazy(() =>
-  import("@/pages/ChatPage").then((m) => ({ default: m.ChatPage })),
-)
+// ChatPage is no longer mounted as a route (#457 / ADR 0019). It stays
+// in the codebase as a component for ADR 0020's portable global chat
+// surface — but App.tsx doesn't lazy-import it any more.
 const LandingPage = lazy(() =>
   import("@/pages/LandingPage").then((m) => ({ default: m.LandingPage })),
 )
@@ -105,6 +111,26 @@ function LazyRoute({
 function WorkspaceRedirect({ to }: { to: string }) {
   const { workspace } = useParams<{ workspace: string }>()
   return <Navigate to={`/workspaces/${workspace}/${to}`} replace />
+}
+
+// Bare-path redirect (#453 / ADR 0019). Lands the signed-in user on
+// `/workspaces/:slug/workflows` for their first membership workspace;
+// users with zero workspaces bounce to `/workspaces` (the picker /
+// FTUE surface). Mirrors the auth-aware behaviour the legacy
+// `/` → `/chat` redirect relied on.
+function BarePathRedirect() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: api.listWorkspaces,
+    staleTime: 30_000,
+    retry: 1,
+  })
+  if (isLoading) return null
+  const first = data?.workspaces?.[0]
+  if (first) {
+    return <Navigate to={`/workspaces/${first.slug}/workflows`} replace />
+  }
+  return <Navigate to="/workspaces" replace />
 }
 
 // Resolves a legacy `sessions/:id` bookmark to its run. Fetches the session
@@ -184,19 +210,20 @@ function AppRoutes() {
             <DevModeBanner />
             <AppLayout>
               <Routes>
-                {/* Bare path: redirect to /chat (spec #398). ChatPage
-                    is the universal entry — workspace-less users see
-                    the FTUE empty state; workspace users see the same
-                    surface with their last-used workspace in scope. */}
-                <Route path="/" element={<Navigate to="/chat" replace />} />
+                {/* Bare path: redirect to the user's first workspace's
+                    Workflows tab (#453 / ADR 0019). Users with zero
+                    workspaces bounce to the picker / FTUE surface. The
+                    legacy `/` → `/chat` route was retired alongside the
+                    chat page-route (#457). */}
+                <Route path="/" element={<BarePathRedirect />} />
 
-                {/* Top-level Chat (spec #398). The same surface lives at
-                    `/workspaces/:slug/chat` for users who deep-link a
-                    specific workspace; this unscoped mount is the
-                    universal landing. */}
+                {/* `/chat` retired as a page route (#457 / ADR 0019).
+                    Chat becomes a portable global component per ADR 0020;
+                    the address-bar entry redirects to the user's
+                    workspace overview so bookmarks don't 404. */}
                 <Route
                   path="/chat"
-                  element={<LazyRoute><ChatPage /></LazyRoute>}
+                  element={<BarePathRedirect />}
                 />
 
                 {/* Workspace picker / list. Stays unscoped — the user
@@ -229,13 +256,12 @@ function AppRoutes() {
                           index
                           element={<Navigate to="workflows" replace />}
                         />
-                        <Route
-                          path="chat"
-                          element={<LazyRoute><ChatPage /></LazyRoute>}
-                        />
+                        {/* Workspace-scoped chat retired as a page route
+                            (#457 / ADR 0019). Redirect preserves bookmarks. */}
+                        <Route path="chat" element={<WorkspaceRedirect to="workflows" />} />
                         {/* Bookmark redirects (spec #306). Preserves any
                             in-the-wild URLs after top-level surfaces were
-                            demoted in the two-surface IA (#289). */}
+                            demoted. */}
                         <Route path="sessions" element={<WorkspaceRedirect to="workflows" />} />
                         <Route path="sessions/:id" element={<SessionIdRedirect />} />
                         <Route path="artifacts" element={<WorkspaceRedirect to="workflows" />} />
@@ -263,12 +289,25 @@ function AppRoutes() {
                           path="workflows/:id"
                           element={<LazyRoute variant="detail"><WorkflowDetailPage /></LazyRoute>}
                         />
+                        {/* Cross-workflow runs list (#454 / ADR 0019).
+                            Workspace-scoped; row clicks land on the flat
+                            run detail route below. */}
+                        <Route
+                          path="runs"
+                          element={<LazyRoute variant="list"><RunsPage /></LazyRoute>}
+                        />
                         {/* Run detail hub (#303). Flat route — runs
                             have unique IDs (artifact_id), so they
                             don't need to be nested under workflow. */}
                         <Route
                           path="runs/:runId"
                           element={<LazyRoute variant="detail"><RunDetailPage /></LazyRoute>}
+                        />
+                        {/* Spine event stream at operator grain
+                            (#454 / ADR 0019). */}
+                        <Route
+                          path="activity"
+                          element={<LazyRoute variant="list"><ActivityPage /></LazyRoute>}
                         />
                         <Route
                           path="settings"

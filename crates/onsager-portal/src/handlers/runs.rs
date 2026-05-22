@@ -15,10 +15,10 @@
 //! `handlers/workflows.rs` (non-members get a flat 404).
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::auth::AuthUser;
@@ -240,4 +240,124 @@ pub async fn get_run(
         "sessions": linked_sessions,
     }))
     .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceRunsQuery {
+    #[serde(default)]
+    pub workflow_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct WorkspaceRunRow {
+    artifact_id: String,
+    workflow_id: String,
+    state: String,
+    current_stage_index: Option<i32>,
+    workflow_parked_reason: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// GET /api/workspaces/:id/runs — workspace-scoped cross-workflow runs
+/// list. Each row is one artifact flowing through a workflow, projected
+/// the same way as `GET /api/workflows/:id/runs`. Optionally filterable
+/// by `workflow_id` to scope to a single workflow's history.
+pub async fn list_workspace_runs(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(workspace_id): Path<String>,
+    Query(q): Query<WorkspaceRunsQuery>,
+) -> Response {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workspace_id).await {
+        return r;
+    }
+    let spine = state.spine.pool();
+    let limit = q.limit.unwrap_or(50).clamp(1, 500);
+
+    let rows = if let Some(wf_id) = q.workflow_id.as_deref() {
+        sqlx::query_as::<_, WorkspaceRunRow>(
+            "SELECT artifact_id, workflow_id, state, current_stage_index, \
+                    workflow_parked_reason, created_at, updated_at \
+             FROM artifacts \
+             WHERE workspace_id = $1 AND workflow_id = $2 \
+             ORDER BY updated_at DESC \
+             LIMIT $3",
+        )
+        .bind(&workspace_id)
+        .bind(wf_id)
+        .bind(limit)
+        .fetch_all(spine)
+        .await
+    } else {
+        sqlx::query_as::<_, WorkspaceRunRow>(
+            "SELECT artifact_id, workflow_id, state, current_stage_index, \
+                    workflow_parked_reason, created_at, updated_at \
+             FROM artifacts \
+             WHERE workspace_id = $1 AND workflow_id IS NOT NULL \
+             ORDER BY updated_at DESC \
+             LIMIT $2",
+        )
+        .bind(&workspace_id)
+        .bind(limit)
+        .fetch_all(spine)
+        .await
+    };
+
+    let rows = match rows {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("failed to list workspace runs: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "failed to load runs" })),
+            )
+                .into_response();
+        }
+    };
+
+    // Group rows by workflow_id so we load each workflow's stage chain
+    // once, then zip the projection per-row. Single-workflow filter case
+    // skips the loop overhead but still falls through this path.
+    let mut stages_by_workflow: std::collections::HashMap<
+        String,
+        Vec<crate::workflow::WorkflowStage>,
+    > = std::collections::HashMap::new();
+    let mut runs: Vec<WorkflowRun> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let stages = match stages_by_workflow.get(&row.workflow_id) {
+            Some(s) => s.clone(),
+            None => {
+                match crate::workflow_db::list_stages_for_workflow(spine, &row.workflow_id).await {
+                    Ok(s) => {
+                        stages_by_workflow.insert(row.workflow_id.clone(), s.clone());
+                        s
+                    }
+                    Err(e) => {
+                        tracing::error!("failed to load stages for {}: {e}", row.workflow_id);
+                        Vec::new()
+                    }
+                }
+            }
+        };
+        let (status, stage_entries) = project_run_stages(
+            &row.state,
+            row.current_stage_index,
+            row.workflow_parked_reason.as_deref(),
+            row.updated_at,
+            &stages,
+        );
+        runs.push(WorkflowRun {
+            id: row.artifact_id.clone(),
+            workflow_id: row.workflow_id,
+            artifact_id: row.artifact_id,
+            status,
+            stages: stage_entries,
+            started_at: row.created_at,
+            updated_at: row.updated_at,
+        });
+    }
+    Json(serde_json::json!({ "runs": runs })).into_response()
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
-import { LabelCombobox } from "@/components/factory/workflows/LabelCombobox"
+import { LabelCombobox } from "@/components/workflows/LabelCombobox"
 import type { GitHubLabel } from "@/lib/api"
 
 const labels: GitHubLabel[] = [

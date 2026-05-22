@@ -2,8 +2,8 @@ import type {
   WorkflowArtifactKind,
   WorkflowGateKind,
 } from "@/lib/api/types"
-import type { WorkflowDocument } from "@/components/factory/workflows/workflow-draft"
-import { makeStage } from "@/components/factory/workflows/workflow-draft"
+import type { WorkflowDocument } from "@/components/workflows/workflow-draft"
+import { makeStage } from "@/components/workflows/workflow-draft"
 import templatesData from "./v0.json"
 
 export interface FtueTemplateStage {

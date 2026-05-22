@@ -17,7 +17,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { useSidebar } from "@/components/ui/sidebar"
 import { NewWorkspaceDialog } from "@/components/workspaces/NewWorkspaceDialog"
 import {
   useMembershipWorkspaces,
@@ -77,7 +76,6 @@ function WorkspaceBadge({ workspace }: { workspace: Workspace | null }) {
 export function WorkspaceSwitcher() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { isMobile, setOpenMobile } = useSidebar()
   const workspaces = useMembershipWorkspaces()
   const active = useOptionalActiveWorkspace()
   const [open, setOpen] = useState(false)
@@ -96,13 +94,8 @@ export function WorkspaceSwitcher() {
     return null
   }
 
-  const closeMobile = () => {
-    if (isMobile) setOpenMobile(false)
-  }
-
   const switchTo = (workspace: Workspace) => {
     setOpen(false)
-    closeMobile()
     navigate(targetPathForSwitch(location.pathname, workspace.slug))
   }
 

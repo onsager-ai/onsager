@@ -1,6 +1,6 @@
 import { Plus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { WorkflowDraft } from "@/components/factory/workflows/workflow-draft"
+import type { WorkflowDraft } from "@/components/workflows/workflow-draft"
 
 export interface DraftStripProps {
   drafts: WorkflowDraft[]

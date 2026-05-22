@@ -72,6 +72,11 @@ export type { SessionSpend } from './sessions';
 
 // Re-export workflow helpers
 export { normalizeWorkflowArtifactKind, stageToCreateStage } from './workflows';
+export type {
+  WorkflowStatusChip,
+  WorkflowStatusCounts,
+  ListWorkflowsResult,
+} from './workflows';
 
 // Compose the unified `api` object that all existing callers use
 import { sessions } from './sessions';

@@ -244,6 +244,98 @@ pub async fn list_workflows_for_workspace(
     rows.into_iter().map(row_to_workflow).collect()
 }
 
+/// Workflow activation states surfaced by the dashboard's chip filter
+/// (#456 / ADR 0019). Derived from `(active, install_id)` — the spine
+/// has no discrete status column today; `Paused` is reserved for a
+/// future explicit pause flag and currently has zero rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowStatus {
+    Drafted,
+    Bound,
+    Active,
+    Paused,
+}
+
+impl WorkflowStatus {
+    pub fn from_wire(s: &str) -> Option<Self> {
+        match s {
+            "drafted" => Some(Self::Drafted),
+            "bound" => Some(Self::Bound),
+            "active" => Some(Self::Active),
+            "paused" => Some(Self::Paused),
+            _ => None,
+        }
+    }
+
+    fn sql_predicate(self) -> &'static str {
+        match self {
+            Self::Drafted => "active = false AND (install_id IS NULL OR install_id = '')",
+            Self::Bound => "active = false AND install_id IS NOT NULL AND install_id <> ''",
+            Self::Active => "active = true",
+            // No persisted "paused" state yet — empty predicate always
+            // resolves to zero rows. Wired the moment an explicit pause
+            // column lands.
+            Self::Paused => "false",
+        }
+    }
+}
+
+pub async fn list_workflows_for_workspace_filtered(
+    pool: &PgPool,
+    workspace_id: &str,
+    status: Option<WorkflowStatus>,
+) -> anyhow::Result<Vec<Workflow>> {
+    let sql = match status {
+        None => "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                        workspace_id, install_id, created_by, created_at, updated_at \
+                   FROM workflows WHERE workspace_id = $1 ORDER BY created_at ASC"
+            .to_string(),
+        Some(s) => format!(
+            "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                    workspace_id, install_id, created_by, created_at, updated_at \
+               FROM workflows WHERE workspace_id = $1 AND {} ORDER BY created_at ASC",
+            s.sql_predicate(),
+        ),
+    };
+    let rows = sqlx::query(&sql).bind(workspace_id).fetch_all(pool).await?;
+    rows.into_iter().map(row_to_workflow).collect()
+}
+
+/// Per-status counts for the workflows-list chip strip. Counts are
+/// derived from the same `(active, install_id)` predicates that
+/// `WorkflowStatus::sql_predicate` uses, so the chip totals and the
+/// filtered list always agree.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WorkflowStatusCounts {
+    pub drafted: i64,
+    pub bound: i64,
+    pub active: i64,
+    pub paused: i64,
+}
+
+pub async fn workflow_status_counts(
+    pool: &PgPool,
+    workspace_id: &str,
+) -> anyhow::Result<WorkflowStatusCounts> {
+    let row = sqlx::query(
+        "SELECT \
+            COUNT(*) FILTER (WHERE active = false AND (install_id IS NULL OR install_id = '')) AS drafted, \
+            COUNT(*) FILTER (WHERE active = false AND install_id IS NOT NULL AND install_id <> '') AS bound, \
+            COUNT(*) FILTER (WHERE active = true) AS active, \
+            0::bigint AS paused \
+           FROM workflows WHERE workspace_id = $1",
+    )
+    .bind(workspace_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(WorkflowStatusCounts {
+        drafted: row.try_get::<i64, _>("drafted")?,
+        bound: row.try_get::<i64, _>("bound")?,
+        active: row.try_get::<i64, _>("active")?,
+        paused: row.try_get::<i64, _>("paused")?,
+    })
+}
+
 pub async fn list_stages_for_workflow(
     pool: &PgPool,
     workflow_id: &str,

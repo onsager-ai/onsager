@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ArrowLeft, Ban, MoreHorizontal, RefreshCw, ShieldCheck } from "lucide-react"
-import { LineageDAG } from "@/components/factory/LineageDAG"
+import { LineageDAG } from "@/components/workflows/LineageDAG"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { useActiveWorkspace } from "@/lib/workspace"
 

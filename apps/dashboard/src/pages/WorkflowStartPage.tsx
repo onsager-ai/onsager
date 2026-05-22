@@ -1,26 +1,26 @@
 import { useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Factory, Loader2, Zap } from "lucide-react"
+import { GitBranch, Loader2, Zap } from "lucide-react"
 import { api, type AccessibleRepo, type CreateWorkflowRequest } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { LabelCombobox } from "@/components/factory/workflows/LabelCombobox"
+import { LabelCombobox } from "@/components/workflows/LabelCombobox"
 import {
   GITHUB_ISSUE_TO_PR_PRESET,
   githubIssueToPrPreset,
-} from "@/components/factory/workflows/workflow-draft"
+} from "@/components/workflows/workflow-draft"
 import { usePageHeader } from "@/components/layout/PageHeader"
 
 /**
- * The 60-second "start the factory" card shown after a GitHub App install.
- * Lists each repo accessible to the install, with a label combobox + a
- * "Run factory" toggle per row. Activating a row creates a workflow from
- * the `github-issue-to-pr` preset and marks it active.
+ * The 60-second "start a workflow" card shown after a GitHub App install.
+ * Lists each repo accessible to the install, with a label combobox + an
+ * activate toggle per row. Activating a row creates a workflow from the
+ * `github-issue-to-pr` preset and marks it active.
  */
 export function WorkflowStartPage() {
-  usePageHeader({ title: "Start the factory", backTo: "/workspaces" })
+  usePageHeader({ title: "Start a workflow", backTo: "/workspaces" })
   const [params] = useSearchParams()
   const installId = params.get("install") ?? ""
   const workspaceIdParam = params.get("workspace_id") ?? ""
@@ -92,11 +92,11 @@ export function WorkflowStartPage() {
     <div className="mx-auto max-w-2xl space-y-4 md:space-y-6">
       <div className="flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <Factory className="h-5 w-5" />
+          <GitBranch className="h-5 w-5" />
         </div>
         <div>
           <h1 className="hidden text-2xl font-bold tracking-tight md:block">
-            Start the factory
+            Start a workflow
           </h1>
           <p className="text-sm text-muted-foreground">
             Pick a repo, tag a label, turn it on. You&apos;re done in a minute.
@@ -252,7 +252,7 @@ function RepoRow({
           onClick={run}
         >
           <Zap className="h-4 w-4" />
-          {create.isPending ? "Starting…" : "Run factory"}
+          {create.isPending ? "Starting…" : "Activate workflow"}
         </Button>
         {create.isError && (
           <p className="text-xs text-destructive">

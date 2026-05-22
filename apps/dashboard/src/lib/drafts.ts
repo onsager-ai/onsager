@@ -13,7 +13,7 @@ import type {
   WorkflowDraft,
   WorkflowDocument,
   WorkflowDraftSource,
-} from "@/components/factory/workflows/workflow-draft"
+} from "@/components/workflows/workflow-draft"
 import { trackActivation } from "@/lib/activation"
 
 /** Soft cap on stored drafts per user. Oldest by `updated_at` evicted. */

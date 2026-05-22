@@ -157,17 +157,56 @@ function defaultStageName(gate: WorkflowGateKind): string {
   }
 }
 
+/// Status chip values surfaced on the Workflows tab (#456 / ADR 0019).
+/// Wire-side: the dashboard sends `?state=<value>`; the backend maps
+/// each to a derived `(active, install_id)` predicate. `all` is the
+/// no-filter pseudo-value (omitted from the query string when picked).
+export type WorkflowStatusChip =
+  | 'all'
+  | 'drafted'
+  | 'bound'
+  | 'active'
+  | 'paused';
+
+export interface WorkflowStatusCounts {
+  drafted: number;
+  bound: number;
+  active: number;
+  paused: number;
+  all: number;
+}
+
+export interface ListWorkflowsResult {
+  workflows: Workflow[];
+  counts: WorkflowStatusCounts;
+}
+
 export const workflows = {
   // Workflows (issue #82) — CRUD + live runs. The API is provided by the
   // stiglab sibling sub-issue; the dashboard is the only client today.
   // The backend persists workflows with flat trigger fields and stage `params`;
   // these wrappers translate backend → UI shape.
-  listWorkflows: async (workspaceId: string): Promise<{ workflows: Workflow[] }> => {
+  listWorkflows: async (
+    workspaceId: string,
+    state?: WorkflowStatusChip,
+  ): Promise<ListWorkflowsResult> => {
     if (!workspaceId) throw new ApiError('workspaceId is required', 400);
-    const raw = await request<{ workflows: BackendWorkflow[] }>(
-      `/workflows?workspace_id=${encodeURIComponent(workspaceId)}`,
-    );
-    return { workflows: raw.workflows.map((w) => workflowFromBackend(w)) };
+    const query = new URLSearchParams({ workspace_id: workspaceId });
+    if (state && state !== 'all') query.set('state', state);
+    const raw = await request<{
+      workflows: BackendWorkflow[];
+      counts?: WorkflowStatusCounts;
+    }>(`/workflows?${query.toString()}`);
+    return {
+      workflows: raw.workflows.map((w) => workflowFromBackend(w)),
+      counts: raw.counts ?? {
+        drafted: 0,
+        bound: 0,
+        active: 0,
+        paused: 0,
+        all: raw.workflows.length,
+      },
+    };
   },
   // Fan-out across every workspace the user belongs to. Stiglab's list
   // endpoint is workspace-scoped; cross-workspace "do I have any workflows
@@ -186,6 +225,26 @@ export const workflows = {
       ),
     );
     return { workflows: lists.flat() };
+  },
+  // Workspace-scoped cross-workflow runs list (#454 / ADR 0019). Backs
+  // the dashboard's Runs tab; optional `workflowId` narrows to a single
+  // workflow's history (mirrors the chip filter on RunsPage).
+  listWorkspaceRuns: (
+    workspaceId: string,
+    opts?: { workflowId?: string; limit?: number },
+  ): Promise<{ runs: WorkflowRun[] }> => {
+    if (!workspaceId) throw new ApiError('workspaceId is required', 400);
+    const params = new URLSearchParams();
+    if (opts?.workflowId) params.set('workflow_id', opts.workflowId);
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    const raw = params.toString();
+    // `qs` is the lint-recognized variable name for query suffixes
+    // in the api-contract matcher; leading `?` lives here so the
+    // template stays a simple `${qs}` interpolation.
+    const qs = raw ? `?${raw}` : '';
+    return request<{ runs: WorkflowRun[] }>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/runs${qs}`,
+    );
   },
   getWorkflow: async (id: string): Promise<{ workflow: Workflow }> => {
     const raw = await request<{ workflow: BackendWorkflow; stages: BackendWorkflowStage[] }>(

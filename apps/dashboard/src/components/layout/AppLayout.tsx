@@ -1,16 +1,39 @@
 import type { ReactNode } from "react"
 import { ArrowLeft } from "lucide-react"
-import { Link } from "react-router-dom"
-import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
+import { Link, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { AppSidebar } from "./AppSidebar"
 import { OnsagerLogo } from "./OnsagerLogo"
-import { CommandPaletteProvider, CommandPaletteTrigger } from "./CommandPalette"
+import {
+  CommandPaletteProvider,
+  CommandPaletteTrigger,
+} from "./CommandPalette"
 import {
   PageHeaderProvider,
   usePageHeaderState,
 } from "./PageHeader"
+import { UserMenu } from "./UserMenu"
+import { WorkspaceSwitcher } from "@/components/workspaces/WorkspaceSwitcher"
+import { useOptionalActiveWorkspace } from "@/lib/workspace"
+import { cn } from "@/lib/utils"
+
+// Top chrome IA (#453 / ADR 0019). Three tabs — Workflows / Runs /
+// Activity — anchor every workspace surface. The workspace switcher
+// and the avatar/user menu sit in the same row; on narrow viewports
+// the row compresses to a second row that holds the tabs.
+
+interface TopTab {
+  key: string
+  label: string
+  // Path relative to the active workspace root.
+  path: string
+}
+
+const TOP_TABS: TopTab[] = [
+  { key: "workflows", label: "Workflows", path: "workflows" },
+  { key: "runs", label: "Runs", path: "runs" },
+  { key: "activity", label: "Activity", path: "activity" },
+]
 
 export function AppLayout({ children }: { children: ReactNode }) {
   return (
@@ -25,42 +48,129 @@ export function AppLayout({ children }: { children: ReactNode }) {
 function AppLayoutInner({ children }: { children: ReactNode }) {
   const { fullBleed } = usePageHeaderState()
   return (
-    // Constrain the shell to the viewport so the inner <main> can be the
-    // only scroll container — body is overflow:hidden in index.css.
-    // shadcn's wrapper defaults to min-h-svh which would let content grow
-    // and clip; h-svh + overflow-hidden pins it.
-    <SidebarProvider className="h-svh overflow-hidden">
-      <AppSidebar />
-      <SidebarInset>
-        <MobileHeader />
-        {/* Desktop header */}
-        <header className="hidden h-14 items-center gap-2 border-b px-6 md:flex">
-          <SidebarTrigger />
-          <Separator orientation="vertical" className="h-6" />
-          <div className="ml-auto flex items-center gap-2">
-            <CommandPaletteTrigger />
-          </div>
-        </header>
-        {/* fullBleed pages (e.g. Chat) own their own scroll and spacing;
-            overflow-hidden + p-0 hands the entire area below the header
-            to the page. Standard pages get overflow-y-auto + padding. */}
-        <main
-          className={
-            fullBleed
-              ? "min-h-0 flex-1 overflow-hidden"
-              : "min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:p-6 md:pb-6"
-          }
-        >
-          {children}
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+    // Pin the shell to the viewport so the inner <main> owns scroll;
+    // html/body are overflow:hidden in index.css.
+    <div className="flex h-svh flex-col overflow-hidden">
+      <DesktopTopChrome />
+      <MobileHeader />
+      <MobileTabsRow />
+      <main
+        className={
+          fullBleed
+            ? "min-h-0 flex-1 overflow-hidden"
+            : "min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:p-6 md:pb-6"
+        }
+      >
+        {children}
+      </main>
+    </div>
   )
 }
 
-// Mobile chrome — the only persistent bar on phones. Pages register
-// title/back/actions via usePageHeader. When a page hasn't registered a
-// title, we fall back to the Onsager wordmark to avoid an empty bar.
+function DesktopTopChrome() {
+  const activeWorkspace = useOptionalActiveWorkspace()
+  const overviewPath = activeWorkspace
+    ? `/workspaces/${activeWorkspace.slug}/workflows`
+    : "/workspaces"
+  return (
+    <header className="hidden h-14 items-center gap-3 border-b px-4 md:flex md:px-6">
+      <Link
+        to={overviewPath}
+        className="flex shrink-0 items-center gap-2"
+        aria-label="Onsager home"
+      >
+        <OnsagerLogo size={22} />
+        <span className="text-base font-semibold">Onsager</span>
+      </Link>
+      <Separator orientation="vertical" className="h-6" />
+      <div className="w-56">
+        <WorkspaceSwitcher />
+      </div>
+      <Separator orientation="vertical" className="h-6" />
+      <TopTabs />
+      <div className="ml-auto flex items-center gap-1">
+        <CommandPaletteTrigger />
+        <UserMenu variant="icon" />
+      </div>
+    </header>
+  )
+}
+
+function TopTabs() {
+  const activeWorkspace = useOptionalActiveWorkspace()
+  const location = useLocation()
+  const linkBase = activeWorkspace
+    ? `/workspaces/${activeWorkspace.slug}`
+    : null
+  return (
+    <nav className="flex items-center gap-1" aria-label="Workspace sections">
+      {TOP_TABS.map((tab) => {
+        const path = linkBase ? `${linkBase}/${tab.path}` : "/workspaces"
+        const isActive =
+          linkBase != null &&
+          (location.pathname === path ||
+            location.pathname.startsWith(`${path}/`))
+        return (
+          <Button
+            key={tab.key}
+            variant={isActive ? "default" : "ghost"}
+            size="sm"
+            className={cn(
+              "h-8 px-3 text-sm",
+              !isActive && "text-muted-foreground hover:text-foreground",
+            )}
+            render={<Link to={path} />}
+          >
+            {tab.label}
+          </Button>
+        )
+      })}
+    </nav>
+  )
+}
+
+function MobileTabsRow() {
+  const activeWorkspace = useOptionalActiveWorkspace()
+  const location = useLocation()
+  const linkBase = activeWorkspace
+    ? `/workspaces/${activeWorkspace.slug}`
+    : null
+  // The mobile top bar already owns the page-title + back arrow row;
+  // this second row holds the three workspace tabs so the chrome
+  // matches the desktop IA.
+  return (
+    <nav
+      className="flex items-center gap-1 overflow-x-auto border-b px-2 py-1 md:hidden"
+      aria-label="Workspace sections (mobile)"
+    >
+      {TOP_TABS.map((tab) => {
+        const path = linkBase ? `${linkBase}/${tab.path}` : "/workspaces"
+        const isActive =
+          linkBase != null &&
+          (location.pathname === path ||
+            location.pathname.startsWith(`${path}/`))
+        return (
+          <Button
+            key={tab.key}
+            variant={isActive ? "default" : "ghost"}
+            size="sm"
+            className={cn(
+              "h-7 shrink-0 rounded-full px-3 text-xs",
+              !isActive && "text-muted-foreground",
+            )}
+            render={<Link to={path} />}
+          >
+            {tab.label}
+          </Button>
+        )
+      })}
+    </nav>
+  )
+}
+
+// Mobile chrome — the page-title bar on phones. Pages register
+// title/back/actions via usePageHeader. When a page hasn't registered
+// a title, fall back to the Onsager wordmark so the bar isn't empty.
 function MobileHeader() {
   const { title, backTo, actions } = usePageHeaderState()
 
@@ -77,25 +187,21 @@ function MobileHeader() {
           <ArrowLeft className="h-5 w-5" />
         </Button>
       ) : (
-        <SidebarTrigger className="h-9 w-9" />
+        <Link to="/" className="flex items-center gap-2 pl-1">
+          <OnsagerLogo size={20} />
+          <span className="text-base font-semibold">Onsager</span>
+        </Link>
       )}
       <div className="min-w-0 flex-1">
-        {title ? (
+        {title && (
           <div className="truncate text-base font-semibold">{title}</div>
-        ) : (
-          <Link to="/" className="flex items-center gap-2">
-            <OnsagerLogo size={20} />
-            <span className="text-base font-semibold">Onsager</span>
-          </Link>
         )}
       </div>
-      {/* Page-specific actions, then the global ⌘K palette. UserMenu
-          lives in the sidebar footer to reclaim header space. */}
       <div className="flex items-center gap-1">
         {actions}
         <CommandPaletteTrigger />
+        <UserMenu variant="icon" />
       </div>
     </header>
   )
 }
-

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { render } from "@testing-library/react"
-import { ArtifactFlowOverview } from "@/components/factory/workflows/ArtifactFlowOverview"
+import { ArtifactFlowOverview } from "@/components/workflows/ArtifactFlowOverview"
 import type { WorkflowStage } from "@/lib/api"
 
 // Issue #100/#104 regression: the pre-#104 flow strip rendered input +

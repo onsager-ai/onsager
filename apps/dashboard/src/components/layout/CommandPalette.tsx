@@ -8,9 +8,9 @@ import {
 } from "react"
 import { useNavigate } from "react-router-dom"
 import {
+  Activity,
   Building2,
   GitBranch,
-  MessageSquare,
   Search,
   Settings as SettingsIcon,
   Terminal,
@@ -158,16 +158,17 @@ function CommandPaletteDialog() {
             <CommandSeparator />
 
             <CommandGroup heading="Go to">
-              <CommandItem
-                keywords={["chat", "agent", "r&d"]}
-                onSelect={() => go(scoped("chat"))}
-              >
-                <MessageSquare className="mr-2 h-4 w-4" />
-                Chat
-              </CommandItem>
               <CommandItem onSelect={() => go(scoped("workflows"))}>
                 <GitBranch className="mr-2 h-4 w-4" />
                 Workflows
+              </CommandItem>
+              <CommandItem onSelect={() => go(scoped("runs"))}>
+                <Activity className="mr-2 h-4 w-4" />
+                Runs
+              </CommandItem>
+              <CommandItem onSelect={() => go(scoped("activity"))}>
+                <Zap className="mr-2 h-4 w-4" />
+                Activity
               </CommandItem>
               <CommandItem onSelect={() => go("/workspaces")}>
                 <Building2 className="mr-2 h-4 w-4" />

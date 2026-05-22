@@ -1,27 +1,53 @@
-import { useState } from "react"
-import { Link } from "react-router-dom"
+import { useMemo, useState } from "react"
+import { Link, useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { GitBranch, Plus } from "lucide-react"
-import { api } from "@/lib/api"
+import { api, type WorkflowStatusChip } from "@/lib/api"
 import { useActiveWorkspace } from "@/lib/workspace"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ActiveRunsBanner } from "@/components/factory/workflows/ActiveRunsBanner"
-import { WebhookHealthWarning } from "@/components/factory/workflows/WebhookHealthWarning"
-import { WorkflowBuilderSheet } from "@/components/factory/workflows/WorkflowBuilderSheet"
+import { ActiveRunsBanner } from "@/components/workflows/ActiveRunsBanner"
+import { WebhookHealthWarning } from "@/components/workflows/WebhookHealthWarning"
+import { WorkflowBuilderSheet } from "@/components/workflows/WorkflowBuilderSheet"
+import { WorkflowStatusChips } from "@/components/workflows/WorkflowStatusChips"
 import { usePageHeader } from "@/components/layout/PageHeader"
+
+const VALID_CHIPS: WorkflowStatusChip[] = [
+  "all",
+  "drafted",
+  "bound",
+  "active",
+  "paused",
+]
+
+function readChipFromQuery(raw: string | null): WorkflowStatusChip {
+  if (!raw) return "all"
+  return (VALID_CHIPS as readonly string[]).includes(raw)
+    ? (raw as WorkflowStatusChip)
+    : "all"
+}
 
 export function WorkflowsPage() {
   usePageHeader({ title: "Workflows" })
   const workspace = useActiveWorkspace()
   const [creating, setCreating] = useState(false)
+  const [params, setParams] = useSearchParams()
+
+  const chip = readChipFromQuery(params.get("state"))
 
   const { data, isLoading } = useQuery({
-    queryKey: ["workflows", workspace.id],
-    queryFn: () => api.listWorkflows(workspace.id),
+    queryKey: ["workflows", workspace.id, chip],
+    queryFn: () => api.listWorkflows(workspace.id, chip),
   })
-  const workflows = data?.workflows ?? []
+  const workflows = useMemo(() => data?.workflows ?? [], [data])
+  const counts = data?.counts ?? {
+    drafted: 0,
+    bound: 0,
+    active: 0,
+    paused: 0,
+    all: 0,
+  }
 
   // Spec #120 item 3 — warn inline on the card when the installation's
   // recent GitHub deliveries include non-2xx responses. One workspace-
@@ -38,6 +64,13 @@ export function WorkflowsPage() {
     (healthData?.installations ?? []).map((h) => [String(h.install_id), h]),
   )
 
+  const setChip = (next: WorkflowStatusChip) => {
+    const updated = new URLSearchParams(params)
+    if (next === "all") updated.delete("state")
+    else updated.set("state", next)
+    setParams(updated, { replace: true })
+  }
+
   return (
     <div className="space-y-4 md:space-y-6">
       <div className="flex items-center justify-between gap-2">
@@ -53,6 +86,8 @@ export function WorkflowsPage() {
         </Button>
       </div>
 
+      <WorkflowStatusChips value={chip} counts={counts} onChange={setChip} />
+
       <ActiveRunsBanner workspaceId={workspace.id} />
 
       {isLoading ? (
@@ -64,15 +99,23 @@ export function WorkflowsPage() {
               <GitBranch className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-base font-medium">No workflows yet</p>
+              <p className="text-base font-medium">
+                {chip === "all"
+                  ? "No workflows yet"
+                  : `No ${chip} workflows`}
+              </p>
               <p className="text-sm text-muted-foreground">
-                Set one up and the factory starts responding to GitHub events.
+                {chip === "all"
+                  ? "Set one up and Onsager starts responding to GitHub events. Open ⌘K to create one."
+                  : "Adjust the filter above or create a workflow via ⌘K."}
               </p>
             </div>
-            <Button onClick={() => setCreating(true)} size="lg">
-              <Plus className="h-4 w-4" />
-              Create your first workflow
-            </Button>
+            {chip === "all" && (
+              <Button onClick={() => setCreating(true)} size="lg">
+                <Plus className="h-4 w-4" />
+                Create your first workflow
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
