@@ -33,6 +33,8 @@ interface ChatThreadViewProps {
   workspace: Workspace
   scope: ChatScope
   userId: string | null
+  /** One-shot composer pre-fill from `useChatUi.open({ prefill })` (#473). */
+  initialPrompt?: string | null
 }
 
 function toWireScope(scope: ChatScope): ChatScopeWire {
@@ -50,6 +52,7 @@ export function ChatThreadView({
   workspace,
   scope,
   userId,
+  initialPrompt,
 }: ChatThreadViewProps) {
   const qc = useQueryClient()
   const threadKey = ["chat", "thread", workspace.id, scopeKey(scope)]
@@ -61,13 +64,32 @@ export function ChatThreadView({
     staleTime: 60_000,
   })
 
-  const [prompt, setPrompt] = useState("")
+  const [prompt, setPrompt] = useState(initialPrompt ?? "")
   const [sendError, setSendError] = useState<string | null>(null)
   const feedEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     feedEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [threadQuery.data?.messages])
+
+  // When the chat opens with a pre-fill (⌘K → `ask: …`, #473), drop
+  // the caret at the end of the seeded text so Enter sends immediately
+  // or the user can keep typing. Mount-only: the parent (ChatContainer)
+  // unmounts on close, so each open() with a fresh prefill remounts
+  // this view — re-running on every initialPrompt change would steal
+  // focus if the prop pointer ever flipped mid-session.
+  useEffect(() => {
+    if (initialPrompt) {
+      const el = textareaRef.current
+      if (el) {
+        el.focus()
+        const len = initialPrompt.length
+        el.setSelectionRange(len, len)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const sendMutation = useMutation({
     mutationFn: async (text: string) => {
@@ -179,6 +201,7 @@ export function ChatThreadView({
         className="flex shrink-0 items-end gap-2 border-t bg-background/95 p-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
       >
         <Textarea
+          ref={textareaRef}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={onKeyDown}
@@ -229,9 +252,26 @@ function ErrorState({ message }: { message: string }) {
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-muted-foreground">
+    <div
+      data-slot="chat-thread-empty"
+      className="flex flex-col items-center gap-2 py-8 text-center text-sm text-muted-foreground"
+    >
       <MessageSquare className="h-8 w-8 text-muted-foreground/50" />
       <div>Start the conversation for this scope.</div>
+      <div
+        data-slot="chat-thread-empty-hint"
+        className="hidden text-xs text-muted-foreground/80 md:block"
+      >
+        Tip — press{" "}
+        <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+          ⌘K
+        </kbd>{" "}
+        then type{" "}
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+          ask:
+        </code>{" "}
+        followed by your question.
+      </div>
     </div>
   )
 }

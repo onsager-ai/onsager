@@ -11,6 +11,7 @@ import {
   Activity,
   Building2,
   GitBranch,
+  MessageSquare,
   Search,
   Settings as SettingsIcon,
   Terminal,
@@ -30,6 +31,7 @@ import {
 import { CreateSessionSheet } from "@/components/sessions/CreateSessionSheet"
 import { NewWorkspaceDialog } from "@/components/workspaces/NewWorkspaceDialog"
 import { useOptionalActiveWorkspace } from "@/lib/workspace"
+import { useOptionalChatUi } from "@/lib/chat/use-chat-ui"
 
 // Single global "do something" surface — create a primitive or jump to
 // a section. Replaces the old chrome `+` dropdown: that pattern doesn't
@@ -97,16 +99,47 @@ export function CommandPaletteTrigger() {
   )
 }
 
+// Parses the palette input for the chat-invocation grammar (ADR 0020
+// channel 5, spec #473). Returns the inline message after `ask:` /
+// `ask ` (empty string when the user typed only the keyword), or null
+// when the input is not an ask command. Matches case-insensitively so
+// `Ask:` and `ASK ` work the same. The `\b` anchor keeps `askbar`
+// from triggering — only the word `ask` followed by end-of-input,
+// `:`, or whitespace counts.
+// eslint-disable-next-line react-refresh/only-export-components
+export function parseAskCommand(input: string): string | null {
+  const trimmed = input.trim()
+  if (!trimmed) return null
+  const m = trimmed.match(/^ask\b\s*:?\s*(.*)$/i)
+  if (!m) return null
+  return m[1].trim()
+}
+
 function CommandPaletteDialog() {
   const { open, setOpen } = usePalette()
   const navigate = useNavigate()
   const activeWorkspace = useOptionalActiveWorkspace()
+  const chatUi = useOptionalChatUi()
 
   const [sessionOpen, setSessionOpen] = useState(false)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
+  const [search, setSearch] = useState("")
+
+  // Detected "ask…" grammar in the input (ADR 0020 channel 5):
+  //   "ask"          → empty prefill (just opens the chat)
+  //   "ask:"         → empty prefill
+  //   "ask: <msg>"   → seed the composer with <msg>
+  //   "ask <msg>"    → seed the composer with <msg>
+  // When non-null we force-mount the chat command so cmdk's fuzzy
+  // filter doesn't drop it for inputs the score wouldn't otherwise
+  // match (e.g. "ask: why did run #42 fail?").
+  const askPrefill = useMemo(() => parseAskCommand(search), [search])
+  const hasAskGrammar = askPrefill !== null
+  const showInlineLabel = hasAskGrammar && (askPrefill ?? "").length > 0
 
   const run = (action: () => void) => {
     setOpen(false)
+    setSearch("")
     action()
   }
   const go = (path: string) => run(() => navigate(path))
@@ -119,6 +152,17 @@ function CommandPaletteDialog() {
       ? `/workspaces/${activeWorkspace.slug}/${suffix}`
       : "/workspaces"
 
+  // Open the global chat (ADR 0020 / spec #473). Routes the prefill
+  // through `useChatUi.open({ prefill })` — the chat lands on Thread
+  // at the route's auto-scope (we deliberately don't pass `scope` so
+  // the auto-scope hook follows the current view). When the chat
+  // provider isn't mounted (unlikely outside tests), this no-ops so
+  // the palette doesn't throw.
+  const openChat = (prefill?: string) =>
+    run(() => {
+      chatUi?.open({ tab: "thread", prefill: prefill || undefined })
+    })
+
   return (
     <>
       <CommandDialog open={open} onOpenChange={setOpen}>
@@ -127,9 +171,42 @@ function CommandPaletteDialog() {
             for context, otherwise CommandInput throws and the dialog
             tears down the tree (blank screen). */}
         <Command>
-          <CommandInput placeholder="Type a command or search…" />
+          <CommandInput
+            placeholder="Type a command or search…"
+            value={search}
+            onValueChange={setSearch}
+          />
           <CommandList>
           <CommandEmpty>No results.</CommandEmpty>
+
+            {chatUi && (
+              <CommandGroup heading="Chat">
+                <CommandItem
+                  value="ask"
+                  keywords={["chat", "question", "talk", "assistant"]}
+                  // forceMount when the user is typing an inline message
+                  // — cmdk's default fuzzy filter would otherwise drop
+                  // this item for queries like "ask: why did run #42
+                  // fail?" that don't score against just "ask".
+                  forceMount={hasAskGrammar ? true : undefined}
+                  onSelect={() => openChat(askPrefill ?? undefined)}
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  {showInlineLabel ? (
+                    <span>
+                      Ask:{" "}
+                      <span className="font-medium text-foreground">
+                        {askPrefill}
+                      </span>
+                    </span>
+                  ) : (
+                    "Ask the assistant"
+                  )}
+                </CommandItem>
+              </CommandGroup>
+            )}
+
+            {chatUi && <CommandSeparator />}
 
             <CommandGroup heading="Create">
               <CommandItem

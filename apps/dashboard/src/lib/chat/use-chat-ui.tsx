@@ -30,6 +30,8 @@ export interface ChatOpenOptions {
   tab?: ChatTab
   /** When set, the Queue tab scrolls to / highlights this HITL card. */
   highlightHitlId?: string
+  /** One-shot pre-fill for the Thread composer (⌘K → `ask: …`, #473). */
+  prefill?: string
 }
 
 export interface ChatUi {
@@ -39,6 +41,8 @@ export interface ChatUi {
   scopeOverride: ChatScope | null
   /** Set by `open({ highlightHitlId })`; cleared on close. */
   highlightHitlId: string | null
+  /** Set by `open({ prefill })`; cleared on close. */
+  prefill: string | null
   open(options?: ChatOpenOptions): void
   close(): void
   toggle(): void
@@ -52,23 +56,27 @@ export function ChatUiProvider({ children }: { children: ReactNode }) {
   const [tab, setTab] = useState<ChatTab>("thread")
   const [scopeOverride, setScopeOverride] = useState<ChatScope | null>(null)
   const [highlightHitlId, setHighlightHitlId] = useState<string | null>(null)
+  const [prefill, setPrefill] = useState<string | null>(null)
 
   const open = useCallback((options?: ChatOpenOptions) => {
     if (options?.tab) setTab(options.tab)
     setScopeOverride(options?.scope ?? null)
     setHighlightHitlId(options?.highlightHitlId ?? null)
+    setPrefill(options?.prefill ?? null)
     setIsOpen(true)
   }, [])
   const close = useCallback(() => {
     setIsOpen(false)
     setScopeOverride(null)
     setHighlightHitlId(null)
+    setPrefill(null)
   }, [])
   const toggle = useCallback(() => {
     setIsOpen((v) => {
       if (v) {
         setScopeOverride(null)
         setHighlightHitlId(null)
+        setPrefill(null)
       }
       return !v
     })
@@ -93,12 +101,13 @@ export function ChatUiProvider({ children }: { children: ReactNode }) {
       tab,
       scopeOverride,
       highlightHitlId,
+      prefill,
       open,
       close,
       toggle,
       setTab,
     }),
-    [isOpen, tab, scopeOverride, highlightHitlId, open, close, toggle],
+    [isOpen, tab, scopeOverride, highlightHitlId, prefill, open, close, toggle],
   )
   return <ChatUiContext.Provider value={value}>{children}</ChatUiContext.Provider>
 }

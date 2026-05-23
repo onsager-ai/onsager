@@ -41,13 +41,17 @@ const TOP_TABS: TopTab[] = [
 ]
 
 export function AppLayout({ children }: { children: ReactNode }) {
+  // ChatUi is mounted *above* CommandPalette so the palette's chat
+  // command (⌘K → `ask: …`, spec #473) can call `useChatUi.open()`.
+  // CommandPalette's chat command uses `useOptionalChatUi` so other
+  // mounts (tests, isolated stories) still render without throwing.
   return (
     <PageHeaderProvider>
-      <CommandPaletteProvider>
-        <ChatUiProvider>
+      <ChatUiProvider>
+        <CommandPaletteProvider>
           <AppLayoutInner>{children}</AppLayoutInner>
-        </ChatUiProvider>
-      </CommandPaletteProvider>
+        </CommandPaletteProvider>
+      </ChatUiProvider>
     </PageHeaderProvider>
   )
 }
