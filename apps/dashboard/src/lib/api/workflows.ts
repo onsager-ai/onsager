@@ -12,6 +12,7 @@ import type {
   RunLinkedSession,
 } from './types';
 import type { WorkflowRun } from './generated/WorkflowRun';
+import type { StageRunStatus } from './generated/StageRunStatus';
 // Generated wire shapes (spec #434 cascaded ts-rs into `onsager-spine` so
 // `TriggerKind` and `Workflow` are emitted from Rust). The dashboard
 // keeps a richer nested UI-side `Workflow` (with `status`, flattened
@@ -227,15 +228,26 @@ export const workflows = {
     return { workflows: lists.flat() };
   },
   // Workspace-scoped cross-workflow runs list (#454 / ADR 0019). Backs
-  // the dashboard's Runs tab; optional `workflowId` narrows to a single
-  // workflow's history (mirrors the chip filter on RunsPage).
+  // the dashboard's Runs tab. Optional filters mirror the portal's
+  // `WorkspaceRunsQuery` (#464): `workflowId` narrows to a single
+  // workflow, `status` filters at the SQL layer, `since` / `until` are
+  // ISO-8601 bounds on `updated_at`.
   listWorkspaceRuns: (
     workspaceId: string,
-    opts?: { workflowId?: string; limit?: number },
+    opts?: {
+      workflowId?: string;
+      status?: StageRunStatus;
+      since?: string;
+      until?: string;
+      limit?: number;
+    },
   ): Promise<{ runs: WorkflowRun[] }> => {
     if (!workspaceId) throw new ApiError('workspaceId is required', 400);
     const params = new URLSearchParams();
     if (opts?.workflowId) params.set('workflow_id', opts.workflowId);
+    if (opts?.status) params.set('status', opts.status);
+    if (opts?.since) params.set('since', opts.since);
+    if (opts?.until) params.set('until', opts.until);
     if (opts?.limit) params.set('limit', String(opts.limit));
     const raw = params.toString();
     // `qs` is the lint-recognized variable name for query suffixes

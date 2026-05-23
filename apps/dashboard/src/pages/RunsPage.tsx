@@ -12,8 +12,10 @@ import { cn } from "@/lib/utils"
 
 // Cross-workflow runs list (#454 / ADR 0019). Each row links to the
 // existing flat `/workspaces/:slug/runs/:runId` detail route.
-// Filterable by status + workflow id; both are URL-persisted so deep
-// links and refreshes preserve the filter.
+// Filterable by status, workflow id, and time range; all three are
+// URL-persisted so deep links and refreshes preserve the filter.
+// Status + time range are sent to the portal as query params (#464)
+// rather than post-filtered client-side.
 
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
@@ -24,6 +26,18 @@ const STATUS_FILTERS = [
 ] as const
 
 type StatusFilter = (typeof STATUS_FILTERS)[number]["key"]
+
+const RANGE_FILTERS = [
+  { key: "24h", label: "Last 24h", hours: 24 },
+  { key: "7d", label: "Last 7d", hours: 24 * 7 },
+  { key: "30d", label: "Last 30d", hours: 24 * 30 },
+  { key: "all", label: "All", hours: null },
+] as const
+
+type RangeFilter = (typeof RANGE_FILTERS)[number]["key"]
+
+// Proposed default (alignment item on #464): runs from the last 7 days.
+const DEFAULT_RANGE: RangeFilter = "7d"
 
 const STATUS_VARIANT: Record<
   StageRunStatus,
@@ -42,6 +56,19 @@ function readStatusFilter(raw: string | null): StatusFilter {
     : "all"
 }
 
+function readRangeFilter(raw: string | null): RangeFilter {
+  if (raw === null) return DEFAULT_RANGE
+  return (RANGE_FILTERS.map((f) => f.key) as readonly string[]).includes(raw)
+    ? (raw as RangeFilter)
+    : DEFAULT_RANGE
+}
+
+function rangeSinceISO(range: RangeFilter, now: Date): string | undefined {
+  const meta = RANGE_FILTERS.find((r) => r.key === range)
+  if (!meta || meta.hours === null) return undefined
+  return new Date(now.getTime() - meta.hours * 60 * 60 * 1000).toISOString()
+}
+
 export function RunsPage() {
   usePageHeader({ title: "Runs" })
   const workspace = useActiveWorkspace()
@@ -49,16 +76,28 @@ export function RunsPage() {
 
   const statusFilter = readStatusFilter(params.get("status"))
   const workflowFilter = params.get("workflow_id") ?? ""
+  const rangeFilter = readRangeFilter(params.get("range"))
+
+  // Pin `since` for the lifetime of this render so React Query's key
+  // doesn't churn every tick. Refreshing the page reseeds the window.
+  const since = useMemo(
+    () => rangeSinceISO(rangeFilter, new Date()),
+    [rangeFilter],
+  )
 
   const { data: runsData, isLoading } = useQuery({
     queryKey: [
       "workspace-runs",
       workspace.id,
       workflowFilter || "*",
+      statusFilter,
+      rangeFilter,
     ],
     queryFn: () =>
       api.listWorkspaceRuns(workspace.id, {
         workflowId: workflowFilter || undefined,
+        status: statusFilter === "all" ? undefined : statusFilter,
+        since,
         limit: 100,
       }),
   })
@@ -76,16 +115,18 @@ export function RunsPage() {
     )
   }, [workflowFilter, workflowsData])
 
-  const runs = useMemo(() => {
-    const all = runsData?.runs ?? []
-    if (statusFilter === "all") return all
-    return all.filter((r) => r.status === statusFilter)
-  }, [runsData, statusFilter])
+  const runs: WorkflowRun[] = runsData?.runs ?? []
 
   const setStatusFilter = (next: StatusFilter) => {
     const updated = new URLSearchParams(params)
     if (next === "all") updated.delete("status")
     else updated.set("status", next)
+    setParams(updated, { replace: true })
+  }
+  const setRangeFilter = (next: RangeFilter) => {
+    const updated = new URLSearchParams(params)
+    if (next === DEFAULT_RANGE) updated.delete("range")
+    else updated.set("range", next)
     setParams(updated, { replace: true })
   }
   const clearWorkflow = () => {
@@ -107,34 +148,63 @@ export function RunsPage() {
         </div>
       </div>
 
-      <div className="-mx-1 flex flex-wrap items-center gap-2 px-1">
-        {STATUS_FILTERS.map((f) => {
-          const active = statusFilter === f.key
-          return (
+      <div className="space-y-2">
+        <div
+          className="-mx-1 flex flex-wrap items-center gap-2 px-1"
+          role="group"
+          aria-label="Status filter"
+        >
+          {STATUS_FILTERS.map((f) => {
+            const active = statusFilter === f.key
+            return (
+              <Button
+                key={f.key}
+                type="button"
+                size="sm"
+                variant={active ? "default" : "outline"}
+                className="h-7 rounded-full px-3 text-xs font-medium"
+                aria-pressed={active}
+                onClick={() => setStatusFilter(f.key)}
+              >
+                {f.label}
+              </Button>
+            )
+          })}
+          {workflowFilter && (
             <Button
-              key={f.key}
               type="button"
               size="sm"
-              variant={active ? "default" : "outline"}
+              variant="secondary"
               className="h-7 rounded-full px-3 text-xs font-medium"
-              onClick={() => setStatusFilter(f.key)}
+              onClick={clearWorkflow}
+              aria-label="Clear workflow filter"
             >
-              {f.label}
+              Workflow: {workflowName ?? workflowFilter.slice(0, 8)} ×
             </Button>
-          )
-        })}
-        {workflowFilter && (
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="h-7 rounded-full px-3 text-xs font-medium"
-            onClick={clearWorkflow}
-            aria-label="Clear workflow filter"
-          >
-            Workflow: {workflowName ?? workflowFilter.slice(0, 8)} ×
-          </Button>
-        )}
+          )}
+        </div>
+        <div
+          className="-mx-1 flex flex-wrap items-center gap-2 px-1"
+          role="group"
+          aria-label="Time range filter"
+        >
+          {RANGE_FILTERS.map((f) => {
+            const active = rangeFilter === f.key
+            return (
+              <Button
+                key={f.key}
+                type="button"
+                size="sm"
+                variant={active ? "default" : "outline"}
+                className="h-7 rounded-full px-3 text-xs font-medium"
+                aria-pressed={active}
+                onClick={() => setRangeFilter(f.key)}
+              >
+                {f.label}
+              </Button>
+            )
+          })}
+        </div>
       </div>
 
       {isLoading ? (
@@ -148,7 +218,9 @@ export function RunsPage() {
             <div>
               <p className="text-base font-medium">No runs match</p>
               <p className="text-sm text-muted-foreground">
-                {statusFilter === "all" && !workflowFilter
+                {statusFilter === "all" &&
+                !workflowFilter &&
+                rangeFilter === "all"
                   ? "No artifacts have flowed through a workflow in this workspace yet."
                   : "Try a different filter, or clear it to see all runs."}
               </p>
