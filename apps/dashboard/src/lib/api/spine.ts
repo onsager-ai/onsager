@@ -21,10 +21,23 @@ export const spine = {
       operator_grain?: boolean;
       limit?: number;
     },
-  ) =>
-    request<{ events: SpineEvent[] }>(
-      `/spine/events${scoped(workspaceId, params)}`,
-    ),
+  ) => {
+    // `scoped()` accepts string|number|null|undefined; widen the
+    // boolean `operator_grain` into a string before passing it through.
+    const extra: Record<string, string | number | null | undefined> = {};
+    if (params) {
+      if (params.stream_type !== undefined) extra.stream_type = params.stream_type;
+      if (params.event_type !== undefined) extra.event_type = params.event_type;
+      if (params.stream_id !== undefined) extra.stream_id = params.stream_id;
+      if (params.run_id !== undefined) extra.run_id = params.run_id;
+      if (params.operator_grain !== undefined)
+        extra.operator_grain = params.operator_grain ? 'true' : 'false';
+      if (params.limit !== undefined) extra.limit = params.limit;
+    }
+    return request<{ events: SpineEvent[] }>(
+      `/spine/events${scoped(workspaceId, extra)}`,
+    );
+  },
   // Path-scoped Activity feed (ADR 0019 / spec #465). Same backing
   // table as `getSpineEvents`, but the workspace is on the path and
   // `operator_grain=true` is forced by the portal handler — the
