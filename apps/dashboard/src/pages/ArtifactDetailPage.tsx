@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table"
 import { ArrowLeft, Ban, MoreHorizontal, RefreshCw, ShieldCheck } from "lucide-react"
 import { LineageDAG } from "@/components/workflows/LineageDAG"
+import { ChatAskButton } from "@/components/chat/ChatAskButton"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { useActiveWorkspace } from "@/lib/workspace"
 
@@ -223,9 +224,15 @@ export function ArtifactDetailPage() {
             {artifact.id}
           </p>
         </div>
-        <Badge variant={STATE_VARIANT[artifact.state] || "secondary"} className="text-sm">
-          {artifact.state.replace("_", " ")}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <ChatAskButton
+            scope={{ type: "workspace", id: null }}
+            label="Ask about this artifact"
+          />
+          <Badge variant={STATE_VARIANT[artifact.state] || "secondary"} className="text-sm">
+            {artifact.state.replace("_", " ")}
+          </Badge>
+        </div>
       </div>
 
       {banner && (

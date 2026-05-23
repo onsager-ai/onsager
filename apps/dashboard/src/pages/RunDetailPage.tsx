@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArtifactBadge } from "@/components/workflows/ArtifactBadge"
+import { ChatAskButton } from "@/components/chat/ChatAskButton"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { useActiveWorkspace } from "@/lib/workspace"
 import { formatDistanceToNow } from "@/lib/utils"
@@ -123,7 +124,13 @@ export function RunDetailPage() {
               </Link>
             </p>
           </div>
-          <Badge variant={STATUS_VARIANT[run.status]}>{run.status}</Badge>
+          <div className="flex items-center gap-2">
+            <ChatAskButton
+              scope={{ type: "run", id: run.id }}
+              label="Ask about this run"
+            />
+            <Badge variant={STATUS_VARIANT[run.status]}>{run.status}</Badge>
+          </div>
         </div>
       </div>
 
@@ -218,6 +225,7 @@ export function RunDetailPage() {
                 status={rs.status}
                 sessions={stageSessions}
                 workspaceSlug={workspace.slug}
+                runId={run.id}
               />
             )
           })}
@@ -279,6 +287,7 @@ function StagePanel({
   status,
   sessions,
   workspaceSlug,
+  runId,
 }: {
   index: number
   name: string
@@ -286,6 +295,7 @@ function StagePanel({
   status: StageRunStatus
   sessions: Array<{ id: string; state: string; node_id: string }>
   workspaceSlug: string
+  runId: string
 }) {
   const [open, setOpen] = useState(false)
   const Icon = STATUS_ICON[status]
@@ -316,6 +326,13 @@ function StagePanel({
       </button>
       {open && (
         <div className="space-y-3 border-t bg-muted/20 px-3 py-3 text-sm">
+          <div className="flex justify-end">
+            <ChatAskButton
+              scope={{ type: "run", id: runId }}
+              label="Ask about this step"
+              variant="ghost"
+            />
+          </div>
           {sessions.length === 0 ? (
             <p className="text-muted-foreground">No sessions for this stage yet.</p>
           ) : (
@@ -408,10 +425,27 @@ function VerdictsCard({
             No gate verdicts for this run yet.
           </p>
         ) : (
-          events.map((e) => <EventRow key={`${e.id}-${e.stream_id}`} event={e} />)
+          events.map((e) => (
+            <VerdictRow key={`${e.id}-${e.stream_id}`} event={e} />
+          ))
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function VerdictRow({ event }: { event: SpineEvent }) {
+  return (
+    <div className="space-y-2">
+      <EventRow event={event} />
+      <div className="flex justify-end">
+        <ChatAskButton
+          scope={{ type: "verdict", id: event.stream_id }}
+          label="Ask about this verdict"
+          variant="ghost"
+        />
+      </div>
+    </div>
   )
 }
 

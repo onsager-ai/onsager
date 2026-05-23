@@ -13,14 +13,16 @@ use crate::handlers::{
     github_app as github_app_handlers, governance as governance_handlers,
     installations as installation_handlers, live_data as live_data_handlers,
     nodes as node_handlers, pats as pat_handlers, projects as project_handlers,
-    registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
-    runs as run_handlers, sessions as session_handlers, showcase as showcase_handlers,
-    spine as spine_handlers, tasks as task_handlers, telegram_webhook,
-    triggers as trigger_handlers, webhook, webhook_health as webhook_health_handlers,
-    workflow_kinds as workflow_kind_handlers, workflow_views as workflow_view_handlers,
-    workflows as workflow_handlers, workspaces as workspace_handlers,
+    push as push_handlers, registry_events as registry_event_handlers,
+    registry_triggers as registry_trigger_handlers, runs as run_handlers,
+    sessions as session_handlers, showcase as showcase_handlers, spine as spine_handlers,
+    tasks as task_handlers, telegram_webhook, triggers as trigger_handlers, webhook,
+    webhook_health as webhook_health_handlers, workflow_kinds as workflow_kind_handlers,
+    workflow_views as workflow_view_handlers, workflows as workflow_handlers,
+    workspaces as workspace_handlers,
 };
 use crate::proxy_cache::ProxyCache;
+use crate::push::PushState;
 use crate::state::AppState;
 
 /// Boot the webhook server. Blocks until the listener exits.
@@ -52,12 +54,28 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 
     let gate = Arc::new(GateClient::new(config.synodic_url.clone()));
 
+    // VAPID config for Web Push (ADR 0020 / spec #472). Optional —
+    // when the env triple is unset the push endpoints surface
+    // `service unavailable` and the dashboard hides the subscription
+    // UI. Any malformed setup is a startup-time error so a half-
+    // configured env never silently breaks dispatch.
+    let push_vapid =
+        crate::push::config_from_env().map_err(|e| anyhow::anyhow!("invalid push config: {e}"))?;
+    if push_vapid.is_some() {
+        tracing::info!("Web Push enabled");
+    } else {
+        tracing::info!(
+            "Web Push disabled (set PORTAL_VAPID_PRIVATE_KEY / PUBLIC_KEY / SUBJECT to enable)"
+        );
+    }
+
     let state = AppState {
         pool,
         spine,
         config: Arc::new(config.clone()),
         gate,
         proxy_cache: Arc::new(ProxyCache::from_env()),
+        push: PushState::new(push_vapid),
     };
 
     // The stiglab reverse proxy preserves the request path, so portal
@@ -391,6 +409,15 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             post(chat_handlers::append_message),
         )
         .route("/api/chat/search", get(chat_handlers::search))
+        // Web Push for HITL notifications (ADR 0020 / spec #472).
+        // Config returns the VAPID public key + an `enabled` flag the
+        // dashboard reads on first paint. The (un)subscribe pair upserts
+        // / deletes browser subscriptions; the test-dispatch endpoint is
+        // gated on dev-login so prod can't be spammed.
+        .route("/api/push/config", get(push_handlers::get_config))
+        .route("/api/push/subscribe", post(push_handlers::subscribe))
+        .route("/api/push/subscribe", delete(push_handlers::unsubscribe))
+        .route("/api/push/test", post(push_handlers::test_dispatch))
         // Public Dogfood showcase (spec #407). Read-only projection of
         // the Onsager-managing-Onsager workflow's recent runs. No auth,
         // 60s in-process cache, sanitized to anonymized stage names +

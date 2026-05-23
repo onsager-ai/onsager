@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth"
 import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import { useChatUi } from "@/lib/chat/use-chat-ui"
 import { useAutoScope } from "@/lib/chat/use-auto-scope"
+import { useHitlCount } from "@/lib/chat/use-hitl-count"
 import { ChatHeader } from "./ChatHeader"
 import { ChatThreadView } from "./ChatThreadView"
 import { ChatQueueView } from "./ChatQueueView"
@@ -26,32 +27,43 @@ import { cn } from "@/lib/utils"
 // scope/tab state.
 
 export function ChatContainer() {
-  const { isOpen, close, tab, setTab } = useChatUi()
+  const { isOpen, close, tab, setTab, scopeOverride, highlightHitlId } = useChatUi()
   const { user } = useAuth()
   const workspace = useOptionalActiveWorkspace()
   const userId = user?.id ?? null
   const workspaceId = workspace?.id ?? null
 
-  const autoScopeState = useAutoScope(userId, workspaceId)
+  const autoScopeState = useAutoScope(userId, workspaceId, scopeOverride)
   const { effectiveScope, isPinned, pin, unpin } = autoScopeState
+  const scopeHitlCount = useHitlCount(effectiveScope)
 
-  // Default-tab logic. The ADR's table says Queue when the scope has
-  // pending HITL, Thread otherwise. HITL aggregation lands in #472, so
-  // for now the default is always Thread; setting the tab via
-  // `open({ tab: "queue" })` (e.g. from the bell once it lands) still
-  // works. We expose the seam here so #472 can flip the rule by
-  // wiring in a `hasPendingHitl(scope)` check.
+  // Default-tab logic per ADR 0020: Queue when the current scope has
+  // pending HITL, Thread otherwise. The rule re-applies when the user
+  // *navigates while the chat is open*, not when the chat first opens —
+  // open() callers (FAB / bell / Ask / deep-link / ⌘J) own the
+  // initial tab. The `wasOpenRef` gate distinguishes "just opened"
+  // (caller picked the tab) from "scope changed mid-session" (we
+  // re-default).
   const seenScopeRef = useRef<string | null>(null)
+  const wasOpenRef = useRef(false)
   useEffect(() => {
-    if (!isOpen) return
+    const wasOpen = wasOpenRef.current
+    wasOpenRef.current = isOpen
+    if (!isOpen) {
+      seenScopeRef.current = null
+      return
+    }
     const key = `${effectiveScope.type}:${effectiveScope.id ?? ""}`
+    if (!wasOpen) {
+      // Just opened — record the scope but leave the tab the caller
+      // picked alone.
+      seenScopeRef.current = key
+      return
+    }
     if (seenScopeRef.current === key) return
     seenScopeRef.current = key
-    // When the open chat re-scopes (e.g. navigation while pinned-off),
-    // reset to the natural default. Invocation channels can override
-    // this by passing `{ tab }` to `open()` — see `useChatUi`.
-    setTab("thread")
-  }, [isOpen, effectiveScope, setTab])
+    setTab(scopeHitlCount > 0 ? "queue" : "thread")
+  }, [isOpen, effectiveScope, scopeHitlCount, setTab])
 
   // Body-scroll lock on mobile when open — without it, swiping on the
   // overlay can bleed into the underlying page scroll. The app shell
@@ -120,10 +132,18 @@ export function ChatContainer() {
               and both panels would stack. */}
           <TabsContent value="queue" className="min-h-0 flex-1">
             <div className="flex min-h-0 h-full flex-col">
-              <ChatQueueView scope={effectiveScope} />
+              <ChatQueueView
+                scope={effectiveScope}
+                highlightHitlId={highlightHitlId}
+              />
             </div>
           </TabsContent>
-          <TabsContent value="thread" className="min-h-0 flex-1">
+          {/* Thread panel is `keepMounted` so the conversation query
+              warms in the background even when the user opens via the
+              bell / push deep-link / FAB-with-pending (all default to
+              Queue) — switching tabs then renders the messages
+              immediately instead of waiting on a fresh fetch. */}
+          <TabsContent value="thread" className="min-h-0 flex-1" keepMounted>
             <div className="flex min-h-0 h-full flex-col">
               {workspace ? (
                 <ChatThreadView

@@ -16,6 +16,7 @@ import { usePageHeader } from "@/components/layout/PageHeader"
 import { WorkspaceCredentials } from "@/components/workspaces/WorkspaceCredentials"
 import { NodeTable } from "@/components/nodes/NodeTable"
 import { GovernanceEventsList } from "@/components/governance/GovernanceEventsList"
+import { PushNotificationsCard } from "@/components/chat/PushNotificationsCard"
 
 const TABS = ["workspace", "infrastructure", "governance"] as const
 type TabValue = (typeof TABS)[number]
@@ -73,6 +74,8 @@ export function WorkspaceSettingsPage() {
           </Card>
 
           <WorkspaceCredentials workspace={workspace} />
+
+          <PushNotificationsCard workspace={workspace} />
         </TabsContent>
 
         <TabsContent value="infrastructure" className="space-y-4 md:space-y-6">
