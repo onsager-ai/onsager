@@ -88,9 +88,10 @@ export function WorkspaceSwitcher() {
   )
 
   if (workspaces.length === 0) {
-    // Zero memberships: the FTUE flow lives at /chat and binding lifts
-    // workspace creation into a single dialog. Rendering a no-op switcher
-    // here would be confusing chrome.
+    // Zero memberships: the FTUE flow lives at the workspace picker
+    // (`/workspaces`) and binding lifts workspace creation into a
+    // single dialog. Rendering a no-op switcher here would be
+    // confusing chrome.
     return null
   }
 

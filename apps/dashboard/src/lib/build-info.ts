@@ -1,9 +1,10 @@
 // Build-info descriptor (`GET /api/build-info`, spec #398).
 //
-// The FTUE OSS banner on the workspace-less `/chat` entry only renders
-// when `is_oss` is true. Fetched once per session (no auth required) and
-// cached at module scope; failures default to `is_oss: false` so a
-// down portal doesn't accidentally flash the OSS banner on Cloud.
+// FTUE OSS-only affordances (e.g. the "drafts on this device" footer
+// on the local drafts card) only render when `is_oss` is true. Fetched
+// once per session (no auth required) and cached at module scope;
+// failures default to `is_oss: false` so a down portal doesn't
+// accidentally flash OSS-only chrome on Cloud.
 
 import { useEffect, useState } from "react"
 

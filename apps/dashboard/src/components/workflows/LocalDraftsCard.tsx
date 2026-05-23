@@ -1,11 +1,11 @@
 import { useCallback, useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
 import { ArrowRight, FileText, Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth"
 import { useWorkflowDraft } from "@/lib/drafts"
 import { useOSSFlag } from "@/hooks/useOSSFlag"
+import { useChatUi } from "@/lib/chat/use-chat-ui"
 import type { WorkflowDraft } from "@/components/workflows/workflow-draft"
 
 // Drafted-chip view (#467, ADR 0019 + 0020). Replaces the chat-page
@@ -15,21 +15,20 @@ import type { WorkflowDraft } from "@/components/workflows/workflow-draft"
 // — newest first, quick "Continue" entry per draft, "+ New draft"
 // affordance, OSS "drafts on this device" footer.
 //
-// "Continue in chat" routes to `/chat?draft=<id>`. The route bounces
-// to the workspace overview today (chat is mid-migration to a global
-// component per ADR 0020 / spec #451) but the URL is the forward-
-// compatible target — once ChatContainer lands, the param wakes the
-// global surface on the right draft.
+// "Continue in chat" opens the global chat mount (ADR 0020 / #471)
+// — the `/chat` page route was retired (#468), so the action wakes
+// the portable surface instead of navigating. Draft binding to the
+// chat thread is a separate concern (a follow-up under #451).
 export function LocalDraftsCard() {
   const { user } = useAuth()
   const isOss = useOSSFlag()
-  const navigate = useNavigate()
+  const { open: openChat } = useChatUi()
   const { drafts, newDraft, deleteById } = useWorkflowDraft(user?.id ?? null)
 
   const handleNew = useCallback(() => {
-    const fresh = newDraft()
-    navigate(`/chat?draft=${encodeURIComponent(fresh.id)}`)
-  }, [newDraft, navigate])
+    newDraft()
+    openChat()
+  }, [newDraft, openChat])
 
   return (
     <Card>
@@ -78,35 +77,39 @@ interface DraftRowProps {
 }
 
 function DraftRow({ draft, canDelete, onDelete }: DraftRowProps) {
+  const { open: openChat } = useChatUi()
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const stageCount = draft.workflow.stages.length
   const trigger = draft.workflow.trigger
   const hasRepo =
     trigger.repo_owner.trim() !== "" && trigger.repo_name.trim() !== ""
-  const continueHref = `/chat?draft=${encodeURIComponent(draft.id)}`
   return (
     <li className="group flex items-center gap-3 rounded-md border bg-background px-3 py-2 hover:border-primary/40">
-      <Link
-        to={continueHref}
-        className="min-w-0 flex-1 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={() => openChat()}
         aria-label={`Continue draft ${draft.name || "Untitled draft"} in chat`}
+        className="h-auto min-w-0 flex-1 justify-start whitespace-normal px-2 py-1 text-left font-normal hover:bg-transparent"
       >
-        <div className="truncate text-sm font-medium">
-          {draft.name || "Untitled draft"}
-        </div>
-        <div className="truncate text-xs text-muted-foreground">
-          {hasRepo
-            ? `${trigger.repo_owner}/${trigger.repo_name}${trigger.label ? ` · ${trigger.label}` : ""}`
-            : "No trigger yet"}
-          {" · "}
-          {stageCount === 0
-            ? "0 stages"
-            : `${stageCount} stage${stageCount === 1 ? "" : "s"}`}
-          {" · "}
-          {formatRelative(draft.updated_at)}
-        </div>
-      </Link>
-      <Button size="sm" variant="ghost" render={<Link to={continueHref} />}>
+        <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+          <span className="w-full truncate text-sm font-medium">
+            {draft.name || "Untitled draft"}
+          </span>
+          <span className="w-full truncate text-xs text-muted-foreground">
+            {hasRepo
+              ? `${trigger.repo_owner}/${trigger.repo_name}${trigger.label ? ` · ${trigger.label}` : ""}`
+              : "No trigger yet"}
+            {" · "}
+            {stageCount === 0
+              ? "0 stages"
+              : `${stageCount} stage${stageCount === 1 ? "" : "s"}`}
+            {" · "}
+            {formatRelative(draft.updated_at)}
+          </span>
+        </span>
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => openChat()}>
         Continue
         <ArrowRight className="h-3.5 w-3.5" />
       </Button>

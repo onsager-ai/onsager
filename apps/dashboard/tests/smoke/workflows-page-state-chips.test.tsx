@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 
 import { WorkflowsPage } from "@/pages/WorkflowsPage"
+import { ChatUiProvider } from "@/lib/chat/use-chat-ui"
 
 // Workflows-tab state filter chips + Drafted view (#467 / ADR 0019).
 // Pins the chip row's count rendering, the URL `?state=` round-trip,
@@ -48,19 +49,21 @@ function renderPage(initialPath: string) {
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[initialPath]}>
-        <Routes>
-          <Route
-            path="/workspaces/:workspace/*"
-            element={
-              <WorkspaceScope>
-                <Routes>
-                  <Route index element={<WorkflowsPage />} />
-                  <Route path="workflows" element={<WorkflowsPage />} />
-                </Routes>
-              </WorkspaceScope>
-            }
-          />
-        </Routes>
+        <ChatUiProvider>
+          <Routes>
+            <Route
+              path="/workspaces/:workspace/*"
+              element={
+                <WorkspaceScope>
+                  <Routes>
+                    <Route index element={<WorkflowsPage />} />
+                    <Route path="workflows" element={<WorkflowsPage />} />
+                  </Routes>
+                </WorkspaceScope>
+              }
+            />
+          </Routes>
+        </ChatUiProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   )

@@ -1,11 +1,11 @@
 // Client-side workflow-draft storage (spec #401).
 //
 // Drafts are a first-class user object the FTUE leans on: a P1 engineer
-// who lands on `/chat` without a workspace must be able to design a
-// workflow over multiple sessions, close the tab, reopen, and resume —
-// all before the binding flow (axis 5) promotes the draft into a real
-// spine workflow. The substrate stays untouched in v1; server-side draft
-// sync is a v1.5 follow-up.
+// without a workspace must be able to design a workflow over multiple
+// sessions, close the tab, reopen, and resume — all before the binding
+// flow (axis 5) promotes the draft into a real spine workflow. The
+// substrate stays untouched in v1; server-side draft sync is a v1.5
+// follow-up.
 
 import { useCallback, useMemo, useState } from "react"
 

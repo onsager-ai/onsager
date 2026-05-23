@@ -5,6 +5,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom"
 
 import { WorkflowDetailPage } from "@/pages/WorkflowDetailPage"
 import { LocalDraftsCard } from "@/components/workflows/LocalDraftsCard"
+import { ChatUiProvider } from "@/lib/chat/use-chat-ui"
 
 // Spec #405: Cloud-vs-OSS capability boundary surfacing. Three inline
 // lines surface only when `is_oss === true`, exactly where the user is
@@ -267,7 +268,9 @@ describe("Spec #467 — LocalDraftsCard OSS footer", () => {
   function renderCard() {
     return render(
       <MemoryRouter>
-        <LocalDraftsCard />
+        <ChatUiProvider>
+          <LocalDraftsCard />
+        </ChatUiProvider>
       </MemoryRouter>,
     )
   }
