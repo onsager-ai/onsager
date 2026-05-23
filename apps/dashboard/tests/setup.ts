@@ -32,3 +32,26 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function scrollIntoView() {};
 }
+
+// jsdom does not ship IntersectionObserver. The anchored-timeline lazy-load
+// (#466) uses it as a scroll-end sentinel. Stub it so component tests can
+// mount; tests that exercise the lazy-load path call the captured callback
+// manually via the global mock.
+if (typeof globalThis.IntersectionObserver === "undefined") {
+  class IntersectionObserverStub {
+    constructor(cb: IntersectionObserverCallback) {
+      void cb;
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
+    readonly root = null;
+    readonly rootMargin = "";
+    readonly thresholds: ReadonlyArray<number> = [];
+  }
+  // @ts-expect-error assigning to globalThis
+  globalThis.IntersectionObserver = IntersectionObserverStub;
+}

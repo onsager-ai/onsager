@@ -3,15 +3,27 @@ import { useQuery } from "@tanstack/react-query"
 import { Package } from "lucide-react"
 import { api } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArtifactBadge } from "./ArtifactBadge"
+import { useLazyReveal } from "@/hooks/useLazyReveal"
 import { useActiveWorkspace } from "@/lib/workspace"
 
 // Workflow-scoped artifact list from the dedicated backend route (#302).
 // Replaces the per-run artifact fan-out we used to do client-side; one
 // request, server-side filter, and we can poll without scaling the
 // request count with the number of runs.
-export function WorkflowArtifactsTab({ workflowId }: { workflowId: string }) {
+//
+// `limit` truncates the inline render to "last N" with an in-place
+// `[show all]` control plus IntersectionObserver-based lazy reveal on
+// scroll (#466). Omit for the legacy "render everything" behaviour.
+export function WorkflowArtifactsTab({
+  workflowId,
+  limit,
+}: {
+  workflowId: string
+  limit?: number
+}) {
   const workspace = useActiveWorkspace()
   const { data, isLoading } = useQuery({
     queryKey: ["workflow-artifacts", workflowId],
@@ -21,10 +33,19 @@ export function WorkflowArtifactsTab({ workflowId }: { workflowId: string }) {
   })
 
   const artifacts = data?.artifacts ?? []
+  const initial = limit ?? artifacts.length
+  const { visibleCount, sentinelRef, hasMore, revealAll } = useLazyReveal({
+    initial,
+    step: limit ?? 20,
+    total: artifacts.length,
+  })
+  const visibleArtifacts = limit ? artifacts.slice(0, visibleCount) : artifacts
 
   if (!isLoading && artifacts.length === 0) {
     return <EmptyState />
   }
+
+  const remaining = artifacts.length - visibleCount
 
   return (
     <Card>
@@ -37,27 +58,48 @@ export function WorkflowArtifactsTab({ workflowId }: { workflowId: string }) {
             Loading…
           </p>
         ) : (
-          artifacts.map((artifact) => (
-            <Link
-              key={artifact.id}
-              to={`/workspaces/${workspace.slug}/artifacts/${artifact.id}`}
-              className="flex items-center gap-2 rounded-md border px-3 py-2 hover:bg-muted/50"
-            >
-              <ArtifactBadge kind={artifact.kind} />
-              <span className="min-w-0 flex-1 truncate text-sm">
-                {artifact.name ?? artifact.id}
-              </span>
-              <Badge
-                variant={artifact.state === "released" ? "default" : "outline"}
-                className="shrink-0"
+          <>
+            {visibleArtifacts.map((artifact) => (
+              <Link
+                key={artifact.id}
+                to={`/workspaces/${workspace.slug}/artifacts/${artifact.id}`}
+                className="flex items-center gap-2 rounded-md border px-3 py-2 hover:bg-muted/50"
               >
-                {artifact.state}
-              </Badge>
-              <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-                v{artifact.current_version}
-              </span>
-            </Link>
-          ))
+                <ArtifactBadge kind={artifact.kind} />
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {artifact.name ?? artifact.id}
+                </span>
+                <Badge
+                  variant={artifact.state === "released" ? "default" : "outline"}
+                  className="shrink-0"
+                >
+                  {artifact.state}
+                </Badge>
+                <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                  v{artifact.current_version}
+                </span>
+              </Link>
+            ))}
+            {limit && hasMore && (
+              <>
+                {/* 1px sentinel sits above the explicit button so the
+                    observer fires on scroll-end without consuming the
+                    button's hit area — otherwise the auto-reveal would
+                    fire as soon as the button entered the viewport and
+                    the user could never click it. */}
+                <div ref={sentinelRef} aria-hidden="true" className="h-px" />
+                <div className="flex justify-center pt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={revealAll}
+                  >
+                    Show all ({remaining} more)
+                  </Button>
+                </div>
+              </>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

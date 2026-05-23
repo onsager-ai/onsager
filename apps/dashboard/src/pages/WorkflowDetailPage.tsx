@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react"
+import { useLazyReveal } from "@/hooks/useLazyReveal"
 import { Link, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -74,7 +75,10 @@ type SectionId = (typeof SECTION_IDS)[number]
 
 // Per-section last_n truncation. Verdicts are denser; show fewer
 // inline and link out to the cross-workflow list for the rest (#455).
+// Artifacts and Runs lazy-load additional rows on scroll (#466) — these
+// constants seed the initial render and the per-step chunk size.
 const LAST_N_RUNS = 10
+const LAST_N_ARTIFACTS = 20
 const LAST_N_VERDICTS = 5
 
 export function WorkflowDetailPage() {
@@ -98,8 +102,24 @@ export function WorkflowDetailPage() {
     const all = runsData?.runs ?? []
     return isOss ? filterRunsToLastSevenDays(all) : all
   }, [runsData, isOss])
-  const visibleRuns = useMemo(() => runs.slice(0, LAST_N_RUNS), [runs])
-  const runsOverflow = runs.length > LAST_N_RUNS
+  // Lazy reveal for the Runs section (#466). `visibleCount` starts at
+  // `LAST_N_RUNS` and grows by the same step as the sentinel below the
+  // run rows enters the viewport. The section header's "Show all" link
+  // is a separate affordance — it deep-links to the cross-workflow runs
+  // page, not an in-page expansion.
+  const {
+    visibleCount: visibleRunCount,
+    sentinelRef: runsSentinelRef,
+    hasMore: runsHasMore,
+  } = useLazyReveal({
+    initial: LAST_N_RUNS,
+    step: LAST_N_RUNS,
+    total: runs.length,
+  })
+  const visibleRuns = useMemo(
+    () => runs.slice(0, visibleRunCount),
+    [runs, visibleRunCount],
+  )
 
   // Spec #120 item 3 — webhook delivery health for this workflow's
   // installation.
@@ -156,6 +176,7 @@ export function WorkflowDetailPage() {
   }
 
   const runsListHref = `/workspaces/${workspace.slug}/runs?workflow_id=${encodeURIComponent(workflow.id)}`
+  const totalRunCount = runs.length
 
   return (
     <div ref={scrollRoot} className="space-y-6 md:space-y-8">
@@ -203,7 +224,7 @@ export function WorkflowDetailPage() {
       <section id="runs" className="scroll-mt-20 space-y-4">
         <SectionHeader
           title="Runs"
-          actionHref={runsOverflow ? runsListHref : undefined}
+          actionHref={totalRunCount > LAST_N_RUNS ? runsListHref : undefined}
           actionLabel="Show all"
         />
         <ActiveRunsBanner
@@ -216,6 +237,7 @@ export function WorkflowDetailPage() {
           stageIds={workflow.stages.map((s) => s.id)}
           workspaceSlug={workspace.slug}
           isOss={isOss}
+          sentinelRef={runsHasMore ? runsSentinelRef : undefined}
         />
         <WorkflowEventsCard workflowId={workflow.id} runs={visibleRuns} />
         <WorkflowSessionsCard runs={visibleRuns} />
@@ -223,7 +245,10 @@ export function WorkflowDetailPage() {
 
       <section id="artifacts" className="scroll-mt-20 space-y-4">
         <SectionHeader title="Artifacts" />
-        <WorkflowArtifactsTab workflowId={workflow.id} />
+        <WorkflowArtifactsTab
+          workflowId={workflow.id}
+          limit={LAST_N_ARTIFACTS}
+        />
       </section>
 
       <section id="verdicts" className="scroll-mt-20 space-y-4">
@@ -345,11 +370,17 @@ function RunsList({
   stageIds,
   workspaceSlug,
   isOss,
+  sentinelRef,
 }: {
   runs: WorkflowRun[]
   stageIds: string[]
   workspaceSlug: string
   isOss: boolean
+  // When provided, rendered as a 1px sentinel below the run rows so
+  // `useLazyReveal`'s IntersectionObserver can extend the visible
+  // window as the user scrolls (#466). `undefined` when all runs are
+  // already on screen.
+  sentinelRef?: React.RefObject<HTMLDivElement | null>
 }) {
   return (
     <Card>
@@ -375,6 +406,9 @@ function RunsList({
               workspaceSlug={workspaceSlug}
             />
           ))
+        )}
+        {sentinelRef && (
+          <div ref={sentinelRef} aria-hidden="true" className="h-px" />
         )}
       </CardContent>
     </Card>
