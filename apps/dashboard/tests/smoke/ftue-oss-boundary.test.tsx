@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 
 import { WorkflowDetailPage } from "@/pages/WorkflowDetailPage"
-import { DraftStrip } from "@/components/chat/DraftStrip"
+import { LocalDraftsCard } from "@/components/workflows/LocalDraftsCard"
 
 // Spec #405: Cloud-vs-OSS capability boundary surfacing. Three inline
 // lines surface only when `is_oss === true`, exactly where the user is
@@ -235,56 +235,60 @@ describe("Spec #405 — OSS capability-boundary surfacing", () => {
   })
 })
 
-describe("Spec #405 — DraftStrip OSS footer", () => {
-  const draft = {
-    id: "d_1",
-    name: "Untitled draft",
-    updated_at: new Date().toISOString(),
-    workflow: { name: "", stages: [], trigger: null },
-    template_id: undefined,
-    // The strip only reads `id`, `name`, `updated_at`; cast keeps the
-    // test fixture small without dragging in the full draft shape.
-  } as unknown as Parameters<typeof DraftStrip>[0]["drafts"][number]
-
-  it("renders the `Drafts on this device.` footer when OSS", () => {
-    render(
-      <DraftStrip
-        drafts={[draft]}
-        activeId={draft.id}
-        onSwitch={() => {}}
-        onNew={() => {}}
-        onDelete={() => {}}
-        isOss={true}
-      />,
+describe("Spec #467 — LocalDraftsCard OSS footer", () => {
+  // The card reads drafts from localStorage via `useWorkflowDraft`. The
+  // auth mock above returns `user: null`, so `useWorkflowDraft` keys
+  // localStorage at `onsager.drafts.anon` (the anonymous-user slot in
+  // `lib/drafts.ts`); seeding writes there too.
+  function seedDrafts(items: { id: string; name: string }[]) {
+    const drafts = items.map((it) => ({
+      id: it.id,
+      user_id: "anon",
+      name: it.name,
+      source: "blank" as const,
+      workflow: {
+        name: "",
+        trigger: { install_id: "", repo_owner: "", repo_name: "", label: "" },
+        stages: [],
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }))
+    window.localStorage.setItem(
+      "onsager.drafts.anon",
+      JSON.stringify({ drafts }),
     )
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  function renderCard() {
+    return render(
+      <MemoryRouter>
+        <LocalDraftsCard />
+      </MemoryRouter>,
+    )
+  }
+
+  it("renders the `Drafts on this device.` footer when OSS with drafts", () => {
+    buildInfoMock.useOSSFlag.mockReturnValue(true)
+    seedDrafts([{ id: "d_1", name: "Untitled draft" }])
+    renderCard()
     expect(screen.getByText("Drafts on this device.")).toBeTruthy()
   })
 
   it("hides the footer when Cloud", () => {
-    render(
-      <DraftStrip
-        drafts={[draft]}
-        activeId={draft.id}
-        onSwitch={() => {}}
-        onNew={() => {}}
-        onDelete={() => {}}
-        isOss={false}
-      />,
-    )
+    buildInfoMock.useOSSFlag.mockReturnValue(false)
+    seedDrafts([{ id: "d_1", name: "Untitled draft" }])
+    renderCard()
     expect(screen.queryByText("Drafts on this device.")).toBeNull()
   })
 
-  it("hides the footer when there are no drafts (strip is hidden entirely)", () => {
-    const { container } = render(
-      <DraftStrip
-        drafts={[]}
-        activeId={null}
-        onSwitch={() => {}}
-        onNew={() => {}}
-        onDelete={() => {}}
-        isOss={true}
-      />,
-    )
-    expect(container.firstChild).toBeNull()
+  it("hides the footer when there are no drafts", () => {
+    buildInfoMock.useOSSFlag.mockReturnValue(true)
+    renderCard()
+    expect(screen.queryByText("Drafts on this device.")).toBeNull()
   })
 })

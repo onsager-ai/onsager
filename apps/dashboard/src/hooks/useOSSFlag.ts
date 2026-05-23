@@ -9,7 +9,8 @@
 // Used at the three Cloud-vs-OSS surfacing points:
 //   - Workflow detail page Runs tab — 7-day retention cap line.
 //   - Workflow detail page trigger panel — scheduler limitation line.
-//   - Chat draft strip — "Drafts on this device." footer.
+//   - Workflows tab Drafted-chip view — "Drafts on this device." footer
+//     (migrated from the retired chat draft strip per #467 / ADR 0019).
 
 import { useBuildInfo } from "@/lib/build-info"
 
