@@ -17,13 +17,21 @@ import type { ChatScope } from "@/lib/chat/scope"
 
 interface ChatQueueViewProps {
   scope: ChatScope
+  /**
+   * Set by push-notification deep-links — once the HITL aggregator
+   * lands, the matching card scrolls into view + highlights. Today the
+   * queue is empty so the id is just rendered as a data attribute for
+   * tests + the future aggregator to read.
+   */
+  highlightHitlId?: string | null
 }
 
-export function ChatQueueView({ scope }: ChatQueueViewProps) {
+export function ChatQueueView({ scope, highlightHitlId }: ChatQueueViewProps) {
   return (
     <div
       data-slot="chat-queue-empty"
       data-scope={scope.type}
+      data-highlight-hitl-id={highlightHitlId ?? undefined}
       className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground"
     >
       <CheckCircle2 className="h-8 w-8 text-muted-foreground/50" />

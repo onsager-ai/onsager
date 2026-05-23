@@ -66,6 +66,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "012_chat_threads",
         include_str!("../migrations/012_chat_threads.sql"),
     ),
+    (
+        "013_push_subscriptions",
+        include_str!("../migrations/013_push_subscriptions.sql"),
+    ),
 ];
 
 /// Apply all portal-owned table migrations. Idempotent — safe to call on

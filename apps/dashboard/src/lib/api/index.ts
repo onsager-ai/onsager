@@ -92,6 +92,7 @@ import { pulls } from './pulls';
 import { registry } from './registry';
 import { activation } from './activation';
 import { chat } from './chat';
+import { push } from './push';
 
 export const api = {
   ...sessions,
@@ -107,4 +108,5 @@ export const api = {
   ...registry,
   ...activation,
   chat,
+  push,
 };

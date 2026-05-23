@@ -84,10 +84,16 @@ export interface AutoScopeState {
  * plus the pin controls. Workspace switches drop the pin (pin is
  * per-workspace per the ADR); the workspace switch itself comes
  * through as a `workspaceId` change.
+ *
+ * `scopeOverride` is a one-shot from `useChatUi.open({ scope })` —
+ * an invocation channel (push deep link, scope-local Ask, top bell)
+ * pinned a specific scope at open time. It outranks both the
+ * route-derived auto scope and the user's pin until the chat closes.
  */
 export function useAutoScope(
   userId: string | null,
   workspaceId: string | null,
+  scopeOverride?: ChatScope | null,
 ): AutoScopeState {
   const { pathname, search } = useLocation()
 
@@ -107,7 +113,7 @@ export function useAutoScope(
     setPinnedScope(readPinnedScope(userId, workspaceId))
   }, [userId, workspaceId])
 
-  const effectiveScope = pinnedScope ?? autoScope
+  const effectiveScope = scopeOverride ?? pinnedScope ?? autoScope
 
   const pin = useCallback(() => {
     if (!userId || !workspaceId) return

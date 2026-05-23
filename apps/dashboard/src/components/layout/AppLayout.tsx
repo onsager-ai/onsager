@@ -17,6 +17,9 @@ import { WorkspaceSwitcher } from "@/components/workspaces/WorkspaceSwitcher"
 import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import { ChatUiProvider } from "@/lib/chat/use-chat-ui"
 import { ChatContainer } from "@/components/chat/ChatContainer"
+import { ChatFab } from "@/components/chat/ChatFab"
+import { ChatBell } from "@/components/chat/ChatBell"
+import { ChatDeepLinkHandler } from "@/components/chat/ChatDeepLinkHandler"
 import { cn } from "@/lib/utils"
 
 // Top chrome IA (#453 / ADR 0019). Three tabs — Workflows / Runs /
@@ -69,9 +72,16 @@ function AppLayoutInner({ children }: { children: ReactNode }) {
       </main>
       {/* Global chat surface (ADR 0020 / spec #471). One responsive
           mount across mobile (bottom-anchored overlay) and desktop
-          (right-anchored 420px sidebar). Closed by default; ⌘J or
-          the invocation channels (#472) bring it up. */}
+          (right-anchored 420px sidebar). Closed by default; ⌘J, the
+          mobile FAB, the top-chrome bell, or scope-local Ask buttons
+          bring it up (#472). */}
       <ChatContainer />
+      {/* Mobile-only FAB — three-state opener pinned to the bottom
+          right. Hidden on desktop (bell + ⌘J cover that surface). */}
+      <ChatFab />
+      {/* Deep-link handler for push-notification clicks. Reads the URL
+          params and opens the chat at the carried scope / HITL id. */}
+      <ChatDeepLinkHandler />
     </div>
   )
 }
@@ -98,6 +108,7 @@ function DesktopTopChrome() {
       <Separator orientation="vertical" className="h-6" />
       <TopTabs />
       <div className="ml-auto flex items-center gap-1">
+        <ChatBell />
         <CommandPaletteTrigger />
         <UserMenu variant="icon" />
       </div>
@@ -208,6 +219,7 @@ function MobileHeader() {
       </div>
       <div className="flex items-center gap-1">
         {actions}
+        <ChatBell size="sm" />
         <CommandPaletteTrigger />
         <UserMenu variant="icon" />
       </div>

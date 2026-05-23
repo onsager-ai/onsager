@@ -16,6 +16,7 @@ pub mod nodes;
 pub mod pats;
 pub mod projects;
 pub mod pull_request;
+pub mod push;
 pub mod registry_events;
 pub mod registry_triggers;
 pub mod runs;
