@@ -65,13 +65,16 @@ export function ActivityPage() {
 
   const chip = readChip(params.get("source"))
 
-  // Pull a generous page of recent events; chip filtering happens
-  // client-side because the spine stream is denser than the chip
-  // taxonomy. Infinite-scroll is a follow-up; for now, page size 100
-  // covers the typical 7-day operator window.
+  // Pull a generous page of recent events via the path-scoped
+  // operator-grain alias (ADR 0019 / spec #465). The backend's
+  // `operator_grain=true` filter trims internal subsystem dispatches
+  // server-side; chip filtering below narrows the allowlisted stream
+  // further on the client (source-type taxonomy). Infinite-scroll is a
+  // follow-up; for now, page size 100 covers the typical 7-day
+  // operator window.
   const { data, isLoading } = useQuery({
-    queryKey: ["spine-events", workspace.id],
-    queryFn: () => api.getSpineEvents(workspace.id, { limit: 100 }),
+    queryKey: ["activity", workspace.id],
+    queryFn: () => api.getActivity(workspace.id, { limit: 100 }),
     refetchInterval: 10_000,
   })
 
@@ -157,10 +160,13 @@ function EventRow({
   event: SpineEvent
   workspaceSlug: string
 }) {
-  // Map event → best deep-link. Run/artifact events route to the run
-  // detail; verdicts route to the workspace verdicts surface (the
-  // workflow detail's #verdicts anchor); everything else stays
-  // unlinked (rendered as a plain row).
+  // Map event → best deep-link. Operator-grain events fall into three
+  // shapes (ADR 0019):
+  // - Run-keyed: payload carries `artifact_id` (or stream_id is a
+  //   `forge:<artifact_id>`). Route to /runs/:id.
+  // - Workflow-keyed: payload carries `workflow_id` (trigger.fired,
+  //   workflow.manual_triggered). Route to /workflows/:id.
+  // - Otherwise unlinked (rendered as a plain row).
   const href = useMemo(() => {
     const data = (event.data ?? {}) as Record<string, unknown>
     const artifactId =
@@ -168,8 +174,20 @@ function EventRow({
     if (artifactId) {
       return `/workspaces/${workspaceSlug}/runs/${artifactId}`
     }
+    // Forge-style stream ids `forge:<artifact_id>` deep-link to the run.
+    if (event.stream_id.startsWith("forge:")) {
+      const id = event.stream_id.slice("forge:".length)
+      if (id) return `/workspaces/${workspaceSlug}/runs/${id}`
+    }
+    const workflowId =
+      typeof data.workflow_id === "string" ? data.workflow_id : null
+    if (workflowId) {
+      return `/workspaces/${workspaceSlug}/workflows/${workflowId}`
+    }
     return null
   }, [event, workspaceSlug])
+
+  const actorLabel = event.actor && event.actor.length > 0 ? event.actor : "system"
 
   const body = (
     <>
@@ -180,7 +198,11 @@ function EventRow({
         {href && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
       </div>
       <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span className="truncate">{event.stream_type}/{event.stream_id}</span>
+        <span className="truncate">
+          <span className="text-foreground/70">{actorLabel}</span>
+          <span aria-hidden="true"> · </span>
+          {event.stream_type}/{event.stream_id}
+        </span>
         <time dateTime={event.created_at}>
           {new Date(event.created_at).toLocaleString()}
         </time>

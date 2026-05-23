@@ -114,6 +114,17 @@ pub struct EventDefinition {
     /// mode landing per spec #275); ratchet to required is a follow-up.
     /// Has no meaning for real rows (`diagnostic_only = false`).
     pub tracking_issue: Option<u32>,
+    /// Whether this event surfaces in the Activity tab's operator-grain
+    /// stream (ADR 0019 / spec #465). `true` for events an operator
+    /// cares about — stage transitions, gate verdicts, run lifecycle,
+    /// trigger fires, escalations, agent/node lifecycle. `false` for
+    /// internal subsystem-to-subsystem dispatches and analyzer
+    /// diagnostics that would only add noise to the feed.
+    ///
+    /// Coverage is enforced by the field being required at construction
+    /// time — adding a `FactoryEventKind` variant means adding a row
+    /// here, and adding a row means picking a value. No default.
+    pub operator_grain: bool,
     /// One-line description for the manifest read API and dashboard.
     pub description: &'static str,
 }
@@ -143,6 +154,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "New artifact accepted and ID assigned.",
         },
         EventDefinition {
@@ -153,6 +165,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "Artifact transitioned between lifecycle states.",
         },
         EventDefinition {
@@ -163,6 +176,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "Artifact reached terminal state (archived).",
         },
         // -- Git lifecycle (onsager-portal webhooks) ------------------------
@@ -174,6 +188,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "A pull request was opened for an artifact.",
         },
         EventDefinition {
@@ -184,6 +199,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "A CI check finished for a PR.",
         },
         EventDefinition {
@@ -194,6 +210,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "A PR was merged.",
         },
         EventDefinition {
@@ -204,6 +221,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "A PR was closed without merging.",
         },
         // -- Forge process events -------------------------------------------
@@ -215,6 +233,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: false,
             description: "ShapingRequest sent to Stiglab via the spine (replaces POST /api/shaping).",
         },
         EventDefinition {
@@ -225,6 +244,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: false,
             description: "ShapingResult received from Stiglab and recorded by Forge.",
         },
         EventDefinition {
@@ -235,6 +255,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: false,
             description: "GateRequest sent to Synodic via the spine (replaces POST /api/gate).",
         },
         EventDefinition {
@@ -245,6 +266,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "GateVerdict observed by Forge after Synodic responded.",
         },
         EventDefinition {
@@ -255,6 +277,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: false,
             description: "Insight forwarded to the scheduling kernel.",
         },
         EventDefinition {
@@ -265,6 +288,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("diagnostic trace of forge scheduling kernel; no downstream action"),
             tracking_issue: None,
+            operator_grain: false,
             description: "Scheduling kernel produced a ShapingDecision.",
         },
         // -- Stiglab events -------------------------------------------------
@@ -276,6 +300,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "A session finished successfully; carries optional artifact_id, token usage, branch, and PR number.",
         },
         EventDefinition {
@@ -286,6 +311,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: false,
             description: "Full session ShapingResult ready for Forge to act on (replaces POST /api/shaping response). Renamed from stiglab.shaping_result_ready per spec #285.",
         },
         EventDefinition {
@@ -296,6 +322,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "A session terminated with an error.",
         },
         EventDefinition {
@@ -306,6 +333,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("dashboard event-timeline troubleshooting for node/deadline failures"),
             tracking_issue: None,
+            operator_grain: true,
             description: "A session was aborted (node lost, deadline exceeded).",
         },
         // -- Portal intents (dashboard → agent dispatch) --------------------
@@ -317,6 +345,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "Dashboard task request from portal; stiglab dispatches the session to an agent node.",
         },
         EventDefinition {
@@ -327,6 +356,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "Dashboard cancel-session request from portal (spec #303); stiglab forwards a CancelSession to the session's agent node.",
         },
         EventDefinition {
@@ -339,6 +369,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "observable in dashboard event timeline for operator troubleshooting when portal cannot open a PR for a completed session",
             ),
             tracking_issue: None,
+            operator_grain: true,
             description: "Portal failed to open a GitHub PR for a completed session (empty branch, GitHub API error, or missing App config).",
         },
         // -- Synodic events -------------------------------------------------
@@ -354,6 +385,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "Full GateVerdict in response to forge.gate_requested (replaces POST /api/gate response).",
         },
         EventDefinition {
@@ -364,6 +396,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("audit trail for escalation context"),
             tracking_issue: None,
+            operator_grain: true,
             description: "An escalation was initiated.",
         },
         EventDefinition {
@@ -374,6 +407,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
             tracking_issue: None,
+            operator_grain: true,
             description: "An escalation was resolved (human, delegate, or timeout).",
         },
         EventDefinition {
@@ -384,6 +418,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
             tracking_issue: None,
+            operator_grain: true,
             description: "An escalation timed out and the default verdict was applied.",
         },
         EventDefinition {
@@ -394,6 +429,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
             tracking_issue: None,
+            operator_grain: true,
             description: "A delegate proposed a resolution for an active escalation.",
         },
         EventDefinition {
@@ -404,6 +440,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
             tracking_issue: None,
+            operator_grain: false,
             description: "A crystallization candidate rule was created.",
         },
         EventDefinition {
@@ -414,6 +451,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
             tracking_issue: None,
+            operator_grain: false,
             description: "A proposed rule was approved and entered the active set.",
         },
         EventDefinition {
@@ -424,6 +462,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
             tracking_issue: None,
+            operator_grain: false,
             description: "A rule was disabled.",
         },
         EventDefinition {
@@ -434,6 +473,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in synodic governance UI; audit trail"),
             tracking_issue: None,
+            operator_grain: false,
             description: "A rule was modified, producing a new version.",
         },
         // -- Ising events ---------------------------------------------------
@@ -445,6 +485,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in dashboard ising views"),
             tracking_issue: None,
+            operator_grain: false,
             description: "An insight passed validation and was recorded on the spine.",
         },
         EventDefinition {
@@ -455,6 +496,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: false,
             description: "Machine-readable signal emitted on the spine for other subsystems to consume.",
         },
         EventDefinition {
@@ -465,6 +507,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in dashboard ising views"),
             tracking_issue: None,
+            operator_grain: false,
             description: "An insight was deduplicated or fell below confidence threshold.",
         },
         EventDefinition {
@@ -475,6 +518,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: false,
             description: "An insight was packaged as a rule proposal for Synodic.",
         },
         EventDefinition {
@@ -485,6 +529,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("operator troubleshooting in dashboard"),
             tracking_issue: None,
+            operator_grain: false,
             description: "An analyzer encountered an error during its run.",
         },
         EventDefinition {
@@ -495,6 +540,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("ising health monitoring in dashboard"),
             tracking_issue: None,
+            operator_grain: false,
             description: "Ising finished catching up from a lag position.",
         },
         // -- Workflow runtime (issue #80 / #81) -----------------------------
@@ -516,6 +562,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "A trigger fired (webhook / schedule / event / manual).",
         },
         EventDefinition {
@@ -531,6 +578,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("audit trail for manual / CLI / replay fires"),
             tracking_issue: None,
+            operator_grain: true,
             description: "Audit record for a manual / CLI / replay trigger fire (actor + workflow).",
         },
         EventDefinition {
@@ -541,6 +589,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in workflow run timeline"),
             tracking_issue: None,
+            operator_grain: true,
             description: "A workflow-tagged artifact entered a new stage.",
         },
         // Per spec #285: per-gate `stage.gate_passed` / `stage.gate_failed`
@@ -554,6 +603,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: true,
             reason: Some("rendered in workflow run timeline"),
             tracking_issue: None,
+            operator_grain: true,
             description: "All gates on a stage resolved and the artifact advanced.",
         },
         // -- Registry events removed by spec #285 ---------------------------
@@ -581,6 +631,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "rendered in dashboard run timeline; Observer consumer arrives with OBS-01 (#361)",
             ),
             tracking_issue: Some(361),
+            operator_grain: true,
             description: "Substrate scheduler dispatched a node — execution began.",
         },
         EventDefinition {
@@ -593,6 +644,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "rendered in dashboard run timeline; Observer consumer arrives with OBS-01 (#361)",
             ),
             tracking_issue: Some(361),
+            operator_grain: true,
             description: "A node finished successfully; outputs persisted under the edge's ArtifactId.",
         },
         EventDefinition {
@@ -605,6 +657,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "rendered in dashboard run timeline; Observer consumer arrives with OBS-01 (#361)",
             ),
             tracking_issue: Some(361),
+            operator_grain: true,
             description: "A node's executor returned Err; the plan is aborted (v1 — no retries).",
         },
         EventDefinition {
@@ -617,6 +670,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "rendered in dashboard HITL inbox; Human executor approval round-trips via portal (#357)",
             ),
             tracking_issue: Some(357),
+            operator_grain: true,
             description: "A Human executor is waiting on an out-of-band approval decision.",
         },
         EventDefinition {
@@ -629,6 +683,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "rendered in dashboard HITL audit; the substrate's own Human executor consumes the approval inline",
             ),
             tracking_issue: None,
+            operator_grain: true,
             description: "A pending Human executor node received an approval decision.",
         },
         EventDefinition {
@@ -641,6 +696,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "rendered in dashboard HITL audit; the substrate's own Human executor consumes the rejection inline",
             ),
             tracking_issue: None,
+            operator_grain: true,
             description: "A pending Human executor node received a rejection decision.",
         },
         EventDefinition {
@@ -653,6 +709,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "rendered in dashboard run timeline as gate outcome; Observer / dashboard read it directly — distinct from the legacy `synodic.gate_verdict` emitted by the 0.1 Synodic subsystem (retired by MIG-03)",
             ),
             tracking_issue: None,
+            operator_grain: true,
             description: "Verify executor produced a verdict — pass / fail outcome with per-check details.",
         },
         EventDefinition {
@@ -665,6 +722,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "rendered in dashboard agent timeline; supersedes the 0.1 `stiglab.session_*` events once MIG-01 retires stiglab",
             ),
             tracking_issue: None,
+            operator_grain: true,
             description: "Agent executor opened an LLM session.",
         },
         EventDefinition {
@@ -677,6 +735,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "rendered in dashboard agent timeline; carries optional token usage for budget consumers",
             ),
             tracking_issue: None,
+            operator_grain: true,
             description: "Agent executor's LLM session finished successfully.",
         },
         EventDefinition {
@@ -689,6 +748,7 @@ pub const EVENTS: EventManifest = EventManifest {
                 "rendered in dashboard agent timeline; the executor wraps this into ExecutorError::Failed for the scheduler",
             ),
             tracking_issue: None,
+            operator_grain: true,
             description: "Agent executor's LLM session terminated with an error.",
         },
         // -- Gate adapters (GitHub webhooks) --------------------------------
@@ -701,6 +761,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: false,
             description: "A GitHub check_suite/check_run/status arrived for a tracked PR.",
         },
         EventDefinition {
@@ -712,6 +773,7 @@ pub const EVENTS: EventManifest = EventManifest {
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
+            operator_grain: true,
             description: "A manual-approval gate received a signal (e.g. PR merged).",
         },
     ],
@@ -780,6 +842,72 @@ mod tests {
         assert!(first.get("diagnostic_only").is_some());
         assert!(first.get("reason").is_some());
         assert!(first.get("tracking_issue").is_some());
+        assert!(
+            first
+                .get("operator_grain")
+                .and_then(|v| v.as_bool())
+                .is_some(),
+            "operator_grain must serialize as a bool"
+        );
+    }
+
+    /// Operator-grain coverage (spec #465): at least one row in each
+    /// state must be present so the Activity feed has signal and the
+    /// allowlist isn't accidentally collapsed to "everything" or
+    /// "nothing".
+    #[test]
+    fn manifest_has_both_operator_grain_states() {
+        let grain_true = EVENTS.events.iter().filter(|e| e.operator_grain).count();
+        let grain_false = EVENTS.events.iter().filter(|e| !e.operator_grain).count();
+        assert!(
+            grain_true > 0,
+            "manifest must include at least one operator-grain event"
+        );
+        assert!(
+            grain_false > 0,
+            "manifest must include at least one non-operator-grain event"
+        );
+    }
+
+    /// Spot-check the operator-grain partition against ADR 0019's
+    /// definition: stage transitions / gate verdicts / run lifecycle
+    /// surface; internal subsystem dispatches do not.
+    #[test]
+    fn operator_grain_partition_matches_adr_0019() {
+        let surfaced = [
+            "stage.entered",
+            "stage.advanced",
+            "synodic.gate_verdict",
+            "synodic.verdict",
+            "trigger.fired",
+            "artifact.registered",
+            "artifact.state_changed",
+            "stiglab.session_completed",
+            "node.failed",
+        ];
+        for kind in surfaced {
+            let def = EVENTS.lookup(kind).expect(kind);
+            assert!(
+                def.operator_grain,
+                "`{kind}` should be operator-grain per ADR 0019"
+            );
+        }
+        let hidden = [
+            "forge.shaping_dispatched",
+            "forge.shaping_returned",
+            "forge.gate_requested",
+            "stiglab.session_result_ready",
+            "ising.insight_emitted",
+            "synodic.rule_proposed",
+            "gate.check_updated",
+        ];
+        for kind in hidden {
+            let def = EVENTS.lookup(kind).expect(kind);
+            assert!(
+                !def.operator_grain,
+                "`{kind}` should NOT be operator-grain (internal dispatch/diagnostic)"
+            );
+        }
     }
 
     #[test]
