@@ -89,9 +89,11 @@ export function WorkspaceScope({ children }: WorkspaceLayoutProps) {
 
   if (workspaces.length === 0) {
     // Deep-link to a scoped path with zero memberships — send them to
-    // `/chat`, the FTUE entry. The picker still lives at `/workspaces`
-    // for users who want to create one explicitly.
-    return <Navigate to="/chat" replace />
+    // the workspace picker / FTUE surface. Matches `BarePathRedirect`
+    // in App.tsx (#453 / ADR 0019); the legacy `/chat` FTUE entry is
+    // retired (#468 / ADR 0019, ADR 0020) and the global chat mount
+    // (ADR 0020 / #471) is reachable from any signed-in surface.
+    return <Navigate to="/workspaces" replace />
   }
 
   if (!active) {
