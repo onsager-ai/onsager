@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 // Progressive in-page reveal for long anchored sections on
 // `WorkflowDetailPage` (#466). Holds a `visibleCount` that starts at
@@ -18,12 +18,11 @@ export function useLazyReveal({
   total: number
 }) {
   const [rawVisibleCount, setVisibleCount] = useState(initial)
-  // Clamp at render time so consumers passing a shrinking `total`
-  // (e.g. filter change) never see `visibleCount > total`.
-  const visibleCount = useMemo(
-    () => Math.min(Math.max(rawVisibleCount, initial), total || initial),
-    [rawVisibleCount, initial, total],
-  )
+  // Clamp at render time so the invariant `visibleCount <= total`
+  // holds even when consumers pass a shrinking `total` (e.g. filter
+  // change). When `total = 0` this correctly yields `visibleCount = 0`
+  // — empty list, no Show-all button.
+  const visibleCount = Math.min(rawVisibleCount, total)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {

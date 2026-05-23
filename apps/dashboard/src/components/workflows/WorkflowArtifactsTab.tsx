@@ -81,15 +81,23 @@ export function WorkflowArtifactsTab({
               </Link>
             ))}
             {limit && hasMore && (
-              <div ref={sentinelRef} className="flex justify-center pt-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={revealAll}
-                >
-                  Show all ({remaining} more)
-                </Button>
-              </div>
+              <>
+                {/* 1px sentinel sits above the explicit button so the
+                    observer fires on scroll-end without consuming the
+                    button's hit area — otherwise the auto-reveal would
+                    fire as soon as the button entered the viewport and
+                    the user could never click it. */}
+                <div ref={sentinelRef} aria-hidden="true" className="h-px" />
+                <div className="flex justify-center pt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={revealAll}
+                  >
+                    Show all ({remaining} more)
+                  </Button>
+                </div>
+              </>
             )}
           </>
         )}

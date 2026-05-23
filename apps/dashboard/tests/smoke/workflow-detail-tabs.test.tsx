@@ -164,6 +164,7 @@ describe("WorkflowDetailPage lazy reveal (#466)", () => {
     cb: IntersectionObserverCallback
     targets: Element[]
   }> = []
+  let originalIO: typeof IntersectionObserver | undefined
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -189,6 +190,7 @@ describe("WorkflowDetailPage lazy reveal (#466)", () => {
       readonly rootMargin = ""
       readonly thresholds: ReadonlyArray<number> = []
     }
+    originalIO = globalThis.IntersectionObserver
     // @ts-expect-error replacing the stub installed by setup.ts
     globalThis.IntersectionObserver = CaptureObserver
 
@@ -207,6 +209,9 @@ describe("WorkflowDetailPage lazy reveal (#466)", () => {
 
   afterEach(() => {
     window.location.hash = ""
+    if (originalIO) {
+      globalThis.IntersectionObserver = originalIO
+    }
   })
 
   function makeRuns(n: number) {

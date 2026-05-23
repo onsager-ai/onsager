@@ -103,9 +103,10 @@ export function WorkflowDetailPage() {
     return isOss ? filterRunsToLastSevenDays(all) : all
   }, [runsData, isOss])
   // Lazy reveal for the Runs section (#466). `visibleCount` starts at
-  // `LAST_N_RUNS`, grows by the same step as the sentinel enters the
-  // viewport, and snaps to `runs.length` via the section header's
-  // "Show all" button. Cross-workflow runs page link stays separate.
+  // `LAST_N_RUNS` and grows by the same step as the sentinel below the
+  // run rows enters the viewport. The section header's "Show all" link
+  // is a separate affordance — it deep-links to the cross-workflow runs
+  // page, not an in-page expansion.
   const {
     visibleCount: visibleRunCount,
     sentinelRef: runsSentinelRef,
