@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ActiveRunsBanner } from "@/components/workflows/ActiveRunsBanner"
+import { LocalDraftsCard } from "@/components/workflows/LocalDraftsCard"
 import { WebhookHealthWarning } from "@/components/workflows/WebhookHealthWarning"
 import { WorkflowBuilderSheet } from "@/components/workflows/WorkflowBuilderSheet"
 import { WorkflowStatusChips } from "@/components/workflows/WorkflowStatusChips"
@@ -87,6 +88,13 @@ export function WorkflowsPage() {
       </div>
 
       <WorkflowStatusChips value={chip} counts={counts} onChange={setChip} />
+
+      {/* Drafted-chip view (#467 / ADR 0019). Client-side drafts live
+          in localStorage (spec #401); the chip view absorbs DraftStrip's
+          quick-jump / continue-in-chat / delete affordances. Spine-side
+          bound-but-not-yet-active drafts continue to render in the list
+          below. */}
+      {chip === "drafted" && <LocalDraftsCard />}
 
       <ActiveRunsBanner workspaceId={workspace.id} />
 

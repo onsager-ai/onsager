@@ -52,7 +52,6 @@ import { useQueryClient } from "@tanstack/react-query"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { WorkflowDAGPreview } from "@/components/chat/WorkflowDAGPreview"
 import { TemplateGallery } from "@/components/chat/TemplateGallery"
-import { DraftStrip } from "@/components/chat/DraftStrip"
 import { useWorkflowDraft } from "@/lib/drafts"
 import { useBuildInfo } from "@/lib/build-info"
 import type {
@@ -278,11 +277,9 @@ export function ChatPage() {
   // The active draft drives the right-panel DAG/YAML preview.
   const {
     draft: activeDraft,
-    drafts,
     setWorkflow,
     switchDraft,
     newDraft,
-    deleteById,
   } = useWorkflowDraft(user?.id ?? null)
   const workflowDoc: WorkflowDocument | null = activeDraft?.workflow ?? null
 
@@ -627,16 +624,10 @@ export function ChatPage() {
             </Button>
           </div>
         ) : null}
-        {/* Drafts quick-access strip (spec #401). Only shown when the
-            user has at least one persisted draft. */}
-        <DraftStrip
-          drafts={drafts}
-          activeId={activeDraft?.id ?? null}
-          onSwitch={switchDraft}
-          onNew={() => newDraft()}
-          onDelete={deleteById}
-          isOss={isOss}
-        />
+        {/* Draft switching migrated to the Workflows tab's Drafted chip
+            (#467 / ADR 0019). The chat surface itself no longer owns the
+            multi-draft strip; ChatContainer (spec #451) will read the
+            active draft id from the URL when it lands. */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
           {isEmpty ? (
             <EmptyState
