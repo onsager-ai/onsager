@@ -70,6 +70,10 @@ jobs:
               # under apps/dashboard/src/lib/api/generated/ and diffs against
               # the committed tree. Either side changing must re-trigger.
               - 'apps/dashboard/src/lib/api/generated/**'
+              # Spec #469 — check-metaphor-leakage scans dashboard copy for
+              # the retired AI-factory metaphor; any change under
+              # apps/dashboard/src/ must re-trigger the audit.
+              - 'apps/dashboard/src/**'
               - '.github/workflows/rust.yml'
 
   check:
@@ -112,6 +116,8 @@ jobs:
         run: cargo run -p xtask --quiet -- check-events
       - name: Generated dashboard API types drift check (spec #298)
         run: cargo run -p xtask --quiet -- check-generated-types
+      - name: Metaphor-leakage check (ADR 0019 / spec #469)
+        run: cargo run -p xtask --quiet -- check-metaphor-leakage
       - name: File-budget check (spec #261)
         run: cargo run -p xtask --quiet -- check-file-budget --mode=fail
       - name: Orphan-crate check (spec #275, warn-mode landing)
