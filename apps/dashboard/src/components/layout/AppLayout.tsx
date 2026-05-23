@@ -15,6 +15,8 @@ import {
 import { UserMenu } from "./UserMenu"
 import { WorkspaceSwitcher } from "@/components/workspaces/WorkspaceSwitcher"
 import { useOptionalActiveWorkspace } from "@/lib/workspace"
+import { ChatUiProvider } from "@/lib/chat/use-chat-ui"
+import { ChatContainer } from "@/components/chat/ChatContainer"
 import { cn } from "@/lib/utils"
 
 // Top chrome IA (#453 / ADR 0019). Three tabs — Workflows / Runs /
@@ -39,7 +41,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <PageHeaderProvider>
       <CommandPaletteProvider>
-        <AppLayoutInner>{children}</AppLayoutInner>
+        <ChatUiProvider>
+          <AppLayoutInner>{children}</AppLayoutInner>
+        </ChatUiProvider>
       </CommandPaletteProvider>
     </PageHeaderProvider>
   )
@@ -63,6 +67,11 @@ function AppLayoutInner({ children }: { children: ReactNode }) {
       >
         {children}
       </main>
+      {/* Global chat surface (ADR 0020 / spec #471). One responsive
+          mount across mobile (bottom-anchored overlay) and desktop
+          (right-anchored 420px sidebar). Closed by default; ⌘J or
+          the invocation channels (#472) bring it up. */}
+      <ChatContainer />
     </div>
   )
 }
