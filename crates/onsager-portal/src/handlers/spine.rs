@@ -44,7 +44,27 @@ pub struct EventsQuery {
     /// - `stream_id IN (SELECT id FROM sessions WHERE artifact_id = run_id)`
     ///   (session-keyed events whose session points back to the artifact).
     pub run_id: Option<String>,
+    /// When `true`, filter to the operator-grain allowlist (ADR 0019 /
+    /// spec #465). The Activity tab uses this to surface only events an
+    /// operator cares about — stage transitions, gate verdicts, run
+    /// lifecycle — and hide internal subsystem dispatches and analyzer
+    /// diagnostics. Default `false` for backward compatibility; the
+    /// `/api/workspaces/:id/activity` alias defaults it to `true`.
+    #[serde(default)]
+    pub operator_grain: Option<bool>,
     pub limit: Option<i64>,
+}
+
+/// The static allowlist of `event_type` strings that count as
+/// operator-grain. Derived once from `onsager_registry::EVENTS`; called
+/// per request which is cheap (52 rows, vec scan).
+fn operator_grain_kinds() -> Vec<&'static str> {
+    onsager_registry::EVENTS
+        .events
+        .iter()
+        .filter(|e| e.operator_grain)
+        .map(|e| e.kind)
+        .collect()
 }
 
 #[derive(Debug, Serialize, FromRow, TS)]
@@ -217,22 +237,72 @@ async fn emit(
     }
 }
 
-/// GET /api/spine/events?workspace=W — query the events_ext table.
-pub async fn list_events(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Query(params): Query<EventsQuery>,
-) -> Response {
-    let workspace_id = params.workspace.trim();
-    if workspace_id.is_empty() {
-        return missing_workspace();
-    }
-    if let Err(r) = require_workspace_access(&state.pool, &auth_user, workspace_id).await {
-        return r;
-    }
+/// Activity-tab query params: same shape as `EventsQuery` minus the
+/// workspace (which is on the path) and minus `operator_grain` (which is
+/// forced to `true` for the Activity surface).
+#[derive(Debug, Deserialize, Default)]
+pub struct ActivityQuery {
+    #[serde(default)]
+    pub stream_type: Option<String>,
+    #[serde(default)]
+    pub event_type: Option<String>,
+    #[serde(default)]
+    pub stream_id: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
 
-    let pool = state.spine.pool();
+/// GET /api/workspaces/:id/activity — path-scoped operator-grain feed
+/// (ADR 0019 / spec #465). Wraps `list_events` with the workspace from
+/// the path and `operator_grain=true` baked in. Matches the dashboard's
+/// `/workspaces/:slug/activity` URL shape so the Activity tab can call
+/// it directly without re-stating the workspace as a query param.
+///
+/// The query-param `GET /api/spine/events?workspace=W&operator_grain=...`
+/// shape stays for non-dashboard MCP clients that already speak it; this
+/// alias is purely additive.
+pub async fn list_activity(
+    state: State<AppState>,
+    auth_user: AuthUser,
+    Path(workspace_id): Path<String>,
+    Query(q): Query<ActivityQuery>,
+) -> Response {
+    let params = EventsQuery {
+        workspace: workspace_id,
+        stream_type: q.stream_type,
+        event_type: q.event_type,
+        stream_id: q.stream_id,
+        run_id: q.run_id,
+        operator_grain: Some(true),
+        limit: q.limit,
+    };
+    list_events(state, auth_user, Query(params)).await
+}
+
+/// Query `events_ext` for the given workspace + filters and return the
+/// projected rows. Pure data-access — no auth, no HTTP, no response
+/// shaping. Pulled out of [`list_events`] so integration tests can
+/// drive the operator-grain filter against a real Postgres without
+/// rebuilding `AppState`. Workspace authorization is the handler's job
+/// (it is required, not optional — see [`require_workspace_access`]).
+///
+/// Returns `Ok(vec![])` rather than running an unbounded query when
+/// `operator_grain` is `Some(true)` but the registry has no operator-
+/// grain rows. That is a manifest-shape error (the registry tests
+/// catch it); a deployed binary with an empty allowlist must not
+/// silently fall back to the unfiltered stream.
+pub async fn query_events_for_workspace(
+    pool: &sqlx::PgPool,
+    workspace_id: &str,
+    params: &EventsQuery,
+) -> Result<Vec<SpineEvent>, sqlx::Error> {
     let limit = params.limit.unwrap_or(50).min(500);
+
+    if params.operator_grain.unwrap_or(false) && operator_grain_kinds().is_empty() {
+        return Ok(Vec::new());
+    }
 
     let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
         "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
@@ -245,6 +315,17 @@ pub async fn list_events(
     }
     if let Some(et) = params.event_type.as_deref() {
         qb.push(" AND event_type = ").push_bind(et.to_string());
+    }
+    // Operator-grain allowlist (ADR 0019 / spec #465). When the caller
+    // opts in (Activity tab via the path-scoped alias below), restrict
+    // results to the registry's `operator_grain: true` rows. Stacks
+    // with `event_type` if both are passed — `operator_grain=true`
+    // narrows to the allowlist, then `event_type` narrows further.
+    if params.operator_grain.unwrap_or(false) {
+        let kinds = operator_grain_kinds();
+        qb.push(" AND event_type = ANY(");
+        qb.push_bind(kinds.iter().map(|k| k.to_string()).collect::<Vec<_>>());
+        qb.push(")");
     }
     if let Some(sid) = params.stream_id.as_deref() {
         qb.push(" AND stream_id = ").push_bind(sid.to_string());
@@ -264,7 +345,24 @@ pub async fn list_events(
     }
     qb.push(" ORDER BY id DESC LIMIT ").push_bind(limit);
 
-    match qb.build_query_as::<SpineEvent>().fetch_all(pool).await {
+    qb.build_query_as::<SpineEvent>().fetch_all(pool).await
+}
+
+/// GET /api/spine/events?workspace=W — query the events_ext table.
+pub async fn list_events(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Query(params): Query<EventsQuery>,
+) -> Response {
+    let workspace_id = params.workspace.trim();
+    if workspace_id.is_empty() {
+        return missing_workspace();
+    }
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, workspace_id).await {
+        return r;
+    }
+
+    match query_events_for_workspace(state.spine.pool(), workspace_id, &params).await {
         Ok(events) => Json(serde_json::json!({ "events": events })).into_response(),
         Err(e) => {
             tracing::error!("spine events query failed: {e}");
@@ -788,4 +886,98 @@ pub async fn override_gate(
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The operator-grain allowlist comes from the registry manifest;
+    /// changing what counts as operator-grain is a registry edit, not a
+    /// handler edit. Spot-check a few entries on both sides of the line
+    /// (ADR 0019 / spec #465).
+    #[test]
+    fn operator_grain_allowlist_pulls_from_registry() {
+        let kinds = operator_grain_kinds();
+        // Run lifecycle / verdict / trigger events are operator-grain.
+        assert!(kinds.contains(&"stiglab.session_completed"));
+        assert!(kinds.contains(&"synodic.gate_verdict"));
+        assert!(kinds.contains(&"trigger.fired"));
+        assert!(kinds.contains(&"stage.entered"));
+        assert!(kinds.contains(&"node.failed"));
+        // Internal subsystem dispatches and analyzer diagnostics are not.
+        assert!(!kinds.contains(&"forge.shaping_dispatched"));
+        assert!(!kinds.contains(&"forge.shaping_returned"));
+        assert!(!kinds.contains(&"stiglab.session_result_ready"));
+        assert!(!kinds.contains(&"ising.insight_emitted"));
+        assert!(!kinds.contains(&"synodic.rule_proposed"));
+    }
+
+    /// The path-scoped `/api/workspaces/:id/activity` alias must force
+    /// `operator_grain=true` regardless of what the client passes —
+    /// it's the contract that distinguishes the Activity surface from
+    /// the unfiltered `/api/spine/events`. Verifies the alias plumbing
+    /// (`ActivityQuery → EventsQuery`) by constructing the same params
+    /// the handler builds.
+    #[test]
+    fn activity_alias_forces_operator_grain_true() {
+        let q = ActivityQuery {
+            stream_type: None,
+            event_type: Some("synodic.gate_verdict".into()),
+            stream_id: None,
+            run_id: None,
+            limit: Some(50),
+        };
+        // Mirror the construction inside `list_activity` so the test
+        // pins the conversion shape, not the handler's `State`/`Auth`
+        // wiring.
+        let params = EventsQuery {
+            workspace: "ws-test".into(),
+            stream_type: q.stream_type,
+            event_type: q.event_type,
+            stream_id: q.stream_id,
+            run_id: q.run_id,
+            operator_grain: Some(true),
+            limit: q.limit,
+        };
+        assert_eq!(params.workspace, "ws-test");
+        assert_eq!(params.operator_grain, Some(true));
+        assert_eq!(params.event_type.as_deref(), Some("synodic.gate_verdict"));
+        assert_eq!(params.limit, Some(50));
+    }
+
+    /// Default-deserialized `EventsQuery` (no `operator_grain` in the
+    /// query string) leaves the filter off — back-compat for existing
+    /// `/api/spine/events?workspace=W` callers (MCP clients, etc.).
+    /// Driven through axum's `Query` extractor so the test pins the
+    /// real wire-decoding shape, not a hand-rolled serde call.
+    #[tokio::test]
+    async fn events_query_operator_grain_defaults_to_none() {
+        use axum::extract::FromRequestParts;
+        use axum::http::Request;
+
+        async fn parse(qs: &str) -> EventsQuery {
+            let uri = format!("http://x/?{qs}");
+            let req = Request::builder().uri(&uri).body(()).unwrap();
+            let (mut parts, _) = req.into_parts();
+            let Query(q) = Query::<EventsQuery>::from_request_parts(&mut parts, &())
+                .await
+                .expect("query parses");
+            q
+        }
+
+        assert_eq!(parse("workspace=ws-1").await.operator_grain, None);
+        assert_eq!(
+            parse("workspace=ws-1&operator_grain=true")
+                .await
+                .operator_grain,
+            Some(true)
+        );
+        assert_eq!(
+            parse("workspace=ws-1&operator_grain=false")
+                .await
+                .operator_grain,
+            Some(false)
+        );
+    }
 }

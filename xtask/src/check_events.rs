@@ -4,7 +4,10 @@
 //! from spec #150:
 //!
 //! 1. **Coverage**: every `FactoryEventKind` variant has a manifest entry
-//!    keyed by its wire `event_type` string.
+//!    keyed by its wire `event_type` string. The manifest entry must
+//!    set every field, including `operator_grain` (spec #465) — Rust's
+//!    no-default-on-struct-literal rule makes this a compile-time
+//!    requirement, so the lint inherits it for free.
 //! 2. **Both ends declared**: every manifest entry has at least one
 //!    producer, and is either real (non-empty `consumers`) or
 //!    diagnostic-only (`diagnostic_only = true` plus a non-empty

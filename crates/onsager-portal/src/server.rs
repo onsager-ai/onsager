@@ -263,6 +263,14 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // dashboard's API_BASE cutover (#222 Slice 6) can land
         // independently.
         .route("/api/spine/events", get(spine_handlers::list_events))
+        // Activity tab path-scoped alias (ADR 0019 / spec #465). Wraps
+        // `list_events` with the workspace from the path and
+        // `operator_grain=true` baked in. Matches the dashboard's
+        // `/workspaces/:slug/activity` URL shape.
+        .route(
+            "/api/workspaces/{workspace_id}/activity",
+            get(spine_handlers::list_activity),
+        )
         .route("/api/spine/artifacts", get(spine_handlers::list_artifacts))
         .route(
             "/api/spine/artifacts/{id}",
