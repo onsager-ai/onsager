@@ -1,19 +1,29 @@
-//! `POST /api/chat/completions` — portal-hosted Anthropic relay (spec #318).
+//! Chat endpoints:
 //!
-//! The dashboard sends the full Anthropic Messages API request body
-//! (system, messages, tools, model, max_tokens) plus a `workspace_id`
-//! field. Portal resolves the `anthropic` credential for the caller's
-//! workspace, decrypts it, and forwards the body verbatim to Anthropic.
-//! The API key never reaches the browser.
+//! - `POST /api/chat/completions` — portal-hosted Anthropic relay
+//!   (spec #318). The dashboard sends the full Anthropic Messages API
+//!   request body plus a `workspace_id` field; portal resolves the
+//!   workspace `anthropic` credential, decrypts it, and forwards the
+//!   body verbatim. The API key never reaches the browser.
+//! - `GET /api/chat/thread` — fetch (or implicitly create) the single
+//!   rolling thread for `(user_id, workspace_id, scope_type, scope_id)`
+//!   plus its messages (spec #470, ADR 0020).
+//! - `POST /api/chat/thread/:id/messages` — append a message to a thread
+//!   (spec #470).
+//! - `GET /api/chat/search` — full-text search across the caller's
+//!   threads in a workspace, returning matching messages with their
+//!   source scope cited (spec #470).
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPool;
+use ts_rs::TS;
 
 use crate::auth::{AuthUser, decrypt_credential};
+use crate::chat_db::{self, ChatMessage, ChatSearchHit, ChatThread};
 use crate::credential_db;
 use crate::runtime::{AnthropicRelay, ChatRuntime, ChatRuntimeError};
 use crate::state::AppState;
@@ -164,6 +174,234 @@ pub async fn create_chat_completion(
     }
 }
 
+// =====================================================================
+// Server-side chat storage (spec #470, ADR 0020).
+// =====================================================================
+
+/// `scope_type` values accepted by the thread endpoints. Mirrors the
+/// CHECK constraint on `chat_threads.scope_type`.
+const VALID_SCOPE_TYPES: &[&str] = &["workspace", "workflow", "run", "verdict"];
+
+/// Query string for `GET /api/chat/thread`.
+#[derive(Debug, Deserialize)]
+pub struct ThreadQuery {
+    /// Workspace the request is scoped to. Required.
+    pub workspace_id: String,
+    /// One of `workspace` / `workflow` / `run` / `verdict`.
+    pub scope_type: String,
+    /// Required for all `scope_type`s except `workspace`. Empty / missing
+    /// for the workspace scope.
+    #[serde(default)]
+    pub scope_id: Option<String>,
+}
+
+/// Response body for `GET /api/chat/thread`.
+#[derive(Debug, Serialize, TS)]
+#[ts(export, rename = "ChatThreadResponse")]
+pub struct ThreadResponse {
+    pub thread: ChatThread,
+    pub messages: Vec<ChatMessage>,
+}
+
+/// Body for `POST /api/chat/thread/:id/messages`. The `tool_call_id` is
+/// reserved for assistant tool-call/result messages (per the spec's
+/// schema).
+#[derive(Debug, Deserialize)]
+pub struct AppendMessageBody {
+    pub workspace_id: String,
+    pub role: String,
+    pub content: String,
+    #[serde(default)]
+    pub tool_call_id: Option<String>,
+}
+
+/// Query string for `GET /api/chat/search`.
+#[derive(Debug, Deserialize)]
+pub struct SearchQuery {
+    pub workspace_id: String,
+    pub q: String,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// Response body for `GET /api/chat/search`.
+#[derive(Debug, Serialize, TS)]
+#[ts(export, rename = "ChatSearchResponse")]
+pub struct SearchResponse {
+    pub hits: Vec<ChatSearchHit>,
+}
+
+fn bad_request(error: &str, detail: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": error, "detail": detail })),
+    )
+        .into_response()
+}
+
+/// Validate + normalize a `(scope_type, scope_id)` pair. Returns the
+/// normalized values on success or an error tag the handler can map to
+/// a 400 response. Kept as a tag-returning function (not a `Result<_,
+/// Response>`) so the caller controls how the error is rendered; this
+/// also keeps the `Result` `Err`-variant small.
+fn normalize_scope(
+    scope_type: &str,
+    scope_id: Option<&str>,
+) -> Result<(String, Option<String>), &'static str> {
+    if !VALID_SCOPE_TYPES.contains(&scope_type) {
+        return Err("scope_type must be one of workspace, workflow, run, verdict");
+    }
+    // `workspace` scope has no scope_id; every other scope requires a
+    // non-empty one. Empty strings collapse to None on the workspace
+    // case so the unique constraint binds the right shape.
+    let normalized_scope_id = match scope_id {
+        Some("") => None,
+        other => other.map(|s| s.to_string()),
+    };
+    if scope_type == "workspace" {
+        if normalized_scope_id.is_some() {
+            return Err("workspace scope must not include a scope_id");
+        }
+    } else if normalized_scope_id.is_none() {
+        return Err("scope_id is required for non-workspace scope_types");
+    }
+    Ok((scope_type.to_string(), normalized_scope_id))
+}
+
+/// `GET /api/chat/thread?workspace_id=&scope_type=&scope_id=` — fetch or
+/// implicitly create the rolling thread for the caller in this scope,
+/// plus its messages.
+pub async fn get_thread(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Query(q): Query<ThreadQuery>,
+) -> Response {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &q.workspace_id).await {
+        return r;
+    }
+    let (scope_type, scope_id) = match normalize_scope(&q.scope_type, q.scope_id.as_deref()) {
+        Ok(v) => v,
+        Err(detail) => return bad_request("invalid_scope", detail),
+    };
+
+    let thread = match chat_db::get_or_create_thread(
+        &state.pool,
+        &auth_user.user_id,
+        &q.workspace_id,
+        &scope_type,
+        scope_id.as_deref(),
+    )
+    .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("failed to get/create chat thread: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+
+    let messages = match chat_db::list_messages(&state.pool, &thread.id).await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!("failed to list chat messages: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+
+    Json(ThreadResponse { thread, messages }).into_response()
+}
+
+/// `POST /api/chat/thread/:id/messages` — append a message to a thread.
+/// The thread must belong to the caller in the workspace named in the
+/// body; otherwise we 404 (no thread leakage across users / workspaces).
+pub async fn append_message(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(thread_id): Path<String>,
+    Json(body): Json<AppendMessageBody>,
+) -> Response {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &body.workspace_id).await {
+        return r;
+    }
+    if !matches!(body.role.as_str(), "user" | "assistant" | "tool") {
+        return bad_request("invalid_role", "role must be one of user, assistant, tool");
+    }
+
+    match chat_db::get_thread_for_user(
+        &state.pool,
+        &thread_id,
+        &auth_user.user_id,
+        &body.workspace_id,
+    )
+    .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "thread not found" })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("failed to look up chat thread: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    }
+
+    match chat_db::append_message(
+        &state.pool,
+        &thread_id,
+        &body.role,
+        &body.content,
+        body.tool_call_id.as_deref(),
+    )
+    .await
+    {
+        Ok(msg) => Json(msg).into_response(),
+        Err(e) => {
+            tracing::error!("failed to append chat message: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+/// `GET /api/chat/search?workspace_id=&q=&limit=` — full-text search
+/// across the caller's chat history within a workspace. Returns
+/// matching messages plus their source scope so the UI can cite where
+/// the answer came from. Workspace-scoped: a user with threads in W1
+/// and W2 sees only the threads in the workspace named on the request.
+pub async fn search(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Query(q): Query<SearchQuery>,
+) -> Response {
+    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &q.workspace_id).await {
+        return r;
+    }
+    let trimmed = q.q.trim();
+    if trimmed.is_empty() {
+        return bad_request("invalid_query", "q must be a non-empty search string");
+    }
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+
+    match chat_db::search_messages(
+        &state.pool,
+        &auth_user.user_id,
+        &q.workspace_id,
+        trimmed,
+        limit,
+    )
+    .await
+    {
+        Ok(hits) => Json(SearchResponse { hits }).into_response(),
+        Err(e) => {
+            tracing::error!("failed to search chat messages: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +485,40 @@ mod tests {
         let obj = req.as_object().unwrap();
         // Non-Claude model id falls back to the default.
         assert_eq!(obj["model"], crate::anthropic::DEFAULT_MODEL);
+    }
+
+    /// `workspace` scope normalizes empty scope_id to None.
+    #[test]
+    fn normalize_scope_workspace_empty_id() {
+        let (ty, id) = normalize_scope("workspace", Some("")).unwrap();
+        assert_eq!(ty, "workspace");
+        assert_eq!(id, None);
+        // `None` and `Some("")` are equivalent for the workspace scope.
+        let (_, id) = normalize_scope("workspace", None).unwrap();
+        assert_eq!(id, None);
+    }
+
+    /// `workspace` scope rejects a non-empty scope_id.
+    #[test]
+    fn normalize_scope_workspace_rejects_scope_id() {
+        let r = normalize_scope("workspace", Some("wf-1"));
+        assert!(r.is_err());
+    }
+
+    /// Non-workspace scope types require a non-empty scope_id.
+    #[test]
+    fn normalize_scope_workflow_requires_id() {
+        assert!(normalize_scope("workflow", None).is_err());
+        assert!(normalize_scope("workflow", Some("")).is_err());
+        let (ty, id) = normalize_scope("workflow", Some("wf-42")).unwrap();
+        assert_eq!(ty, "workflow");
+        assert_eq!(id.as_deref(), Some("wf-42"));
+    }
+
+    /// Unknown scope types are rejected up front (defense in depth on
+    /// top of the DB CHECK).
+    #[test]
+    fn normalize_scope_rejects_unknown_type() {
+        assert!(normalize_scope("nope", Some("x")).is_err());
     }
 }

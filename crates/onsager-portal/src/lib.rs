@@ -30,6 +30,7 @@ pub mod anthropic;
 pub mod auth;
 pub mod auth_db;
 pub mod backfill;
+pub mod chat_db;
 pub mod config;
 pub mod core;
 pub mod credential_db;

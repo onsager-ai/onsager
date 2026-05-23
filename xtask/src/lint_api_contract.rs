@@ -477,6 +477,18 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "Anthropic relay (spec #318) — called from `lib/chat/llm-client.ts` via a bespoke fetch, outside the `lib/api/` scanner scope. Same pattern as `/mcp/messages`.",
     ),
     (
+        "/api/chat/thread",
+        "Server-side chat storage (spec #470, ADR 0020) — the dashboard caller lands in a sibling sub-issue under #451 (ChatContainer surface). This sub-issue (#470) ships the backend slice; dashboard wiring is a separate PR.",
+    ),
+    (
+        "/api/chat/thread/{id}/messages",
+        "Server-side chat storage (spec #470, ADR 0020) — see `/api/chat/thread` exemption above. Dashboard caller lands in the ChatContainer sibling sub-issue.",
+    ),
+    (
+        "/api/chat/search",
+        "Cross-scope chat search (spec #470, ADR 0020) — see `/api/chat/thread` exemption above. Dashboard caller lands in the ChatContainer sibling sub-issue.",
+    ),
+    (
         "/api/build-info",
         "Runtime deployment descriptor (spec #398) — fetched from `lib/build-info.ts` via a bespoke fetch before any workspace scope exists. No auth, no workspace_id; outside the `lib/api/` typed scanner.",
     ),

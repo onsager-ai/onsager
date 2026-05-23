@@ -372,6 +372,17 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/chat/completions",
             post(chat_handlers::create_chat_completion),
         )
+        // Server-side chat storage (spec #470, ADR 0020). One rolling
+        // thread per `(user_id, workspace_id, scope_type, scope_id)`;
+        // cross-scope full-text search returns matching messages with
+        // their source scope cited. Chat is user-private state — it
+        // lives in portal-owned tables, not on the spine event bus.
+        .route("/api/chat/thread", get(chat_handlers::get_thread))
+        .route(
+            "/api/chat/thread/{id}/messages",
+            post(chat_handlers::append_message),
+        )
+        .route("/api/chat/search", get(chat_handlers::search))
         // Public Dogfood showcase (spec #407). Read-only projection of
         // the Onsager-managing-Onsager workflow's recent runs. No auth,
         // 60s in-process cache, sanitized to anonymized stage names +
