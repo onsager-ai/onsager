@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils"
 // scope/tab state.
 
 export function ChatContainer() {
-  const { isOpen, close, tab, setTab, scopeOverride, highlightHitlId } = useChatUi()
+  const { isOpen, close, tab, setTab, scopeOverride, highlightHitlId, prefill } = useChatUi()
   const { user } = useAuth()
   const workspace = useOptionalActiveWorkspace()
   const userId = user?.id ?? null
@@ -150,6 +150,7 @@ export function ChatContainer() {
                   workspace={workspace}
                   scope={effectiveScope}
                   userId={userId}
+                  initialPrompt={prefill}
                 />
               ) : (
                 <NoWorkspaceState />
