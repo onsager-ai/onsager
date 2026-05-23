@@ -242,29 +242,106 @@ pub async fn get_run(
     .into_response()
 }
 
+/// Status filter for `GET /api/workspaces/:id/runs`. Mirrors
+/// `StageRunStatus` — the projection above is total, so each variant
+/// has a complementary SQL predicate against `state` +
+/// `workflow_parked_reason`.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunStatusFilter {
+    Pending,
+    Blocked,
+    Passed,
+    Failed,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct WorkspaceRunsQuery {
     #[serde(default)]
     pub workflow_id: Option<String>,
     #[serde(default)]
+    pub status: Option<RunStatusFilter>,
+    /// Inclusive lower bound on `updated_at` (ISO-8601). Filters at the
+    /// SQL layer alongside `until`; ordering still uses `updated_at`.
+    #[serde(default)]
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    /// Inclusive upper bound on `updated_at` (ISO-8601).
+    #[serde(default)]
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
     pub limit: Option<i64>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
-struct WorkspaceRunRow {
-    artifact_id: String,
-    workflow_id: String,
-    state: String,
-    current_stage_index: Option<i32>,
-    workflow_parked_reason: Option<String>,
-    created_at: chrono::DateTime<chrono::Utc>,
-    updated_at: chrono::DateTime<chrono::Utc>,
+pub struct WorkspaceRunRow {
+    pub artifact_id: String,
+    pub workflow_id: String,
+    pub state: String,
+    pub current_stage_index: Option<i32>,
+    pub workflow_parked_reason: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// SQL half of `list_workspace_runs`. Pulled out so integration tests
+/// can exercise the `status` / `since` / `until` filter combinations
+/// without spinning up the Axum app — the projection layer above is
+/// already covered by the per-stage status table elsewhere.
+pub async fn fetch_workspace_run_rows(
+    spine: &sqlx::PgPool,
+    workspace_id: &str,
+    q: &WorkspaceRunsQuery,
+) -> Result<Vec<WorkspaceRunRow>, sqlx::Error> {
+    let limit = q.limit.unwrap_or(50).clamp(1, 500);
+    let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+        "SELECT artifact_id, workflow_id, state, current_stage_index, \
+                workflow_parked_reason, created_at, updated_at \
+         FROM artifacts WHERE workflow_id IS NOT NULL AND workspace_id = ",
+    );
+    qb.push_bind(workspace_id);
+    if let Some(wf_id) = q.workflow_id.as_deref() {
+        qb.push(" AND workflow_id = ").push_bind(wf_id);
+    }
+    match q.status {
+        Some(RunStatusFilter::Passed) => {
+            qb.push(" AND state = 'released'");
+        }
+        Some(RunStatusFilter::Failed) => {
+            qb.push(" AND state = 'archived'");
+        }
+        Some(RunStatusFilter::Blocked) => {
+            qb.push(
+                " AND state NOT IN ('released', 'archived') \
+                  AND workflow_parked_reason IS NOT NULL",
+            );
+        }
+        Some(RunStatusFilter::Pending) => {
+            qb.push(
+                " AND state NOT IN ('released', 'archived') \
+                  AND workflow_parked_reason IS NULL",
+            );
+        }
+        None => {}
+    }
+    if let Some(since) = q.since {
+        qb.push(" AND updated_at >= ").push_bind(since);
+    }
+    if let Some(until) = q.until {
+        qb.push(" AND updated_at <= ").push_bind(until);
+    }
+    qb.push(" ORDER BY updated_at DESC LIMIT ").push_bind(limit);
+    qb.build_query_as::<WorkspaceRunRow>()
+        .fetch_all(spine)
+        .await
 }
 
 /// GET /api/workspaces/:id/runs — workspace-scoped cross-workflow runs
 /// list. Each row is one artifact flowing through a workflow, projected
-/// the same way as `GET /api/workflows/:id/runs`. Optionally filterable
-/// by `workflow_id` to scope to a single workflow's history.
+/// the same way as `GET /api/workflows/:id/runs`. Optional query params:
+/// `workflow_id` (scope to a single workflow), `status`
+/// (pending | blocked | passed | failed — filtered at the SQL layer
+/// rather than post-projection), `since` / `until` (ISO-8601 bounds on
+/// `updated_at`).
 pub async fn list_workspace_runs(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -275,38 +352,8 @@ pub async fn list_workspace_runs(
         return r;
     }
     let spine = state.spine.pool();
-    let limit = q.limit.unwrap_or(50).clamp(1, 500);
 
-    let rows = if let Some(wf_id) = q.workflow_id.as_deref() {
-        sqlx::query_as::<_, WorkspaceRunRow>(
-            "SELECT artifact_id, workflow_id, state, current_stage_index, \
-                    workflow_parked_reason, created_at, updated_at \
-             FROM artifacts \
-             WHERE workspace_id = $1 AND workflow_id = $2 \
-             ORDER BY updated_at DESC \
-             LIMIT $3",
-        )
-        .bind(&workspace_id)
-        .bind(wf_id)
-        .bind(limit)
-        .fetch_all(spine)
-        .await
-    } else {
-        sqlx::query_as::<_, WorkspaceRunRow>(
-            "SELECT artifact_id, workflow_id, state, current_stage_index, \
-                    workflow_parked_reason, created_at, updated_at \
-             FROM artifacts \
-             WHERE workspace_id = $1 AND workflow_id IS NOT NULL \
-             ORDER BY updated_at DESC \
-             LIMIT $2",
-        )
-        .bind(&workspace_id)
-        .bind(limit)
-        .fetch_all(spine)
-        .await
-    };
-
-    let rows = match rows {
+    let rows = match fetch_workspace_run_rows(spine, &workspace_id, &q).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("failed to list workspace runs: {e}");
