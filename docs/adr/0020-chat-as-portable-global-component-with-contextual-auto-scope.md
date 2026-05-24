@@ -1,6 +1,6 @@
 # ADR 0020 — Chat as portable global component with contextual auto-scope
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-22
 - **Identity impact**: no
 - **Tracking issues**: #451 (implementation spec). Sibling to
