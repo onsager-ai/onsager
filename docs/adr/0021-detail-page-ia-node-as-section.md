@@ -1,7 +1,7 @@
 # ADR 0021 — Detail page IA: node-as-section, attribute-as-expanded-detail
 
-- **Status**: Proposed
-- **Date**: 2026-05-27
+- **Status**: Accepted
+- **Date**: 2026-05-27 (accepted 2026-05-28)
 - **Identity impact**: no
 - **Tracking issues**: #487 (implementation spec) and sub-issues #489, #490, #491, #492. Builds on ADR 0019 (which collapsed `WorkflowDetailPage`'s four tabs to anchored sections) by extending the same logic to the remaining three detail pages and by reframing the section split itself around substrate primitives rather than v0.1 subsystem boundaries.
 - **Supersedes**: none. Refines ADR 0019 without replacing it.
@@ -96,17 +96,26 @@ The "tabs = orthogonal views of same data" rule has a dev-process analog too: a 
 
 ## Adoption checklist
 
-- [ ] Open implementation spec; assign issue number; backfill into this ADR's metadata
-- [ ] Remove `<Tabs>` from `RunDetailPage`; stages timeline absorbs verdict, events, sessions, artifact into expanded stage detail
-- [ ] Remove `Verdicts` and `Artifacts` sections from `WorkflowDetailPage`; add `Activity` section with link-out to Activity tab filtered by workflow
-- [ ] Merge `ArtifactDetailPage`'s `Run Lineage`, `Version History`, `Vertical Lineage`, `Horizontal Lineage` Cards into one `Provenance` section with axis switch (Time / Origin / Relations)
-- [ ] Add `Content` section to `ArtifactDetailPage` with `artifact_kind` dispatch; default branch + `markdown` + `github_issue` branches ship first
-- [ ] Retire `IssueDetailPage`; add 301 redirect from `/issues/:projectId/:number` to `/artifacts/:id` via `github_issue.external_ref` server-side lookup
-- [ ] Attach `ChatAskButton` to: `WorkflowDetailPage` header; each stage row in `RunDetailPage` expanded detail; each version row in `ArtifactDetailPage` Provenance Time axis; each consumer row
-- [ ] Delete `WorkflowEventsCard`, `WorkflowSessionsCard`, `WorkflowVerdictsTab`, `WorkflowArtifactsTab`
-- [ ] Preserve `#definition`, `#runs` hash anchors on `WorkflowDetailPage`; add `#artifacts`, `#verdicts` 301 to Activity-filtered URLs
-- [ ] xtask lint `check-detail-page-tabs`: `pages/*DetailPage.tsx` may not import `<Tabs>` at the top level; tabs inside a section require `// tabs-allow: <reason>` marker
-- [ ] Flip Status to `Accepted` once the above land
+- [x] Open implementation spec; assign issue number; backfill into this ADR's metadata (#487 + sub-issues #489–#492)
+- [x] Remove `<Tabs>` from `RunDetailPage`; stages timeline absorbs verdict, events, sessions, artifact into expanded stage detail (#489)
+- [x] Remove `Verdicts` and `Artifacts` sections from `WorkflowDetailPage`; add `Activity` section with link-out to Activity tab filtered by workflow (#490)
+- [x] Merge `ArtifactDetailPage`'s `Run Lineage`, `Version History`, `Vertical Lineage`, `Horizontal Lineage` Cards into one `Provenance` section with axis switch (Time / Origin / Relations) (#491)
+- [x] Add `Content` section to `ArtifactDetailPage` with `artifact_kind` dispatch; default branch + `markdown` + `github_issue` branches ship first (#491)
+- [x] Retire `IssueDetailPage`; add redirect from `/issues/:projectId/:number` to `/artifacts/:id` via `github_issue.external_ref` lookup (#492)
+- [x] Attach `ChatAskButton` to: `WorkflowDetailPage` header; each stage row in `RunDetailPage` expanded detail; each version row in `ArtifactDetailPage` Provenance Time axis; each consumer row
+- [x] Delete `WorkflowEventsCard`, `WorkflowSessionsCard`, `WorkflowVerdictsTab`, `WorkflowArtifactsTab`
+- [x] Preserve `#definition`, `#runs` hash anchors on `WorkflowDetailPage`; add `#artifacts`, `#verdicts` 301 to Activity-filtered URLs
+- [x] xtask lint `check-detail-page-tabs`: `pages/*DetailPage.tsx` may not import `<Tabs>` at the top level; tabs inside a section require `// tabs-allow: <reason>` marker
+- [x] Flip Status to `Accepted` once the above land
+
+> **SourceTag note.** Per ADR 0022's adoption checklist, each enumerated
+> row carries a `{/* SourceTag (#488) */}` slot rather than a rendered
+> tag. #488 is deferred: ADR 0022 assumes the Det/Uncertain `source`
+> flavor is on the wire for every event / verdict / version record, but
+> today only the spine `artifacts.provenance` column stores it (and it
+> is not yet projected to the dashboard DTOs). Exposing substrate
+> provenance to the wire is its own backend spec; until it lands the
+> slots stay placeholders.
 
 ## Out of scope
 

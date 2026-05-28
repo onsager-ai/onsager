@@ -500,6 +500,14 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "/api/admin/activation-funnel",
         "FTUE activation funnel report (spec #404). v1 is internal-only — \"the query runs, returns numbers\"; the admin dashboard surface is an explicit follow-up. Today this is exercised by ops humans hitting the URL directly (or via a future internal dashboard); no typed `request<T>` caller yet by design.",
     ),
+    (
+        "/api/workflows/{id}/artifacts",
+        "Workflow-scoped artifact list. The inline WorkflowDetail Artifacts section was retired by ADR 0021 (#490); its replacement caller is the workflow-filtered Activity view, owned by ADR 0019's source-type implementation and explicitly out of scope for #490. The route + typed `getWorkflowArtifacts` binding are retained as the data source for that pending caller.",
+    ),
+    (
+        "/api/workflows/{id}/verdicts",
+        "Workflow-scoped verdict list. The inline WorkflowDetail Verdicts section was retired by ADR 0021 (#490); its replacement caller is the workflow-filtered Activity view, owned by ADR 0019's source-type implementation and explicitly out of scope for #490. The route + typed `getWorkflowVerdicts` binding are retained as the data source for that pending caller.",
+    ),
 ];
 
 /// Routes registered by stiglab (or any other factory subsystem) that

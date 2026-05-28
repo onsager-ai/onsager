@@ -1,8 +1,8 @@
-import { useParams, Link } from "react-router-dom"
+import { useParams, useSearchParams, Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import { api, ApiError, type OverrideGateRequestBody } from "@/lib/api"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import type { ArtifactDetail } from "@/lib/api/generated/ArtifactDetail"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -21,9 +21,26 @@ import {
 } from "@/components/ui/table"
 import { ArrowLeft, Ban, MoreHorizontal, RefreshCw, ShieldCheck } from "lucide-react"
 import { LineageDAG } from "@/components/workflows/LineageDAG"
+import { ArtifactContent } from "@/components/artifacts/ArtifactContent"
 import { ChatAskButton } from "@/components/chat/ChatAskButton"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { useActiveWorkspace } from "@/lib/workspace"
+
+// Provenance axes (ADR 0021 inv. 3 — tabs/segmented views are allowed
+// for orthogonal views of the *same* data). Time is the default and
+// absorbs the former Version History card.
+const PROVENANCE_AXES = [
+  { key: "time", label: "Time" },
+  { key: "origin", label: "Origin" },
+  { key: "relations", label: "Relations" },
+] as const
+type ProvenanceAxis = (typeof PROVENANCE_AXES)[number]["key"]
+
+function readAxis(raw: string | null): ProvenanceAxis {
+  return PROVENANCE_AXES.some((a) => a.key === raw)
+    ? (raw as ProvenanceAxis)
+    : "time"
+}
 
 const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "outline",
@@ -43,6 +60,14 @@ export function ArtifactDetailPage() {
   const workspace = useActiveWorkspace()
   const queryClient = useQueryClient()
   const [banner, setBanner] = useState<ActionBanner>(null)
+  const [params, setParams] = useSearchParams()
+  const axis = readAxis(params.get("axis"))
+  const setAxis = (next: ProvenanceAxis) => {
+    const updated = new URLSearchParams(params)
+    if (next === "time") updated.delete("axis")
+    else updated.set("axis", next)
+    setParams(updated, { replace: true })
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["artifact", id],
@@ -295,176 +320,344 @@ export function ArtifactDetailPage() {
         </Button>
       </div>
 
-      {/* Metadata */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Card>
-          <CardContent className="px-3 py-3">
-            <div className="text-xs text-muted-foreground">Kind</div>
-            <div className="font-medium">{artifact.kind}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="px-3 py-3">
-            <div className="text-xs text-muted-foreground">Owner</div>
-            <div className="font-medium">{artifact.owner ?? "—"}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="px-3 py-3">
-            <div className="text-xs text-muted-foreground">Version</div>
-            <div className="font-mono font-medium">v{artifact.current_version}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="px-3 py-3">
-            <div className="text-xs text-muted-foreground">Created</div>
-            <div className="text-sm">{new Date(artifact.created_at).toLocaleDateString()}</div>
-          </CardContent>
-        </Card>
+      {/* Single-value metadata absorbed into the header strip (ADR 0021
+          inv. 4) — replaces the former 4-up metadata grid and the
+          "Onsager metadata" Card from IssueDetail (#492). Lifecycle is
+          an artifact state-machine attribute, applies to every kind. */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border bg-muted/30 px-3 py-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
+        <Meta label="Kind">{artifact.kind}</Meta>
+        <Meta label="Lifecycle">{artifact.state.replaceAll("_", " ")}</Meta>
+        <Meta label="Owner">{artifact.owner ?? "—"}</Meta>
+        <Meta label="Version">
+          <span className="font-mono">v{artifact.current_version}</span>
+        </Meta>
+        <Meta label="Created">
+          {new Date(artifact.created_at).toLocaleDateString()}
+        </Meta>
+        <Meta label="Last observed">
+          {artifact.last_observed_at
+            ? new Date(artifact.last_observed_at).toLocaleString()
+            : "—"}
+        </Meta>
       </div>
 
-      {/* Per-run lineage DAG */}
-      <Card>
-        <CardHeader className="px-4 md:px-6">
-          <CardTitle className="text-base md:text-lg">Run Lineage</CardTitle>
-        </CardHeader>
-        <CardContent className="px-4 md:px-6">
-          <LineageDAG artifact={artifact} />
-        </CardContent>
-      </Card>
+      {/* Content — dispatched by artifact_kind (#491). */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold tracking-tight">Content</h2>
+        <ArtifactContent artifact={artifact} />
+      </section>
 
-      {/* Version History */}
-      <Card>
-        <CardHeader className="px-4 md:px-6">
-          <CardTitle className="text-base md:text-lg">
-            Version History
-            {artifact.versions && artifact.versions.length > 0 && (
-              <span className="ml-2 text-muted-foreground font-normal">
-                ({artifact.versions.length})
-              </span>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-4 md:px-6">
-          {!artifact.versions || artifact.versions.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">
-              No versions yet. Versions are created as Forge shapes this artifact.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Summary</TableHead>
-                  <TableHead>Session</TableHead>
-                  <TableHead>Created</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {[...artifact.versions]
-                  .sort((a, b) => b.version - a.version)
-                  .map((v) => (
-                    <TableRow key={v.version}>
-                      <TableCell className="font-mono">v{v.version}</TableCell>
-                      <TableCell className="max-w-[300px] truncate">
-                        {v.change_summary || "-"}
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          to={`/workspaces/${workspace.slug}/sessions/${v.created_by_session}`}
-                          className="font-mono text-xs hover:underline"
-                        >
-                          {v.created_by_session.slice(0, 8)}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {new Date(v.created_at).toLocaleString()}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {/* Provenance — one graph, three axes (ADR 0021). Axis is mirrored
+          to `?axis=` for bookmark stability. */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold tracking-tight">Provenance</h2>
+          <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+            {PROVENANCE_AXES.map((a) => (
+              <Button
+                key={a.key}
+                type="button"
+                size="sm"
+                variant={axis === a.key ? "default" : "ghost"}
+                className="h-7 px-3 text-xs"
+                onClick={() => setAxis(a.key)}
+              >
+                {a.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+        {axis === "time" && (
+          <ProvenanceTime artifact={artifact} workspaceSlug={workspace.slug} />
+        )}
+        {axis === "origin" && (
+          <ProvenanceOrigin artifact={artifact} workspaceSlug={workspace.slug} />
+        )}
+        {axis === "relations" && (
+          <ProvenanceRelations
+            artifact={artifact}
+            workspaceSlug={workspace.slug}
+          />
+        )}
+      </section>
 
-      {/* Lineage */}
-      {artifact.vertical_lineage && artifact.vertical_lineage.length > 0 && (
-        <Card>
-          <CardHeader className="px-4 md:px-6">
-            <CardTitle className="text-base md:text-lg">Vertical Lineage</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 md:px-6">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Session</TableHead>
-                  <TableHead>Recorded</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {artifact.vertical_lineage.map((entry, i) => (
-                  <TableRow key={i}>
-                    <TableCell className="font-mono">v{entry.version}</TableCell>
-                    <TableCell>
-                      <Link
-                        to={`/workspaces/${workspace.slug}/sessions/${entry.session_id}`}
-                        className="font-mono text-xs hover:underline"
-                      >
-                        {entry.session_id.slice(0, 8)}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {new Date(entry.recorded_at).toLocaleString()}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+      {/* Consumers — reverse traceability (ADR 0021): the runs/stages
+          that consumed this artifact as input. */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold tracking-tight">Consumers</h2>
+        <ConsumersSection artifact={artifact} workspaceSlug={workspace.slug} />
+      </section>
+    </div>
+  )
+}
 
-      {artifact.horizontal_lineage && artifact.horizontal_lineage.length > 0 && (
-        <Card>
-          <CardHeader className="px-4 md:px-6">
-            <CardTitle className="text-base md:text-lg">Horizontal Lineage</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 md:px-6">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Source Artifact</TableHead>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Recorded</TableHead>
+function Meta({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="min-w-0 space-y-0.5">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="truncate">{children}</div>
+    </div>
+  )
+}
+
+// Time axis — the version-sequence walk. Absorbs the former Version
+// History card; each row carries an Ask button (ADR 0021 adoption
+// checklist) and a SourceTag slot wired in #488.
+function ProvenanceTime({
+  artifact,
+  workspaceSlug,
+}: {
+  artifact: ArtifactDetail
+  workspaceSlug: string
+}) {
+  if (!artifact.versions || artifact.versions.length === 0) {
+    return (
+      <p className="py-4 text-center text-sm text-muted-foreground">
+        No versions yet. Versions are created as Forge shapes this artifact.
+      </p>
+    )
+  }
+  const versions = [...artifact.versions].sort((a, b) => b.version - a.version)
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Version</TableHead>
+            <TableHead>Summary</TableHead>
+            <TableHead>Source</TableHead>
+            <TableHead>Session</TableHead>
+            <TableHead>Created</TableHead>
+            <TableHead className="text-right">Ask</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {versions.map((v) => (
+            <TableRow key={v.version}>
+              <TableCell className="font-mono">v{v.version}</TableCell>
+              <TableCell className="max-w-[260px] truncate">
+                {v.change_summary || "-"}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {/* SourceTag (#488) */}—
+              </TableCell>
+              <TableCell>
+                <Link
+                  to={`/workspaces/${workspaceSlug}/sessions/${v.created_by_session}`}
+                  className="font-mono text-xs hover:underline"
+                >
+                  {v.created_by_session.slice(0, 8)}
+                </Link>
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {new Date(v.created_at).toLocaleString()}
+              </TableCell>
+              <TableCell className="text-right">
+                <ChatAskButton
+                  scope={{ type: "workspace", id: null }}
+                  label="Ask"
+                  variant="ghost"
+                  size="icon"
+                />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+// Origin axis — where the artifact came from: the producing run's
+// internal DAG plus the per-version session that shaped it.
+function ProvenanceOrigin({
+  artifact,
+  workspaceSlug,
+}: {
+  artifact: ArtifactDetail
+  workspaceSlug: string
+}) {
+  return (
+    <div className="space-y-4">
+      <LineageDAG artifact={artifact} />
+      {artifact.vertical_lineage && artifact.vertical_lineage.length > 0 ? (
+        <div className="overflow-x-auto rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Version</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Session</TableHead>
+                <TableHead>Recorded</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {artifact.vertical_lineage.map((entry, i) => (
+                <TableRow key={i}>
+                  <TableCell className="font-mono">v{entry.version}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {/* SourceTag (#488) */}—
+                  </TableCell>
+                  <TableCell>
+                    <Link
+                      to={`/workspaces/${workspaceSlug}/sessions/${entry.session_id}`}
+                      className="font-mono text-xs hover:underline"
+                    >
+                      {entry.session_id.slice(0, 8)}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {new Date(entry.recorded_at).toLocaleString()}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {artifact.horizontal_lineage.map((entry) => (
-                  <TableRow
-                    key={`${entry.role}-${entry.source_artifact_id}-${entry.source_version}-${entry.recorded_at}`}
-                  >
-                    <TableCell className="text-xs">{entry.role}</TableCell>
-                    <TableCell>
-                      <Link
-                        to={`/workspaces/${workspace.slug}/artifacts/${entry.source_artifact_id}`}
-                        className="font-mono text-xs hover:underline"
-                      >
-                        {entry.source_artifact_id}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="font-mono">v{entry.source_version}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {new Date(entry.recorded_at).toLocaleString()}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+// Relations axis — sibling artifacts wired into this one's production
+// (the former Horizontal Lineage card).
+function ProvenanceRelations({
+  artifact,
+  workspaceSlug,
+}: {
+  artifact: ArtifactDetail
+  workspaceSlug: string
+}) {
+  if (!artifact.horizontal_lineage || artifact.horizontal_lineage.length === 0) {
+    return (
+      <p className="py-4 text-center text-sm text-muted-foreground">
+        No related artifacts recorded for this run.
+      </p>
+    )
+  }
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Role</TableHead>
+            <TableHead>Source Artifact</TableHead>
+            <TableHead>Source</TableHead>
+            <TableHead>Version</TableHead>
+            <TableHead>Recorded</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {artifact.horizontal_lineage.map((entry) => (
+            <TableRow
+              key={`${entry.role}-${entry.source_artifact_id}-${entry.source_version}-${entry.recorded_at}`}
+            >
+              <TableCell className="text-xs">{entry.role}</TableCell>
+              <TableCell>
+                <Link
+                  to={`/workspaces/${workspaceSlug}/artifacts/${entry.source_artifact_id}`}
+                  className="font-mono text-xs hover:underline"
+                >
+                  {entry.source_artifact_id}
+                </Link>
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {/* SourceTag (#488) */}—
+              </TableCell>
+              <TableCell className="font-mono">v{entry.source_version}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {new Date(entry.recorded_at).toLocaleString()}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+interface ConsumerRef {
+  artifact_id?: string
+  run_id?: string
+  stage?: string
+}
+
+// Consumers — reads the spine `artifacts.consumers` array. The column is
+// populated by a future substrate writer (defaults to `[]` today), so
+// the section reads the real field and shows the empty state until then
+// rather than fabricating reverse edges.
+function ConsumersSection({
+  artifact,
+  workspaceSlug,
+}: {
+  artifact: ArtifactDetail
+  workspaceSlug: string
+}) {
+  const consumers: ConsumerRef[] = Array.isArray(artifact.consumers)
+    ? (artifact.consumers as ConsumerRef[])
+    : []
+  if (consumers.length === 0) {
+    return (
+      <p className="py-4 text-center text-sm text-muted-foreground">
+        Nothing has consumed this artifact yet.
+      </p>
+    )
+  }
+  const INLINE = 10
+  const visible = consumers.slice(0, INLINE)
+  const activityHref = `/workspaces/${workspaceSlug}/activity?artifact=${encodeURIComponent(
+    artifact.id,
+  )}`
+  return (
+    <div className="space-y-2">
+      {visible.map((c, i) => {
+        const target = c.run_id
+          ? `/workspaces/${workspaceSlug}/runs/${c.run_id}`
+          : c.artifact_id
+            ? `/workspaces/${workspaceSlug}/artifacts/${c.artifact_id}`
+            : null
+        const label = c.run_id ?? c.artifact_id ?? "consumer"
+        return (
+          <div
+            key={`${label}-${i}`}
+            className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              {/* SourceTag (#488) */}
+              {target ? (
+                <Link to={target} className="truncate font-mono text-xs hover:underline">
+                  {label}
+                </Link>
+              ) : (
+                <span className="truncate font-mono text-xs">{label}</span>
+              )}
+              {c.stage ? (
+                <Badge variant="outline" className="shrink-0 text-[10px]">
+                  {c.stage}
+                </Badge>
+              ) : null}
+            </div>
+            <ChatAskButton
+              scope={{ type: "workspace", id: null }}
+              label="Ask"
+              variant="ghost"
+              size="icon"
+            />
+          </div>
+        )
+      })}
+      {consumers.length > INLINE && (
+        <Button variant="outline" size="sm" render={<Link to={activityHref} />}>
+          {consumers.length - INLINE} more in Activity →
+        </Button>
       )}
     </div>
   )
