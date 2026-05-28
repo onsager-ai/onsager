@@ -30,7 +30,9 @@ see [`../architecture.md`](../architecture.md).
 | [0017](0017-plan-compiler-three-step-algorithm.md) | Plan Compiler: three-step algorithm | Accepted (2026-05-15) — `Identity impact: yes` |
 | [0018](0018-five-kernel-invariants.md) | Five kernel invariants: static validation on workflow load | Accepted (2026-05-15) — `Identity impact: yes` |
 | [0019](0019-dashboard-ia-pipeline-centric-three-tab-surface.md) | Dashboard IA: pipeline-centric three-tab surface | Accepted (2026-05-22) — `Identity impact: no` |
-| [0020](0020-chat-as-portable-global-component-with-contextual-auto-scope.md) | Chat as portable global component with contextual auto-scope | Proposed (2026-05-22) — `Identity impact: no` |
+| [0020](0020-chat-as-portable-global-component-with-contextual-auto-scope.md) | Chat as portable global component with contextual auto-scope | Accepted (2026-05-22) — `Identity impact: no` |
+| [0021](0021-detail-page-ia-node-as-section.md) | Detail page IA: node-as-section, attribute-as-expanded-detail | Proposed (2026-05-27) — `Identity impact: no` |
+| [0022](0022-provenance-source-tag-first-class-ui.md) | Provenance source tag as first-class UI | Proposed (2026-05-27) — `Identity impact: no` |
 
 ## How to add an ADR
 
