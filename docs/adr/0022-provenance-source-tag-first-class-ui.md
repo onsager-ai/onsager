@@ -4,9 +4,9 @@
 - **Date**: 2026-05-27
 - **Identity impact**: no. Refines how ADR 0010's substrate invariant
   surfaces in UI; does not change the invariant itself.
-- **Tracking issues**: pending — implementation spec to be opened on
-  Accept. Depends on ADR 0021 for the detail-page surfaces this ADR
-  attaches to.
+- **Tracking issues**: #488 (implementation spec). Depends on ADR 0021's
+  implementation per #487 for the detail-page surfaces this ADR attaches
+  to.
 - **Supersedes**: none
 - **Superseded by**: none
 

@@ -3,11 +3,12 @@
 - **Status**: Proposed
 - **Date**: 2026-05-27
 - **Identity impact**: no
-- **Tracking issues**: pending — implementation spec to be opened on Accept.
-  Builds on ADR 0019 (which collapsed `WorkflowDetailPage`'s four tabs to
-  anchored sections) by extending the same logic to the remaining three
-  detail pages and by reframing the section split itself around substrate
-  primitives rather than v0.1 subsystem boundaries.
+- **Tracking issues**: #487 (implementation spec) and sub-issues #489,
+  #490, #491, #492. Builds on ADR 0019 (which collapsed
+  `WorkflowDetailPage`'s four tabs to anchored sections) by extending the
+  same logic to the remaining three detail pages and by reframing the
+  section split itself around substrate primitives rather than v0.1
+  subsystem boundaries.
 - **Supersedes**: none. Refines ADR 0019 without replacing it.
 - **Superseded by**: none
 
