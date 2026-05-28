@@ -68,10 +68,9 @@ function renderSwitcher(initialPath = "/workspaces/acme/sessions") {
 describe("WorkspaceSwitcher", () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it("renders the active workspace's name and slug", async () => {
+  it("renders the active workspace's name", async () => {
     renderSwitcher()
     expect(await screen.findByText("Acme")).toBeInTheDocument()
-    expect(screen.getByText("acme")).toBeInTheDocument()
   })
 
   it("opens the picker and lists every membership", async () => {
@@ -80,6 +79,9 @@ describe("WorkspaceSwitcher", () => {
       await screen.findByRole("combobox", { name: /switch workspace/i }),
     )
     expect(await screen.findByText("Beta")).toBeInTheDocument()
+    // The slug lives in the picker rows, not on the closed trigger
+    // (the trigger now shows the name only — see #496).
+    expect(screen.getByText("acme")).toBeInTheDocument()
     expect(screen.getByText(/create workspace/i)).toBeInTheDocument()
   })
 
@@ -127,6 +129,5 @@ describe("WorkspaceSwitcher", () => {
       </QueryClientProvider>,
     )
     expect(await screen.findByText("Acme")).toBeInTheDocument()
-    expect(screen.getByText("acme")).toBeInTheDocument()
   })
 })
