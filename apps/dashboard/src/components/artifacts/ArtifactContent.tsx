@@ -48,7 +48,7 @@ function GithubIssueContent({ artifact }: { artifact: ArtifactDetail }) {
   // through the same proxy IssueDetailPage used (#170 fail-open): the
   // envelope carries `{ issue: null, error }` when GitHub is rate-limited
   // or unreachable, surfaced as the warning below.
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["project-issue", ref?.projectId, ref?.number],
     queryFn: () => api.getProjectIssue(ref!.projectId, ref!.number),
     enabled: !!ref,
@@ -64,7 +64,14 @@ function GithubIssueContent({ artifact }: { artifact: ArtifactDetail }) {
   }
 
   const issue: ProjectIssueDetail | null = data?.issue ?? null
+  // Two failure shapes: the proxy fail-open envelope (`{ issue: null,
+  // error }`, rate-limited / unreachable) and a thrown ApiError (404,
+  // network). The retired IssueDetailPage surfaced both; without this
+  // the github_issue branch would render blank "No description" on a
+  // hard error rather than a degraded message.
   const proxyError = data?.error ?? null
+  const liveError =
+    isError && error instanceof Error ? error.message : null
 
   return (
     <div className="space-y-4">
@@ -91,6 +98,10 @@ function GithubIssueContent({ artifact }: { artifact: ArtifactDetail }) {
           {proxyError === "rate_limited"
             ? "GitHub rate limit reached. Showing the last-known artifact; details will return in about a minute."
             : "Couldn't reach GitHub. Showing the last-known artifact; details will refresh once the connection recovers."}
+        </p>
+      ) : liveError ? (
+        <p className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          Couldn&apos;t load the live issue from GitHub: {liveError}
         </p>
       ) : null}
 
@@ -145,7 +156,7 @@ function GithubIssueContent({ artifact }: { artifact: ArtifactDetail }) {
             <p className="text-sm text-muted-foreground">
               {isLoading
                 ? "Loading description…"
-                : proxyError
+                : proxyError || liveError
                   ? "Description unavailable while GitHub is degraded."
                   : "No description."}
             </p>

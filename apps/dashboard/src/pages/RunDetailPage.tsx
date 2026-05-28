@@ -93,9 +93,8 @@ export function RunDetailPage() {
     refetchInterval: 5000,
   })
 
-  // Run-scoped events + gate verdicts, fetched once and partitioned onto
-  // stage rows below. Replaces the former per-attribute Verdicts/Events
-  // tabs (ADR 0021).
+  // Run-scoped events, fetched once and partitioned onto stage rows
+  // below. Replaces the former per-attribute Events tab (ADR 0021).
   const eventsQuery = useQuery({
     queryKey: ["run-events", runId, workspace.id],
     queryFn: () =>
@@ -103,10 +102,27 @@ export function RunDetailPage() {
     enabled: !!runId,
     refetchInterval: 5000,
   })
-  const allEvents = useMemo(
-    () => eventsQuery.data?.events ?? [],
-    [eventsQuery.data],
-  )
+  // Dedicated gate-verdict query. The general events query is capped at
+  // 100 rows, so a busy run could push verdicts out of that window and
+  // hide them from stage detail; this guarantees the former Verdicts tab
+  // content stays reachable regardless of event volume.
+  const verdictsQuery = useQuery({
+    queryKey: ["run-verdicts", runId, workspace.id],
+    queryFn: () =>
+      api.getSpineEvents(workspace.id, {
+        run_id: runId,
+        event_type: "synodic.gate_verdict",
+        limit: 100,
+      }),
+    enabled: !!runId,
+    refetchInterval: 5000,
+  })
+  const allEvents = useMemo(() => {
+    const byId = new Map<number, SpineEvent>()
+    for (const e of eventsQuery.data?.events ?? []) byId.set(e.id, e)
+    for (const e of verdictsQuery.data?.events ?? []) byId.set(e.id, e)
+    return [...byId.values()]
+  }, [eventsQuery.data, verdictsQuery.data])
 
   usePageHeader({
     title: data ? (

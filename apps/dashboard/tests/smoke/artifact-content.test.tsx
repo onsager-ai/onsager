@@ -105,6 +105,16 @@ describe("ArtifactContent github_issue branch", () => {
     ).toBeInTheDocument()
   })
 
+  it("surfaces a degraded banner when issue hydration throws (404/network)", async () => {
+    apiMock.getProjectIssue.mockRejectedValue(new Error("not found"))
+
+    renderContent(baseArtifact({}))
+
+    expect(
+      await screen.findByText(/Couldn't load the live issue from GitHub/),
+    ).toBeInTheDocument()
+  })
+
   it("non-issue kinds fall through to a content branch, not the issue proxy", async () => {
     renderContent(
       baseArtifact({
