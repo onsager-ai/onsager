@@ -68,15 +68,17 @@ impl From<&str> for SpecId {
 
 /// Entry-side artifact references for a spec.
 ///
-/// Today this is a flat list of `ArtifactId`s the spec expects to
-/// have available at its workflow's entry edge. v1 does not type or
-/// position-tag these — single-entry / single-exit per ADR 0015 means
-/// at most one entry edge, and the compiler does not need to address
-/// individual inputs to wire deps.
+/// A flat list of `ArtifactId`s the spec expects to have available at
+/// its workflow's entry edge. v1 does not type or position-tag these —
+/// single-entry / single-exit per ADR 0015 means at most one entry
+/// edge, and the compiler does not need to address individual inputs
+/// to wire deps.
 ///
-/// The field is here so the Spec Plan shape matches ADR 0015's
-/// declared contract; downstream consumers (the scheduler, executor
-/// runtime) will pick it up later.
+/// Consumed end-to-end as of B4 (#502, ADR 0023): the Plan Compiler
+/// carries these onto the spec's entry node
+/// ([`crate::compiler::ExecutionPlan::entry_inputs`]) and the
+/// substrate scheduler materializes them from the `PlanStore` into the
+/// entry node's executor context at run time.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpecInputs {
     #[serde(default)]

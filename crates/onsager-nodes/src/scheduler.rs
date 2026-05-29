@@ -558,6 +558,24 @@ impl Scheduler {
                 inputs.push((edge.artifact_id.clone(), artifact));
             }
         }
+        // B4 (#502): an entry node's spec may declare external input
+        // artifacts (`SpecInputs.artifacts`). The compiler carried
+        // them onto this node in `plan.entry_inputs`; materialize each
+        // from the PlanStore and add it to the executor context. A
+        // declared input that isn't in the store yet is skipped (same
+        // shape as an absent edge input) rather than failing the node.
+        if let Some(artifact_ids) = plan.entry_inputs.get(&node.id) {
+            for artifact_id in artifact_ids {
+                if let Some(artifact) = self
+                    .store
+                    .get_artifact(plan_id, artifact_id)
+                    .await
+                    .map_err(|e| SchedulerError::Store(e.0))?
+                {
+                    inputs.push((artifact_id.clone(), artifact));
+                }
+            }
+        }
         Ok(inputs)
     }
 
@@ -652,6 +670,7 @@ mod tests {
                 },
             ],
             spec_index: HashMap::new(),
+            entry_inputs: HashMap::new(),
         }
     }
 
@@ -751,6 +770,97 @@ mod tests {
         let states = store.node_states(&plan_id).await.unwrap();
         assert_eq!(states.get(&a_id), Some(&NodeState::Completed));
         assert_eq!(states.get(&b_id), Some(&NodeState::Completed));
+    }
+
+    /// Records the `ArtifactId`s its executor context received as
+    /// inputs, so a test can assert B4 wiring delivered a spec's
+    /// declared entry inputs. Registers under `noop` to override the
+    /// default.
+    #[derive(Debug, Default)]
+    struct RecordingExecutor {
+        seen: std::sync::Mutex<Vec<ArtifactId>>,
+    }
+
+    #[async_trait]
+    impl crate::Executor for RecordingExecutor {
+        fn executor_kind(&self) -> &'static str {
+            "noop"
+        }
+        fn declared_provenance(
+            &self,
+            _: &[onsager_artifact::Provenance],
+        ) -> onsager_artifact::Provenance {
+            onsager_artifact::Provenance::external_deterministic()
+        }
+        async fn execute(
+            &self,
+            ctx: ExecutorContext,
+        ) -> Result<crate::context::ExecutorOutputs, ExecutorError> {
+            let mut seen = self.seen.lock().unwrap();
+            for (id, _) in &ctx.inputs {
+                seen.push(id.clone());
+            }
+            Ok(crate::context::ExecutorOutputs::empty())
+        }
+    }
+
+    #[tokio::test]
+    async fn entry_node_receives_declared_spec_inputs() {
+        // Single entry node with a declared external input artifact
+        // (the shape the compiler emits from SpecInputs.artifacts).
+        let edge_out = EdgeId::generate();
+        let node_id = NodeId::generate();
+        let node = SubstrateNode {
+            id: node_id,
+            executor: Box::new(onsager_substrate::executor::NoOpExecutor),
+            inputs: vec![],
+            outputs: vec![EdgeRef::new(edge_out)],
+        };
+        let external_input = ArtifactId::new("ext-input");
+        let mut entry_inputs = HashMap::new();
+        entry_inputs.insert(node_id, vec![external_input.clone()]);
+        let plan = ExecutionPlan {
+            nodes: vec![node],
+            edges: vec![Edge {
+                id: edge_out,
+                artifact_id: ArtifactId::new("out"),
+                requires_deterministic: false,
+            }],
+            spec_index: HashMap::new(),
+            entry_inputs,
+        };
+
+        let recorder = Arc::new(RecordingExecutor::default());
+        let mut registry = ExecutorRegistry::new();
+        registry.register(Arc::clone(&recorder) as Arc<dyn crate::Executor>);
+        let store = Arc::new(InMemoryPlanStore::new());
+        let spine = Arc::new(MockSpine::default());
+        let scheduler = Scheduler::new(
+            Arc::new(registry),
+            Arc::clone(&store) as Arc<dyn PlanStore>,
+            Arc::clone(&spine) as Arc<dyn SpineClient>,
+        );
+        let plan_id = PlanId::generate();
+
+        // Materialize the declared input artifact in the store, keyed
+        // by its external ArtifactId — the same key the compiler put
+        // in entry_inputs.
+        store
+            .put_artifact(
+                &plan_id,
+                &external_input,
+                Artifact::new(Kind::Document, "fixture", "marvin", "test", vec![]),
+            )
+            .await
+            .unwrap();
+
+        scheduler.run(&plan_id, &plan).await.unwrap();
+
+        let seen = recorder.seen.lock().unwrap();
+        assert!(
+            seen.contains(&external_input),
+            "entry node executor should have received its declared input artifact, saw: {seen:?}",
+        );
     }
 
     /// Failing executor: registers under the `noop` kind so it

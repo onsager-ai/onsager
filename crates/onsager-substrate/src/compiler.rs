@@ -22,6 +22,8 @@
 
 use std::collections::HashMap;
 
+use onsager_artifact::{ArtifactId, NodeId};
+
 use crate::ids::EdgeId;
 use crate::library::WorkflowLibrary;
 use crate::spec_plan::{SpecDep, SpecId, SpecPlan, SpecPlanError};
@@ -43,6 +45,12 @@ pub struct ExecutionPlan {
     /// the original `SpecId`s from the input Spec Plan; entry edges
     /// reflect rewiring from `connect`.
     pub spec_index: HashMap<SpecId, SpecSlot>,
+    /// `entry_node_id → external input artifact ids` declared by the
+    /// spec the node entered (its `SpecInputs.artifacts`). The
+    /// scheduler materializes these from the [`PlanStore`] and hands
+    /// them to the entry node's executor context at run time (B4,
+    /// #502). Empty for specs that declare no inputs.
+    pub entry_inputs: HashMap<NodeId, Vec<ArtifactId>>,
 }
 
 /// Where a single spec landed in the merged Execution Plan.
@@ -225,6 +233,33 @@ pub fn compile(
     // loop preserves every surviving edge verbatim — duplicate
     // artifact ids surface as a kernel-invariant violation rather
     // than a silent compile-time merge.
+    // B4 (#502): carry each spec's declared entry-side input artifacts
+    // onto its entry node(s). The entry node of a spec is the node
+    // whose `inputs` reference one of the spec's instantiated entry
+    // edges. Built from the pre-merge instantiation (node ids survive
+    // the merge unchanged — only edge refs are rewritten) so the map
+    // keys match the merged plan's node ids. A spec with empty
+    // `inputs.artifacts` contributes nothing.
+    let mut entry_inputs: HashMap<NodeId, Vec<ArtifactId>> = HashMap::new();
+    for spec in &spec_plan.specs {
+        if spec.inputs.artifacts.is_empty() {
+            continue;
+        }
+        let (_, inst) = &instantiated[&spec.id];
+        for node in &inst.nodes {
+            let is_entry_node = node
+                .inputs
+                .iter()
+                .any(|r| inst.entry_edges.contains(&r.edge_id));
+            if is_entry_node {
+                entry_inputs
+                    .entry(node.id)
+                    .or_default()
+                    .extend(spec.inputs.artifacts.iter().cloned());
+            }
+        }
+    }
+
     let mut nodes: Vec<Node> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
     let mut spec_index: HashMap<SpecId, SpecSlot> = HashMap::new();
@@ -282,6 +317,7 @@ pub fn compile(
         nodes: merged.nodes,
         edges: merged.edges,
         spec_index,
+        entry_inputs,
     })
 }
 
@@ -731,6 +767,61 @@ mod tests {
     // the spec_index back-pointer inconsistent with the merged
     // node's actual inputs.
     // ---------------------------------------------------------------
+
+    // ---------------------------------------------------------------
+    // B4 (#502): a spec's declared input artifacts are carried onto
+    // its entry node in `entry_inputs`.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn spec_inputs_are_carried_onto_the_entry_node() {
+        let mut lib = TestLibrary::new();
+        lib.register("passthrough", passthrough_workflow());
+
+        let plan = SpecPlan {
+            specs: vec![SpecRef {
+                id: SpecId::new("s1"),
+                kind: "passthrough".to_string(),
+                inputs: crate::spec_plan::SpecInputs {
+                    artifacts: vec![ArtifactId::new("ext-in-1"), ArtifactId::new("ext-in-2")],
+                },
+            }],
+            deps: vec![],
+        };
+        let compiled = compile(&plan, &lib).unwrap();
+
+        // passthrough has a single node and that node consumes the
+        // entry edge, so it is the entry node.
+        assert_eq!(compiled.nodes.len(), 1);
+        let entry_node = compiled.nodes[0].id;
+        let carried = compiled
+            .entry_inputs
+            .get(&entry_node)
+            .expect("entry node should have declared inputs");
+        assert_eq!(
+            carried,
+            &vec![ArtifactId::new("ext-in-1"), ArtifactId::new("ext-in-2")],
+        );
+    }
+
+    #[test]
+    fn empty_spec_inputs_leave_entry_inputs_unset() {
+        let mut lib = TestLibrary::new();
+        lib.register("passthrough", passthrough_workflow());
+        let plan = SpecPlan {
+            specs: vec![SpecRef {
+                id: SpecId::new("s1"),
+                kind: "passthrough".to_string(),
+                inputs: Default::default(),
+            }],
+            deps: vec![],
+        };
+        let compiled = compile(&plan, &lib).unwrap();
+        assert!(
+            compiled.entry_inputs.is_empty(),
+            "a spec with no declared inputs must not populate entry_inputs",
+        );
+    }
 
     #[test]
     fn multiple_incoming_deps_into_same_spec_are_rejected() {
