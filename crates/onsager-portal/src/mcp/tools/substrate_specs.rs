@@ -456,9 +456,7 @@ fn compile_result_value(
             let node_index: serde_json::Map<String, Value> = execution_plan
                 .node_spec_index
                 .iter()
-                .map(|(node_id, spec_id)| {
-                    (node_id.to_string(), Value::from(spec_id.as_str()))
-                })
+                .map(|(node_id, spec_id)| (node_id.to_string(), Value::from(spec_id.as_str())))
                 .collect();
             serde_json::json!({
                 "ok": true,

@@ -99,11 +99,12 @@ impl PlanStore for SqlxPlanStore {
         &self,
         plan_id: &PlanId,
     ) -> Result<std::collections::HashMap<NodeId, NodeState>, PlanStoreError> {
-        let rows = sqlx::query("SELECT node_id, state FROM execution_plan_nodes WHERE plan_id = $1")
-            .bind(plan_id.as_str())
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| PlanStoreError::new(format!("node_states failed: {e}")))?;
+        let rows =
+            sqlx::query("SELECT node_id, state FROM execution_plan_nodes WHERE plan_id = $1")
+                .bind(plan_id.as_str())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| PlanStoreError::new(format!("node_states failed: {e}")))?;
 
         let mut out = std::collections::HashMap::with_capacity(rows.len());
         for row in rows {
@@ -161,11 +162,12 @@ impl PlanStore for SqlxPlanStore {
         match row {
             None => Ok(None),
             Some(row) => {
-                let json: serde_json::Value = row
-                    .try_get("artifact_json")
-                    .map_err(|e| PlanStoreError::new(format!("artifact_json decode failed: {e}")))?;
-                let artifact = serde_json::from_value(json)
-                    .map_err(|e| PlanStoreError::new(format!("artifact deserialize failed: {e}")))?;
+                let json: serde_json::Value = row.try_get("artifact_json").map_err(|e| {
+                    PlanStoreError::new(format!("artifact_json decode failed: {e}"))
+                })?;
+                let artifact = serde_json::from_value(json).map_err(|e| {
+                    PlanStoreError::new(format!("artifact deserialize failed: {e}"))
+                })?;
                 Ok(Some(artifact))
             }
         }

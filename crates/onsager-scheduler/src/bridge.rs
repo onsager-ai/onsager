@@ -269,9 +269,9 @@ mod tests {
         Executor, ExecutorContext, ExecutorError, ExecutorOutputs, InMemoryPlanStore, PlanStore,
         SpineClient, SpineError,
     };
-    use std::sync::Arc;
     use onsager_substrate::ids::EdgeId;
     use onsager_substrate::workflow::{Edge, EdgeRef, EntrySpec, Node, OutputSpec};
+    use std::sync::Arc;
     use std::sync::Mutex;
 
     #[derive(Debug, Default)]

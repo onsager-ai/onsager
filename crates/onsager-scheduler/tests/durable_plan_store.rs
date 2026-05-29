@@ -17,10 +17,10 @@ use onsager_nodes::{
 };
 use onsager_scheduler::{PlanRunner, SqlxPlanStore};
 use onsager_substrate::ids::EdgeId;
+use onsager_substrate::ids::WorkflowId;
 use onsager_substrate::spec_plan::{SpecDep, SpecId, SpecPlan, SpecRef};
 use onsager_substrate::workflow::{Edge, EdgeRef, EntrySpec, Node, OutputSpec, Workflow};
 use onsager_substrate::{WorkflowLibraryError, WorkflowLookup};
-use onsager_substrate::ids::WorkflowId;
 use sqlx::PgPool;
 
 async fn try_pool() -> Option<PgPool> {
@@ -136,7 +136,10 @@ fn build_runner(store: Arc<dyn PlanStore>) -> PlanRunner {
 }
 
 async fn snapshot() -> Result<TwoKindLibrary, WorkflowLibraryError> {
-    Ok(TwoKindLibrary(passthrough_workflow(), passthrough_workflow()))
+    Ok(TwoKindLibrary(
+        passthrough_workflow(),
+        passthrough_workflow(),
+    ))
 }
 
 #[tokio::test]

@@ -181,7 +181,10 @@ async fn recover_running_plans(
     if plans.is_empty() {
         return Ok(());
     }
-    tracing::info!(count = plans.len(), "resuming in-flight plans after restart");
+    tracing::info!(
+        count = plans.len(),
+        "resuming in-flight plans after restart"
+    );
     for rec in plans {
         let snapshot = match SchedulerLibrarySnapshot::build(&rec.spec_plan, library).await {
             Ok(s) => s,
@@ -497,7 +500,10 @@ fn decode_spec_plan_run_requested(
         return Some((spec_plan_id, workspace_id));
     }
     // Raw payload fallback.
-    let spec_plan_id = data.get("spec_plan_id").and_then(|v| v.as_str())?.to_string();
+    let spec_plan_id = data
+        .get("spec_plan_id")
+        .and_then(|v| v.as_str())?
+        .to_string();
     let workspace_id = data
         .get("workspace_id")
         .and_then(|v| v.as_str())
@@ -635,7 +641,10 @@ mod tests {
         let (spec_plan_id, workspace_id) =
             decode_spec_plan_run_requested(&data, "row-ws").expect("decodes");
         assert_eq!(spec_plan_id, "github:42");
-        assert_eq!(workspace_id, "row-ws", "missing workspace falls back to the row column");
+        assert_eq!(
+            workspace_id, "row-ws",
+            "missing workspace falls back to the row column"
+        );
     }
 
     #[test]
