@@ -148,10 +148,18 @@ deliberately are not adding.
 ## Adoption checklist
 
 - [x] Decision recorded (this ADR), `Identity impact: no`.
-- [ ] B1 — durable `PlanStore` + recovery (#499).
-- [ ] B2 — run a persisted multi-spec `SpecPlan` via the shared entry
-  (#500).
-- [ ] B3 — `run_spec_plan` tool + `plan.run_requested` trigger (#501).
-- [ ] B4 — wire `SpecInputs` at run (#502).
-- [ ] F1 — `SpecPlanDAG` in-chat (#503).
-- [ ] F2 — plan-run progress overlay in-chat (#504).
+- [x] B1 — durable `PlanStore` + recovery (#499). `SqlxPlanStore`
+  (`crates/onsager-scheduler/src/plan_store.rs`) + recovery in
+  `service.rs`.
+- [x] B2 — run a persisted multi-spec `SpecPlan` via the shared entry
+  (#500). `PlanRunner::run` (`crates/onsager-scheduler/src/plan_runner.rs`).
+- [x] B3 — `run_spec_plan` tool + `plan.run_requested` trigger (#501).
+  `FactoryEventKind::SpecPlanRunRequested` + the MCP tool.
+- [x] B4 — wire `SpecInputs` at run (#502).
+- [x] F1 — `SpecPlanDAG` in-chat (#503)
+  (`apps/dashboard/src/components/chat/SpecPlanDAG.tsx`).
+- [x] F2 — plan-run progress overlay in-chat (#504)
+  (`apps/dashboard/src/components/chat/SpecPlanRunView.tsx`).
+
+All landed via #505. The future fold of plan runs into the Runs surface
+remains the deliberate follow-up named in Decision 2.

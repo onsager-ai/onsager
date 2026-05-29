@@ -637,8 +637,14 @@ Same warn-then-ratchet rollout as `check-file-budget`.
 - **`xtask check-events`** also surfaces diagnostic-only event rows
   without a `tracking_issue` (warn-mode), so dangling skeletons in the
   manifest get re-examined too.
+- **`xtask check-adr-adoption`** (ADR 0024 / 0025, spec #506) — flags
+  `Accepted` ADRs (`docs/adr/`) whose `## Adoption checklist` still has
+  unchecked `- [ ]` items. An Accepted decision with owed follow-through
+  is a wire connected at one end. Escape: mark the ADR `Adoption:
+  ongoing` in its metadata block while implementation is genuinely in
+  flight, then flip to `enforced` and tick the boxes as the work lands.
 
-All four land in warn mode initially (warn-then-ratchet); a follow-up
+All five land in warn mode initially (warn-then-ratchet); a follow-up
 spec will ratchet them to fail once the floor is clean.
 
 ## Workspace layout

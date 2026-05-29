@@ -34,6 +34,8 @@ see [`../architecture.md`](../architecture.md).
 | [0021](0021-detail-page-ia-node-as-section.md) | Detail page IA: node-as-section, attribute-as-expanded-detail | Accepted (2026-05-28) — `Identity impact: no` |
 | [0022](0022-provenance-source-tag-first-class-ui.md) | Provenance source tag as first-class UI | Proposed (2026-05-27) — `Identity impact: no` |
 | [0023](0023-spec-plan-run-orchestration-and-dashboard-placement.md) | Spec-plan run orchestration and dashboard placement | Accepted (2026-05-29) — `Identity impact: no` |
+| [0024](0024-workflow-lifecycle-orthogonal-readiness-autofire-axes.md) | Workflow lifecycle: orthogonal readiness/autofire axes + trigger-neutral binding | Accepted (2026-05-29, adoption ongoing) — `Identity impact: no` |
+| [0025](0025-chat-as-design-and-maintenance-surface.md) | Chat as design + maintenance surface | Accepted (2026-05-29, adoption ongoing) — `Identity impact: no` — amends ADR 0020 |
 
 ## How to add an ADR
 
