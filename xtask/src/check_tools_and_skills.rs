@@ -99,6 +99,13 @@ const PENDING_SKILL_GRANTS: &[(&str, &str)] = &[
         "get_workflow_v2",
         "spec #395 — pending `onsager-author-substrate` skill",
     ),
+    // Spec #501 (ADR 0023) — run a persisted SpecPlan. Pairs with the
+    // same `onsager-author-substrate` skill grant; the sibling-repo PR
+    // is a follow-up since this session is scoped to onsager-ai/onsager.
+    (
+        "run_spec_plan",
+        "spec #501 — pending `onsager-author-substrate` skill",
+    ),
 ];
 
 pub fn run() -> Result<()> {

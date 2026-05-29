@@ -17,10 +17,12 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use onsager_artifact::{Artifact, ArtifactId, Kind, NodeId, Provenance};
 use onsager_nodes::{
-    Executor, ExecutorContext, ExecutorError, ExecutorOutputs, ExecutorRegistry, SpineClient,
-    SpineError,
+    Executor, ExecutorContext, ExecutorError, ExecutorOutputs, ExecutorRegistry, InMemoryPlanStore,
+    PlanStore, SpineClient, SpineError,
 };
-use onsager_scheduler::{TriggerBridge, bridge::PreloadedWorkflow, bridge::WorkflowMeta};
+use onsager_scheduler::{
+    PlanRunner, TriggerBridge, bridge::PreloadedWorkflow, bridge::WorkflowMeta,
+};
 use onsager_substrate::ids::EdgeId;
 use onsager_substrate::workflow::{Edge, EdgeRef, EntrySpec, Node, OutputSpec, Workflow};
 
@@ -96,10 +98,13 @@ async fn trigger_fired_drives_scheduler_and_emits_node_events() {
     let mut registry = ExecutorRegistry::new();
     registry.register(Arc::new(EmitOne));
     let spine = Arc::new(CapturingSpine::default());
-    let bridge = TriggerBridge::new(
+    let store: Arc<dyn PlanStore> = Arc::new(InMemoryPlanStore::new());
+    let runner = PlanRunner::new(
         Arc::new(registry),
+        store,
         Arc::clone(&spine) as Arc<dyn SpineClient>,
     );
+    let bridge = TriggerBridge::new(runner);
 
     // Simulate a manual fire: `onsager trigger fire wf-e2e --manual run --payload '{"spec_kind":"e2e-kind"}'`
     let payload = serde_json::json!({

@@ -1,5 +1,15 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 import { AlertTriangle, Send, Sparkles } from "lucide-react"
+import { SpecPlanDAG } from "@/components/chat/SpecPlanDAG"
+import { SpecPlanRunView } from "@/components/chat/SpecPlanRunView"
+import { extractSpecPlan } from "@/lib/spec-plan"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
@@ -318,21 +328,24 @@ export function ChatBuilder({ workspaceId }: ChatBuilderProps) {
                         {call.state === "committed" && call.resultText ? (
                           <ResultBlock text={call.resultText} />
                         ) : null}
+                        {renderSpecPlanGraph(call)}
                       </div>
                     )
                   }
                   return (
-                    <InfoBlock
-                      key={call.id}
-                      title={call.binding.title(call.input)}
-                      body={
-                        call.binding.renderInfo?.(call.input) ??
-                        `Calling ${call.toolName}.`
-                      }
-                      state={call.state}
-                      resultText={call.resultText}
-                      errorMessage={call.errorMessage}
-                    />
+                    <div key={call.id} className="flex flex-col gap-1.5">
+                      <InfoBlock
+                        title={call.binding.title(call.input)}
+                        body={
+                          call.binding.renderInfo?.(call.input) ??
+                          `Calling ${call.toolName}.`
+                        }
+                        state={call.state}
+                        resultText={call.resultText}
+                        errorMessage={call.errorMessage}
+                      />
+                      {renderSpecPlanGraph(call)}
+                    </div>
                   )
                 })}
                 {turn.error ? (
@@ -369,6 +382,52 @@ export function ChatBuilder({ workspaceId }: ChatBuilderProps) {
       </CardContent>
     </Card>
   )
+}
+
+/**
+ * The spec-plan DAG to render beneath a tool call's card/info block
+ * (F1 #503 / F2 #504, ADR 0023):
+ *
+ * - `submit_spec_plan` / `compile_dry_run` carry the full `{ specs,
+ *   deps }` body in their args — render the authored graph directly.
+ * - `run_spec_plan` carries only the plan id; once committed, its
+ *   result includes the derived `plan_id`, so render the live run view
+ *   that overlays per-spec progress.
+ *
+ * Returns `null` for every other tool.
+ */
+function renderSpecPlanGraph(call: ToolCallEntry): ReactNode {
+  if (call.toolName === "run_spec_plan") {
+    if (call.state !== "committed" || !call.resultText) return null
+    let planId: string | undefined
+    try {
+      const parsed = JSON.parse(call.resultText) as { plan_id?: unknown }
+      if (typeof parsed.plan_id === "string") planId = parsed.plan_id
+    } catch {
+      planId = undefined
+    }
+    const workspaceId = call.input.workspace_id
+    const specPlanId = call.input.spec_plan_id
+    if (
+      !planId ||
+      typeof workspaceId !== "string" ||
+      typeof specPlanId !== "string"
+    ) {
+      return null
+    }
+    return (
+      <SpecPlanRunView
+        workspaceId={workspaceId}
+        specPlanId={specPlanId}
+        planId={planId}
+      />
+    )
+  }
+  if (call.toolName === "submit_spec_plan" || call.toolName === "compile_dry_run") {
+    const plan = extractSpecPlan(call.input)
+    return plan ? <SpecPlanDAG plan={plan} /> : null
+  }
+  return null
 }
 
 function UserBubble({ content }: { content: string }) {

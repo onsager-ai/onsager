@@ -248,6 +248,15 @@ fn build_registry() -> Vec<ToolDescriptor> {
             },
         },
         ToolDescriptor {
+            name: "run_spec_plan",
+            description: "Launch a persisted `SpecPlan` (ADR 0023). Emits `plan.run_requested` on the spine; the substrate scheduler host loads the stored plan, compiles it, and runs every spec in dependency order to a terminal state. Portal does not run the plan itself (seam rule). The plan must already exist (`submit_spec_plan`); a re-invocation resumes the same run rather than forking. The peer of `submit_spec_plan` / `get_execution_plan`.",
+            category: ToolCategory::Destructive,
+            input_schema: super::input_schema::<tools::substrate_specs::RunSpecPlanArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::substrate_specs::run_spec_plan(state, user, args))
+            },
+        },
+        ToolDescriptor {
             name: "submit_workflow",
             description: "Register a new `Workflow` (ADR 0016) for `spec_kind` in the substrate Workflow Library. Inserts a fresh monotonic version (per-kind `MAX(version) + 1`); the new row becomes the active version the Plan Compiler resolves. Workflow payload round-trips via the substrate's `Workflow` serde derive (executors flow through `typetag`'s `kind` discriminator).",
             category: ToolCategory::Constructive,

@@ -340,6 +340,87 @@ pub async fn get_execution_plan(state: &AppState, auth_user: &AuthUser, args: Va
 }
 
 // =============================================================================
+// run_spec_plan
+// =============================================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RunSpecPlanArgs {
+    pub workspace_id: String,
+    pub spec_plan_id: String,
+}
+
+/// Launch a stored `SpecPlan` (B3, #501, ADR 0023). Portal does **not**
+/// run the plan — it emits `plan.run_requested` on the spine and the
+/// substrate scheduler host consumes it, loads the stored plan,
+/// compiles it, and drives it to completion (the seam rule: portal is
+/// the edge, the scheduler is the runtime). The peer of
+/// `submit_spec_plan` / `get_execution_plan`.
+pub async fn run_spec_plan(state: &AppState, auth_user: &AuthUser, args: Value) -> ToolResult {
+    let args: RunSpecPlanArgs = serde_json::from_value(args)
+        .map_err(|e| ToolError::InvalidParams(format!("invalid run_spec_plan args: {e}")))?;
+    if args.spec_plan_id.trim().is_empty() {
+        return Err(ToolError::InvalidParams("spec_plan_id is required".into()));
+    }
+    require_workspace_access(&state.pool, auth_user, &args.workspace_id).await?;
+
+    let spec_plan_id = args.spec_plan_id.trim();
+    // Confirm the plan exists before firing — a run request for a
+    // missing plan is a client error, not a dropped event.
+    let stored = spec_plan_db::get(&state.pool, &args.workspace_id, spec_plan_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("mcp run_spec_plan get failed: {e}");
+            ToolError::Internal(format!("failed to load spec plan: {e}"))
+        })?
+        .ok_or_else(|| ToolError::NotFound(format!("spec plan `{spec_plan_id}` not found")))?;
+
+    // Raw `{ spec_plan_id, workspace_id }` payload — the scheduler's
+    // `decode_spec_plan_run_requested` accepts this shape (alongside a
+    // FactoryEvent envelope / bare kind), mirroring how `run_workflow`
+    // emits `trigger.fired`.
+    let payload = serde_json::json!({
+        "spec_plan_id": stored.spec_plan_id,
+        "workspace_id": args.workspace_id,
+        "actor": auth_user.user_id,
+        "source": "mcp",
+    });
+    let metadata = onsager_spine::EventMetadata {
+        correlation_id: None,
+        causation_id: None,
+        actor: auth_user.user_id.clone(),
+    };
+    let stream_id = format!("plan:{}:{}", args.workspace_id, stored.spec_plan_id);
+    let event_id = state
+        .spine
+        .append_ext(
+            &args.workspace_id,
+            &stream_id,
+            "plan",
+            "plan.run_requested",
+            payload,
+            &metadata,
+            None,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("mcp run_spec_plan emit failed: {e}");
+            ToolError::Internal(format!("failed to emit plan.run_requested: {e}"))
+        })?;
+
+    // Derived run id (shared with the scheduler, ADR 0023) so the
+    // dashboard can subscribe to this run's `node.*` events on the
+    // `substrate:<plan_id>:` stream prefix for the F2 progress surface.
+    let plan_id = onsager_substrate::derive_plan_id(&args.workspace_id, &stored.spec_plan_id);
+
+    Ok(serde_json::json!({
+        "spec_plan_id": stored.spec_plan_id,
+        "workspace_id": args.workspace_id,
+        "plan_id": plan_id,
+        "run_requested_event_id": event_id,
+    }))
+}
+
+// =============================================================================
 // shared compile-response formatting
 // =============================================================================
 
@@ -369,12 +450,21 @@ fn compile_result_value(
                     )
                 })
                 .collect();
+            // node_id → spec_id, so the dashboard plan-run progress
+            // surface (F2, #504) can attribute `node.*` events to the
+            // spec they belong to.
+            let node_index: serde_json::Map<String, Value> = execution_plan
+                .node_spec_index
+                .iter()
+                .map(|(node_id, spec_id)| (node_id.to_string(), Value::from(spec_id.as_str())))
+                .collect();
             serde_json::json!({
                 "ok": true,
                 "execution_plan": {
                     "node_count": execution_plan.nodes.len(),
                     "edge_count": execution_plan.edges.len(),
                     "spec_index": spec_index,
+                    "node_index": node_index,
                     "library_versions": snapshot
                         .versions
                         .iter()
@@ -423,6 +513,17 @@ mod tests {
         let parsed: UpdateSpecArgs = serde_json::from_value(raw).unwrap();
         let spec: SpecRef = serde_json::from_value(parsed.spec).unwrap();
         assert_eq!(spec.kind, "feature");
+    }
+
+    #[test]
+    fn run_spec_plan_args_round_trip() {
+        let raw = json!({
+            "workspace_id": "ws1",
+            "spec_plan_id": "github:42"
+        });
+        let parsed: RunSpecPlanArgs = serde_json::from_value(raw).unwrap();
+        assert_eq!(parsed.workspace_id, "ws1");
+        assert_eq!(parsed.spec_plan_id, "github:42");
     }
 
     #[test]

@@ -464,6 +464,19 @@ pub enum FactoryEventKind {
         to_stage_index: Option<u32>,
     },
 
+    /// A persisted multi-spec `SpecPlan` was requested to run (#501,
+    /// ADR 0023). Emitted by portal's `run_spec_plan` MCP tool;
+    /// consumed by the substrate scheduler host, which loads the stored
+    /// plan from `spec_plans`, compiles it, and drives it to
+    /// completion. Portal does not run the plan itself — the seam rule
+    /// (portal is the edge, the scheduler host is the runtime).
+    SpecPlanRunRequested {
+        /// `(workspace_id, spec_plan_id)` keys the `spec_plans` row the
+        /// scheduler loads and compiles.
+        spec_plan_id: String,
+        workspace_id: String,
+    },
+
     // -- Registry events removed by spec #285 -------------------------------
     // The nine `registry.*` mutation events (`type_proposed`, `type_approved`,
     // `type_deprecated`, `adapter_registered`, `adapter_deprecated`,
@@ -659,6 +672,7 @@ impl FactoryEventKind {
             Self::WorkflowManualTriggered { .. } => "workflow.manual_triggered",
             Self::StageEntered { .. } => "stage.entered",
             Self::StageAdvanced { .. } => "stage.advanced",
+            Self::SpecPlanRunRequested { .. } => "plan.run_requested",
             Self::GateCheckUpdated { .. } => "gate.check_updated",
             Self::GateManualApprovalSignal { .. } => "gate.manual_approval_signal",
             Self::NodeStarted { .. } => "node.started",
@@ -715,6 +729,10 @@ impl FactoryEventKind {
             Self::TriggerFired { .. } | Self::StageEntered { .. } | Self::StageAdvanced { .. } => {
                 "workflow"
             }
+            // Plan-run intent (portal → scheduler host). Its own
+            // namespace so the dashboard can scope plan-run requests
+            // without mixing them with per-node substrate lifecycle.
+            Self::SpecPlanRunRequested { .. } => "plan",
             // Audit-only fan-out for manual fires (#241). Lives in the
             // `audit` namespace so audit views can filter without
             // mixing with first-class workflow runtime events.
@@ -788,6 +806,10 @@ impl FactoryEventKind {
             Self::StageEntered { artifact_id, .. } | Self::StageAdvanced { artifact_id, .. } => {
                 format!("workflow:{artifact_id}")
             }
+            Self::SpecPlanRunRequested {
+                workspace_id,
+                spec_plan_id,
+            } => format!("plan:{workspace_id}:{spec_plan_id}"),
             Self::GateCheckUpdated {
                 repo_owner,
                 repo_name,

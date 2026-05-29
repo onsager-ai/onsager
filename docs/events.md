@@ -61,6 +61,7 @@ that requires a coordinated rollout.
 | `ising` | ising | 6 |
 | `workflow` | stiglab (trigger) / substrate scheduler (stage) | 3 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
+| `plan` | (unknown — update `stream_producer` in xtask) | 1 |
 | `gate` | onsager-portal (GitHub) / substrate scheduler (manual) | 2 |
 | `substrate` | substrate scheduler (onsager-nodes) + executor catalog (RUN-02, #360) | 10 |
 
@@ -613,6 +614,22 @@ Audit record for a manual / CLI / replay trigger fire (#241). Emitted alongside 
 | `actor` | `String` |  |
 | `event_subtype` | `String` |  |
 | `detail` | `serde_json::Value` |  |
+
+## `plan` events
+
+Producer subsystem: **(unknown — update `stream_producer` in xtask)**.
+
+### `plan.run_requested`
+
+- Variant: `FactoryEventKind::SpecPlanRunRequested`
+- Stream: `plan`
+
+A persisted multi-spec `SpecPlan` was requested to run (#501, ADR 0023). Emitted by portal's `run_spec_plan` MCP tool; consumed by the substrate scheduler host, which loads the stored plan from `spec_plans`, compiles it, and drives it to completion. Portal does not run the plan itself — the seam rule (portal is the edge, the scheduler host is the runtime).
+
+| Field | Type | Description |
+|---|---|---|
+| `spec_plan_id` | `String` | `(workspace_id, spec_plan_id)` keys the `spec_plans` row the scheduler loads and compiles. |
+| `workspace_id` | `String` |  |
 
 ## `gate` events
 

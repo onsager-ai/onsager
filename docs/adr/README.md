@@ -33,6 +33,7 @@ see [`../architecture.md`](../architecture.md).
 | [0020](0020-chat-as-portable-global-component-with-contextual-auto-scope.md) | Chat as portable global component with contextual auto-scope | Accepted (2026-05-22) — `Identity impact: no` |
 | [0021](0021-detail-page-ia-node-as-section.md) | Detail page IA: node-as-section, attribute-as-expanded-detail | Accepted (2026-05-28) — `Identity impact: no` |
 | [0022](0022-provenance-source-tag-first-class-ui.md) | Provenance source tag as first-class UI | Proposed (2026-05-27) — `Identity impact: no` |
+| [0023](0023-spec-plan-run-orchestration-and-dashboard-placement.md) | Spec-plan run orchestration and dashboard placement | Accepted (2026-05-29) — `Identity impact: no` |
 
 ## How to add an ADR
 
