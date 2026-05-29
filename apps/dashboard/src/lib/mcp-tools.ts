@@ -377,6 +377,27 @@ const get_execution_plan: McpToolBinding = {
     `Recompiling stored plan ${str(args, "spec_plan_id", "(unknown)")} on read.`,
 }
 
+const run_spec_plan: McpToolBinding = {
+  name: "run_spec_plan",
+  category: "destructive",
+  title: (args) => `Run spec plan · ${str(args, "spec_plan_id", "unknown")}`,
+  buildCard: (args) => ({
+    kind: "destructive",
+    title: `Run spec plan · ${str(args, "spec_plan_id", "unknown")}`,
+    body: {
+      info: `Launches the stored plan and runs every spec in dependency order. Progress shows on the plan graph below as each node advances.`,
+    },
+    sideEffects: [
+      "Emits `plan.run_requested` on the spine",
+      "The substrate scheduler compiles the stored plan and runs all specs",
+    ],
+    reversibility:
+      "Reversible — a re-run resumes the same plan; cancel individual runs from their detail page.",
+    commit: { label: "Run plan", intent: "destructive" },
+    reject: { label: "Don't run" },
+  }),
+}
+
 const submit_workflow: McpToolBinding = {
   name: "submit_workflow",
   category: "constructive",
@@ -489,6 +510,7 @@ const BINDINGS: McpToolBinding[] = [
   get_spec_plan,
   compile_dry_run,
   get_execution_plan,
+  run_spec_plan,
   submit_workflow,
   update_workflow,
   retire_workflow,

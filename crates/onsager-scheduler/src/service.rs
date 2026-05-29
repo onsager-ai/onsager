@@ -613,4 +613,47 @@ mod tests {
         let data = serde_json::json!({ "not_a_workflow": "nope" });
         assert!(decode_trigger_fired(&data).is_none());
     }
+
+    #[test]
+    fn decode_plan_run_requested_from_raw_payload() {
+        // The shape portal's `run_spec_plan` MCP tool writes.
+        let data = serde_json::json!({
+            "spec_plan_id": "github:42",
+            "workspace_id": "ws-7",
+            "actor": "mcp-client",
+            "source": "mcp",
+        });
+        let (spec_plan_id, workspace_id) =
+            decode_spec_plan_run_requested(&data, "fallback").expect("decodes");
+        assert_eq!(spec_plan_id, "github:42");
+        assert_eq!(workspace_id, "ws-7");
+    }
+
+    #[test]
+    fn decode_plan_run_requested_falls_back_to_row_workspace() {
+        let data = serde_json::json!({ "spec_plan_id": "github:42" });
+        let (spec_plan_id, workspace_id) =
+            decode_spec_plan_run_requested(&data, "row-ws").expect("decodes");
+        assert_eq!(spec_plan_id, "github:42");
+        assert_eq!(workspace_id, "row-ws", "missing workspace falls back to the row column");
+    }
+
+    #[test]
+    fn decode_plan_run_requested_from_bare_kind() {
+        let kind = FactoryEventKind::SpecPlanRunRequested {
+            spec_plan_id: "github:99".into(),
+            workspace_id: "ws-9".into(),
+        };
+        let data = serde_json::to_value(&kind).unwrap();
+        let (spec_plan_id, workspace_id) =
+            decode_spec_plan_run_requested(&data, "fallback").expect("decodes");
+        assert_eq!(spec_plan_id, "github:99");
+        assert_eq!(workspace_id, "ws-9");
+    }
+
+    #[test]
+    fn decode_plan_run_requested_none_without_spec_plan_id() {
+        let data = serde_json::json!({ "workspace_id": "ws" });
+        assert!(decode_spec_plan_run_requested(&data, "fallback").is_none());
+    }
 }
