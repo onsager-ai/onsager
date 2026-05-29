@@ -118,6 +118,8 @@ jobs:
         run: cargo run -p xtask --quiet -- check-generated-types
       - name: Metaphor-leakage check (ADR 0019 / spec #469)
         run: cargo run -p xtask --quiet -- check-metaphor-leakage
+      - name: Detail-page tabs check (ADR 0021 / spec #487)
+        run: cargo run -p xtask --quiet -- check-detail-page-tabs
       - name: File-budget check (spec #261)
         run: cargo run -p xtask --quiet -- check-file-budget --mode=fail
       - name: Orphan-crate check (spec #275, warn-mode landing)

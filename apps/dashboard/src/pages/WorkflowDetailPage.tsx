@@ -1,29 +1,16 @@
 import { useEffect, useMemo, useRef } from "react"
-import { useLazyReveal } from "@/hooks/useLazyReveal"
-import { Link, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import {
-  ArrowLeft,
-  ArrowRight,
-  Circle,
-  CircleCheck,
-  CircleDot,
-  CircleX,
-} from "lucide-react"
+import { ArrowLeft, Circle, CircleCheck, CircleDot, CircleX } from "lucide-react"
 import { api, type StageRunStatus, type WorkflowRun } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ActiveRunsBanner } from "@/components/workflows/ActiveRunsBanner"
-import { ArtifactBadge } from "@/components/workflows/ArtifactBadge"
 import { ArtifactFlowOverview } from "@/components/workflows/ArtifactFlowOverview"
 import { WorkflowActions } from "@/components/workflows/WorkflowActions"
-import { WorkflowArtifactsTab } from "@/components/workflows/WorkflowArtifactsTab"
-import { WorkflowEventsCard } from "@/components/workflows/WorkflowEventsCard"
-import { WorkflowSessionsCard } from "@/components/workflows/WorkflowSessionsCard"
-import { WorkflowVerdictsTab } from "@/components/workflows/WorkflowVerdictsTab"
 import { WebhookHealthWarning } from "@/components/workflows/WebhookHealthWarning"
-import { outputArtifactKind } from "@/components/workflows/workflow-meta"
+import { ChatAskButton } from "@/components/chat/ChatAskButton"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { useOSSFlag } from "@/hooks/useOSSFlag"
 import { useActiveWorkspace } from "@/lib/workspace"
@@ -67,19 +54,17 @@ const STATUS_ICON: Record<StageRunStatus, typeof Circle> = {
   failed: CircleX,
 }
 
-// Anchored section ids, kept aligned with the legacy `#definition` /
-// `#runs` / `#artifacts` / `#verdicts` hash anchors so bookmarks
-// survive the collapse from tabs to a single scroll surface (#455).
-const SECTION_IDS = ["definition", "runs", "artifacts", "verdicts"] as const
+// Anchored section ids after the ADR 0021 reshape: a workflow is its
+// spec (Definition) + its history (Activity). `#runs`, `#artifacts`,
+// `#verdicts` are handled separately as legacy anchors — `#runs` scrolls
+// to Activity; `#artifacts` / `#verdicts` 301-redirect to the
+// workflow-filtered Activity tab (see `legacyAnchorTarget`).
+const SECTION_IDS = ["definition", "activity"] as const
 type SectionId = (typeof SECTION_IDS)[number]
 
-// Per-section last_n truncation. Verdicts are denser; show fewer
-// inline and link out to the cross-workflow list for the rest (#455).
-// Artifacts and Runs lazy-load additional rows on scroll (#466) — these
-// constants seed the initial render and the per-step chunk size.
-const LAST_N_RUNS = 10
-const LAST_N_ARTIFACTS = 20
-const LAST_N_VERDICTS = 5
+// Activity shows the most recent runs inline; the section header links
+// out to the full workflow-filtered Activity tab for the rest (#490).
+const LAST_N_RUNS = 5
 
 export function WorkflowDetailPage() {
   const { id = "" } = useParams<{ id: string }>()
@@ -102,24 +87,9 @@ export function WorkflowDetailPage() {
     const all = runsData?.runs ?? []
     return isOss ? filterRunsToLastSevenDays(all) : all
   }, [runsData, isOss])
-  // Lazy reveal for the Runs section (#466). `visibleCount` starts at
-  // `LAST_N_RUNS` and grows by the same step as the sentinel below the
-  // run rows enters the viewport. The section header's "Show all" link
-  // is a separate affordance — it deep-links to the cross-workflow runs
-  // page, not an in-page expansion.
-  const {
-    visibleCount: visibleRunCount,
-    sentinelRef: runsSentinelRef,
-    hasMore: runsHasMore,
-  } = useLazyReveal({
-    initial: LAST_N_RUNS,
-    step: LAST_N_RUNS,
-    total: runs.length,
-  })
-  const visibleRuns = useMemo(
-    () => runs.slice(0, visibleRunCount),
-    [runs, visibleRunCount],
-  )
+  // Activity surfaces the most recent runs inline; the rest live on the
+  // workflow-filtered Activity tab via the section header's link-out.
+  const visibleRuns = useMemo(() => runs.slice(0, LAST_N_RUNS), [runs])
 
   // Spec #120 item 3 — webhook delivery health for this workflow's
   // installation.
@@ -136,24 +106,37 @@ export function WorkflowDetailPage() {
     )
   }, [healthData, workflow])
 
-  // Scroll the matched anchored section into view on mount (or when
-  // the hash changes from a browser back/forward). One requestAnimation
-  // Frame waits for lazy section content to mount before scrolling.
+  // Scroll the matched anchored section into view on mount (or when the
+  // hash changes). Legacy anchors are remapped: `#runs` scrolls to
+  // Activity; `#artifacts` / `#verdicts` 301-redirect to the
+  // workflow-filtered Activity tab (ADR 0021 / #490) so bookmarks made
+  // against the retired sections still resolve.
+  const navigate = useNavigate()
   const scrollRoot = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    const scrollToHash = () => {
+    if (!workflow) return
+    const activityBase = `/workspaces/${workspace.slug}/activity?workflow=${encodeURIComponent(
+      workflow.id,
+    )}`
+    const handleHash = () => {
       const raw = window.location.hash.replace(/^#/, "")
-      if (!SECTION_IDS.includes(raw as SectionId)) return
-      const el = document.getElementById(raw)
+      if (raw === "artifacts" || raw === "verdicts") {
+        const sourceType = raw === "artifacts" ? "artifact" : "verdict"
+        navigate(`${activityBase}&source_type=${sourceType}`, { replace: true })
+        return
+      }
+      const target = raw === "runs" ? "activity" : raw
+      if (!SECTION_IDS.includes(target as SectionId)) return
+      const el = document.getElementById(target)
       if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
     }
-    const raf = window.requestAnimationFrame(scrollToHash)
-    window.addEventListener("hashchange", scrollToHash)
+    const raf = window.requestAnimationFrame(handleHash)
+    window.addEventListener("hashchange", handleHash)
     return () => {
       window.cancelAnimationFrame(raf)
-      window.removeEventListener("hashchange", scrollToHash)
+      window.removeEventListener("hashchange", handleHash)
     }
-  }, [workflow])
+  }, [workflow, workspace.slug, navigate])
 
   const headerActions = useMemo(
     () =>
@@ -175,8 +158,9 @@ export function WorkflowDetailPage() {
     )
   }
 
-  const runsListHref = `/workspaces/${workspace.slug}/runs?workflow_id=${encodeURIComponent(workflow.id)}`
-  const totalRunCount = runs.length
+  const activityHref = `/workspaces/${workspace.slug}/activity?workflow=${encodeURIComponent(
+    workflow.id,
+  )}`
 
   return (
     <div ref={scrollRoot} className="space-y-6 md:space-y-8">
@@ -193,9 +177,15 @@ export function WorkflowDetailPage() {
               {workflow.trigger.label ? ` · ${workflow.trigger.label}` : ""}
             </p>
           </div>
-          <Badge variant={workflow.status === "active" ? "default" : "outline"}>
-            {workflow.status}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <ChatAskButton
+              scope={{ type: "workflow", id: workflow.id }}
+              label="Ask about this workflow"
+            />
+            <Badge variant={workflow.status === "active" ? "default" : "outline"}>
+              {workflow.status}
+            </Badge>
+          </div>
         </div>
         <WorkflowActions workflow={workflow} />
       </div>
@@ -205,27 +195,35 @@ export function WorkflowDetailPage() {
           {workflow.trigger.repo_owner}/{workflow.trigger.repo_name}
           {workflow.trigger.label ? ` · ${workflow.trigger.label}` : ""}
         </p>
-        <Badge variant={workflow.status === "active" ? "default" : "outline"}>
-          {workflow.status}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-2">
+          <ChatAskButton
+            scope={{ type: "workflow", id: workflow.id }}
+            label="Ask"
+            size="icon"
+          />
+          <Badge variant={workflow.status === "active" ? "default" : "outline"}>
+            {workflow.status}
+          </Badge>
+        </div>
       </div>
 
       <WebhookHealthWarning health={installHealth} variant="block" />
 
-      {/* Anchored timeline — single scroll surface, four sections.
-          `id=` attributes match the legacy `#definition` / `#runs` /
-          `#artifacts` / `#verdicts` hash anchors so bookmarks survive
-          the collapse from tabs (#455). */}
+      {/* Two sections only (ADR 0021 inv. 1): a workflow is its spec
+          (Definition) + its history (Activity). The retired Runs /
+          Artifacts / Verdicts sections are reachable via the
+          workflow-filtered Activity tab; legacy hash anchors redirect
+          there (see the hash effect above). */}
       <section id="definition" className="scroll-mt-20 space-y-4">
         <SectionHeader title="Definition" />
         <DefinitionSection workflow={workflow} isOss={isOss} />
       </section>
 
-      <section id="runs" className="scroll-mt-20 space-y-4">
+      <section id="activity" className="scroll-mt-20 space-y-4">
         <SectionHeader
-          title="Runs"
-          actionHref={totalRunCount > LAST_N_RUNS ? runsListHref : undefined}
-          actionLabel="Show all"
+          title="Activity"
+          actionHref={activityHref}
+          actionLabel="View all in Activity"
         />
         <ActiveRunsBanner
           workflowId={workflow.id}
@@ -237,26 +235,6 @@ export function WorkflowDetailPage() {
           stageIds={workflow.stages.map((s) => s.id)}
           workspaceSlug={workspace.slug}
           isOss={isOss}
-          sentinelRef={runsHasMore ? runsSentinelRef : undefined}
-        />
-        <WorkflowEventsCard workflowId={workflow.id} runs={visibleRuns} />
-        <WorkflowSessionsCard runs={visibleRuns} />
-      </section>
-
-      <section id="artifacts" className="scroll-mt-20 space-y-4">
-        <SectionHeader title="Artifacts" />
-        <WorkflowArtifactsTab
-          workflowId={workflow.id}
-          limit={LAST_N_ARTIFACTS}
-        />
-      </section>
-
-      <section id="verdicts" className="scroll-mt-20 space-y-4">
-        <SectionHeader title="Verdicts" />
-        <WorkflowVerdictsTab
-          workflowId={workflow.id}
-          stages={workflow.stages}
-          limit={LAST_N_VERDICTS}
         />
       </section>
     </div>
@@ -325,41 +303,6 @@ function DefinitionSection({
             </p>
           )}
         </div>
-        {workflow.stages.map((s, i) => {
-          const output = outputArtifactKind(s.gate_kind, s.artifact_kind)
-          const transforms = output !== s.artifact_kind
-          return (
-            <div
-              key={s.id}
-              className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
-            >
-              <div className="min-w-0 space-y-1">
-                <div className="truncate text-sm font-medium">
-                  {i + 1}. {s.name}
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {s.gate_kind}
-                  </span>
-                  <span className="text-muted-foreground/50">·</span>
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    in
-                  </span>
-                  <ArtifactBadge kind={s.artifact_kind} />
-                  {transforms && (
-                    <>
-                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                        out
-                      </span>
-                      <ArtifactBadge kind={output} />
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          )
-        })}
       </CardContent>
     </Card>
   )
@@ -370,17 +313,11 @@ function RunsList({
   stageIds,
   workspaceSlug,
   isOss,
-  sentinelRef,
 }: {
   runs: WorkflowRun[]
   stageIds: string[]
   workspaceSlug: string
   isOss: boolean
-  // When provided, rendered as a 1px sentinel below the run rows so
-  // `useLazyReveal`'s IntersectionObserver can extend the visible
-  // window as the user scrolls (#466). `undefined` when all runs are
-  // already on screen.
-  sentinelRef?: React.RefObject<HTMLDivElement | null>
 }) {
   return (
     <Card>
@@ -406,9 +343,6 @@ function RunsList({
               workspaceSlug={workspaceSlug}
             />
           ))
-        )}
-        {sentinelRef && (
-          <div ref={sentinelRef} aria-hidden="true" className="h-px" />
         )}
       </CardContent>
     </Card>

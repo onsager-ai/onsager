@@ -10,13 +10,10 @@ import { PageSkeleton } from "@/components/layout/PageSkeleton"
 // pay for an extra chunk fetch. Every other page is lazy.
 import { LoginPage } from "@/pages/LoginPage"
 import { api } from "@/lib/api"
-import { WorkspaceScope } from "@/lib/workspace"
+import { WorkspaceScope, useActiveWorkspace } from "@/lib/workspace"
 import { DevModeBanner } from "@/components/layout/DevModeBanner"
 import type { ReactNode } from "react"
 
-const IssueDetailPage = lazy(() =>
-  import("@/pages/IssueDetailPage").then((m) => ({ default: m.IssueDetailPage })),
-)
 const ArtifactDetailPage = lazy(() =>
   import("@/pages/ArtifactDetailPage").then((m) => ({ default: m.ArtifactDetailPage })),
 )
@@ -154,6 +151,51 @@ function SessionIdRedirect() {
   return <Navigate to={`/workspaces/${workspace}/workflows`} replace />
 }
 
+// Retires IssueDetailPage (ADR 0021 / #492): `/issues/:projectId/:number`
+// resolves to the canonical `/artifacts/:id` for the `github_issue`
+// artifact via the same `external_ref` join IssueDetailPage performed.
+// Un-ingested issues (no artifact yet) or a failed lookup fall back to
+// Workflows, consistent with SessionIdRedirect.
+export function IssueArtifactRedirect() {
+  const { projectId = "", number = "" } = useParams<{
+    projectId: string
+    number: string
+  }>()
+  const workspace = useActiveWorkspace()
+  const numberValid = /^\d+$/.test(number)
+  const { data, isLoading } = useQuery({
+    queryKey: ["artifacts", workspace.id, "github_issue", projectId],
+    queryFn: () =>
+      api.getArtifacts(workspace.id, {
+        kind: "github_issue",
+        project_id: projectId,
+      }),
+    enabled: !!projectId && numberValid,
+    retry: 1,
+    staleTime: 0,
+  })
+
+  if (!projectId || !numberValid) {
+    return <Navigate to={`/workspaces/${workspace.slug}/workflows`} replace />
+  }
+  if (isLoading) return null
+
+  const externalRef = `github:project:${projectId}:issue:${Number.parseInt(
+    number,
+    10,
+  )}`
+  const match = data?.artifacts.find((a) => a.external_ref === externalRef)
+  if (match) {
+    return (
+      <Navigate
+        to={`/workspaces/${workspace.slug}/artifacts/${match.id}`}
+        replace
+      />
+    )
+  }
+  return <Navigate to={`/workspaces/${workspace.slug}/workflows`} replace />
+}
+
 function AppRoutes() {
   const { user, loading } = useAuth()
 
@@ -268,9 +310,11 @@ function AppRoutes() {
                         <Route path="spine" element={<WorkspaceRedirect to="workflows" />} />
                         <Route path="governance" element={<WorkspaceRedirect to="settings#governance-audit" />} />
                         <Route path="issues" element={<WorkspaceRedirect to="workflows" />} />
+                        {/* IssueDetailPage retired (#492): redirect to
+                            the canonical artifact URL. */}
                         <Route
                           path="issues/:projectId/:number"
-                          element={<LazyRoute variant="detail"><IssueDetailPage /></LazyRoute>}
+                          element={<IssueArtifactRedirect />}
                         />
                         <Route path="nodes" element={<WorkspaceRedirect to="settings#infrastructure" />} />
                         <Route

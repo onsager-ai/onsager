@@ -97,7 +97,11 @@ function renderWorkflow(hash: string) {
                 <Routes>
                   <Route
                     path="workflows/:id"
-                    element={<WorkflowDetailPage />}
+                    element={
+                      <ChatUiProvider>
+                        <WorkflowDetailPage />
+                      </ChatUiProvider>
+                    }
                   />
                 </Routes>
               </WorkspaceScope>
