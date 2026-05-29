@@ -606,6 +606,20 @@ pub const EVENTS: EventManifest = EventManifest {
             operator_grain: true,
             description: "All gates on a stage resolved and the artifact advanced.",
         },
+        EventDefinition {
+            kind: "plan.run_requested",
+            schema_version: 1,
+            // Portal's `run_spec_plan` MCP tool emits this; the
+            // substrate scheduler host consumes it, loads the stored
+            // SpecPlan, compiles it, and runs it (#501, ADR 0023).
+            producers: &[Subsystem::Portal],
+            consumers: &[Subsystem::Substrate],
+            diagnostic_only: false,
+            reason: None,
+            tracking_issue: None,
+            operator_grain: true,
+            description: "A persisted multi-spec SpecPlan was requested to run.",
+        },
         // -- Registry events removed by spec #285 ---------------------------
         // The nine `registry.*` mutation events had no in-tree consumer
         // or dashboard reader. The registry tables remain the source of

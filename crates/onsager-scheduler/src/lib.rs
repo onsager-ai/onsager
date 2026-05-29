@@ -34,9 +34,15 @@
 //! spine / artifact only — never on a sibling subsystem crate.
 
 pub mod bridge;
+pub mod migrate;
+pub mod plan_registry;
+pub mod plan_runner;
+pub mod plan_store;
 pub mod service;
 pub mod spine_client;
 
 pub use bridge::{TriggerBridge, TriggerBridgeError};
+pub use plan_runner::{PlanRunError, PlanRunner, SchedulerLibrarySnapshot};
+pub use plan_store::SqlxPlanStore;
 pub use service::{SchedulerService, ServiceConfig};
 pub use spine_client::SpineEventStoreClient;

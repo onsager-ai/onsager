@@ -22,13 +22,16 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use onsager_nodes::{ExecutorRegistry, NoOpExecutor, SpineClient};
+use onsager_nodes::{ExecutorRegistry, NoOpExecutor, PlanStore, SpineClient};
 use onsager_spine::factory_event::{FactoryEvent, FactoryEventKind};
 use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 use onsager_substrate::workflow_library::WorkflowLibrary as PersistedWorkflowLibrary;
 use sqlx::Row;
 
 use crate::bridge::{PreloadedWorkflow, TriggerBridge, WorkflowMeta};
+use crate::plan_registry::{self, derive_plan_id};
+use crate::plan_runner::{PlanRunner, SchedulerLibrarySnapshot};
+use crate::plan_store::SqlxPlanStore;
 use crate::spine_client::SpineEventStoreClient;
 
 /// Configuration the service reads from env / CLI.
@@ -89,16 +92,35 @@ impl SchedulerService {
         let store = EventStore::connect(&self.config.database_url)
             .await
             .with_context(|| format!("connecting to {}", self.config.database_url))?;
+        // Ensure the durable execution-plan tables exist (idempotent;
+        // the canonical schema is the spine migration, but the
+        // scheduler connects via EventStore which does not migrate).
+        crate::migrate::run(store.pool())
+            .await
+            .context("ensuring execution-plan tables")?;
         let library = PersistedWorkflowLibrary::new(store.pool().clone());
         let base_spine = SpineEventStoreClient::new(store.clone(), &self.config.actor);
         let registry = self
             .registry
             .unwrap_or_else(|| Arc::new(default_executor_registry()));
+        let plan_store: Arc<dyn PlanStore> = Arc::new(SqlxPlanStore::new(store.pool().clone()));
+
+        // Recovery: a prior host may have died mid-run. Re-drive every
+        // plan still marked `running` — Scheduler::run resets
+        // non-terminal node states to pending and re-dispatches
+        // (RUN-01 fault-tolerance, B1 #499).
+        if let Err(e) =
+            recover_running_plans(&store, &registry, &base_spine, &library, &plan_store).await
+        {
+            tracing::warn!("plan recovery pass failed (continuing to live listen): {e}");
+        }
+
         let handler = TriggerHandler {
             registry,
             base_spine,
             library,
             store: store.clone(),
+            plan_store,
         };
 
         // Default: live-only. `replay_history = true` rewinds to id=0
@@ -133,11 +155,55 @@ impl SchedulerService {
         tracing::info!(
             actor = %self.config.actor,
             replay = self.config.replay_history,
-            "substrate scheduler listening for trigger.fired",
+            "substrate scheduler listening for trigger.fired / plan.run_requested",
         );
         listener.run(handler).await?;
         Ok(())
     }
+}
+
+/// Re-drive every plan left in `running` status by a prior host. Each
+/// plan's source `SpecPlan` is recompiled against the current library
+/// and handed to the shared [`PlanRunner`]; [`Scheduler::run`] resets
+/// any non-terminal node state read from the durable store and
+/// re-dispatches, so an interrupted multi-node run resumes to
+/// completion (B1 #499 / B2 #500).
+async fn recover_running_plans(
+    store: &EventStore,
+    registry: &Arc<ExecutorRegistry>,
+    base_spine: &SpineEventStoreClient,
+    library: &PersistedWorkflowLibrary,
+    plan_store: &Arc<dyn PlanStore>,
+) -> anyhow::Result<()> {
+    let plans = plan_registry::list_recoverable(store.pool())
+        .await
+        .context("listing recoverable plans")?;
+    if plans.is_empty() {
+        return Ok(());
+    }
+    tracing::info!(count = plans.len(), "resuming in-flight plans after restart");
+    for rec in plans {
+        let snapshot = match SchedulerLibrarySnapshot::build(&rec.spec_plan, library).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(plan_id = %rec.plan_id, "recovery library snapshot failed: {e}");
+                continue;
+            }
+        };
+        let scoped: Arc<dyn SpineClient> = Arc::new(base_spine.with_workspace(&rec.workspace_id));
+        let runner = PlanRunner::new(Arc::clone(registry), Arc::clone(plan_store), scoped);
+        match runner.run(&rec.plan_id, &rec.spec_plan, &snapshot).await {
+            Ok(()) => {
+                let _ = plan_registry::set_status(store.pool(), &rec.plan_id, "completed").await;
+                tracing::info!(plan_id = %rec.plan_id, "resumed plan completed");
+            }
+            Err(e) => {
+                let _ = plan_registry::set_status(store.pool(), &rec.plan_id, "failed").await;
+                tracing::warn!(plan_id = %rec.plan_id, "resumed plan failed: {e}");
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Read `MAX(id) FROM events_ext`, returning `None` when the table is
@@ -171,21 +237,30 @@ pub fn default_executor_registry() -> ExecutorRegistry {
     r
 }
 
-/// Spine [`EventHandler`] that dispatches `trigger.fired` events
-/// through the bridge.
+/// Spine [`EventHandler`] that dispatches the scheduler's two front
+/// doors — `trigger.fired` (single-spec) and `plan.run_requested`
+/// (multi-spec) — through the shared [`PlanRunner`].
 struct TriggerHandler {
     registry: Arc<ExecutorRegistry>,
     base_spine: SpineEventStoreClient,
     library: PersistedWorkflowLibrary,
     store: EventStore,
+    plan_store: Arc<dyn PlanStore>,
 }
 
 #[async_trait]
 impl EventHandler for TriggerHandler {
     async fn handle(&self, event: EventNotification) -> anyhow::Result<()> {
-        if event.event_type != "trigger.fired" {
-            return Ok(());
+        match event.event_type.as_str() {
+            "trigger.fired" => self.handle_trigger_fired(event).await,
+            "plan.run_requested" => self.handle_plan_run_requested(event).await,
+            _ => Ok(()),
         }
+    }
+}
+
+impl TriggerHandler {
+    async fn handle_trigger_fired(&self, event: EventNotification) -> anyhow::Result<()> {
         // Pull the row's data + workspace_id. Notifications carry
         // only stream_id + event_type; the body lives on
         // `events_ext`. workspace_id is the indexed tenant column —
@@ -245,7 +320,12 @@ impl EventHandler for TriggerHandler {
             .unwrap_or_else(|| "default".to_string());
         let scoped_spine: Arc<dyn SpineClient> =
             Arc::new(self.base_spine.with_workspace(&workspace_id));
-        let bridge = TriggerBridge::new(Arc::clone(&self.registry), scoped_spine);
+        let runner = PlanRunner::new(
+            Arc::clone(&self.registry),
+            Arc::clone(&self.plan_store),
+            scoped_spine,
+        );
+        let bridge = TriggerBridge::new(runner);
         match bridge
             .handle_payload(&workflow_id, &payload, &meta, lookup)
             .await
@@ -262,6 +342,91 @@ impl EventHandler for TriggerHandler {
                 %workflow_id,
                 "trigger.fired dispatch failed: {e}",
             ),
+        }
+        Ok(())
+    }
+
+    /// Load a persisted multi-spec `SpecPlan`, compile it, and run it
+    /// to completion through the shared [`PlanRunner`] (B2 #500 / B3
+    /// #501). Portal's `run_spec_plan` tool emitted the
+    /// `plan.run_requested` event this consumes.
+    async fn handle_plan_run_requested(&self, event: EventNotification) -> anyhow::Result<()> {
+        let row = sqlx::query("SELECT data, workspace_id FROM events_ext WHERE id = $1")
+            .bind(event.id)
+            .fetch_optional(self.store.pool())
+            .await
+            .context("loading plan.run_requested body")?;
+        let Some(row) = row else { return Ok(()) };
+        let data: serde_json::Value = row.try_get("data")?;
+        let row_workspace_id: String = row.try_get("workspace_id").unwrap_or_default();
+
+        let Some((spec_plan_id, workspace_id)) =
+            decode_spec_plan_run_requested(&data, &row_workspace_id)
+        else {
+            tracing::warn!(
+                event_id = event.id,
+                "plan.run_requested body did not decode (no spec_plan_id)"
+            );
+            return Ok(());
+        };
+
+        let spec_plan =
+            match plan_registry::load_spec_plan(self.store.pool(), &workspace_id, &spec_plan_id)
+                .await
+                .context("loading stored spec plan")?
+            {
+                Some(plan) => plan,
+                None => {
+                    tracing::warn!(
+                        event_id = event.id,
+                        %workspace_id,
+                        %spec_plan_id,
+                        "plan.run_requested for unknown spec plan — dropped",
+                    );
+                    return Ok(());
+                }
+            };
+
+        let plan_id = derive_plan_id(&workspace_id, &spec_plan_id);
+        plan_registry::register_plan(
+            self.store.pool(),
+            &plan_id,
+            &workspace_id,
+            Some(&spec_plan_id),
+            &spec_plan,
+        )
+        .await
+        .context("registering plan run")?;
+
+        let snapshot = SchedulerLibrarySnapshot::build(&spec_plan, &self.library)
+            .await
+            .context("building library snapshot")?;
+        let scoped_spine: Arc<dyn SpineClient> =
+            Arc::new(self.base_spine.with_workspace(&workspace_id));
+        let runner = PlanRunner::new(
+            Arc::clone(&self.registry),
+            Arc::clone(&self.plan_store),
+            scoped_spine,
+        );
+        match runner.run(&plan_id, &spec_plan, &snapshot).await {
+            Ok(()) => {
+                let _ = plan_registry::set_status(self.store.pool(), &plan_id, "completed").await;
+                tracing::info!(
+                    event_id = event.id,
+                    %workspace_id,
+                    %spec_plan_id,
+                    plan_id = %plan_id,
+                    "plan.run_requested completed",
+                );
+            }
+            Err(e) => {
+                let _ = plan_registry::set_status(self.store.pool(), &plan_id, "failed").await;
+                tracing::warn!(
+                    event_id = event.id,
+                    %spec_plan_id,
+                    "plan.run_requested failed: {e}",
+                );
+            }
         }
         Ok(())
     }
@@ -308,6 +473,38 @@ fn decode_trigger_fired(data: &serde_json::Value) -> Option<FactoryEventKind> {
         trigger_kind,
         payload: data.clone(),
     })
+}
+
+/// Extract `(spec_plan_id, workspace_id)` from a `plan.run_requested`
+/// `events_ext.data` column. Accepts the same three shapes as
+/// [`decode_trigger_fired`]: a `FactoryEvent` envelope, a bare
+/// `FactoryEventKind`, or a raw `{ spec_plan_id, workspace_id }`
+/// payload (the shape portal's MCP tool writes). The events_ext row's
+/// `workspace_id` column is the fallback when the payload omits it.
+fn decode_spec_plan_run_requested(
+    data: &serde_json::Value,
+    fallback_workspace_id: &str,
+) -> Option<(String, String)> {
+    let from_kind = serde_json::from_value::<FactoryEvent>(data.clone())
+        .map(|env| env.event)
+        .ok()
+        .or_else(|| serde_json::from_value::<FactoryEventKind>(data.clone()).ok());
+    if let Some(FactoryEventKind::SpecPlanRunRequested {
+        spec_plan_id,
+        workspace_id,
+    }) = from_kind
+    {
+        return Some((spec_plan_id, workspace_id));
+    }
+    // Raw payload fallback.
+    let spec_plan_id = data.get("spec_plan_id").and_then(|v| v.as_str())?.to_string();
+    let workspace_id = data
+        .get("workspace_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(fallback_workspace_id)
+        .to_string();
+    Some((spec_plan_id, workspace_id))
 }
 
 /// Pull the workflow row's workspace_id. Returns `Ok(None)` if no

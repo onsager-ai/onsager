@@ -34,16 +34,17 @@
 //! construction path here.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use onsager_nodes::{InMemoryPlanStore, PlanId, PlanStore, Scheduler, SchedulerError, SpineClient};
-use onsager_substrate::compiler::{CompileError, compile};
+use onsager_nodes::PlanId;
 use onsager_substrate::ids::WorkflowId;
 use onsager_substrate::library::WorkflowLibrary as WorkflowLookup;
 use onsager_substrate::spec_plan::{SpecId, SpecPlan, SpecRef};
 use onsager_substrate::workflow::Workflow;
 use serde_json::Value;
 use thiserror::Error;
+
+use crate::plan_registry::derive_plan_id;
+use crate::plan_runner::{PlanRunError, PlanRunner};
 
 /// Outcome of running [`TriggerBridge::handle_payload`].
 #[derive(Debug, Error)]
@@ -59,23 +60,14 @@ pub enum TriggerBridgeError {
     #[error("no workflow registered for spec_kind `{kind}` (workflow `{workflow_id}`)")]
     MissingKind { workflow_id: String, kind: String },
 
-    /// Compile-step failure — Spec Plan invalid, kernel invariant
-    /// violated, etc.
-    #[error("compile failed for workflow `{workflow_id}` (kind `{kind}`): {source}")]
-    Compile {
+    /// Compile or scheduler failure running the synthesized single-spec
+    /// plan, surfaced from the shared [`PlanRunner`].
+    #[error("run failed for workflow `{workflow_id}` (kind `{kind}`): {source}")]
+    Run {
         workflow_id: String,
         kind: String,
         #[source]
-        source: CompileError,
-    },
-
-    /// Scheduler-step failure — a node failed, the plan got stuck.
-    #[error("scheduler failed for workflow `{workflow_id}` (kind `{kind}`): {source}")]
-    Scheduler {
-        workflow_id: String,
-        kind: String,
-        #[source]
-        source: SchedulerError,
+        source: PlanRunError,
     },
 }
 
@@ -93,14 +85,15 @@ pub struct WorkflowMeta {
 /// Stateless bridge: trigger payload + workflow library → one
 /// executed plan.
 ///
-/// Holds the scheduler-side wiring (registry, store, spine) once at
-/// construction time; each call to [`Self::handle_payload`] builds a
-/// fresh [`PlanId`] and runs the resolved plan through
-/// [`Scheduler::run`].
+/// A thin adapter over the shared [`PlanRunner`] (B2, ADR 0023): it
+/// resolves the `spec_kind`, builds the single-element [`SpecPlan`]
+/// the trigger path needs, derives a workflow-stable [`PlanId`], and
+/// delegates the compile-and-run to the runner — the same entry the
+/// multi-spec `plan.run_requested` path uses. No parallel run loop
+/// lives here anymore.
 #[derive(Clone)]
 pub struct TriggerBridge {
-    registry: Arc<onsager_nodes::ExecutorRegistry>,
-    spine: Arc<dyn SpineClient>,
+    runner: PlanRunner,
 }
 
 impl std::fmt::Debug for TriggerBridge {
@@ -110,11 +103,8 @@ impl std::fmt::Debug for TriggerBridge {
 }
 
 impl TriggerBridge {
-    pub fn new(
-        registry: Arc<onsager_nodes::ExecutorRegistry>,
-        spine: Arc<dyn SpineClient>,
-    ) -> Self {
-        Self { registry, spine }
+    pub fn new(runner: PlanRunner) -> Self {
+        Self { runner }
     }
 
     /// Run a single trigger.fired payload to completion.
@@ -154,20 +144,15 @@ impl TriggerBridge {
             deps: vec![],
         };
         let single = SingleWorkflowLookup::new(kind.clone(), workflow);
-        let exec_plan =
-            compile(&spec_plan, &single).map_err(|source| TriggerBridgeError::Compile {
-                workflow_id: workflow_id.to_string(),
-                kind: kind.clone(),
-                source,
-            })?;
-
-        let store: Arc<dyn PlanStore> = Arc::new(InMemoryPlanStore::new());
-        let scheduler = Scheduler::new(Arc::clone(&self.registry), store, Arc::clone(&self.spine));
-        let plan_id = PlanId::generate();
-        scheduler
-            .run(&plan_id, &exec_plan)
+        // Stable per-workflow id so a re-fire resumes rather than
+        // forking; the single-spec path keys off the workflow id (no
+        // persisted spec_plan_id), the multi-spec path keys off
+        // (workspace_id, spec_plan_id).
+        let plan_id = derive_plan_id("trigger", workflow_id);
+        self.runner
+            .run(&plan_id, &spec_plan, &single)
             .await
-            .map_err(|source| TriggerBridgeError::Scheduler {
+            .map_err(|source| TriggerBridgeError::Run {
                 workflow_id: workflow_id.to_string(),
                 kind,
                 source,
@@ -280,7 +265,11 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use onsager_artifact::{Artifact, ArtifactId, NodeId, Provenance};
-    use onsager_nodes::{Executor, ExecutorContext, ExecutorError, ExecutorOutputs, SpineError};
+    use onsager_nodes::{
+        Executor, ExecutorContext, ExecutorError, ExecutorOutputs, InMemoryPlanStore, PlanStore,
+        SpineClient, SpineError,
+    };
+    use std::sync::Arc;
     use onsager_substrate::ids::EdgeId;
     use onsager_substrate::workflow::{Edge, EdgeRef, EntrySpec, Node, OutputSpec};
     use std::sync::Mutex;
@@ -361,10 +350,13 @@ mod tests {
         let mut registry = onsager_nodes::ExecutorRegistry::new();
         registry.register(Arc::new(EchoExecutor));
         let spine = Arc::new(CapturingSpine::default());
-        let bridge = TriggerBridge::new(
+        let store: Arc<dyn PlanStore> = Arc::new(InMemoryPlanStore::new());
+        let runner = PlanRunner::new(
             Arc::new(registry),
+            store,
             Arc::clone(&spine) as Arc<dyn SpineClient>,
         );
+        let bridge = TriggerBridge::new(runner);
         (bridge, spine)
     }
 
