@@ -106,9 +106,7 @@ function DesktopTopChrome() {
         <span className="text-base font-semibold">Onsager</span>
       </Link>
       <Separator orientation="vertical" className="h-6" />
-      <div className="w-56">
-        <WorkspaceSwitcher />
-      </div>
+      <WorkspaceSwitcher />
       <Separator orientation="vertical" className="h-6" />
       <TopTabs />
       <div className="ml-auto flex items-center gap-1">

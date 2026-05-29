@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Building2, Check, ChevronsUpDown, Plus } from "lucide-react"
+import { Building2, Check, ChevronDown, Plus } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -64,7 +64,7 @@ function WorkspaceBadge({ workspace }: { workspace: Workspace | null }) {
   }
   // First letter of the slug (lowercased) gives a stable "avatar" without
   // requiring a generated image. Avoids manual-input territory while still
-  // distinguishing workspaces visually in the sidebar.
+  // distinguishing workspaces visually in the picker rows.
   const initial = (workspace.slug[0] ?? "?").toUpperCase()
   return (
     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs font-semibold text-primary">
@@ -101,37 +101,22 @@ export function WorkspaceSwitcher() {
   }
 
   return (
-    <div className="px-2 pt-2">
+    <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
             <Button
-              variant="outline"
+              variant="ghost"
+              size="sm"
               role="combobox"
               aria-expanded={open}
               aria-label="Switch workspace"
-              className="h-auto w-full justify-between gap-2 px-2 py-1.5"
+              className="h-8 gap-1.5 px-2 text-sm font-medium"
             >
-              <span className="flex min-w-0 flex-1 items-center gap-2">
-                <WorkspaceBadge workspace={active} />
-                <span className="min-w-0 flex-1 truncate text-left">
-                  {active ? (
-                    <>
-                      <span className="block truncate text-sm font-medium">
-                        {active.name}
-                      </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {active.slug}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="block truncate text-sm text-muted-foreground">
-                      Select workspace
-                    </span>
-                  )}
-                </span>
+              <span className="max-w-[12rem] truncate">
+                {active ? active.name : "Select workspace"}
               </span>
-              <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
             </Button>
           }
         />
@@ -183,6 +168,6 @@ export function WorkspaceSwitcher() {
         </PopoverContent>
       </Popover>
       <NewWorkspaceDialog open={createOpen} onOpenChange={setCreateOpen} />
-    </div>
+    </>
   )
 }
