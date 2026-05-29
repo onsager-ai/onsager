@@ -120,6 +120,7 @@ fn script_agent_verify_plan() -> (ExecutionPlan, NodeId, NodeId, NodeId) {
         ],
         spec_index: Default::default(),
         entry_inputs: Default::default(),
+        node_spec_index: Default::default(),
     };
     (plan, script_node_id, agent_node_id, verify_node_id)
 }
@@ -291,6 +292,7 @@ async fn verify_failure_still_emits_synodic_verdict() {
         ],
         spec_index: Default::default(),
         entry_inputs: Default::default(),
+        node_spec_index: Default::default(),
     };
 
     // Per-node executor configuration is not yet routed through the

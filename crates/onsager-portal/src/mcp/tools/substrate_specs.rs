@@ -407,9 +407,15 @@ pub async fn run_spec_plan(state: &AppState, auth_user: &AuthUser, args: Value) 
             ToolError::Internal(format!("failed to emit plan.run_requested: {e}"))
         })?;
 
+    // Derived run id (shared with the scheduler, ADR 0023) so the
+    // dashboard can subscribe to this run's `node.*` events on the
+    // `substrate:<plan_id>:` stream prefix for the F2 progress surface.
+    let plan_id = onsager_substrate::derive_plan_id(&args.workspace_id, &stored.spec_plan_id);
+
     Ok(serde_json::json!({
         "spec_plan_id": stored.spec_plan_id,
         "workspace_id": args.workspace_id,
+        "plan_id": plan_id,
         "run_requested_event_id": event_id,
     }))
 }
@@ -444,12 +450,23 @@ fn compile_result_value(
                     )
                 })
                 .collect();
+            // node_id → spec_id, so the dashboard plan-run progress
+            // surface (F2, #504) can attribute `node.*` events to the
+            // spec they belong to.
+            let node_index: serde_json::Map<String, Value> = execution_plan
+                .node_spec_index
+                .iter()
+                .map(|(node_id, spec_id)| {
+                    (node_id.to_string(), Value::from(spec_id.as_str()))
+                })
+                .collect();
             serde_json::json!({
                 "ok": true,
                 "execution_plan": {
                     "node_count": execution_plan.nodes.len(),
                     "edge_count": execution_plan.edges.len(),
                     "spec_index": spec_index,
+                    "node_index": node_index,
                     "library_versions": snapshot
                         .versions
                         .iter()

@@ -300,6 +300,7 @@ impl SubWorkflowRunner for SchedulerSubWorkflowRunner {
             edges: inst.edges,
             spec_index: HashMap::new(),
             entry_inputs: HashMap::new(),
+            node_spec_index: HashMap::new(),
         };
         let exit_edges = inst.exit_edges.clone();
         let entry_edge_ids = inst.entry_edges.clone();

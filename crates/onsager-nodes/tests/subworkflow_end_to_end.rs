@@ -174,6 +174,7 @@ async fn outer_subworkflow_node_propagates_inner_uncertain_to_outer_exit() {
         }],
         spec_index: HashMap::new(),
         entry_inputs: HashMap::new(),
+        node_spec_index: HashMap::new(),
     };
 
     // ----- Run the outer scheduler.

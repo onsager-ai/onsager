@@ -51,6 +51,12 @@ pub struct ExecutionPlan {
     /// them to the entry node's executor context at run time (B4,
     /// #502). Empty for specs that declare no inputs.
     pub entry_inputs: HashMap<NodeId, Vec<ArtifactId>>,
+    /// `node_id → originating SpecId`. Every node in the merged plan
+    /// came from exactly one spec's instantiated workflow; this records
+    /// which. The dashboard plan-run progress surface (F2, #504) uses
+    /// it to attribute `node.*` lifecycle events back to the spec they
+    /// belong to.
+    pub node_spec_index: HashMap<NodeId, SpecId>,
 }
 
 /// Where a single spec landed in the merged Execution Plan.
@@ -263,6 +269,7 @@ pub fn compile(
     let mut nodes: Vec<Node> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
     let mut spec_index: HashMap<SpecId, SpecSlot> = HashMap::new();
+    let mut node_spec_index: HashMap<NodeId, SpecId> = HashMap::new();
 
     // Iterate in spec_plan.specs declaration order so the resulting
     // node/edge ordering is deterministic across runs (HashMap
@@ -281,6 +288,7 @@ pub fn compile(
                     *output = EdgeRef::new(*target);
                 }
             }
+            node_spec_index.insert(node.id, spec.id.clone());
             nodes.push(node);
         }
 
@@ -318,6 +326,7 @@ pub fn compile(
         edges: merged.edges,
         spec_index,
         entry_inputs,
+        node_spec_index,
     })
 }
 

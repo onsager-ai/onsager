@@ -671,6 +671,7 @@ mod tests {
             ],
             spec_index: HashMap::new(),
             entry_inputs: HashMap::new(),
+            node_spec_index: HashMap::new(),
         }
     }
 
@@ -828,6 +829,7 @@ mod tests {
             }],
             spec_index: HashMap::new(),
             entry_inputs,
+            node_spec_index: HashMap::new(),
         };
 
         let recorder = Arc::new(RecordingExecutor::default());

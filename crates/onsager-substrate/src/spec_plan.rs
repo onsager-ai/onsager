@@ -116,6 +116,22 @@ pub struct SpecPlan {
     pub deps: Vec<SpecDep>,
 }
 
+/// Stable namespace for [`derive_plan_id`] — frozen UUID v4.
+const PLAN_ID_NAMESPACE: uuid::Uuid = uuid::Uuid::from_bytes([
+    0x4f, 0x4e, 0x53, 0x47, 0x52, 0x50, 0x4c, 0x41, 0x4e, 0x52, 0x55, 0x4e, 0x49, 0x44, 0x06, 0x06,
+]);
+
+/// Derive a stable run-`PlanId` string from `(workspace_id,
+/// spec_plan_id)`. Single source of truth (ADR 0023): both portal's
+/// `run_spec_plan` (which returns it so the dashboard can subscribe to
+/// the run's node events) and the scheduler's `plan_registry` derive
+/// the same id, so a re-invocation resumes the same run rather than
+/// forking a second one.
+pub fn derive_plan_id(workspace_id: &str, spec_plan_id: &str) -> String {
+    let seed = format!("{workspace_id}:{spec_plan_id}");
+    uuid::Uuid::new_v5(&PLAN_ID_NAMESPACE, seed.as_bytes()).to_string()
+}
+
 /// Why a Spec Plan failed validation. The compiler surfaces these
 /// before any workflow lookup so authors see structural errors
 /// without having to populate the library first.

@@ -19,19 +19,17 @@ use onsager_nodes::PlanId;
 use onsager_substrate::spec_plan::SpecPlan;
 use sqlx::{PgPool, Row};
 
-/// Stable namespace for [`derive_plan_id`] — frozen UUID v4.
-const PLAN_ID_NAMESPACE: uuid::Uuid = uuid::Uuid::from_bytes([
-    0x4f, 0x4e, 0x53, 0x47, 0x52, 0x50, 0x4c, 0x41, 0x4e, 0x52, 0x55, 0x4e, 0x49, 0x44, 0x06, 0x06,
-]);
-
 /// Derive a stable [`PlanId`] from `(workspace_id, spec_plan_id)`.
 ///
-/// A `run_spec_plan` re-invocation for the same stored plan resolves
-/// to the same `PlanId`, so the durable store sees a resume rather
-/// than a forked second run (ADR 0023 decision 1).
+/// Thin wrapper over [`onsager_substrate::spec_plan::derive_plan_id`]
+/// (the single source of truth, shared with portal's `run_spec_plan`)
+/// so the durable store sees a resume rather than a forked second run
+/// on re-invocation (ADR 0023 decision 1).
 pub fn derive_plan_id(workspace_id: &str, spec_plan_id: &str) -> PlanId {
-    let seed = format!("{workspace_id}:{spec_plan_id}");
-    PlanId::new(uuid::Uuid::new_v5(&PLAN_ID_NAMESPACE, seed.as_bytes()).to_string())
+    PlanId::new(onsager_substrate::spec_plan::derive_plan_id(
+        workspace_id,
+        spec_plan_id,
+    ))
 }
 
 /// Load the authored `SpecPlan` for `(workspace_id, spec_plan_id)` from
