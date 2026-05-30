@@ -3,6 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { MoreHorizontal, Pause, Play, Rocket, Trash2 } from "lucide-react"
 import { api, type Workflow } from "@/lib/api"
+import {
+  HitlActionButton,
+  HitlActionDialog,
+} from "@/components/chat/HitlActionButton"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -28,6 +32,15 @@ import {
 // for confirmation in a modal — a workflow is durable state with a
 // webhook and a label side effect, not a typo.
 //
+// The "Run a batch" affordance (ADR 0024 / 0025, spec #514) gates on the
+// `readiness` axis, not `active`: a `ready + off` (manual-only) workflow
+// is a first-class state that still earns the button. The button only
+// applies to manual-trigger workflows — `run_workflow` requires a
+// `TriggerKind::Manual` binding — so a non-manual `ready` workflow shows
+// no manual-run button (it fires on its own trigger). The mutation
+// routes through a `HitlCard` (HITL principle 1), reusing the shared
+// `run_workflow` MCP path rather than the REST manual-trigger endpoint.
+//
 // `variant`:
 //   - "buttons" (default): full-width labeled buttons. Used in the
 //     desktop page-level header block.
@@ -47,20 +60,23 @@ export function WorkflowActions({
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [confirming, setConfirming] = useState(false)
+  const [runOpen, setRunOpen] = useState(false)
 
   const isActive = workflow.status === "active"
   const isManualTrigger = workflow.trigger.kind_tag === "manual"
   const manualName = workflow.trigger.manual_name ?? ""
+  // ADR 0024: `ready` (any trigger binding), not `active`, earns the run
+  // button. `run_workflow` needs a `Manual` trigger, so the affordance is
+  // manual-trigger-only.
+  const canRunBatch =
+    workflow.readiness === "ready" && isManualTrigger && manualName !== ""
 
-  const fireManual = useMutation({
-    mutationFn: () => api.fireManualTrigger(workflow.id, manualName),
-    onSuccess: () => {
-      // The trigger.fired event lands within ~50ms; refresh runs so
-      // the new artifact appears without waiting for the 5s poll.
-      queryClient.invalidateQueries({ queryKey: ["workflow-runs", workflow.id] })
-      queryClient.invalidateQueries({ queryKey: ["spine-events"] })
-    },
-  })
+  const onRunCommitted = () => {
+    // The trigger.fired event lands within ~50ms; refresh runs so the
+    // new artifact appears without waiting for the 5s poll.
+    queryClient.invalidateQueries({ queryKey: ["workflow-runs", workflow.id] })
+    queryClient.invalidateQueries({ queryKey: ["spine-events"] })
+  }
 
   const toggle = useMutation({
     mutationFn: (active: boolean) => api.setWorkflowActive(workflow.id, active),
@@ -103,13 +119,10 @@ export function WorkflowActions({
           <MoreHorizontal className="h-5 w-5" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
-          {isManualTrigger && isActive && (
-            <DropdownMenuItem
-              disabled={fireManual.isPending}
-              onClick={() => fireManual.mutate()}
-            >
+          {canRunBatch && (
+            <DropdownMenuItem onClick={() => setRunOpen(true)}>
               <Rocket className="mr-2 h-4 w-4" />
-              {fireManual.isPending ? "Firing…" : "Run now"}
+              Run a batch
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
@@ -133,17 +146,17 @@ export function WorkflowActions({
         className="flex flex-wrap items-center gap-2"
         data-testid="workflow-actions"
       >
-        {isManualTrigger && isActive && (
-          <Button
-            type="button"
+        {canRunBatch && (
+          <HitlActionButton
+            toolName="run_workflow"
+            args={{ workflow_id: workflow.id, trigger_name: manualName }}
+            onCommitted={onRunCommitted}
             variant="default"
             size="sm"
-            disabled={fireManual.isPending}
-            onClick={() => fireManual.mutate()}
           >
             <Rocket className="h-4 w-4" />
-            {fireManual.isPending ? "Firing…" : "Run now"}
-          </Button>
+            Run a batch
+          </HitlActionButton>
         )}
         <Button
           type="button"
@@ -171,19 +184,23 @@ export function WorkflowActions({
               : "Failed to update workflow"}
           </p>
         )}
-        {fireManual.isError && (
-          <p className="w-full text-xs text-destructive">
-            {fireManual.error instanceof Error
-              ? fireManual.error.message
-              : "Run now failed"}
-          </p>
-        )}
       </div>
     )
 
   return (
     <>
       {controls}
+      {/* Menu-variant run trigger opens this controlled review dialog;
+          the buttons variant uses its own HitlActionButton inline. */}
+      {variant === "menu" && canRunBatch && (
+        <HitlActionDialog
+          open={runOpen}
+          onOpenChange={setRunOpen}
+          toolName="run_workflow"
+          args={{ workflow_id: workflow.id, trigger_name: manualName }}
+          onCommitted={onRunCommitted}
+        />
+      )}
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent>
           <DialogHeader>

@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vitest"
 import { deriveAutoScope } from "@/lib/chat/use-auto-scope"
 
-// Route → scope mapping (ADR 0020 § Contextual auto-scope, spec #471
-// Plan: "Hook test: route → scope mapping for each of the four scope
-// types"). The hook itself is route-reactive — the pure derivation is
-// unit-tested here; the React-level pin/unpin behavior is covered by
-// the smoke tests.
+// Route → default chat scope (ADR 0020 § Contextual auto-scope, narrowed
+// by ADR 0025 § Chat's scope narrows to two jobs, spec #514). The default
+// scope a bare route resolves to is design (workspace) or maintenance
+// (run / verdict) — never a workflow scope. The `workflow` scope survives
+// only as an explicit ChatAskButton override, exercised in the smoke
+// tests, not as a route default.
 
-describe("deriveAutoScope", () => {
+describe("deriveAutoScope (design + maintenance only)", () => {
   it("maps the workflows list to workspace scope", () => {
     expect(deriveAutoScope("/workspaces/acme/workflows", "")).toEqual({
       type: "workspace",
@@ -15,11 +16,23 @@ describe("deriveAutoScope", () => {
     })
   })
 
-  it("maps the workflow detail to workflow:{id}", () => {
+  it("maps workflow detail to workspace (design), not workflow scope", () => {
+    // ADR 0025: a workflow is *designed* at the workspace level; its
+    // detail route no longer auto-scopes to workflow:{id}.
     expect(deriveAutoScope("/workspaces/acme/workflows/wf-1", "")).toEqual({
-      type: "workflow",
-      id: "wf-1",
+      type: "workspace",
+      id: null,
     })
+  })
+
+  it("never returns a workflow scope from any bare route", () => {
+    for (const path of [
+      "/workspaces/acme/workflows/wf-1",
+      "/workspaces/acme/workflows/start",
+      "/workspaces/acme/spec-plans",
+    ]) {
+      expect(deriveAutoScope(path, "").type).not.toBe("workflow")
+    }
   })
 
   it("does not treat /workflows/start as a workflow scope", () => {

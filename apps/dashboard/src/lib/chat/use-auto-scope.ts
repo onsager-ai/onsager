@@ -11,20 +11,29 @@ import {
   writePinnedScope,
 } from "./pinned-scope"
 
-// Route → scope mapping (ADR 0020 § Contextual auto-scope).
+// Route → default chat scope (ADR 0020 § Contextual auto-scope,
+// *narrowed* by ADR 0025 § Chat's scope narrows to two jobs, spec #514).
 //
-// Workflows tab list      → workspace
-// Workflow detail         → workflow:{id}
-// Cross-workflow runs     → workspace
-// Run detail              → run:{runId}
-// Verdict detail (future) → verdict:{verdictId}
-// Activity / settings /…  → workspace
+// ADR 0025 names chat's two jobs: **design** (authoring/drafting, which
+// happens at the workspace level — the CAD bench) and **maintenance**
+// (incident handling on a specific run — scope=run). The default scope a
+// bare route resolves to is therefore one of exactly two kinds:
 //
-// Verdicts don't have a dedicated route today (they live inside the
-// run-detail surface); the verdict scope is reserved for when the
-// `/runs/:runId?verdict=…` deep link or a future verdict-detail page
-// lands. The hook also reads `?verdict=` off the run-detail surface so
-// invocation channels that pass it (#472) get the right scope.
+//   Run detail              → run:{runId}      (maintenance)
+//   Everything else          → workspace        (design)
+//
+// A workflow detail page no longer auto-scopes to `workflow:{id}` — a
+// workflow is *designed* at the workspace level, not maintained from its
+// detail route, so the route default folds into the design (workspace)
+// surface. The `workflow` scope still exists for the explicit
+// `ChatAskButton` override ("Ask about this workflow"); it just isn't a
+// route *default* any more. That keeps the resolver to design +
+// maintenance only.
+//
+// `?verdict=` is a maintenance sub-scope of a run, carried explicitly by
+// invocation channels (push notifications, scope-local Ask on verdict
+// cards, #472) — it is an override the resolver honours, never a bare
+// route default.
 //
 // Routes outside `/workspaces/:slug/*` (account settings, picker) fall
 // back to the workspace scope of the resolved workspace; if there is
@@ -39,28 +48,19 @@ export function deriveAutoScope(pathname: string, search: string): ChatScope {
   if (!wsMatch) return WORKSPACE_SCOPE
   const rest = wsMatch[1] ?? ""
 
-  // Verdict deep link wins on any sub-route — invocation channels
-  // (push notifications, scope-local Ask on verdict cards) carry it
-  // explicitly.
+  // Verdict deep link wins on any sub-route — a maintenance sub-scope
+  // carried explicitly by invocation channels.
   if (verdictId) return { type: "verdict", id: verdictId }
 
-  // Workflow detail. Excludes `/workflows/start` (creation surface,
-  // which is workspace-scoped).
-  const wfMatch = rest.match(/^\/workflows\/([^/]+)$/)
-  if (wfMatch && wfMatch[1] !== "start") {
-    return { type: "workflow", id: wfMatch[1] }
-  }
-
-  // Run detail.
+  // Maintenance — run detail is the one route that scopes to a run.
   const runMatch = rest.match(/^\/runs\/([^/]+)$/)
   if (runMatch) {
     return { type: "run", id: runMatch[1] }
   }
 
-  // Everything else under the workspace — workflows list, runs list,
-  // activity, settings, artifact detail, issue detail — is workspace
-  // scope per the ADR's "tab switch preserves scope at current level"
-  // rule.
+  // Design — everything else under the workspace (workflows list +
+  // detail, runs list, plans, activity, settings, artifact detail)
+  // resolves to the workspace authoring thread.
   return WORKSPACE_SCOPE
 }
 

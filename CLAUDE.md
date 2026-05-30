@@ -514,6 +514,19 @@ The four canonical nouns:
   parameters). A workflow's structural unit; never a top-level
   navigation noun.
 
+**Sanctioned carve-out — "Plans" (spec plans).** ADR 0023 made the
+authored spec-plan graph a first-class user concept, and ADR 0025 /
+spec #514 require a noun-surface launch path for it so chat stops
+being the sole way to run one. The dashboard therefore carries a
+fifth top-level nav noun, **Plans** (`/workspaces/:slug/spec-plans`),
+listing persisted spec plans with a HitlCard-routed "Run" button.
+This is *not* a violation of the four-noun rule but a deliberate
+exception under it: a spec **plan** (a substrate authoring artifact —
+a DAG of specs run in dependency order) is distinct from the
+internal-only dev-process **spec** (a GitHub issue with implementation
+intent) demoted below. The carve-out is scoped to this one surface;
+new top-level nav nouns still default to "no" and need their own ADR.
+
 **Demoted to internal-only.** These terms stay rich in Rust /
 migration / spine vocabulary but never surface to users:
 

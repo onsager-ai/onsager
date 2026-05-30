@@ -218,7 +218,11 @@ describe("ChatContainer", () => {
     expect(nav.textContent).toContain("acme")
   })
 
-  it("calls getThread with the workflow scope on workflow detail", async () => {
+  it("defaults to workspace (design) scope on workflow detail", async () => {
+    // ADR 0025 / #514: a workflow's detail route no longer auto-scopes
+    // to workflow:{id} — it folds into the workspace design thread. The
+    // workflow scope survives only as an explicit ChatAskButton override
+    // (see chat-ask-button.test.tsx), not as a route default.
     mountAt("/workspaces/acme/workflows/wf-1")
     await act(async () => {
       fireEvent.click(await screen.findByTestId("open-chat"))
@@ -229,8 +233,7 @@ describe("ChatContainer", () => {
       await new Promise((r) => setTimeout(r, 0))
     })
     expect(apiMock.getThread).toHaveBeenCalledWith("ws-1", {
-      scope_type: "workflow",
-      scope_id: "wf-1",
+      scope_type: "workspace",
     })
   })
 
@@ -254,7 +257,8 @@ describe("ChatContainer", () => {
     await act(async () => {
       fireEvent.click(await screen.findByTestId("open-chat"))
     })
-    // Confirm scope is workflow.
+    // Confirm scope is the workspace design thread (workflow detail now
+    // folds into workspace scope per ADR 0025 / #514).
     const nav = await screen.findByRole("navigation", { name: /chat scope/i })
     expect(nav.textContent).toContain("acme")
     // Click pin.
@@ -267,7 +271,7 @@ describe("ChatContainer", () => {
     // localStorage carries the pinned scope.
     expect(
       window.localStorage.getItem("onsager.chat.pinned_scope.user-1.ws-1"),
-    ).toBe("workflow:wf-1")
+    ).toBe("workspace")
 
     // Rerender wouldn't actually move the route; in jsdom we rely on
     // the localStorage assertion + button-state assertion above to

@@ -19,6 +19,7 @@ import { ChatUiProvider } from "@/lib/chat/use-chat-ui"
 import { ChatContainer } from "@/components/chat/ChatContainer"
 import { ChatFab } from "@/components/chat/ChatFab"
 import { ChatBell } from "@/components/chat/ChatBell"
+import { DesktopChatEntry } from "@/components/chat/DesktopChatEntry"
 import { ChatDeepLinkHandler } from "@/components/chat/ChatDeepLinkHandler"
 import { cn } from "@/lib/utils"
 
@@ -37,6 +38,11 @@ interface TopTab {
 const TOP_TABS: TopTab[] = [
   { key: "workflows", label: "Workflows", path: "workflows" },
   { key: "runs", label: "Runs", path: "runs" },
+  // "Plans" is the noun-surface home for persisted spec plans (ADR 0023
+  // / 0025, spec #514) — the launch surface that stops chat being the
+  // sole spec-plan-run path. It is a sanctioned 5th nav noun; see the
+  // vocabulary carve-out in the root CLAUDE.md.
+  { key: "spec-plans", label: "Plans", path: "spec-plans" },
   { key: "activity", label: "Activity", path: "activity" },
 ]
 
@@ -110,6 +116,7 @@ function DesktopTopChrome() {
       <Separator orientation="vertical" className="h-6" />
       <TopTabs />
       <div className="ml-auto flex items-center gap-1">
+        <DesktopChatEntry />
         <ChatBell />
         <CommandPaletteTrigger />
         <UserMenu variant="icon" />

@@ -6,7 +6,7 @@
 - **Tracking issues**: #451 (implementation spec). Sibling to ADR 0019, which removes the top-level Chat tab. This ADR governs what chat *becomes* once it is no longer a tab. Builds on ADR 0007 (tools and skills as the public contract) and ADR 0008 (portal owns the agent control plane).
 - **Supersedes**: none. Predecessor specs (#398 universal-chat-entry, #400 chat empty-state chips, #401 DraftStrip + chat surface) are the prior frame in prose; the repo convention reserves the `Supersedes` field for ADR-to-ADR replacement, so no entry here.
 - **Superseded by**: none
-- **Amended by**: ADR 0025 (2026-05-29) — names chat's dashboard role as design + maintenance (not a pure interchangeable frontend) and adds a labeled desktop entry. The responsive-mount, auto-scope, pin, and storage decisions below are unchanged.
+- **Amended by**: ADR 0025 (2026-05-29) — names chat's dashboard role as design + maintenance (not a pure interchangeable frontend) and adds a labeled desktop entry. The responsive-mount, auto-scope *mechanism* (the hook, pin override, storage schema) is unchanged; the route → default-scope *table* below is narrowed to design (workspace) + maintenance (run / verdict) by ADR 0025 / spec #514 — a workflow detail route no longer auto-scopes to `workflow:{id}` (that scope survives only as an explicit Ask override).
 
 ## Context
 
