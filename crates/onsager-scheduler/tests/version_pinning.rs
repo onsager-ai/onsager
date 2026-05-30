@@ -164,6 +164,78 @@ async fn recovered_plan_resolves_pinned_version_not_latest() {
         .unwrap();
 }
 
+/// Pinning survives a resume that reuses the same `plan_id` (#515
+/// review): the `ON CONFLICT` path on `register_plan` must NOT overwrite
+/// the original pin with the re-resolved (now newer) version, or a
+/// replay/retry would silently re-pin the resumed run to latest.
+///
+/// Mutation check: restore `kind_versions = EXCLUDED.kind_versions` to
+/// the ON CONFLICT clause and the final assertion sees v2 and fails.
+#[tokio::test]
+async fn resume_preserves_original_pin() {
+    let Some(pool) = try_pool().await else {
+        eprintln!("DATABASE_URL not set; skipping");
+        return;
+    };
+    onsager_scheduler::migrate::run(&pool)
+        .await
+        .expect("ensure execution-plan tables");
+    let library = WorkflowLibrary::new(pool.clone());
+
+    let kind = format!("resume-pin-{}", uuid::Uuid::new_v4());
+    library
+        .register(&kind, &tagged_workflow("v1"))
+        .await
+        .expect("register v1");
+
+    let plan = one_spec_plan(&kind);
+    let plan_id = PlanId::new(format!("plan-{}", uuid::Uuid::new_v4()));
+
+    // First registration pins v1.
+    let pin_v1 = resolve_kind_versions(&plan, &library)
+        .await
+        .expect("resolve v1");
+    assert_eq!(pin_v1.get(&kind), Some(&1));
+    plan_registry::register_plan(&pool, &plan_id, "default", None, &plan, &pin_v1)
+        .await
+        .expect("register plan");
+
+    // v2 lands; a resume re-resolves latest (v2) and re-registers the
+    // SAME plan_id — the original v1 pin must survive the ON CONFLICT.
+    library
+        .register(&kind, &tagged_workflow("v2"))
+        .await
+        .expect("register v2");
+    let pin_v2 = resolve_kind_versions(&plan, &library)
+        .await
+        .expect("resolve v2");
+    assert_eq!(
+        pin_v2.get(&kind),
+        Some(&2),
+        "the resume would pin v2 if allowed to overwrite",
+    );
+    plan_registry::register_plan(&pool, &plan_id, "default", None, &plan, &pin_v2)
+        .await
+        .expect("re-register plan (resume)");
+
+    let recovered = plan_registry::list_recoverable(&pool)
+        .await
+        .expect("list recoverable");
+    let rec = recovered
+        .iter()
+        .find(|r| r.plan_id.as_str() == plan_id.as_str())
+        .expect("our plan is recoverable");
+    assert_eq!(
+        rec.kind_versions.get(&kind),
+        Some(&1),
+        "resume must preserve the original v1 pin, not the re-resolved v2",
+    );
+
+    plan_registry::set_status(&pool, &plan_id, "completed")
+        .await
+        .unwrap();
+}
+
 /// A legacy row (registered before #511) carries an empty
 /// `kind_versions` map and recovers via `latest()` exactly as before.
 #[tokio::test]

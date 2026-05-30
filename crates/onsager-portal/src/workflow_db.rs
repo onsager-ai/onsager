@@ -352,7 +352,8 @@ pub async fn list_workflows_for_workspace_filtered(
     filter: WorkflowFilter,
 ) -> anyhow::Result<Vec<Workflow>> {
     const COLS: &str = "workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                        workspace_id, install_id, created_by, created_at, updated_at";
+                        workspace_id, install_id, created_by, created_at, updated_at, \
+                        readiness, autofire";
     let sql = match filter.where_clause() {
         None => {
             format!("SELECT {COLS} FROM workflows WHERE workspace_id = $1 ORDER BY created_at ASC")

@@ -63,8 +63,13 @@ pub async fn load_spec_plan(
 /// `kind_versions` is the `{kind → workflow-library version}` snapshot
 /// the plan compiled against ([`resolve_kind_versions`](crate::resolve_kind_versions)),
 /// persisted so a recovery after a host restart recompiles against the
-/// same versions, not whatever is latest then (#511). The map is
-/// re-asserted on a resume so a re-invocation keeps the original pins.
+/// same versions, not whatever is latest then (#511). The pin is set
+/// **once, at first registration**: on the `ON CONFLICT` resume path the
+/// existing `kind_versions` is preserved, so a replay/retry that reuses
+/// the same derived `plan_id` keeps the original pin even though it
+/// re-resolves `latest_version()` at call time. Overwriting it here
+/// would silently re-pin the resumed run to whatever is latest now,
+/// defeating the pinning guarantee.
 pub async fn register_plan(
     pool: &PgPool,
     plan_id: &PlanId,
@@ -81,7 +86,6 @@ pub async fn register_plan(
          VALUES ($1, $2, $3, $4, $5, 'running', NOW()) \
          ON CONFLICT (plan_id) DO UPDATE \
          SET spec_plan_json = EXCLUDED.spec_plan_json, \
-             kind_versions = EXCLUDED.kind_versions, \
              status = 'running', updated_at = NOW()",
     )
     .bind(plan_id.as_str())
