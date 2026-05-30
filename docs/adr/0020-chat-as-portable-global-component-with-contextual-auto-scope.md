@@ -6,6 +6,7 @@
 - **Tracking issues**: #451 (implementation spec). Sibling to ADR 0019, which removes the top-level Chat tab. This ADR governs what chat *becomes* once it is no longer a tab. Builds on ADR 0007 (tools and skills as the public contract) and ADR 0008 (portal owns the agent control plane).
 - **Supersedes**: none. Predecessor specs (#398 universal-chat-entry, #400 chat empty-state chips, #401 DraftStrip + chat surface) are the prior frame in prose; the repo convention reserves the `Supersedes` field for ADR-to-ADR replacement, so no entry here.
 - **Superseded by**: none
+- **Amended by**: ADR 0025 (2026-05-29) — names chat's dashboard role as design + maintenance (not a pure interchangeable frontend) and adds a labeled desktop entry. The responsive-mount, auto-scope, pin, and storage decisions below are unchanged.
 
 ## Context
 
@@ -154,23 +155,23 @@ The contextual auto-scope rule maps to: a dashboard chat scoped to `workflow:{id
 
 Phase 0 (responsive mount + push + FAB + bell + scope-local Ask):
 
-- [ ] Land the `ChatContainer` with state machine, storage interface, conversation feed, and the Queue / Thread segmented control — one responsive shell across mobile and desktop
-- [ ] Land the contextual auto-scope hook that observes route changes and computes scope; surface the breadcrumb in the chat header
-- [ ] Land the pin affordance + pinned-scope persistence
-- [ ] Land the storage backend with the new `(user_id, scope_type, scope_id)` key shape; keep the old `localStorage` reads available behind a one-release “previous conversations” surface
-- [ ] Land the scope-aware FAB (mobile): Active / Muted / Hidden states, long-press → Inbox, first-time hint on third use
-- [ ] Land the top-chrome bell (mobile + desktop) → Queue at `scope=workspace`
-- [ ] Land the scope-local "Ask" on step / verdict / artifact surfaces
-- [ ] Land push notifications with Approve / Reject for approval-kind HITL and Open-only for selection / clarify kinds; deep link scrolls Queue to the matching card
-- [ ] Replace `apps/dashboard/src/pages/ChatPage.tsx` mounts in `App.tsx` with the global container; remove the `/chat` and `/workspaces/:slug/chat` page routes (the 301 redirects land in ADR 0019’s adoption checklist)
-- [ ] Migrate the DraftStrip’s function into the Workflows tab’s `Drafted` filter chip; delete `components/chat/DraftStrip.tsx`
+- [x] Land the `ChatContainer` with state machine, storage interface, conversation feed, and the Queue / Thread segmented control — one responsive shell across mobile and desktop (`components/chat/ChatContainer.tsx`, `ChatQueueView.tsx`, `ChatThreadView.tsx`)
+- [x] Land the contextual auto-scope hook that observes route changes and computes scope; surface the breadcrumb in the chat header (`lib/chat/use-auto-scope.ts`, `lib/chat/scope.ts`, `components/chat/ChatBreadcrumb.tsx`)
+- [x] Land the pin affordance + pinned-scope persistence (`lib/chat/pinned-scope.ts`)
+- [x] Land the storage backend with the new `(user_id, scope_type, scope_id)` key shape; keep the old `localStorage` reads available behind a one-release “previous conversations” surface (`components/chat/PreviousConversationsLink.tsx`)
+- [x] Land the scope-aware FAB (mobile): Active / Muted / Hidden states, long-press → Inbox, first-time hint on third use (`components/chat/ChatFab.tsx`)
+- [x] Land the top-chrome bell (mobile + desktop) → Queue at `scope=workspace` (`components/chat/ChatBell.tsx`)
+- [x] Land the scope-local "Ask" on step / verdict / artifact surfaces (`components/chat/ChatAskButton.tsx`)
+- [x] Land push notifications with Approve / Reject for approval-kind HITL and Open-only for selection / clarify kinds; deep link scrolls Queue to the matching card (`components/chat/PushNotificationsCard.tsx`, `ChatDeepLinkHandler.tsx`)
+- [x] Replace `apps/dashboard/src/pages/ChatPage.tsx` mounts in `App.tsx` with the global container; remove the `/chat` and `/workspaces/:slug/chat` page routes (the 301 redirects land in ADR 0019’s adoption checklist) — routes retired in `App.tsx` (#457); the residual `ChatPage.tsx` file is an unreferenced leftover to delete in a hygiene follow-up
+- [x] Migrate the DraftStrip’s function into the Workflows tab’s `Drafted` filter chip; delete `components/chat/DraftStrip.tsx` (file removed)
 
 Phase 1 (⌘K invocation) and closeout:
 
-- [ ] Land the ⌘K palette invocation on desktop, opening Thread at the current route's scope
-- [ ] Update KB page `35cd79199ca68131b4f6efac9ed8c3d6` (Onsager root) Timeline with an entry for this ADR
-- [ ] Add `closed by ADR 0020` follow-up comments to specs #398 and #400
-- [ ] Flip Status to `Accepted` once phase 0 ships
+- [x] Land the ⌘K palette invocation on desktop, opening Thread at the current route's scope (`lib/chat/use-chat-ui.tsx` #473)
+- [ ] Update KB page `35cd79199ca68131b4f6efac9ed8c3d6` (Onsager root) Timeline with an entry for this ADR — external (Notion); not verifiable from the repo
+- [ ] Add `closed by ADR 0020` follow-up comments to specs #398 and #400 — external (GitHub); not verifiable from the repo
+- [x] Flip Status to `Accepted` once phase 0 ships
 
 ## Out of scope
 
