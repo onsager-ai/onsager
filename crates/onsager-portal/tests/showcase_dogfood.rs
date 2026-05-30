@@ -42,6 +42,8 @@ async fn seed_dogfood_workflow(spine: &PgPool, workspace_id: &str) -> String {
         install_id: Some(1),
         preset_id: Some("onsager-dogfood".into()),
         active: true,
+        readiness: "ready".into(),
+        autofire: "active".into(),
         created_by: "tester".into(),
         created_at: now,
         updated_at: now,

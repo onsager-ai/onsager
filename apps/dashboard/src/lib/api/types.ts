@@ -191,6 +191,17 @@ export interface Workflow {
   name: string;
   preset?: string | null;
   status: WorkflowStatus;
+  /**
+   * ADR 0024 readiness axis (#512). `ready` ⇔ the workflow has a
+   * trigger binding of any kind. The "Run a batch" button gates on this
+   * (`readiness === "ready"`) rather than re-deriving from `status`.
+   */
+  readiness: "drafted" | "ready";
+  /**
+   * ADR 0024 autofire axis (#512) — orthogonal to `readiness`. `off`
+   * (manual-only) / `active` (auto-firing) / `paused`.
+   */
+  autofire: "off" | "active" | "paused";
   trigger: WorkflowTrigger;
   stages: WorkflowStage[];
   created_at: string;

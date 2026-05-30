@@ -15,6 +15,8 @@
 //!    recompile + resume any plan with non-terminal nodes
 //!    ([`list_recoverable`]).
 
+use std::collections::HashMap;
+
 use onsager_nodes::PlanId;
 use onsager_substrate::spec_plan::SpecPlan;
 use sqlx::{PgPool, Row};
@@ -57,25 +59,40 @@ pub async fn load_spec_plan(
 
 /// Record (or refresh) a run in `execution_plans` with status
 /// `running`. Idempotent on `plan_id` so a resume re-asserts the row.
+///
+/// `kind_versions` is the `{kind → workflow-library version}` snapshot
+/// the plan compiled against ([`resolve_kind_versions`](crate::resolve_kind_versions)),
+/// persisted so a recovery after a host restart recompiles against the
+/// same versions, not whatever is latest then (#511). The pin is set
+/// **once, at first registration**: on the `ON CONFLICT` resume path the
+/// existing `kind_versions` is preserved, so a replay/retry that reuses
+/// the same derived `plan_id` keeps the original pin even though it
+/// re-resolves `latest_version()` at call time. Overwriting it here
+/// would silently re-pin the resumed run to whatever is latest now,
+/// defeating the pinning guarantee.
 pub async fn register_plan(
     pool: &PgPool,
     plan_id: &PlanId,
     workspace_id: &str,
     spec_plan_id: Option<&str>,
     spec_plan: &SpecPlan,
+    kind_versions: &HashMap<String, i32>,
 ) -> anyhow::Result<()> {
     let plan_json = serde_json::to_value(spec_plan)?;
+    let kind_versions_json = serde_json::to_value(kind_versions)?;
     sqlx::query(
         "INSERT INTO execution_plans \
-         (plan_id, workspace_id, spec_plan_id, spec_plan_json, status, updated_at) \
-         VALUES ($1, $2, $3, $4, 'running', NOW()) \
+         (plan_id, workspace_id, spec_plan_id, spec_plan_json, kind_versions, status, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, 'running', NOW()) \
          ON CONFLICT (plan_id) DO UPDATE \
-         SET spec_plan_json = EXCLUDED.spec_plan_json, status = 'running', updated_at = NOW()",
+         SET spec_plan_json = EXCLUDED.spec_plan_json, \
+             status = 'running', updated_at = NOW()",
     )
     .bind(plan_id.as_str())
     .bind(workspace_id)
     .bind(spec_plan_id)
     .bind(&plan_json)
+    .bind(&kind_versions_json)
     .execute(pool)
     .await?;
     Ok(())
@@ -92,12 +109,16 @@ pub async fn set_status(pool: &PgPool, plan_id: &PlanId, status: &str) -> anyhow
 }
 
 /// A plan that was still `running` at startup — its source `SpecPlan`
-/// to recompile and resume.
+/// to recompile and resume, plus the `{kind → version}` pins it was
+/// registered with so the recompile targets the same workflow versions
+/// (#511). An empty map is a legacy row (registered before #511) and
+/// recovers via `latest()`.
 #[derive(Debug)]
 pub struct RecoverablePlan {
     pub plan_id: PlanId,
     pub workspace_id: String,
     pub spec_plan: SpecPlan,
+    pub kind_versions: HashMap<String, i32>,
 }
 
 /// Every plan left in `running` status. The host recompiles each and
@@ -105,7 +126,8 @@ pub struct RecoverablePlan {
 /// to pending and re-dispatches (RUN-01 fault-tolerance note).
 pub async fn list_recoverable(pool: &PgPool) -> anyhow::Result<Vec<RecoverablePlan>> {
     let rows = sqlx::query(
-        "SELECT plan_id, workspace_id, spec_plan_json FROM execution_plans WHERE status = 'running'",
+        "SELECT plan_id, workspace_id, spec_plan_json, kind_versions \
+         FROM execution_plans WHERE status = 'running'",
     )
     .fetch_all(pool)
     .await?;
@@ -115,10 +137,13 @@ pub async fn list_recoverable(pool: &PgPool) -> anyhow::Result<Vec<RecoverablePl
         let workspace_id: String = row.try_get("workspace_id")?;
         let json: serde_json::Value = row.try_get("spec_plan_json")?;
         let spec_plan: SpecPlan = serde_json::from_value(json)?;
+        let kind_versions_json: serde_json::Value = row.try_get("kind_versions")?;
+        let kind_versions: HashMap<String, i32> = serde_json::from_value(kind_versions_json)?;
         out.push(RecoverablePlan {
             plan_id: PlanId::new(plan_id),
             workspace_id,
             spec_plan,
+            kind_versions,
         });
     }
     Ok(out)

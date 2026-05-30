@@ -39,6 +39,7 @@ lint-rust: _check-tools-and-skills
     cargo run -p xtask --quiet -- gen-event-docs --check
     cargo run -p xtask --quiet -- lint-seams
     cargo run -p xtask --quiet -- check-api-contract
+    cargo run -p xtask --quiet -- check-events
     cargo run -p xtask --quiet -- check-generated-types
     cargo run -p xtask --quiet -- check-metaphor-leakage
     cargo run -p xtask --quiet -- check-detail-page-tabs
@@ -69,6 +70,59 @@ _check-tools-and-skills:
 
 lint-ui:
     pnpm --filter dashboard lint
+
+# ── CI parity (spec #513) ────────────────────────────────────────────
+#
+# `just ci-local` runs the exact gate set CI runs — the union of
+# rust.yml's `check` job and frontend.yml's `build` job — fail-fast,
+# against the committed tree. It exists because "I verified locally"
+# kept meaning narrower per-crate commands (`cargo test -p X --lib`,
+# `tsc --noEmit`) that passed while the real CI jobs (workspace clippy
+# /test, the frontend lint+BUILD+test triad) failed (PR #510, ~12 red
+# rounds). Run it ONCE before pushing — not on every edit (it's slow:
+# workspace clippy + workspace test + dashboard build).
+#
+# check-ci-parity: the step set below must stay a superset of every
+# `run:` step in .github/workflows/rust.yml (`check` job) and
+# frontend.yml (`build` job). When a CI step is added in either file,
+# mirror it here (or in the recipe it composes — `lint-rust`). The
+# Postgres-gated spine/stiglab integration tests are left to CI /
+# `just test-spine`; `ci-local-full` adds them when Postgres is up.
+ci-local: ci-local-rust ci-local-ui
+
+# Rust half — mirrors rust.yml's `check` job. `lint-rust` already runs
+# fmt + workspace clippy + every xtask lint CI runs (incl. check-events);
+# this adds the explicit workspace build + test. The DB-gated spine
+# /stiglab tests skip without DATABASE_URL, exactly as in the "Test
+# remaining crates" CI step — see `ci-local-full` to include them.
+ci-local-rust: lint-rust
+    cargo build --workspace
+    cargo test --workspace
+
+# Frontend half — mirrors frontend.yml's `build` job exactly. The
+# `build` step (`pnpm --filter dashboard build`, the `tsc -b` + vite
+# step) is the one that was invisible to a narrower `tsc --noEmit` and
+# only runs in CI on PRs touching apps/dashboard/** — so a backend-only
+# base PR's green CI says nothing about a dashboard-touching child.
+ci-local-ui:
+    pnpm install
+    pnpm --filter dashboard lint
+    pnpm --filter dashboard build
+    pnpm --filter dashboard test
+
+# Full parity including the Postgres-gated spine/stiglab integration
+# tests. Requires a running Postgres (`just dev-infra`) with DATABASE_URL
+# set; otherwise use plain `ci-local` (DB-free). Mirrors CI's three-way
+# test split exactly — spine and stiglab run serial (`--test-threads=1`)
+# because they share one DB schema — rather than `cargo test --workspace`,
+# which would race them. `lint-rust` (fmt + clippy + xtask lints) runs
+# first as a dependency.
+ci-local-full: lint-rust
+    cargo build --workspace
+    cargo test -p onsager-spine -- --test-threads=1
+    cargo test -p stiglab -- --test-threads=1
+    cargo test --workspace --exclude onsager-spine --exclude stiglab
+    just ci-local-ui
 
 # ── Docs ─────────────────────────────────────────────────────────────
 

@@ -118,6 +118,10 @@ pub async fn propose_workflow(state: &AppState, auth_user: &AuthUser, args: Valu
         install_id: (args.install_id > 0).then_some(args.install_id),
         preset_id: None,
         active: false,
+        // Mirrors what `insert_workflow_with_stages` persists (ADR 0024):
+        // `ready` on create, `autofire` off until activation.
+        readiness: "ready".to_string(),
+        autofire: "off".to_string(),
         created_by: auth_user.user_id.clone(),
         created_at: now,
         updated_at: now,
@@ -292,9 +296,15 @@ pub async fn run_workflow(state: &AppState, auth_user: &AuthUser, args: Value) -
             )));
         }
     }
-    if !workflow.active {
+    // Gate on `readiness`, not `active` (ADR 0024 / spec #512). The
+    // two-axis model makes "ready + off" (manual-only) a first-class
+    // state: a human can press "run a batch" without arming autofire.
+    // Gating on `active` here would make the run button unreachable for
+    // exactly the manual-only case it exists to serve. Run-time safety
+    // stays the Verify/HITL gate, not a button-time gate.
+    if workflow.readiness != "ready" {
         return Err(ToolError::InvalidParams(
-            "workflow is inactive — activate before firing".into(),
+            "workflow is not ready — it needs a trigger binding before it can run".into(),
         ));
     }
 

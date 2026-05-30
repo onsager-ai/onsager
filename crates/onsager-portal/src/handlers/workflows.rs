@@ -213,6 +213,12 @@ pub async fn create_workflow(
         install_id: body.install_id.filter(|id| *id > 0),
         preset_id: body.preset_id.clone(),
         active: false,
+        // Mirrors what `insert_workflow_with_stages` persists (ADR 0024):
+        // a freshly created workflow carries a trigger binding → `ready`;
+        // `autofire` tracks `active`, which is `false` until activation
+        // runs below.
+        readiness: "ready".to_string(),
+        autofire: "off".to_string(),
         created_by: user_id,
         created_at: now,
         updated_at: now,
@@ -246,10 +252,25 @@ pub async fn create_workflow(
         }
     }
 
-    let activated = body.active;
-    let created = Workflow {
-        active: activated,
-        ..workflow
+    // Return the persisted row as the source of truth rather than
+    // re-deriving active/autofire in memory — activation flips both via
+    // `set_workflow_active`, and re-reading avoids the divergent-state
+    // drift the root CLAUDE.md warns against (and stays correct if
+    // activation ever touches more axes). The row was just inserted
+    // (and activated above, if requested), so a missing/errored read is
+    // exceptional; fall back to the in-memory struct with the flag set.
+    let created = match workflow_db::get_workflow(spine, &workflow.id).await {
+        Ok(Some(latest)) => latest,
+        other => {
+            if let Err(e) = other {
+                tracing::warn!("re-fetch workflow after create failed: {e}");
+            }
+            Workflow {
+                active: body.active,
+                autofire: if body.active { "active" } else { "off" }.to_string(),
+                ..workflow
+            }
+        }
     };
     (
         StatusCode::CREATED,

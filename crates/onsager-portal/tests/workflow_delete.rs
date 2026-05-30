@@ -35,6 +35,8 @@ async fn seed_workflow(spine: &PgPool, workspace_id: &str) -> String {
         install_id: Some(1),
         preset_id: None,
         active: false,
+        readiness: "ready".into(),
+        autofire: "off".into(),
         created_by: "u1".into(),
         created_at: now,
         updated_at: now,
@@ -162,4 +164,37 @@ async fn delete_workflow_without_artifacts_still_works() {
         .unwrap()
         .get(0);
     assert_eq!(wf_count, 0);
+}
+
+/// Regression for the #515 review: `list_workflows_for_workspace_filtered`
+/// builds its SELECT from a `COLS` constant. When the `Workflow` read
+/// shape gained `readiness`/`autofire` (#512), `row_to_workflow` started
+/// requiring those columns — `COLS` had to grow too, or this path errors
+/// at `try_get("readiness")` at runtime (the other read paths use an
+/// inline column list that was updated separately).
+///
+/// Mutation check: drop `readiness, autofire` from `COLS` and the
+/// `.expect(...)` below fails.
+#[tokio::test]
+async fn filtered_list_reads_lifecycle_axes() {
+    let Some(spine) = try_pool().await else {
+        eprintln!("skipping: DATABASE_URL not set");
+        return;
+    };
+    let workspace_id = format!("ws-{}", Uuid::new_v4());
+    let workflow_id = seed_workflow(&spine, &workspace_id).await;
+
+    let listed = workflow_db::list_workflows_for_workspace_filtered(
+        &spine,
+        &workspace_id,
+        Default::default(),
+    )
+    .await
+    .expect("filtered list must not fail (COLS must include the lifecycle axes)");
+    let got = listed
+        .iter()
+        .find(|w| w.id == workflow_id)
+        .expect("seeded workflow is listed");
+    assert_eq!(got.readiness, "ready");
+    assert_eq!(got.autofire, "off");
 }

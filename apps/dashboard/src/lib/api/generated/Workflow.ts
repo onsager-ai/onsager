@@ -31,4 +31,20 @@ install_id: number | null,
  * Preset id this workflow was expanded from (e.g. `github-issue-to-pr`).
  * `None` for custom workflows built in the card editor.
  */
-preset_id: string | null, active: boolean, created_by: string, created_at: string, updated_at: string, };
+preset_id: string | null, active: boolean, 
+/**
+ * Lifecycle **readiness** axis (ADR 0024): `"drafted"` → `"ready"`.
+ * `ready` ⇔ the workflow has ≥1 trigger binding of any kind. Per
+ * spec #512 a `ready` workflow earns the manual "run a batch"
+ * button; the dashboard gates that button on this field rather than
+ * re-deriving from `active`.
+ */
+readiness: string, 
+/**
+ * Lifecycle **autofire** axis (ADR 0024): `"off"` / `"active"` /
+ * `"paused"`. Orthogonal to `readiness` — a `ready` workflow may be
+ * `off` (manual-only), `active` (auto-firing), or `paused`. `active`
+ * (the legacy firing pin) is kept in sync with this by portal's
+ * single writer path.
+ */
+autofire: string, created_by: string, created_at: string, updated_at: string, };

@@ -101,6 +101,15 @@ function workflowFromBackend(
     name: w.name,
     preset: w.preset_id,
     status: w.active ? "active" : "draft",
+    // ADR 0024 lifecycle axes (#512), carried straight from the wire so
+    // the detail page + run button gate on `readiness` rather than
+    // re-deriving from `active`. Narrow the generated `string` to the UI
+    // union, defaulting to the *safe* side: only an exact `"ready"`
+    // enables ready-gated affordances (e.g. the run button), so an
+    // unknown/new backend state never silently unlocks them.
+    readiness: w.readiness === "ready" ? "ready" : "drafted",
+    autofire:
+      w.autofire === "active" ? "active" : w.autofire === "paused" ? "paused" : "off",
     trigger: {
       kind: "github-label",
       // `install_id` is a nullable token-mint cache (ADR 0024); null means
