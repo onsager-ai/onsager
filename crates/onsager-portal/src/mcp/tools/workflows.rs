@@ -114,7 +114,8 @@ pub async fn propose_workflow(state: &AppState, auth_user: &AuthUser, args: Valu
         workspace_id: args.workspace_id.clone(),
         name: args.name.trim().to_string(),
         trigger: args.trigger,
-        install_id: args.install_id,
+        // Token-mint cache only (ADR 0024); `0` means "no cached install".
+        install_id: (args.install_id > 0).then_some(args.install_id),
         preset_id: None,
         active: false,
         created_by: auth_user.user_id.clone(),

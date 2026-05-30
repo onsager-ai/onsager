@@ -221,7 +221,7 @@ pub fn build_snapshot(
         "id": workflow.id,
         "name": workflow.name,
         "workspace_id": workflow.workspace_id,
-        "install_id": workflow.install_id.to_string(),
+        "install_id": workflow.install_id.map(|id| id.to_string()).unwrap_or_default(),
         "trigger": {
             "kind": trigger_kind,
             "config": trigger_config,
@@ -536,7 +536,7 @@ mod tests {
                 repo: "owner/repo".into(),
                 label: "planned".into(),
             },
-            install_id: 42,
+            install_id: Some(42),
             preset_id: None,
             active: false,
             created_by: "user-1".into(),

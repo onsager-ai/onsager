@@ -32,7 +32,7 @@ async fn seed_workflow(spine: &PgPool, workspace_id: &str) -> String {
             repo: "acme/widgets".into(),
             label: "ai".into(),
         },
-        install_id: 1,
+        install_id: Some(1),
         preset_id: None,
         active: false,
         created_by: "u1".into(),

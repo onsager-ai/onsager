@@ -101,13 +101,20 @@ pub async fn insert_workflow_with_stages(
             "spine_event workflow cannot listen for `trigger.fired` (would self-amplify)"
         );
     }
-    let install_id_text = workflow.install_id.to_string();
+    // `install_id` is a token-mint cache only (ADR 0024). Persisted as a
+    // nullable TEXT; `None` writes SQL NULL so non-GitHub and install-less
+    // GitHub workflows round-trip without a sentinel value.
+    let install_id_text = workflow.install_id.map(|id| id.to_string());
+    // Explicit lifecycle axes (ADR 0024): a freshly created workflow
+    // carries a trigger binding, so it is `ready`; `autofire` mirrors the
+    // legacy `active` pin (`false` at create → `off`). Neither reads
+    // `install_id` — status is trigger-source-neutral.
 
     sqlx::query(
         "INSERT INTO workflows (workflow_id, name, trigger_kind, trigger_config, \
                                 active, preset_id, workspace_id, install_id, \
-                                created_by, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                                created_by, created_at, updated_at, readiness, autofire) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
     )
     .bind(&workflow.id)
     .bind(&workflow.name)
@@ -116,10 +123,12 @@ pub async fn insert_workflow_with_stages(
     .bind(workflow.active)
     .bind(workflow.preset_id.as_deref())
     .bind(&workflow.workspace_id)
-    .bind(&install_id_text)
+    .bind(install_id_text.as_deref())
     .bind(&workflow.created_by)
     .bind(workflow.created_at)
     .bind(workflow.updated_at)
+    .bind("ready")
+    .bind(autofire_for_active(workflow.active))
     .execute(&mut *tx)
     .await
     .context("insert spine workflows row")?;
@@ -244,10 +253,28 @@ pub async fn list_workflows_for_workspace(
     rows.into_iter().map(row_to_workflow).collect()
 }
 
+/// The `autofire` axis string (ADR 0024) mirroring the legacy `active`
+/// pin: `active=true → "active"`, else `"off"`. The two are written
+/// together from this module's single writer path so they never drift;
+/// `"paused"` is set only by a dedicated pause action (tracked follow-up
+/// under #506), never by the active toggle, so it survives the round-trip.
+fn autofire_for_active(active: bool) -> &'static str {
+    if active { "active" } else { "off" }
+}
+
 /// Workflow activation states surfaced by the dashboard's chip filter
-/// (#456 / ADR 0019). Derived from `(active, install_id)` — the spine
-/// has no discrete status column today; `Paused` is reserved for a
-/// future explicit pause flag and currently has zero rows.
+/// (#456 / ADR 0019). Derived from the explicit `(readiness, autofire)`
+/// axes (ADR 0024) — no longer from `(active, install_id)`. The wire
+/// vocabulary is unchanged; only its source of truth moved:
+///
+/// - `Drafted`  ⇐ `readiness = drafted`
+/// - `Bound`    ⇐ `readiness = ready  AND autofire = off`
+/// - `Active`   ⇐ `autofire = active`
+/// - `Paused`   ⇐ `autofire = paused`
+///
+/// The two-axis chip UI that exposes `readiness` and `autofire`
+/// independently is a tracked follow-up under #506; until it lands the
+/// four-value enum keeps the dashboard contract stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkflowStatus {
     Drafted,
@@ -269,13 +296,10 @@ impl WorkflowStatus {
 
     fn sql_predicate(self) -> &'static str {
         match self {
-            Self::Drafted => "active = false AND (install_id IS NULL OR install_id = '')",
-            Self::Bound => "active = false AND install_id IS NOT NULL AND install_id <> ''",
-            Self::Active => "active = true",
-            // No persisted "paused" state yet — empty predicate always
-            // resolves to zero rows. Wired the moment an explicit pause
-            // column lands.
-            Self::Paused => "false",
+            Self::Drafted => "readiness = 'drafted'",
+            Self::Bound => "readiness = 'ready' AND autofire = 'off'",
+            Self::Active => "autofire = 'active'",
+            Self::Paused => "autofire = 'paused'",
         }
     }
 }
@@ -302,7 +326,7 @@ pub async fn list_workflows_for_workspace_filtered(
 }
 
 /// Per-status counts for the workflows-list chip strip. Counts are
-/// derived from the same `(active, install_id)` predicates that
+/// derived from the same `(readiness, autofire)` predicates that
 /// `WorkflowStatus::sql_predicate` uses, so the chip totals and the
 /// filtered list always agree.
 #[derive(Debug, Clone, Copy, Default)]
@@ -319,10 +343,10 @@ pub async fn workflow_status_counts(
 ) -> anyhow::Result<WorkflowStatusCounts> {
     let row = sqlx::query(
         "SELECT \
-            COUNT(*) FILTER (WHERE active = false AND (install_id IS NULL OR install_id = '')) AS drafted, \
-            COUNT(*) FILTER (WHERE active = false AND install_id IS NOT NULL AND install_id <> '') AS bound, \
-            COUNT(*) FILTER (WHERE active = true) AS active, \
-            0::bigint AS paused \
+            COUNT(*) FILTER (WHERE readiness = 'drafted') AS drafted, \
+            COUNT(*) FILTER (WHERE readiness = 'ready' AND autofire = 'off') AS bound, \
+            COUNT(*) FILTER (WHERE autofire = 'active') AS active, \
+            COUNT(*) FILTER (WHERE autofire = 'paused') AS paused \
            FROM workflows WHERE workspace_id = $1",
     )
     .bind(workspace_id)
@@ -352,14 +376,17 @@ pub async fn list_stages_for_workflow(
 
 /// Toggle the `active` flag and bump `updated_at`. The `workflow_updated`
 /// trigger on the spine table sets `updated_at = NOW()` automatically; we
-/// don't need a manual bind.
+/// don't need a manual bind. `autofire` is written alongside `active` so
+/// the explicit lifecycle axis (ADR 0024) stays in sync with the legacy
+/// firing pin from this single writer.
 pub async fn set_workflow_active(
     pool: &PgPool,
     workflow_id: &str,
     active: bool,
 ) -> anyhow::Result<()> {
-    sqlx::query("UPDATE workflows SET active = $1 WHERE workflow_id = $2")
+    sqlx::query("UPDATE workflows SET active = $1, autofire = $2 WHERE workflow_id = $3")
         .bind(active)
+        .bind(autofire_for_active(active))
         .bind(workflow_id)
         .execute(pool)
         .await?;
@@ -665,10 +692,14 @@ fn row_to_workflow(row: sqlx::postgres::PgRow) -> anyhow::Result<Workflow> {
 
     let trigger = TriggerKind::from_storage(&trigger_kind_raw, &trigger_config)
         .with_context(|| format!("workflow {id} has unparseable trigger"))?;
-    let install_id: i64 = install_id_text
+    // `install_id` is an optional mint cache (ADR 0024). A missing or
+    // non-numeric value is no longer an error — it means "resolve the
+    // install live through the project layer at activation time". Only a
+    // present, parseable value is carried as the cache.
+    let install_id: Option<i64> = install_id_text
         .as_deref()
-        .and_then(|s| s.parse::<i64>().ok())
-        .ok_or_else(|| anyhow::anyhow!("workflow {id} has missing/non-numeric install_id"))?;
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse::<i64>().ok());
 
     Ok(Workflow {
         id,
@@ -712,6 +743,69 @@ mod tests {
     //! `tests/workflow_db_pg.rs` (gated on `DATABASE_URL`).
 
     use super::*;
+
+    #[test]
+    fn status_wire_roundtrips() {
+        for s in ["drafted", "bound", "active", "paused"] {
+            assert!(WorkflowStatus::from_wire(s).is_some(), "{s} should parse");
+        }
+        assert!(WorkflowStatus::from_wire("nope").is_none());
+        assert!(WorkflowStatus::from_wire("").is_none());
+    }
+
+    /// The status predicates are derived from the explicit `(readiness,
+    /// autofire)` axes (ADR 0024) and must never reference `install_id` or
+    /// the legacy `active` pin — that leak is the whole defect this slice
+    /// removes. A future change that silently falls back to the old
+    /// semantics fails here.
+    #[test]
+    fn status_predicates_use_axes_not_install_id() {
+        for s in [
+            WorkflowStatus::Drafted,
+            WorkflowStatus::Bound,
+            WorkflowStatus::Active,
+            WorkflowStatus::Paused,
+        ] {
+            let pred = s.sql_predicate();
+            assert!(
+                !pred.contains("install_id"),
+                "{s:?} predicate must not read install_id: {pred}"
+            );
+            assert!(
+                !pred.contains("active "),
+                "{s:?} predicate must not read the legacy active pin: {pred}"
+            );
+            assert!(
+                pred.contains("readiness") || pred.contains("autofire"),
+                "{s:?} predicate must read a lifecycle axis: {pred}"
+            );
+        }
+        // Exact predicates — pins the four buckets so the count query and
+        // the filter stay in agreement, and `paused` is a live bucket, not
+        // the dead `false` arm it used to be.
+        assert_eq!(
+            WorkflowStatus::Drafted.sql_predicate(),
+            "readiness = 'drafted'"
+        );
+        assert_eq!(
+            WorkflowStatus::Bound.sql_predicate(),
+            "readiness = 'ready' AND autofire = 'off'"
+        );
+        assert_eq!(
+            WorkflowStatus::Active.sql_predicate(),
+            "autofire = 'active'"
+        );
+        assert_eq!(
+            WorkflowStatus::Paused.sql_predicate(),
+            "autofire = 'paused'"
+        );
+    }
+
+    #[test]
+    fn autofire_mirrors_active() {
+        assert_eq!(autofire_for_active(true), "active");
+        assert_eq!(autofire_for_active(false), "off");
+    }
 
     #[test]
     fn agent_session_maps_to_in_progress() {

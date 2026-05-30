@@ -6,10 +6,13 @@ import type {
 } from "@/lib/api"
 
 // Workflow activation chips on the Workflows tab (#456 / ADR 0019).
-// State values map to the spine's `workflows.active` + `install_id` via
-// the portal's `WorkflowStatus` derivation. `Drafted` gets a light pulse
+// State values are derived server-side from the spine's explicit
+// `workflows.readiness` + `workflows.autofire` axes (ADR 0024) — no
+// longer from `active` + `install_id`. `Drafted` gets a light pulse
 // when count > 0 — it's the activation-ladder key metric (#404), so
-// "you have unbound drafts" surfaces without a drill-in.
+// "you have unbound drafts" surfaces without a drill-in. The two-axis
+// chip UI that exposes readiness and autofire independently is a
+// tracked follow-up under #506.
 const CHIPS: { key: WorkflowStatusChip; label: string }[] = [
   { key: "all", label: "All" },
   { key: "drafted", label: "Drafted" },
