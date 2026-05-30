@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { GitBranch, Plus } from "lucide-react"
-import { api, type WorkflowStatusChip } from "@/lib/api"
+import { api, type ReadinessFilter, type AutofireFilter } from "@/lib/api"
 import { useActiveWorkspace } from "@/lib/workspace"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -14,18 +14,20 @@ import { WorkflowBuilderSheet } from "@/components/workflows/WorkflowBuilderShee
 import { WorkflowStatusChips } from "@/components/workflows/WorkflowStatusChips"
 import { usePageHeader } from "@/components/layout/PageHeader"
 
-const VALID_CHIPS: WorkflowStatusChip[] = [
-  "all",
-  "drafted",
-  "bound",
-  "active",
-  "paused",
-]
+const READINESS_VALUES: ReadinessFilter[] = ["all", "drafted", "ready"]
+const AUTOFIRE_VALUES: AutofireFilter[] = ["all", "off", "active", "paused"]
 
-function readChipFromQuery(raw: string | null): WorkflowStatusChip {
+function readReadiness(raw: string | null): ReadinessFilter {
   if (!raw) return "all"
-  return (VALID_CHIPS as readonly string[]).includes(raw)
-    ? (raw as WorkflowStatusChip)
+  return (READINESS_VALUES as readonly string[]).includes(raw)
+    ? (raw as ReadinessFilter)
+    : "all"
+}
+
+function readAutofire(raw: string | null): AutofireFilter {
+  if (!raw) return "all"
+  return (AUTOFIRE_VALUES as readonly string[]).includes(raw)
+    ? (raw as AutofireFilter)
     : "all"
 }
 
@@ -35,20 +37,24 @@ export function WorkflowsPage() {
   const [creating, setCreating] = useState(false)
   const [params, setParams] = useSearchParams()
 
-  const chip = readChipFromQuery(params.get("state"))
+  const readinessFilter = readReadiness(params.get("readiness"))
+  const autofireFilter = readAutofire(params.get("autofire"))
 
   const { data, isLoading } = useQuery({
-    queryKey: ["workflows", workspace.id, chip],
-    queryFn: () => api.listWorkflows(workspace.id, chip),
+    queryKey: ["workflows", workspace.id, readinessFilter, autofireFilter],
+    queryFn: () =>
+      api.listWorkflows(workspace.id, {
+        readiness: readinessFilter,
+        autofire: autofireFilter,
+      }),
   })
   const workflows = useMemo(() => data?.workflows ?? [], [data])
   const counts = data?.counts ?? {
-    drafted: 0,
-    bound: 0,
-    active: 0,
-    paused: 0,
     all: 0,
+    readiness: { drafted: 0, ready: 0 },
+    autofire: { off: 0, active: 0, paused: 0 },
   }
+  const filtered = readinessFilter !== "all" || autofireFilter !== "all"
 
   // Spec #120 item 3 — warn inline on the card when the installation's
   // recent GitHub deliveries include non-2xx responses. One workspace-
@@ -65,10 +71,17 @@ export function WorkflowsPage() {
     (healthData?.installations ?? []).map((h) => [String(h.install_id), h]),
   )
 
-  const setChip = (next: WorkflowStatusChip) => {
+  const setReadiness = (next: ReadinessFilter) => {
     const updated = new URLSearchParams(params)
-    if (next === "all") updated.delete("state")
-    else updated.set("state", next)
+    if (next === "all") updated.delete("readiness")
+    else updated.set("readiness", next)
+    setParams(updated, { replace: true })
+  }
+
+  const setAutofire = (next: AutofireFilter) => {
+    const updated = new URLSearchParams(params)
+    if (next === "all") updated.delete("autofire")
+    else updated.set("autofire", next)
     setParams(updated, { replace: true })
   }
 
@@ -87,14 +100,19 @@ export function WorkflowsPage() {
         </Button>
       </div>
 
-      <WorkflowStatusChips value={chip} counts={counts} onChange={setChip} />
+      <WorkflowStatusChips
+        readiness={readinessFilter}
+        autofire={autofireFilter}
+        counts={counts}
+        onReadinessChange={setReadiness}
+        onAutofireChange={setAutofire}
+      />
 
-      {/* Drafted-chip view (#467 / ADR 0019). Client-side drafts live
-          in localStorage (spec #401); the chip view absorbs DraftStrip's
+      {/* Drafted view (#467 / ADR 0019). Client-side drafts live in
+          localStorage (spec #401); the view absorbs DraftStrip's
           quick-jump / continue-in-chat / delete affordances. Spine-side
-          bound-but-not-yet-active drafts continue to render in the list
-          below. */}
-      {chip === "drafted" && <LocalDraftsCard />}
+          drafts continue to render in the list below. */}
+      {readinessFilter === "drafted" && <LocalDraftsCard />}
 
       <ActiveRunsBanner workspaceId={workspace.id} />
 
@@ -108,17 +126,15 @@ export function WorkflowsPage() {
             </div>
             <div>
               <p className="text-base font-medium">
-                {chip === "all"
-                  ? "No workflows yet"
-                  : `No ${chip} workflows`}
+                {filtered ? "No matching workflows" : "No workflows yet"}
               </p>
               <p className="text-sm text-muted-foreground">
-                {chip === "all"
-                  ? "Set one up and Onsager starts responding to GitHub events. Open ⌘K to create one."
-                  : "Adjust the filter above or create a workflow via ⌘K."}
+                {filtered
+                  ? "Adjust the filters above or create a workflow via ⌘K."
+                  : "Set one up and Onsager starts responding to GitHub events. Open ⌘K to create one."}
               </p>
             </div>
-            {chip === "all" && (
+            {!filtered && (
               <Button onClick={() => setCreating(true)} size="lg">
                 <Plus className="h-4 w-4" />
                 Create your first workflow

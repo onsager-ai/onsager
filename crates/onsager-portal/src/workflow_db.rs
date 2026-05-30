@@ -262,32 +262,45 @@ fn autofire_for_active(active: bool) -> &'static str {
     if active { "active" } else { "off" }
 }
 
-/// Workflow activation states surfaced by the dashboard's chip filter
-/// (#456 / ADR 0019). Derived from the explicit `(readiness, autofire)`
-/// axes (ADR 0024) — no longer from `(active, install_id)`. The wire
-/// vocabulary is unchanged; only its source of truth moved:
-///
-/// - `Drafted`  ⇐ `readiness = drafted`
-/// - `Bound`    ⇐ `readiness = ready  AND autofire = off`
-/// - `Active`   ⇐ `autofire = active`
-/// - `Paused`   ⇐ `autofire = paused`
-///
-/// The two-axis chip UI that exposes `readiness` and `autofire`
-/// independently is a tracked follow-up under #506; until it lands the
-/// four-value enum keeps the dashboard contract stable.
+/// The **readiness** axis (ADR 0024): does the workflow have a trigger
+/// binding yet? A user-facing filter on the workflows list, independent of
+/// `autofire`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorkflowStatus {
+pub enum Readiness {
     Drafted,
-    Bound,
+    Ready,
+}
+
+impl Readiness {
+    pub fn from_wire(s: &str) -> Option<Self> {
+        match s {
+            "drafted" => Some(Self::Drafted),
+            "ready" => Some(Self::Ready),
+            _ => None,
+        }
+    }
+
+    fn sql_predicate(self) -> &'static str {
+        match self {
+            Self::Drafted => "readiness = 'drafted'",
+            Self::Ready => "readiness = 'ready'",
+        }
+    }
+}
+
+/// The **autofire** axis (ADR 0024): does the workflow fire by itself on its
+/// trigger? Independent of `readiness`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Autofire {
+    Off,
     Active,
     Paused,
 }
 
-impl WorkflowStatus {
+impl Autofire {
     pub fn from_wire(s: &str) -> Option<Self> {
         match s {
-            "drafted" => Some(Self::Drafted),
-            "bound" => Some(Self::Bound),
+            "off" => Some(Self::Off),
             "active" => Some(Self::Active),
             "paused" => Some(Self::Paused),
             _ => None,
@@ -296,10 +309,37 @@ impl WorkflowStatus {
 
     fn sql_predicate(self) -> &'static str {
         match self {
-            Self::Drafted => "readiness = 'drafted'",
-            Self::Bound => "readiness = 'ready' AND autofire = 'off'",
+            Self::Off => "autofire = 'off'",
             Self::Active => "autofire = 'active'",
             Self::Paused => "autofire = 'paused'",
+        }
+    }
+}
+
+/// Combined filter over the two orthogonal axes. The two predicates AND
+/// together; an absent axis is unconstrained.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WorkflowFilter {
+    pub readiness: Option<Readiness>,
+    pub autofire: Option<Autofire>,
+}
+
+impl WorkflowFilter {
+    /// `WHERE`-clause fragment for the active axes, or `None` when no axis is
+    /// constrained. Built from static `&'static str` predicates only — no
+    /// user input is interpolated, so this is injection-safe.
+    fn where_clause(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if let Some(r) = self.readiness {
+            parts.push(r.sql_predicate());
+        }
+        if let Some(a) = self.autofire {
+            parts.push(a.sql_predicate());
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" AND "))
         }
     }
 }
@@ -307,44 +347,44 @@ impl WorkflowStatus {
 pub async fn list_workflows_for_workspace_filtered(
     pool: &PgPool,
     workspace_id: &str,
-    status: Option<WorkflowStatus>,
+    filter: WorkflowFilter,
 ) -> anyhow::Result<Vec<Workflow>> {
-    let sql = match status {
-        None => "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                        workspace_id, install_id, created_by, created_at, updated_at \
-                   FROM workflows WHERE workspace_id = $1 ORDER BY created_at ASC"
-            .to_string(),
-        Some(s) => format!(
-            "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                    workspace_id, install_id, created_by, created_at, updated_at \
-               FROM workflows WHERE workspace_id = $1 AND {} ORDER BY created_at ASC",
-            s.sql_predicate(),
+    const COLS: &str = "workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
+                        workspace_id, install_id, created_by, created_at, updated_at";
+    let sql = match filter.where_clause() {
+        None => {
+            format!("SELECT {COLS} FROM workflows WHERE workspace_id = $1 ORDER BY created_at ASC")
+        }
+        Some(clause) => format!(
+            "SELECT {COLS} FROM workflows WHERE workspace_id = $1 AND {clause} ORDER BY created_at ASC"
         ),
     };
     let rows = sqlx::query(&sql).bind(workspace_id).fetch_all(pool).await?;
     rows.into_iter().map(row_to_workflow).collect()
 }
 
-/// Per-status counts for the workflows-list chip strip. Counts are
-/// derived from the same `(readiness, autofire)` predicates that
-/// `WorkflowStatus::sql_predicate` uses, so the chip totals and the
-/// filtered list always agree.
+/// Per-axis-value counts for the workflows-list filter strip. Each axis
+/// reports its own totals so each filter group shows independent counts.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct WorkflowStatusCounts {
+pub struct WorkflowAxisCounts {
+    pub total: i64,
     pub drafted: i64,
-    pub bound: i64,
+    pub ready: i64,
+    pub off: i64,
     pub active: i64,
     pub paused: i64,
 }
 
-pub async fn workflow_status_counts(
+pub async fn workflow_axis_counts(
     pool: &PgPool,
     workspace_id: &str,
-) -> anyhow::Result<WorkflowStatusCounts> {
+) -> anyhow::Result<WorkflowAxisCounts> {
     let row = sqlx::query(
         "SELECT \
+            COUNT(*) AS total, \
             COUNT(*) FILTER (WHERE readiness = 'drafted') AS drafted, \
-            COUNT(*) FILTER (WHERE readiness = 'ready' AND autofire = 'off') AS bound, \
+            COUNT(*) FILTER (WHERE readiness = 'ready') AS ready, \
+            COUNT(*) FILTER (WHERE autofire = 'off') AS off, \
             COUNT(*) FILTER (WHERE autofire = 'active') AS active, \
             COUNT(*) FILTER (WHERE autofire = 'paused') AS paused \
            FROM workflows WHERE workspace_id = $1",
@@ -352,9 +392,11 @@ pub async fn workflow_status_counts(
     .bind(workspace_id)
     .fetch_one(pool)
     .await?;
-    Ok(WorkflowStatusCounts {
+    Ok(WorkflowAxisCounts {
+        total: row.try_get::<i64, _>("total")?,
         drafted: row.try_get::<i64, _>("drafted")?,
-        bound: row.try_get::<i64, _>("bound")?,
+        ready: row.try_get::<i64, _>("ready")?,
+        off: row.try_get::<i64, _>("off")?,
         active: row.try_get::<i64, _>("active")?,
         paused: row.try_get::<i64, _>("paused")?,
     })
@@ -745,59 +787,86 @@ mod tests {
     use super::*;
 
     #[test]
-    fn status_wire_roundtrips() {
-        for s in ["drafted", "bound", "active", "paused"] {
-            assert!(WorkflowStatus::from_wire(s).is_some(), "{s} should parse");
+    fn axis_wire_roundtrips() {
+        for s in ["drafted", "ready"] {
+            assert!(Readiness::from_wire(s).is_some(), "{s} should parse");
         }
-        assert!(WorkflowStatus::from_wire("nope").is_none());
-        assert!(WorkflowStatus::from_wire("").is_none());
+        for s in ["off", "active", "paused"] {
+            assert!(Autofire::from_wire(s).is_some(), "{s} should parse");
+        }
+        assert!(Readiness::from_wire("active").is_none()); // autofire value, not readiness
+        assert!(Autofire::from_wire("drafted").is_none()); // readiness value, not autofire
+        assert!(Readiness::from_wire("").is_none());
+        assert!(Autofire::from_wire("nope").is_none());
     }
 
-    /// The status predicates are derived from the explicit `(readiness,
-    /// autofire)` axes (ADR 0024) and must never reference `install_id` or
-    /// the legacy `active` pin — that leak is the whole defect this slice
-    /// removes. A future change that silently falls back to the old
-    /// semantics fails here.
+    /// The axis predicates are derived from the explicit `(readiness,
+    /// autofire)` columns (ADR 0024) and must never reference `install_id`
+    /// or the legacy `active` pin — that leak is the defect this work
+    /// removes. A change that silently falls back to the old semantics
+    /// fails here.
     #[test]
-    fn status_predicates_use_axes_not_install_id() {
-        for s in [
-            WorkflowStatus::Drafted,
-            WorkflowStatus::Bound,
-            WorkflowStatus::Active,
-            WorkflowStatus::Paused,
-        ] {
-            let pred = s.sql_predicate();
+    fn axis_predicates_use_columns_not_install_id() {
+        let preds = [
+            Readiness::Drafted.sql_predicate(),
+            Readiness::Ready.sql_predicate(),
+            Autofire::Off.sql_predicate(),
+            Autofire::Active.sql_predicate(),
+            Autofire::Paused.sql_predicate(),
+        ];
+        for pred in preds {
             assert!(
                 !pred.contains("install_id"),
-                "{s:?} predicate must not read install_id: {pred}"
+                "predicate must not read install_id: {pred}"
             );
             assert!(
                 !pred.contains("active "),
-                "{s:?} predicate must not read the legacy active pin: {pred}"
+                "predicate must not read the legacy active pin: {pred}"
             );
             assert!(
                 pred.contains("readiness") || pred.contains("autofire"),
-                "{s:?} predicate must read a lifecycle axis: {pred}"
+                "predicate must read a lifecycle axis: {pred}"
             );
         }
-        // Exact predicates — pins the four buckets so the count query and
-        // the filter stay in agreement, and `paused` is a live bucket, not
-        // the dead `false` arm it used to be.
+        assert_eq!(Readiness::Drafted.sql_predicate(), "readiness = 'drafted'");
+        assert_eq!(Readiness::Ready.sql_predicate(), "readiness = 'ready'");
+        assert_eq!(Autofire::Off.sql_predicate(), "autofire = 'off'");
+        assert_eq!(Autofire::Active.sql_predicate(), "autofire = 'active'");
+        assert_eq!(Autofire::Paused.sql_predicate(), "autofire = 'paused'");
+    }
+
+    /// The two axes combine with AND, and an absent axis is unconstrained.
+    /// Mutating `where_clause` to OR the parts, or to drop one axis, fails
+    /// these assertions.
+    #[test]
+    fn filter_where_clause_combines_axes() {
+        assert_eq!(WorkflowFilter::default().where_clause(), None);
         assert_eq!(
-            WorkflowStatus::Drafted.sql_predicate(),
-            "readiness = 'drafted'"
+            WorkflowFilter {
+                readiness: Some(Readiness::Ready),
+                autofire: None,
+            }
+            .where_clause()
+            .as_deref(),
+            Some("readiness = 'ready'")
         );
         assert_eq!(
-            WorkflowStatus::Bound.sql_predicate(),
-            "readiness = 'ready' AND autofire = 'off'"
+            WorkflowFilter {
+                readiness: None,
+                autofire: Some(Autofire::Paused),
+            }
+            .where_clause()
+            .as_deref(),
+            Some("autofire = 'paused'")
         );
         assert_eq!(
-            WorkflowStatus::Active.sql_predicate(),
-            "autofire = 'active'"
-        );
-        assert_eq!(
-            WorkflowStatus::Paused.sql_predicate(),
-            "autofire = 'paused'"
+            WorkflowFilter {
+                readiness: Some(Readiness::Ready),
+                autofire: Some(Autofire::Off),
+            }
+            .where_clause()
+            .as_deref(),
+            Some("readiness = 'ready' AND autofire = 'off'")
         );
     }
 

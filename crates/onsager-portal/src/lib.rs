@@ -60,6 +60,7 @@ pub mod state;
 pub mod substrate_library_db;
 pub mod workflow;
 pub mod workflow_activation;
+pub mod workflow_create;
 pub mod workflow_db;
 pub mod workflow_install;
 pub mod workflow_version_db;

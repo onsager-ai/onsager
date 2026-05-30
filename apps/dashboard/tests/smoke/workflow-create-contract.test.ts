@@ -1,15 +1,15 @@
-import { describe, it, expect } from "vitest"
-import type { GitHubAppInstallation } from "@/lib/api"
+import { describe, it, expect } from "vitest";
+import type { GitHubAppInstallation } from "@/lib/api";
 import {
   documentToCreateRequest,
   emptyDocument,
   type WorkflowDocument,
-} from "@/components/workflows/workflow-draft"
+} from "@/components/workflows/workflow-draft";
 
-// The stiglab `validate_create_body` is the source of truth for the wire
+// The portal `validate_create_body` is the source of truth for the wire
 // shape. These tests pin the UI → backend adapter against its contract:
-// flat trigger fields, numeric install_id resolved from the install record,
-// snake_case `trigger_kind` / `trigger_label` / `active`, and stage params
+// a structured `trigger: TriggerKind` (ADR 0024 / spec #509), numeric
+// install_id resolved from the install record, `active`, and stage params
 // that carry the UI-only name + artifact_kind alongside any gate config.
 describe("documentToCreateRequest", () => {
   const installation: GitHubAppInstallation = {
@@ -19,7 +19,7 @@ describe("documentToCreateRequest", () => {
     account_login: "onsager-ai",
     account_type: "organization",
     created_at: "2026-04-22T00:00:00Z",
-  }
+  };
 
   const draft = (): WorkflowDocument => ({
     name: "Issue → PR",
@@ -38,32 +38,34 @@ describe("documentToCreateRequest", () => {
         config: { agent_profile: "default" },
       },
     ],
-  })
+  });
 
   it("resolves the numeric GitHub install_id from the installations list", () => {
-    const out = documentToCreateRequest(draft(), [installation], "t_1", true)
-    expect(out.install_id).toBe(12345)
-    expect(typeof out.install_id).toBe("number")
-  })
+    const out = documentToCreateRequest(draft(), [installation], "t_1", true);
+    expect(out.install_id).toBe(12345);
+    expect(typeof out.install_id).toBe("number");
+  });
 
-  it("flattens the trigger into the backend's snake_case keys", () => {
-    const out = documentToCreateRequest(draft(), [installation], "t_1", true)
+  it("assembles a structured github_issue_webhook trigger", () => {
+    const out = documentToCreateRequest(draft(), [installation], "t_1", true);
     expect(out).toMatchObject({
       workspace_id: "t_1",
       name: "Issue → PR",
-      trigger_kind: "github_issue_webhook",
-      repo_owner: "onsager-ai",
-      repo_name: "onsager",
-      trigger_label: "factory",
+      trigger: {
+        kind: "github_issue_webhook",
+        repo: "onsager-ai/onsager",
+        label: "factory",
+      },
       active: true,
-    })
-    // No nested `trigger`, no `activate`, no `preset` — all wire keys.
-    expect("trigger" in out).toBe(false)
-    expect("activate" in out).toBe(false)
-  })
+    });
+    // Structured trigger, not flat fields — and no stray `activate` key.
+    expect("trigger_kind" in out).toBe(false);
+    expect("repo_owner" in out).toBe(false);
+    expect("activate" in out).toBe(false);
+  });
 
   it("maps stages to { gate_kind, params } and carries UI display fields in params", () => {
-    const out = documentToCreateRequest(draft(), [installation], "t_1", true)
+    const out = documentToCreateRequest(draft(), [installation], "t_1", true);
     expect(out.stages).toEqual([
       {
         gate_kind: "agent-session",
@@ -73,30 +75,30 @@ describe("documentToCreateRequest", () => {
           artifact_kind: "github-issue",
         },
       },
-    ])
-  })
+    ]);
+  });
 
   it("passes activate=false through as active=false", () => {
-    const out = documentToCreateRequest(draft(), [installation], "t_1", false)
-    expect(out.active).toBe(false)
-  })
+    const out = documentToCreateRequest(draft(), [installation], "t_1", false);
+    expect(out.active).toBe(false);
+  });
 
   it("throws when workspace_id is blank", () => {
-    expect(() => documentToCreateRequest(draft(), [installation], "  ", true)).toThrow(
-      /workspace_id/,
-    )
-  })
+    expect(() =>
+      documentToCreateRequest(draft(), [installation], "  ", true),
+    ).toThrow(/workspace_id/);
+  });
 
   it("throws when the selected install isn't in the list", () => {
     expect(() => documentToCreateRequest(draft(), [], "t_1", true)).toThrow(
       /install not found/,
-    )
-  })
+    );
+  });
 
   it("throws when the trigger isn't ready (missing label)", () => {
-    const d = emptyDocument()
-    expect(() => documentToCreateRequest(d, [installation], "t_1", true)).toThrow(
-      /install, repo, and label/,
-    )
-  })
-})
+    const d = emptyDocument();
+    expect(() =>
+      documentToCreateRequest(d, [installation], "t_1", true),
+    ).toThrow(/install, repo, and label/);
+  });
+});

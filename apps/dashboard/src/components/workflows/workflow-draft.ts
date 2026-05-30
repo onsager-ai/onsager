@@ -7,7 +7,7 @@ import {
   type WorkflowGateKind,
   type WorkflowStage,
   type WorkflowTrigger,
-} from "@/lib/api"
+} from "@/lib/api";
 
 // The in-memory shape the chat/card editor manipulates. Everything here is
 // structured — no free-text linkable fields. The card stack is the source
@@ -20,16 +20,16 @@ import {
 // draft's identity (`id`, `user_id`, `source`, lifecycle timestamps,
 // optional `bound_to`).
 export interface WorkflowDocument {
-  name: string
-  trigger: WorkflowTriggerDraft
-  stages: WorkflowStage[]
+  name: string;
+  trigger: WorkflowTriggerDraft;
+  stages: WorkflowStage[];
 }
 
 export interface WorkflowTriggerDraft {
-  install_id: string
-  repo_owner: string
-  repo_name: string
-  label: string
+  install_id: string;
+  repo_owner: string;
+  repo_name: string;
+  label: string;
 }
 
 /**
@@ -41,36 +41,36 @@ export interface WorkflowTriggerDraft {
  * untouched.
  */
 export interface WorkflowDraft {
-  id: string
-  user_id: string
+  id: string;
+  user_id: string;
   /** Display name for the draft; defaults to "Untitled draft". */
-  name: string
-  source: WorkflowDraftSource
+  name: string;
+  source: WorkflowDraftSource;
   /** Set when `source === "template"`. */
-  template_id?: string
+  template_id?: string;
   /** The in-progress workflow document being authored. */
-  workflow: WorkflowDocument
+  workflow: WorkflowDocument;
   /** ISO timestamp of first creation. */
-  created_at: string
+  created_at: string;
   /** ISO timestamp written on every edit. */
-  updated_at: string
+  updated_at: string;
   /** Populated when the binding flow (axis 5) completes. */
   bound_to?: {
-    workspace_id: string
-    workflow_id: string
-    bound_at: string
-  }
+    workspace_id: string;
+    workflow_id: string;
+    bound_at: string;
+  };
 }
 
-export type WorkflowDraftSource = "template" | "chat" | "yaml-paste" | "blank"
+export type WorkflowDraftSource = "template" | "chat" | "yaml-paste" | "blank";
 
-export const GITHUB_ISSUE_TO_PR_PRESET = "github-issue-to-pr" as const
+export const GITHUB_ISSUE_TO_PR_PRESET = "github-issue-to-pr" as const;
 
 function newStageId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID()
+    return crypto.randomUUID();
   }
-  return `stage_${Math.random().toString(36).slice(2, 10)}`
+  return `stage_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function makeStage(
@@ -84,19 +84,19 @@ export function makeStage(
     gate_kind: gate,
     artifact_kind: artifactKind,
     config: {},
-  }
+  };
 }
 
 export function defaultStageName(gate: WorkflowGateKind): string {
   switch (gate) {
     case "agent-session":
-      return "Agent session"
+      return "Agent session";
     case "external-check":
-      return "CI check"
+      return "CI check";
     case "governance":
-      return "Governance"
+      return "Governance";
     case "manual-approval":
-      return "Manual approval"
+      return "Manual approval";
   }
 }
 
@@ -105,14 +105,14 @@ export function emptyDocument(): WorkflowDocument {
     name: "",
     trigger: { install_id: "", repo_owner: "", repo_name: "", label: "" },
     stages: [],
-  }
+  };
 }
 
 export function githubIssueToPrPreset(
   trigger: WorkflowTriggerDraft,
 ): WorkflowDocument {
-  const owner = trigger.repo_owner || "repo"
-  const name = trigger.repo_name || "issue-to-pr"
+  const owner = trigger.repo_owner || "repo";
+  const name = trigger.repo_name || "issue-to-pr";
   return {
     name: `${owner}/${name} — issue to PR`,
     trigger,
@@ -121,24 +121,25 @@ export function githubIssueToPrPreset(
       makeStage("external-check", "PR", "CI check"),
       makeStage("manual-approval", "PR", "Merge approval"),
     ],
-  }
+  };
 }
 
 // Preset catalog — drives the picker shown at the top of the workflow
 // builder. Each entry returns a fresh document; the trigger stays empty
 // and is filled in via the TriggerCard.
 export interface WorkflowPreset {
-  id: string
-  label: string
-  description: string
-  build: (trigger: WorkflowTriggerDraft) => WorkflowDocument
+  id: string;
+  label: string;
+  description: string;
+  build: (trigger: WorkflowTriggerDraft) => WorkflowDocument;
 }
 
 export const WORKFLOW_PRESETS: WorkflowPreset[] = [
   {
     id: GITHUB_ISSUE_TO_PR_PRESET,
     label: "Issue → PR",
-    description: "Agent opens a PR from an issue, waits on CI, then human merges.",
+    description:
+      "Agent opens a PR from an issue, waits on CI, then human merges.",
     build: githubIssueToPrPreset,
   },
   {
@@ -193,7 +194,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
       ],
     }),
   },
-]
+];
 
 export function isTriggerReady(t: WorkflowTriggerDraft): boolean {
   return (
@@ -201,10 +202,12 @@ export function isTriggerReady(t: WorkflowTriggerDraft): boolean {
     t.repo_owner.trim() !== "" &&
     t.repo_name.trim() !== "" &&
     t.label.trim() !== ""
-  )
+  );
 }
 
-export function draftToRequestTrigger(t: WorkflowTriggerDraft): WorkflowTrigger {
+export function draftToRequestTrigger(
+  t: WorkflowTriggerDraft,
+): WorkflowTrigger {
   return {
     kind: "github-label",
     install_id: t.install_id,
@@ -213,7 +216,7 @@ export function draftToRequestTrigger(t: WorkflowTriggerDraft): WorkflowTrigger 
     label: t.label,
     kind_tag: "github_issue_webhook",
     manual_name: "",
-  }
+  };
 }
 
 // Build the stiglab-shaped create-workflow request from the UI draft. The
@@ -234,34 +237,36 @@ export function documentToCreateRequest(
   activate: boolean,
 ): CreateWorkflowRequest {
   if (!workspaceId.trim()) {
-    throw new ApiError("workspace_id is required", 400)
+    throw new ApiError("workspace_id is required", 400);
   }
   if (!isTriggerReady(doc.trigger)) {
     throw new ApiError(
       "pick an install, repo, and label before activating",
       400,
-    )
+    );
   }
-  const install = installations.find((i) => i.id === doc.trigger.install_id)
+  const install = installations.find((i) => i.id === doc.trigger.install_id);
   if (!install) {
     throw new ApiError(
       "selected GitHub install not found in this workspace",
       400,
-    )
+    );
   }
   return {
     workspace_id: workspaceId,
     name: doc.name.trim(),
-    // Snake-case `kind_tag` from the registry manifest (#237).
-    // `<TriggerKindPicker>` could expose this for selection, but today
-    // the draft form is GitHub-only so we hardcode the only registered
-    // tag — matching whatever `/api/registry/triggers` returns.
-    trigger_kind: "github_issue_webhook",
+    // Structured trigger (ADR 0024 / spec #509). The UI draft is
+    // GitHub-only today, so we assemble the `github_issue_webhook`
+    // variant; the wire contract accepts any registry trigger kind.
+    trigger: {
+      kind: "github_issue_webhook",
+      repo: `${doc.trigger.repo_owner}/${doc.trigger.repo_name}`,
+      label: doc.trigger.label,
+    },
+    // Optional token-mint cache hint; resolved live through the project
+    // layer at activation when absent.
     install_id: install.install_id,
-    repo_owner: doc.trigger.repo_owner,
-    repo_name: doc.trigger.repo_name,
-    trigger_label: doc.trigger.label,
     stages: doc.stages.map(stageToCreateStage),
     active: activate,
-  }
+  };
 }

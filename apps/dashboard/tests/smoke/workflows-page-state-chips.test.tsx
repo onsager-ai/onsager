@@ -7,10 +7,11 @@ import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { WorkflowsPage } from "@/pages/WorkflowsPage"
 import { ChatUiProvider } from "@/lib/chat/use-chat-ui"
 
-// Workflows-tab state filter chips + Drafted view (#467 / ADR 0019).
-// Pins the chip row's count rendering, the URL `?state=` round-trip,
-// and the Drafted view's surfaced affordances (carried over from the
-// retired chat `DraftStrip`).
+// Workflows-tab two-axis filter chips + Drafted view (#467 / ADR 0019,
+// migrated to the readiness/autofire axes by spec #509). Pins the per-axis
+// count rendering, the URL `?readiness=`/`?autofire=` round-trip, and the
+// Drafted view's surfaced affordances (carried over from the retired chat
+// `DraftStrip`).
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ user: null, authEnabled: false }),
@@ -69,13 +70,15 @@ function renderPage(initialPath: string) {
   )
 }
 
+// Per-axis counts shape (spec #509): each axis reports its own buckets.
 const COUNTS = {
   all: 6,
-  drafted: 2,
-  bound: 1,
-  active: 2,
-  paused: 1,
+  readiness: { drafted: 2, ready: 4 },
+  autofire: { off: 1, active: 2, paused: 1 },
 }
+
+// The page calls `listWorkflows(workspaceId, { readiness, autofire })`.
+const ALL_FILTER = { readiness: "all", autofire: "all" }
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -92,61 +95,100 @@ beforeEach(() => {
   })
 })
 
-describe("WorkflowsPage state filter chips (#467)", () => {
-  it("renders the chip row with counts from the endpoint", async () => {
+describe("WorkflowsPage two-axis filter chips (#467 / #509)", () => {
+  it("renders both axis groups with per-axis counts from the endpoint", async () => {
     renderPage("/workspaces/acme/workflows")
     await waitFor(() =>
-      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", "all"),
+      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", ALL_FILTER),
     )
-    const tablist = await screen.findByRole("tablist", {
-      name: /workflow status filter/i,
+    const readiness = await screen.findByRole("tablist", {
+      name: /workflow readiness filter/i,
     })
-    expect(within(tablist).getByRole("tab", { name: /^All/ })).toBeTruthy()
-    expect(within(tablist).getByLabelText("2 drafted")).toBeTruthy()
-    expect(within(tablist).getByLabelText("1 bound")).toBeTruthy()
-    expect(within(tablist).getByLabelText("2 active")).toBeTruthy()
-    expect(within(tablist).getByLabelText("1 paused")).toBeTruthy()
+    const autofire = await screen.findByRole("tablist", {
+      name: /workflow autofire filter/i,
+    })
+    // readiness group: All / Drafted / Ready
+    expect(within(readiness).getByLabelText("2 drafted")).toBeTruthy()
+    expect(within(readiness).getByLabelText("4 ready")).toBeTruthy()
+    // autofire group: All / Manual / Active / Paused
+    expect(within(autofire).getByLabelText("1 manual")).toBeTruthy()
+    expect(within(autofire).getByLabelText("2 active")).toBeTruthy()
+    expect(within(autofire).getByLabelText("1 paused")).toBeTruthy()
+    // Each group has its own "All" chip.
+    expect(within(readiness).getByRole("tab", { name: /^All/ })).toBeTruthy()
+    expect(within(autofire).getByRole("tab", { name: /^All/ })).toBeTruthy()
   })
 
-  it("clicking a chip re-queries with `state=<chip>`", async () => {
+  it("clicking the Drafted readiness chip re-queries with readiness=drafted", async () => {
     const user = userEvent.setup()
     renderPage("/workspaces/acme/workflows")
     await waitFor(() =>
-      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", "all"),
+      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", ALL_FILTER),
     )
-    const draftedChip = await screen.findByRole("tab", { name: /Drafted/ })
-    await user.click(draftedChip)
+    const readiness = await screen.findByRole("tablist", {
+      name: /workflow readiness filter/i,
+    })
+    await user.click(within(readiness).getByRole("tab", { name: /Drafted/ }))
     await waitFor(() =>
-      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", "drafted"),
+      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", {
+        readiness: "drafted",
+        autofire: "all",
+      }),
     )
-    // Once the click lands, the chip is marked selected — proxy for the
-    // URL `?state=drafted` round-trip (MemoryRouter keeps location
-    // in-memory, so the chip's aria-selected is the observable signal).
     await waitFor(() =>
       expect(
-        screen.getByRole("tab", { name: /Drafted/ }).getAttribute("aria-selected"),
+        within(readiness)
+          .getByRole("tab", { name: /Drafted/ })
+          .getAttribute("aria-selected"),
       ).toBe("true"),
     )
   })
 
-  it("reads initial chip from the URL `?state=` query", async () => {
-    renderPage("/workspaces/acme/workflows?state=active")
+  it("clicking the Active autofire chip re-queries with autofire=active", async () => {
+    const user = userEvent.setup()
+    renderPage("/workspaces/acme/workflows")
     await waitFor(() =>
-      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", "active"),
+      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", ALL_FILTER),
     )
-    const activeChip = await screen.findByRole("tab", { name: /Active/ })
-    expect(activeChip.getAttribute("aria-selected")).toBe("true")
+    const autofire = await screen.findByRole("tablist", {
+      name: /workflow autofire filter/i,
+    })
+    await user.click(within(autofire).getByRole("tab", { name: /Active/ }))
+    await waitFor(() =>
+      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", {
+        readiness: "all",
+        autofire: "active",
+      }),
+    )
   })
 
-  it("falls back to `all` when `?state=` is unknown", async () => {
-    renderPage("/workspaces/acme/workflows?state=nonsense")
+  it("reads initial axis values from the URL query", async () => {
+    renderPage("/workspaces/acme/workflows?readiness=ready&autofire=paused")
     await waitFor(() =>
-      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", "all"),
+      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", {
+        readiness: "ready",
+        autofire: "paused",
+      }),
+    )
+    const readiness = await screen.findByRole("tablist", {
+      name: /workflow readiness filter/i,
+    })
+    expect(
+      within(readiness)
+        .getByRole("tab", { name: /Ready/ })
+        .getAttribute("aria-selected"),
+    ).toBe("true")
+  })
+
+  it("falls back to `all` when a URL axis value is unknown", async () => {
+    renderPage("/workspaces/acme/workflows?readiness=nonsense")
+    await waitFor(() =>
+      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", ALL_FILTER),
     )
   })
 })
 
-describe("Drafted-chip view absorbs DraftStrip (#467)", () => {
+describe("Drafted view absorbs DraftStrip (#467)", () => {
   function seedDrafts(items: { id: string; name: string }[]) {
     const drafts = items.map((it) => ({
       id: it.id,
@@ -167,25 +209,27 @@ describe("Drafted-chip view absorbs DraftStrip (#467)", () => {
     )
   }
 
-  it("renders the local-drafts card only when the Drafted chip is active", async () => {
+  it("renders the local-drafts card only when the Drafted readiness chip is active", async () => {
     seedDrafts([{ id: "d_1", name: "My draft" }])
     const user = userEvent.setup()
     renderPage("/workspaces/acme/workflows")
     await waitFor(() =>
-      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", "all"),
+      expect(apiMock.listWorkflows).toHaveBeenCalledWith("ws_1", ALL_FILTER),
     )
-    // `All` chip is the default — the local-drafts card is gated on the
-    // Drafted chip being selected, so it should not appear here.
+    // Default `All` readiness — the local-drafts card is gated on the
+    // Drafted readiness chip being selected, so it should not appear here.
     expect(screen.queryByText("Local drafts")).toBeNull()
-    const draftedChip = await screen.findByRole("tab", { name: /Drafted/ })
-    await user.click(draftedChip)
+    const readiness = await screen.findByRole("tablist", {
+      name: /workflow readiness filter/i,
+    })
+    await user.click(within(readiness).getByRole("tab", { name: /Drafted/ }))
     await screen.findByText("Local drafts")
     expect(screen.getByText("My draft")).toBeTruthy()
   })
 
   it("surfaces `Continue` and `New draft` affordances", async () => {
     seedDrafts([{ id: "d_1", name: "First draft" }])
-    renderPage("/workspaces/acme/workflows?state=drafted")
+    renderPage("/workspaces/acme/workflows?readiness=drafted")
     await screen.findByText("Local drafts")
     expect(screen.getAllByText("Continue").length).toBeGreaterThan(0)
     expect(screen.getByRole("button", { name: /New draft/i })).toBeTruthy()
@@ -194,7 +238,7 @@ describe("Drafted-chip view absorbs DraftStrip (#467)", () => {
   it("shows the OSS `Drafts on this device.` footer when OSS with drafts", async () => {
     ossMock.useOSSFlag.mockReturnValue(true)
     seedDrafts([{ id: "d_1", name: "My draft" }])
-    renderPage("/workspaces/acme/workflows?state=drafted")
+    renderPage("/workspaces/acme/workflows?readiness=drafted")
     await screen.findByText("Local drafts")
     expect(screen.getByText("Drafts on this device.")).toBeTruthy()
   })
