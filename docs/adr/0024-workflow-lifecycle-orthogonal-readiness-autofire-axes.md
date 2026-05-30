@@ -78,11 +78,11 @@ Per ADR 0002, the dev-process analog of the two axes is the split between a spec
 ## Adoption checklist
 
 - [x] Decision recorded (this ADR), `Identity impact: no`.
-- [ ] Phase 1 — add `readiness` + `autofire` columns to `workflows`; backfill `autofire` from `active`, `readiness` from trigger-binding presence (transitional fallback: any trigger / install_id present → `ready`).
-- [ ] Phase 1 — delete the `(active, install_id)` derivation and the dead `Paused` predicate from `workflow_db.rs`; `readiness` is driven by trigger-binding existence for any `TriggerKind`.
-- [ ] Phase 1 — reroute token minting / webhook-secret resolution through `workflow → trigger binding → project → installation`; keep `workflows.install_id` only as an optional mint cache, out of the status path.
-- [ ] Phase 1 — remove the `install_id is required` create gate; a Manual/Telegram/Schedule workflow is creatable and can reach `ready`.
-- [ ] Phase 1 — remap `apps/dashboard/src/components/workflows/WorkflowStatusChips.tsx` to the two axes; leave the spec #404 FTUE funnel events untouched.
+- [x] Phase 1 — add `readiness` + `autofire` columns to `workflows`; backfill `autofire` from `active`, `readiness` from trigger-binding presence (transitional fallback: any trigger / install_id present → `ready`). (spine migration 007; #506)
+- [x] Phase 1 — delete the `(active, install_id)` derivation and the dead `Paused` predicate from `workflow_db.rs`; `readiness` is driven by trigger-binding existence for any `TriggerKind`. `WorkflowStatus` now derives from the two axes; the dead `Paused => "false"` arm is gone. (#506)
+- [ ] Phase 1 — reroute token minting / webhook-secret resolution through `workflow → trigger binding → project → installation`; keep `workflows.install_id` only as an optional mint cache, out of the status path. (status path already decoupled; the project→installation reroute is the tracked remainder, #506)
+- [ ] Phase 1 — remove the `install_id is required` create gate; a Manual/Telegram/Schedule workflow is creatable and can reach `ready`. (tracked remainder, #506)
+- [ ] Phase 1 — remap `apps/dashboard/src/components/workflows/WorkflowStatusChips.tsx` to the two axes; leave the spec #404 FTUE funnel events untouched. (tracked remainder, #506)
 - [ ] Phase 3 — `ready` workflows earn the manual "run a batch" button (reuse `run_spec_plan` / `run_workflow`); no button-time gate.
 - [ ] Flip `Adoption` to `enforced` and tick the boxes once Phases 1 + 3 land.
 
