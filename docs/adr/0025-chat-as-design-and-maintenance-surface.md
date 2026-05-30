@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-05-29
 - **Identity impact**: no
-- **Adoption**: ongoing
+- **Adoption**: enforced
 - **Tracking issues**: #506 (umbrella spec). Amends ADR 0020 (chat as portable global component); reconciles ADR 0023 (spec-plan run orchestration).
 - **Supersedes**: none. Amends ADR 0020 — see the note below; the responsive-mount + auto-scope decisions of 0020 stand.
 - **Superseded by**: none
@@ -63,11 +63,11 @@ Per ADR 0002, the dev-process analog: the issue/PR thread is the *design + maint
 ## Adoption checklist
 
 - [x] Decision recorded (this ADR), `Identity impact: no`.
-- [ ] Phase 3 — add a labeled desktop chat entry opening `tab=thread`; keep `ChatBell` as the Inbox/Queue counter; `ChatFab` stays mobile-only.
-- [ ] Phase 3 — add the "run a batch" button to `ready` workflows and persisted spec plans (reuse `run_spec_plan` / `run_workflow`); a routine run is startable without opening chat.
-- [ ] Phase 3 — narrow chat default scope to design (drafted) + maintenance (scope=run); remove chat as the only launch path for spec-plan runs.
-- [ ] Add an "amended by ADR 0025" note to ADR 0020's metadata block.
-- [ ] Flip `Adoption` to `enforced` and tick the boxes once Phase 3 lands.
+- [x] Phase 3 — add a labeled desktop chat entry opening `tab=thread`; keep `ChatBell` as the Inbox/Queue counter; `ChatFab` stays mobile-only. `DesktopChatEntry` (MessageSquare + "Chat" + `⌘J` hint) mounts in the desktop top chrome and opens `{ scope: workspace, tab: thread }`. (spec #514)
+- [x] Phase 3 — add the "run a batch" button to `ready` workflows and persisted spec plans (reuse `run_spec_plan` / `run_workflow`); a routine run is startable without opening chat. `HitlActionButton` is the standalone HitlCard host (page button → review dialog → `mcpCallTool`); it backs the workflow "Run a batch" and the Spec Plans surface "Run". (spec #514)
+- [x] Phase 3 — narrow chat default scope to design (drafted) + maintenance (scope=run); remove chat as the only launch path for spec-plan runs. `deriveAutoScope` now resolves bare routes to workspace (design) or run/verdict (maintenance) only — workflow detail folds into workspace; the Spec Plans surface is the noun-surface launch path. (spec #514)
+- [x] Add an "amended by ADR 0025" note to ADR 0020's metadata block. The note names the design/maintenance role, the desktop entry, and the narrowed route → default-scope table.
+- [x] Flip `Adoption` to `enforced` and tick the boxes once Phase 3 lands. (spec #514)
 
 ## Out of scope
 

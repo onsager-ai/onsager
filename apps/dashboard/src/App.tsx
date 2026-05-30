@@ -32,6 +32,9 @@ const WorkflowDetailPage = lazy(() =>
 const RunDetailPage = lazy(() =>
   import("@/pages/RunDetailPage").then((m) => ({ default: m.RunDetailPage })),
 )
+const SpecPlansPage = lazy(() =>
+  import("@/pages/SpecPlansPage").then((m) => ({ default: m.SpecPlansPage })),
+)
 const RunsPage = lazy(() =>
   import("@/pages/RunsPage").then((m) => ({ default: m.RunsPage })),
 )
@@ -346,6 +349,13 @@ function AppRoutes() {
                         <Route
                           path="runs/:runId"
                           element={<LazyRoute variant="detail"><RunDetailPage /></LazyRoute>}
+                        />
+                        {/* Spec Plans surface (ADR 0023 / 0025, spec
+                            #514). List of persisted plans, each with a
+                            HitlCard-routed run button. */}
+                        <Route
+                          path="spec-plans"
+                          element={<LazyRoute variant="list"><SpecPlansPage /></LazyRoute>}
                         />
                         {/* Spine event stream at operator grain
                             (#454 / ADR 0019). */}

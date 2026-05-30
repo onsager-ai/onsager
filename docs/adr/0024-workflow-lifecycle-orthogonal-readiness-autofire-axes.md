@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-05-29
 - **Identity impact**: no
-- **Adoption**: ongoing
+- **Adoption**: enforced
 - **Tracking issues**: #506 (umbrella spec). Supersedes the `(active, install_id)` status-derivation introduced under ADR 0019 / spec #456.
 - **Supersedes**: none at the ADR level. The `(active, install_id)`-derived `WorkflowStatus` is a code shortcut taken under ADR 0019; this ADR replaces that shortcut, not ADR 0019's IA decision.
 - **Superseded by**: none
@@ -83,8 +83,8 @@ Per ADR 0002, the dev-process analog of the two axes is the split between a spec
 - [x] Phase 1 — reroute token minting / webhook-secret resolution through `workflow → trigger binding → project → installation`; keep `workflows.install_id` only as an optional mint cache, out of the status path. `Workflow.install_id` is now `Option<i64>` (nullable column, NULL-tolerant read), and `activate_workflow` / `deactivate_workflow` resolve the install via `pick_install_id` — `(workspace_id, repo) → projects.github_app_installation_id`, with the cached column as fallback. (#506)
 - [x] Phase 1 — remove the `install_id is required` create gate; a Manual/Telegram/Schedule workflow is creatable and can reach `ready`. `POST /api/workflows` now takes a structured `trigger: TriggerKind` (the registry union, matching the MCP create path); the `github_issue_webhook`-only gate is gone and any registry trigger kind is accepted. (spec #509)
 - [x] Phase 1 — remap `apps/dashboard/src/components/workflows/WorkflowStatusChips.tsx` to the two axes; leave the spec #404 FTUE funnel events untouched. The chip strip is now two independent filter groups (readiness: Drafted/Ready; autofire: Manual/Active/Paused) backed by the list endpoint's independent `readiness` + `autofire` params and per-axis counts. (spec #509)
-- [ ] Phase 3 — `ready` workflows earn the manual "run a batch" button (reuse `run_spec_plan` / `run_workflow`); no button-time gate.
-- [ ] Flip `Adoption` to `enforced` and tick the boxes once Phases 1 + 3 land.
+- [x] Phase 3 — `ready` workflows earn the manual "run a batch" button (reuse `run_spec_plan` / `run_workflow`); no button-time gate. The button gates on `readiness === "ready"` and routes through a `HitlCard` + `run_workflow` (manual-trigger workflows) — `WorkflowActions`'s legacy REST "Run now" is replaced by it. Persisted spec plans get the same treatment on the Spec Plans surface via `run_spec_plan`. No button-time gate; run-time Verify/HITL owns safety. (spec #514)
+- [x] Flip `Adoption` to `enforced` and tick the boxes once Phases 1 + 3 land. (spec #514)
 
 ## Out of scope
 

@@ -12,6 +12,7 @@ import {
   Building2,
   GitBranch,
   MessageSquare,
+  Rocket,
   Search,
   Settings as SettingsIcon,
   Terminal,
@@ -242,6 +243,10 @@ function CommandPaletteDialog() {
               <CommandItem onSelect={() => go(scoped("runs"))}>
                 <Activity className="mr-2 h-4 w-4" />
                 Runs
+              </CommandItem>
+              <CommandItem onSelect={() => go(scoped("spec-plans"))}>
+                <Rocket className="mr-2 h-4 w-4" />
+                Plans
               </CommandItem>
               <CommandItem onSelect={() => go(scoped("activity"))}>
                 <Zap className="mr-2 h-4 w-4" />
