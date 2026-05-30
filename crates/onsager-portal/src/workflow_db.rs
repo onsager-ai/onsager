@@ -101,7 +101,10 @@ pub async fn insert_workflow_with_stages(
             "spine_event workflow cannot listen for `trigger.fired` (would self-amplify)"
         );
     }
-    let install_id_text = workflow.install_id.to_string();
+    // `install_id` is a token-mint cache only (ADR 0024). Persisted as a
+    // nullable TEXT; `None` writes SQL NULL so non-GitHub and install-less
+    // GitHub workflows round-trip without a sentinel value.
+    let install_id_text = workflow.install_id.map(|id| id.to_string());
     // Explicit lifecycle axes (ADR 0024): a freshly created workflow
     // carries a trigger binding, so it is `ready`; `autofire` mirrors the
     // legacy `active` pin (`false` at create → `off`). Neither reads
@@ -120,7 +123,7 @@ pub async fn insert_workflow_with_stages(
     .bind(workflow.active)
     .bind(workflow.preset_id.as_deref())
     .bind(&workflow.workspace_id)
-    .bind(&install_id_text)
+    .bind(install_id_text.as_deref())
     .bind(&workflow.created_by)
     .bind(workflow.created_at)
     .bind(workflow.updated_at)
@@ -689,10 +692,14 @@ fn row_to_workflow(row: sqlx::postgres::PgRow) -> anyhow::Result<Workflow> {
 
     let trigger = TriggerKind::from_storage(&trigger_kind_raw, &trigger_config)
         .with_context(|| format!("workflow {id} has unparseable trigger"))?;
-    let install_id: i64 = install_id_text
+    // `install_id` is an optional mint cache (ADR 0024). A missing or
+    // non-numeric value is no longer an error — it means "resolve the
+    // install live through the project layer at activation time". Only a
+    // present, parseable value is carried as the cache.
+    let install_id: Option<i64> = install_id_text
         .as_deref()
-        .and_then(|s| s.parse::<i64>().ok())
-        .ok_or_else(|| anyhow::anyhow!("workflow {id} has missing/non-numeric install_id"))?;
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse::<i64>().ok());
 
     Ok(Workflow {
         id,

@@ -96,7 +96,10 @@ function workflowFromBackend(
     status: w.active ? 'active' : 'draft',
     trigger: {
       kind: 'github-label',
-      install_id: String(w.install_id),
+      // `install_id` is a nullable token-mint cache (ADR 0024); null means
+      // "no cached install — resolved live at activation". The UI's
+      // no-install convention is the empty string, not the literal "null".
+      install_id: w.install_id == null ? '' : String(w.install_id),
       repo_owner: repoOwner,
       repo_name: repoName,
       label,

@@ -39,7 +39,7 @@ async fn seed_dogfood_workflow(spine: &PgPool, workspace_id: &str) -> String {
             repo: "onsager-ai/onsager".into(),
             label: "ready-to-implement".into(),
         },
-        install_id: 1,
+        install_id: Some(1),
         preset_id: Some("onsager-dogfood".into()),
         active: true,
         created_by: "tester".into(),

@@ -18,9 +18,8 @@ use onsager_github::api::app::{AppConfig, mint_app_jwt, mint_installation_token}
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::auth::{AuthUser, decrypt_credential};
+use crate::auth::AuthUser;
 use crate::credential_db;
-use crate::installation_db;
 use crate::preset::{PRESET_IDS, resolve_preset};
 use crate::state::AppState;
 use crate::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
@@ -29,6 +28,7 @@ use crate::workflow_activation::{
     ensure_webhook_registered,
 };
 use crate::workflow_db;
+use crate::workflow_install;
 
 /// Spine pool used for workflow CRUD. Portal's `EventStore` is
 /// non-optional and already validated at boot, so this just hands back
@@ -317,7 +317,11 @@ pub async fn create_workflow(
         workspace_id: body.workspace_id.clone(),
         name: body.name.trim().to_string(),
         trigger,
-        install_id: body.install_id,
+        // Token-mint cache only (ADR 0024). A non-positive value means
+        // "no cache — resolve the install live at activation"; the create
+        // gate in `validate_create_body` still requires a real id for
+        // `github_issue_webhook` today (gate removal is ADR item 4).
+        install_id: (body.install_id > 0).then_some(body.install_id),
         preset_id: body.preset_id.clone(),
         active: false,
         created_by: user_id,
@@ -745,7 +749,18 @@ async fn activate_workflow(
             return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     };
-    let token = match mint_installation_token(&app_jwt, workflow.install_id).await {
+    // ADR 0024 item 3: resolve the install through the project layer, with
+    // the workflow's cached `install_id` as fallback. A GitHub workflow
+    // with no resolvable install cannot be activated.
+    let Some(install_id) = workflow_install::resolve_workflow_install_id(state, &workflow).await
+    else {
+        return Err(bad_request(
+            "no GitHub App installation for this workflow's repo — \
+             register the repo as a project first"
+                .to_string(),
+        ));
+    };
+    let token = match mint_installation_token(&app_jwt, install_id).await {
         Ok(t) => t,
         Err(e) => {
             tracing::warn!("mint installation token: {e}");
@@ -772,7 +787,7 @@ async fn activate_workflow(
         return Err(map_activation_error(e));
     }
 
-    let secret = resolve_install_webhook_secret(state, workflow.install_id).await;
+    let secret = workflow_install::resolve_install_webhook_secret(state, install_id).await;
     if let Err(e) =
         ensure_webhook_registered(&token, repo_owner, repo_name, secret.as_deref(), headers).await
     {
@@ -825,7 +840,12 @@ async fn deactivate_workflow(state: &AppState, workflow_id: &str) -> Result<(), 
     let Ok(app_jwt) = mint_app_jwt(&app_cfg) else {
         return Ok(());
     };
-    let Ok(token) = mint_installation_token(&app_jwt, workflow.install_id).await else {
+    let Some(install_id) = workflow_install::resolve_workflow_install_id(state, &workflow).await
+    else {
+        // No resolvable install — nothing to deregister against.
+        return Ok(());
+    };
+    let Ok(token) = mint_installation_token(&app_jwt, install_id).await else {
         return Ok(());
     };
     let _ = deregister_webhook(&token, repo_owner, repo_name).await;
@@ -914,16 +934,6 @@ fn map_activation_error(e: ActivationError) -> Response {
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
-}
-
-async fn resolve_install_webhook_secret(state: &AppState, install_id: i64) -> Option<String> {
-    let cipher = installation_db::get_install_webhook_secret_cipher(&state.pool, install_id)
-        .await
-        .ok()
-        .flatten()
-        .flatten()?;
-    let key = state.config.credential_key.as_ref()?;
-    decrypt_credential(key, &cipher).ok()
 }
 
 #[cfg(test)]

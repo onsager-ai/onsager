@@ -85,17 +85,22 @@ pub struct Workflow {
     /// Trigger kind + per-kind config. Persisted as
     /// `(workflows.trigger_kind, workflows.trigger_config)`.
     pub trigger: TriggerKind,
-    /// Workspace GitHub App install that fires this workflow (reused from
-    /// issue #70 — no per-workflow install flow).
+    /// GitHub App installation id used to mint tokens when this workflow's
+    /// trigger is a GitHub webhook. Per ADR 0024 this is a **token-mint
+    /// cache only** — it does NOT participate in lifecycle status
+    /// (`readiness` / `autofire`), and it is `None` for workflows whose
+    /// trigger needs no GitHub install (Telegram / Manual / Schedule /
+    /// spine-event) and for GitHub workflows whose install is resolved
+    /// live through `(workspace_id, repo) → project → installation`.
     ///
-    /// Annotated `ts(type = "number")` because `JSON.parse` in the
+    /// Annotated `ts(type = "number | null")` because `JSON.parse` in the
     /// dashboard returns a JS `number` for integers, not a `bigint` —
     /// ts-rs v12's default `bigint` mapping for i64 would mis-type the
     /// wire value. GitHub installation IDs fit comfortably in
     /// `Number.MAX_SAFE_INTEGER` (2^53), so the precision loss is
     /// theoretical only.
-    #[ts(type = "number")]
-    pub install_id: i64,
+    #[ts(type = "number | null")]
+    pub install_id: Option<i64>,
     /// Preset id this workflow was expanded from (e.g. `github-issue-to-pr`).
     /// `None` for custom workflows built in the card editor.
     pub preset_id: Option<String>,
