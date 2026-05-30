@@ -174,8 +174,21 @@ pub async fn resolve_kind_versions(
         if versions.contains_key(&spec.kind) {
             continue;
         }
-        if let Some(version) = library.latest_version(&spec.kind).await? {
-            versions.insert(spec.kind.clone(), version);
+        match library.latest_version(&spec.kind).await? {
+            Some(version) => {
+                versions.insert(spec.kind.clone(), version);
+            }
+            None => {
+                // No registered version to pin — the compile will
+                // surface `MissingKind` for this spec. Log it so the
+                // unregistered kind is visible at registration time, not
+                // only when the run later fails to compile.
+                tracing::warn!(
+                    kind = %spec.kind,
+                    "no registered workflow version for kind at plan registration; \
+                     it will not be pinned",
+                );
+            }
         }
     }
     Ok(versions)

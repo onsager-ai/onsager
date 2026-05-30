@@ -252,14 +252,25 @@ pub async fn create_workflow(
         }
     }
 
-    let activated = body.active;
-    let created = Workflow {
-        active: activated,
-        // `set_workflow_active` flips `autofire` in lockstep with
-        // `active` (ADR 0024); reflect that in the returned struct so the
-        // create response matches a subsequent read.
-        autofire: if activated { "active" } else { "off" }.to_string(),
-        ..workflow
+    // Return the persisted row as the source of truth rather than
+    // re-deriving active/autofire in memory — activation flips both via
+    // `set_workflow_active`, and re-reading avoids the divergent-state
+    // drift the root CLAUDE.md warns against (and stays correct if
+    // activation ever touches more axes). The row was just inserted
+    // (and activated above, if requested), so a missing/errored read is
+    // exceptional; fall back to the in-memory struct with the flag set.
+    let created = match workflow_db::get_workflow(spine, &workflow.id).await {
+        Ok(Some(latest)) => latest,
+        other => {
+            if let Err(e) = other {
+                tracing::warn!("re-fetch workflow after create failed: {e}");
+            }
+            Workflow {
+                active: body.active,
+                autofire: if body.active { "active" } else { "off" }.to_string(),
+                ..workflow
+            }
+        }
     };
     (
         StatusCode::CREATED,
