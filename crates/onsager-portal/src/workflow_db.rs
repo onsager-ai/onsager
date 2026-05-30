@@ -738,6 +738,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn status_wire_roundtrips() {
+        for s in ["drafted", "bound", "active", "paused"] {
+            assert!(WorkflowStatus::from_wire(s).is_some(), "{s} should parse");
+        }
+        assert!(WorkflowStatus::from_wire("nope").is_none());
+        assert!(WorkflowStatus::from_wire("").is_none());
+    }
+
+    /// The status predicates are derived from the explicit `(readiness,
+    /// autofire)` axes (ADR 0024) and must never reference `install_id` or
+    /// the legacy `active` pin — that leak is the whole defect this slice
+    /// removes. A future change that silently falls back to the old
+    /// semantics fails here.
+    #[test]
+    fn status_predicates_use_axes_not_install_id() {
+        for s in [
+            WorkflowStatus::Drafted,
+            WorkflowStatus::Bound,
+            WorkflowStatus::Active,
+            WorkflowStatus::Paused,
+        ] {
+            let pred = s.sql_predicate();
+            assert!(
+                !pred.contains("install_id"),
+                "{s:?} predicate must not read install_id: {pred}"
+            );
+            assert!(
+                !pred.contains("active "),
+                "{s:?} predicate must not read the legacy active pin: {pred}"
+            );
+            assert!(
+                pred.contains("readiness") || pred.contains("autofire"),
+                "{s:?} predicate must read a lifecycle axis: {pred}"
+            );
+        }
+        // Exact predicates — pins the four buckets so the count query and
+        // the filter stay in agreement, and `paused` is a live bucket, not
+        // the dead `false` arm it used to be.
+        assert_eq!(
+            WorkflowStatus::Drafted.sql_predicate(),
+            "readiness = 'drafted'"
+        );
+        assert_eq!(
+            WorkflowStatus::Bound.sql_predicate(),
+            "readiness = 'ready' AND autofire = 'off'"
+        );
+        assert_eq!(
+            WorkflowStatus::Active.sql_predicate(),
+            "autofire = 'active'"
+        );
+        assert_eq!(
+            WorkflowStatus::Paused.sql_predicate(),
+            "autofire = 'paused'"
+        );
+    }
+
+    #[test]
+    fn autofire_mirrors_active() {
+        assert_eq!(autofire_for_active(true), "active");
+        assert_eq!(autofire_for_active(false), "off");
+    }
+
+    #[test]
     fn agent_session_maps_to_in_progress() {
         let (state, gates) =
             translate_stage(GateKind::AgentSession, &json!({"action": "implement"}));
