@@ -105,6 +105,18 @@ pub struct Workflow {
     /// `None` for custom workflows built in the card editor.
     pub preset_id: Option<String>,
     pub active: bool,
+    /// Lifecycle **readiness** axis (ADR 0024): `"drafted"` → `"ready"`.
+    /// `ready` ⇔ the workflow has ≥1 trigger binding of any kind. Per
+    /// spec #512 a `ready` workflow earns the manual "run a batch"
+    /// button; the dashboard gates that button on this field rather than
+    /// re-deriving from `active`.
+    pub readiness: String,
+    /// Lifecycle **autofire** axis (ADR 0024): `"off"` / `"active"` /
+    /// `"paused"`. Orthogonal to `readiness` — a `ready` workflow may be
+    /// `off` (manual-only), `active` (auto-firing), or `paused`. `active`
+    /// (the legacy firing pin) is kept in sync with this by portal's
+    /// single writer path.
+    pub autofire: String,
     pub created_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

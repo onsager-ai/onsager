@@ -35,6 +35,8 @@ async fn seed_workflow(spine: &PgPool, workspace_id: &str) -> String {
         install_id: Some(1),
         preset_id: None,
         active: false,
+        readiness: "ready".into(),
+        autofire: "off".into(),
         created_by: "u1".into(),
         created_at: now,
         updated_at: now,

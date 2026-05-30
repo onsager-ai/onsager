@@ -229,7 +229,8 @@ pub async fn insert_workflow_with_stages(
 pub async fn get_workflow(pool: &PgPool, workflow_id: &str) -> anyhow::Result<Option<Workflow>> {
     let row = sqlx::query(
         "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                workspace_id, install_id, created_by, created_at, updated_at \
+                workspace_id, install_id, created_by, created_at, updated_at, \
+                readiness, autofire \
            FROM workflows WHERE workflow_id = $1",
     )
     .bind(workflow_id)
@@ -244,7 +245,8 @@ pub async fn list_workflows_for_workspace(
 ) -> anyhow::Result<Vec<Workflow>> {
     let rows = sqlx::query(
         "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                workspace_id, install_id, created_by, created_at, updated_at \
+                workspace_id, install_id, created_by, created_at, updated_at, \
+                readiness, autofire \
            FROM workflows WHERE workspace_id = $1 ORDER BY created_at ASC",
     )
     .bind(workspace_id)
@@ -504,7 +506,8 @@ pub async fn find_active_github_workflows_for_label(
     // registered under install B.
     let rows = sqlx::query(
         "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                workspace_id, install_id, created_by, created_at, updated_at \
+                workspace_id, install_id, created_by, created_at, updated_at, \
+                readiness, autofire \
            FROM workflows \
           WHERE active = TRUE \
             AND trigger_kind = 'github_issue_webhook' \
@@ -534,7 +537,8 @@ pub async fn find_active_github_workflows_for_label_in_workspace(
     let repo = format!("{repo_owner}/{repo_name}");
     let rows = sqlx::query(
         "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                workspace_id, install_id, created_by, created_at, updated_at \
+                workspace_id, install_id, created_by, created_at, updated_at, \
+                readiness, autofire \
            FROM workflows \
           WHERE active = TRUE \
             AND workspace_id = $1 \
@@ -562,7 +566,8 @@ pub async fn find_active_github_workflows_for_workspace_repo(
     let repo = format!("{repo_owner}/{repo_name}");
     let rows = sqlx::query(
         "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                workspace_id, install_id, created_by, created_at, updated_at \
+                workspace_id, install_id, created_by, created_at, updated_at, \
+                readiness, autofire \
            FROM workflows \
           WHERE active = TRUE \
             AND workspace_id = $1 \
@@ -587,7 +592,8 @@ pub async fn find_active_pull_request_closed_workflows(
     let repo = format!("{repo_owner}/{repo_name}");
     let rows = sqlx::query(
         "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                workspace_id, install_id, created_by, created_at, updated_at \
+                workspace_id, install_id, created_by, created_at, updated_at, \
+                readiness, autofire \
            FROM workflows \
           WHERE active = TRUE \
             AND trigger_kind = 'github_pull_request_closed' \
@@ -610,7 +616,8 @@ pub async fn find_active_workflow_run_completed_workflows(
     let repo = format!("{repo_owner}/{repo_name}");
     let rows = sqlx::query(
         "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                workspace_id, install_id, created_by, created_at, updated_at \
+                workspace_id, install_id, created_by, created_at, updated_at, \
+                readiness, autofire \
            FROM workflows \
           WHERE active = TRUE \
             AND trigger_kind = 'github_workflow_run_completed' \
@@ -632,7 +639,8 @@ pub async fn find_active_workflow_run_completed_workflows(
 pub async fn list_active_telegram_workflows(pool: &PgPool) -> anyhow::Result<Vec<Workflow>> {
     let rows = sqlx::query(
         "SELECT workflow_id, name, trigger_kind, trigger_config, active, preset_id, \
-                workspace_id, install_id, created_by, created_at, updated_at \
+                workspace_id, install_id, created_by, created_at, updated_at, \
+                readiness, autofire \
            FROM workflows \
           WHERE active = TRUE \
             AND trigger_kind = 'telegram_webhook'",
@@ -731,6 +739,11 @@ fn row_to_workflow(row: sqlx::postgres::PgRow) -> anyhow::Result<Workflow> {
     }
     let created_at: DateTime<Utc> = row.try_get("created_at")?;
     let updated_at: DateTime<Utc> = row.try_get("updated_at")?;
+    // The two ADR 0024 lifecycle axes — read as the canonical wire
+    // strings ("drafted"/"ready", "off"/"active"/"paused"). The CHECK
+    // constraints on the columns (migration 007) guarantee the values.
+    let readiness: String = row.try_get("readiness")?;
+    let autofire: String = row.try_get("autofire")?;
 
     let trigger = TriggerKind::from_storage(&trigger_kind_raw, &trigger_config)
         .with_context(|| format!("workflow {id} has unparseable trigger"))?;
@@ -751,6 +764,8 @@ fn row_to_workflow(row: sqlx::postgres::PgRow) -> anyhow::Result<Workflow> {
         install_id,
         preset_id,
         active,
+        readiness,
+        autofire,
         created_by: created_by.unwrap_or_default(),
         created_at,
         updated_at,

@@ -213,6 +213,12 @@ pub async fn create_workflow(
         install_id: body.install_id.filter(|id| *id > 0),
         preset_id: body.preset_id.clone(),
         active: false,
+        // Mirrors what `insert_workflow_with_stages` persists (ADR 0024):
+        // a freshly created workflow carries a trigger binding → `ready`;
+        // `autofire` tracks `active`, which is `false` until activation
+        // runs below.
+        readiness: "ready".to_string(),
+        autofire: "off".to_string(),
         created_by: user_id,
         created_at: now,
         updated_at: now,
@@ -249,6 +255,10 @@ pub async fn create_workflow(
     let activated = body.active;
     let created = Workflow {
         active: activated,
+        // `set_workflow_active` flips `autofire` in lockstep with
+        // `active` (ADR 0024); reflect that in the returned struct so the
+        // create response matches a subsequent read.
+        autofire: if activated { "active" } else { "off" }.to_string(),
         ..workflow
     };
     (

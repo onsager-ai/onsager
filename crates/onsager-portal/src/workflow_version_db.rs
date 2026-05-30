@@ -539,6 +539,8 @@ mod tests {
             install_id: Some(42),
             preset_id: None,
             active: false,
+            readiness: "ready".into(),
+            autofire: "off".into(),
             created_by: "user-1".into(),
             created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),

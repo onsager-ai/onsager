@@ -82,6 +82,8 @@ mod tests {
             install_id: cached,
             preset_id: None,
             active: false,
+            readiness: "ready".into(),
+            autofire: "off".into(),
             created_by: "u1".into(),
             created_at: now,
             updated_at: now,
