@@ -20,13 +20,13 @@ use uuid::Uuid;
 
 use crate::auth::AuthUser;
 use crate::credential_db;
-use crate::preset::{PRESET_IDS, resolve_preset};
 use crate::state::AppState;
-use crate::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
+use crate::workflow::Workflow;
 use crate::workflow_activation::{
     ActivationError, deregister_webhook, ensure_label_exists, ensure_repo_in_scope,
     ensure_webhook_registered,
 };
+use crate::workflow_create::{CreateWorkflowBody, validate_create_body};
 use crate::workflow_db;
 use crate::workflow_install;
 
@@ -164,119 +164,6 @@ async fn require_owner_credentials(
 /// learns to honor them.
 const CLAUDE_AUTH_CREDENTIAL_NAMES: &[&str] = &["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
 
-#[derive(Debug, Deserialize)]
-pub struct CreateWorkflowBody {
-    pub workspace_id: String,
-    pub name: String,
-    pub trigger_kind: String,
-    pub repo_owner: String,
-    pub repo_name: String,
-    pub trigger_label: String,
-    pub install_id: i64,
-    #[serde(default)]
-    pub preset_id: Option<String>,
-    /// Optional explicit stage chain. Required when `preset_id` is not set.
-    #[serde(default)]
-    pub stages: Option<Vec<CreateStageBody>>,
-    #[serde(default)]
-    pub active: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateStageBody {
-    pub gate_kind: String,
-    #[serde(default)]
-    pub params: Option<serde_json::Value>,
-}
-
-/// Validation helper kept public for unit tests.
-///
-/// `trigger_kind` accepts the registry's snake-case `kind_tag`
-/// (`"github_issue_webhook"`); per-kind config (`repo_owner`,
-/// `repo_name`, `trigger_label`) is taken from the body's flat fields
-/// and assembled into the unified [`TriggerKind`] variant.
-pub fn validate_create_body(
-    body: &CreateWorkflowBody,
-) -> Result<(TriggerKind, Vec<WorkflowStage>), String> {
-    if body.name.trim().is_empty() {
-        return Err("name is required".into());
-    }
-
-    let trigger = match body.trigger_kind.as_str() {
-        "github_issue_webhook" => {
-            if body.trigger_label.trim().is_empty() {
-                return Err("trigger_label is required for github_issue_webhook".into());
-            }
-            if body.repo_owner.trim().is_empty() || body.repo_name.trim().is_empty() {
-                return Err("repo_owner and repo_name are required".into());
-            }
-            if body.install_id <= 0 {
-                return Err("install_id is required".into());
-            }
-            TriggerKind::GithubIssueWebhook {
-                repo: format!("{}/{}", body.repo_owner.trim(), body.repo_name.trim()),
-                label: body.trigger_label.trim().to_string(),
-            }
-        }
-        other => return Err(format!("invalid trigger kind: {other}")),
-    };
-
-    // Reject requests that ship both a preset and explicit stages — the
-    // two are mutually exclusive and silently preferring one is surprising.
-    if body.preset_id.is_some() && body.stages.as_ref().is_some_and(|s| !s.is_empty()) {
-        return Err("provide either preset_id or stages, not both".into());
-    }
-
-    let stages = if let Some(preset_id) = body.preset_id.as_deref() {
-        if !PRESET_IDS.contains(&preset_id) {
-            return Err(format!("unknown preset_id: {preset_id}"));
-        }
-        let expansion =
-            resolve_preset(preset_id).ok_or_else(|| format!("unknown preset_id: {preset_id}"))?;
-        if expansion.trigger_kind_tag != trigger.kind_tag() {
-            return Err(format!(
-                "preset {preset_id} expects trigger_kind {} but got {}",
-                expansion.trigger_kind_tag,
-                trigger.kind_tag()
-            ));
-        }
-        expansion
-            .stages
-            .into_iter()
-            .enumerate()
-            .map(|(i, s)| WorkflowStage {
-                id: Uuid::new_v4().to_string(),
-                workflow_id: String::new(),
-                seq: i as i32,
-                gate_kind: s.gate_kind,
-                params: s.params,
-            })
-            .collect()
-    } else {
-        let explicit = body
-            .stages
-            .as_ref()
-            .ok_or_else(|| "stages or preset_id required".to_string())?;
-        if explicit.is_empty() {
-            return Err("at least one stage is required".into());
-        }
-        let mut out = Vec::with_capacity(explicit.len());
-        for (i, s) in explicit.iter().enumerate() {
-            let gate_kind = s.gate_kind.parse::<GateKind>().map_err(|e| e.to_string())?;
-            out.push(WorkflowStage {
-                id: Uuid::new_v4().to_string(),
-                workflow_id: String::new(),
-                seq: i as i32,
-                gate_kind,
-                params: s.params.clone().unwrap_or_else(|| serde_json::json!({})),
-            });
-        }
-        out
-    };
-
-    Ok((trigger, stages))
-}
-
 /// POST /api/workflows — create a workflow. If `active=true`, the
 /// activation hook runs inline and rejects out-of-scope repos with 400.
 ///
@@ -321,7 +208,9 @@ pub async fn create_workflow(
         // "no cache — resolve the install live at activation"; the create
         // gate in `validate_create_body` still requires a real id for
         // `github_issue_webhook` today (gate removal is ADR item 4).
-        install_id: (body.install_id > 0).then_some(body.install_id),
+        // Token-mint cache only (ADR 0024); `None`/non-positive means
+        // "resolve the install live at activation through the project layer".
+        install_id: body.install_id.filter(|id| *id > 0),
         preset_id: body.preset_id.clone(),
         active: false,
         created_by: user_id,
@@ -372,15 +261,19 @@ pub async fn create_workflow(
         .into_response()
 }
 
-/// GET /api/workflows?workspace_id=...&state=... — list workflows for a
-/// workspace. `state` (`drafted|bound|active|paused`) filters the list and
-/// the response always includes per-status counts for the chip strip
-/// (#456 / ADR 0019).
+/// GET /api/workflows?workspace_id=...&readiness=...&autofire=... — list
+/// workflows for a workspace. The two orthogonal axes (ADR 0024) filter
+/// independently: `readiness` (`drafted|ready`) and `autofire`
+/// (`off|active|paused`). Both are optional and combine with AND. The
+/// response always includes per-axis-value counts for the filter strip
+/// (spec #509).
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
     pub workspace_id: String,
     #[serde(default)]
-    pub state: Option<String>,
+    pub readiness: Option<String>,
+    #[serde(default)]
+    pub autofire: Option<String>,
 }
 
 pub async fn list_workflows(
@@ -398,15 +291,26 @@ pub async fn list_workflows(
         Ok(p) => p,
         Err(r) => return r,
     };
-    let status = match q.state.as_deref() {
+    let readiness = match q.readiness.as_deref() {
         None | Some("") | Some("all") => None,
-        Some(s) => match workflow_db::WorkflowStatus::from_wire(s) {
+        Some(s) => match workflow_db::Readiness::from_wire(s) {
             Some(v) => Some(v),
-            None => return bad_request(format!("unknown workflow state: {s}")),
+            None => return bad_request(format!("unknown readiness filter: {s}")),
         },
     };
+    let autofire = match q.autofire.as_deref() {
+        None | Some("") | Some("all") => None,
+        Some(s) => match workflow_db::Autofire::from_wire(s) {
+            Some(v) => Some(v),
+            None => return bad_request(format!("unknown autofire filter: {s}")),
+        },
+    };
+    let filter = workflow_db::WorkflowFilter {
+        readiness,
+        autofire,
+    };
     let workflows =
-        match workflow_db::list_workflows_for_workspace_filtered(spine, &q.workspace_id, status)
+        match workflow_db::list_workflows_for_workspace_filtered(spine, &q.workspace_id, filter)
             .await
         {
             Ok(w) => w,
@@ -415,21 +319,26 @@ pub async fn list_workflows(
                 return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
             }
         };
-    let counts = match workflow_db::workflow_status_counts(spine, &q.workspace_id).await {
+    let counts = match workflow_db::workflow_axis_counts(spine, &q.workspace_id).await {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!("failed to compute workflow status counts: {e}");
+            tracing::error!("failed to compute workflow axis counts: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
     Json(serde_json::json!({
         "workflows": workflows,
         "counts": {
-            "drafted": counts.drafted,
-            "bound": counts.bound,
-            "active": counts.active,
-            "paused": counts.paused,
-            "all": counts.drafted + counts.bound + counts.active + counts.paused,
+            "all": counts.total,
+            "readiness": {
+                "drafted": counts.drafted,
+                "ready": counts.ready,
+            },
+            "autofire": {
+                "off": counts.off,
+                "active": counts.active,
+                "paused": counts.paused,
+            },
         },
     }))
     .into_response()
@@ -939,126 +848,11 @@ fn map_activation_error(e: ActivationError) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workflow::{GateKind, WorkflowStage};
 
-    fn base_body() -> CreateWorkflowBody {
-        CreateWorkflowBody {
-            workspace_id: "w1".into(),
-            name: "sdd".into(),
-            trigger_kind: "github_issue_webhook".into(),
-            repo_owner: "acme".into(),
-            repo_name: "widgets".into(),
-            trigger_label: "spec".into(),
-            install_id: 42,
-            preset_id: Some("github-issue-to-pr".into()),
-            stages: None,
-            active: false,
-        }
-    }
-
-    #[test]
-    fn validate_preset_expands_to_stage_chain() {
-        let (trigger, stages) = validate_create_body(&base_body()).unwrap();
-        assert_eq!(
-            trigger,
-            TriggerKind::GithubIssueWebhook {
-                repo: "acme/widgets".into(),
-                label: "spec".into(),
-            }
-        );
-        assert_eq!(stages.len(), 1);
-        assert_eq!(stages[0].gate_kind, GateKind::AgentSession);
-        assert_eq!(stages[0].seq, 0);
-    }
-
-    #[test]
-    fn validate_rejects_bad_trigger_kind() {
-        let mut body = base_body();
-        body.trigger_kind = "polling".into();
-        let err = validate_create_body(&body).unwrap_err();
-        assert!(err.to_lowercase().contains("invalid trigger kind"));
-    }
-
-    #[test]
-    fn validate_rejects_missing_label() {
-        let mut body = base_body();
-        body.trigger_label = "".into();
-        let err = validate_create_body(&body).unwrap_err();
-        assert!(err.contains("trigger_label"));
-    }
-
-    #[test]
-    fn validate_rejects_unknown_preset() {
-        let mut body = base_body();
-        body.preset_id = Some("nope".into());
-        body.stages = None;
-        let err = validate_create_body(&body).unwrap_err();
-        assert!(err.contains("unknown preset_id"));
-    }
-
-    #[test]
-    fn validate_accepts_explicit_stages_when_no_preset() {
-        let mut body = base_body();
-        body.preset_id = None;
-        body.stages = Some(vec![
-            CreateStageBody {
-                gate_kind: "agent-session".into(),
-                params: Some(serde_json::json!({"profile": "implementer"})),
-            },
-            CreateStageBody {
-                gate_kind: "external-check".into(),
-                params: None,
-            },
-            CreateStageBody {
-                gate_kind: "manual-approval".into(),
-                params: None,
-            },
-        ]);
-        let (_t, stages) = validate_create_body(&body).unwrap();
-        assert_eq!(stages.len(), 3);
-        assert_eq!(stages[0].gate_kind, GateKind::AgentSession);
-        assert_eq!(stages[1].gate_kind, GateKind::ExternalCheck);
-        assert_eq!(stages[2].gate_kind, GateKind::ManualApproval);
-    }
-
-    #[test]
-    fn validate_rejects_empty_stage_chain_without_preset() {
-        let mut body = base_body();
-        body.preset_id = None;
-        body.stages = Some(vec![]);
-        assert!(validate_create_body(&body).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_missing_install_id() {
-        let mut body = base_body();
-        body.install_id = 0;
-        let err = validate_create_body(&body).unwrap_err();
-        assert!(err.contains("install_id"));
-    }
-
-    #[test]
-    fn validate_rejects_empty_name() {
-        let mut body = base_body();
-        body.name = "  ".into();
-        let err = validate_create_body(&body).unwrap_err();
-        assert!(err.contains("name"));
-    }
-
-    #[test]
-    fn validate_rejects_both_preset_and_stages() {
-        let mut body = base_body();
-        body.preset_id = Some("github-issue-to-pr".into());
-        body.stages = Some(vec![CreateStageBody {
-            gate_kind: "agent-session".into(),
-            params: None,
-        }]);
-        let err = validate_create_body(&body).unwrap_err();
-        assert!(err.contains("preset_id or stages"));
-    }
-
-    // ---------------------------------------------------------------
-    // project_run — status table for /api/workflows/:id/runs
-    // ---------------------------------------------------------------
+    // Create-body validation tests live in `crate::workflow_create`
+    // (where the body + validator moved per spec #509). The tests below
+    // cover `project_run` — the status table for /api/workflows/:id/runs.
 
     fn run_row(
         state: &str,

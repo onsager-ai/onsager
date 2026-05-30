@@ -1,17 +1,21 @@
-import { useMemo, useState } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { GitBranch, Loader2, Zap } from "lucide-react"
-import { api, type AccessibleRepo, type CreateWorkflowRequest } from "@/lib/api"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { LabelCombobox } from "@/components/workflows/LabelCombobox"
+import { useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { GitBranch, Loader2, Zap } from "lucide-react";
+import {
+  api,
+  type AccessibleRepo,
+  type CreateWorkflowRequest,
+} from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LabelCombobox } from "@/components/workflows/LabelCombobox";
 import {
   GITHUB_ISSUE_TO_PR_PRESET,
   githubIssueToPrPreset,
-} from "@/components/workflows/workflow-draft"
-import { usePageHeader } from "@/components/layout/PageHeader"
+} from "@/components/workflows/workflow-draft";
+import { usePageHeader } from "@/components/layout/PageHeader";
 
 /**
  * The 60-second "start a workflow" card shown after a GitHub App install.
@@ -20,73 +24,76 @@ import { usePageHeader } from "@/components/layout/PageHeader"
  * `github-issue-to-pr` preset and marks it active.
  */
 export function WorkflowStartPage() {
-  usePageHeader({ title: "Start a workflow", backTo: "/workspaces" })
-  const [params] = useSearchParams()
-  const installId = params.get("install") ?? ""
-  const workspaceIdParam = params.get("workspace_id") ?? ""
+  usePageHeader({ title: "Start a workflow", backTo: "/workspaces" });
+  const [params] = useSearchParams();
+  const installId = params.get("install") ?? "";
+  const workspaceIdParam = params.get("workspace_id") ?? "";
 
   const { data: workspacesData } = useQuery({
     queryKey: ["workspaces"],
     queryFn: api.listWorkspaces,
     staleTime: 30_000,
-  })
+  });
   const workspaces = useMemo(
     () => workspacesData?.workspaces ?? [],
     [workspacesData],
-  )
+  );
 
   // If the callback URL doesn't carry an explicit workspace_id, fall back
   // to the workspace that owns this install — one query hop, no typing.
   const { data: workspaceInstallsData } = useQuery({
-    queryKey: ["workflow-start-installations", workspaces.map((w) => w.id).join(",")],
+    queryKey: [
+      "workflow-start-installations",
+      workspaces.map((w) => w.id).join(","),
+    ],
     queryFn: async () => {
       const entries = await Promise.all(
         workspaces.map(async (w) => {
-          const r = await api.listWorkspaceInstallations(w.id)
-          return { workspaceId: w.id, installations: r.installations }
+          const r = await api.listWorkspaceInstallations(w.id);
+          return { workspaceId: w.id, installations: r.installations };
         }),
-      )
-      return entries
+      );
+      return entries;
     },
     enabled: workspaces.length > 0,
     staleTime: 30_000,
-  })
+  });
 
   // Resolve the workspace that owns the given install id. If we can't
   // match, return "" and let the UI render an error — guessing would run
   // later mutations against the wrong workspace.
   const resolvedWorkspaceId = useMemo(() => {
-    if (workspaceIdParam) return workspaceIdParam
-    if (!workspaceInstallsData) return ""
+    if (workspaceIdParam) return workspaceIdParam;
+    if (!workspaceInstallsData) return "";
     const hit = workspaceInstallsData.find((e) =>
       e.installations.some((i) => i.id === installId),
-    )
-    return hit?.workspaceId ?? ""
-  }, [workspaceIdParam, workspaceInstallsData, installId])
+    );
+    return hit?.workspaceId ?? "";
+  }, [workspaceIdParam, workspaceInstallsData, installId]);
 
   // The backend's workflow create API wants the numeric GitHub install id,
   // not the dashboard's installation record id. Look it up from the same
   // list we used to resolve the workspace.
   const githubInstallId = useMemo(() => {
-    if (!workspaceInstallsData) return 0
+    if (!workspaceInstallsData) return 0;
     for (const e of workspaceInstallsData) {
-      const hit = e.installations.find((i) => i.id === installId)
-      if (hit) return hit.install_id
+      const hit = e.installations.find((i) => i.id === installId);
+      if (hit) return hit.install_id;
     }
-    return 0
-  }, [workspaceInstallsData, installId])
+    return 0;
+  }, [workspaceInstallsData, installId]);
 
-  const installLookupDone = !!workspaceIdParam || !!workspaceInstallsData
+  const installLookupDone = !!workspaceIdParam || !!workspaceInstallsData;
   const installUnresolved =
-    !!installId && installLookupDone && !resolvedWorkspaceId
+    !!installId && installLookupDone && !resolvedWorkspaceId;
 
   const { data: reposData, isLoading: reposLoading } = useQuery({
     queryKey: ["installation-repos", resolvedWorkspaceId, installId],
     queryFn: () => api.listInstallationRepos(resolvedWorkspaceId, installId),
     enabled: !!resolvedWorkspaceId && !!installId,
     retry: false,
-  })
-  const repos = reposData?.repos ?? []
+  });
+  const repos = reposData?.repos ?? [];
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 md:space-y-6">
@@ -152,7 +159,7 @@ export function WorkflowStartPage() {
         .
       </p>
     </div>
-  )
+  );
 }
 
 function EmptyInstall() {
@@ -166,7 +173,7 @@ function EmptyInstall() {
         Go to Workspaces
       </Button>
     </div>
-  )
+  );
 }
 
 function RepoRow({
@@ -175,26 +182,26 @@ function RepoRow({
   installId,
   githubInstallId,
 }: {
-  repo: AccessibleRepo
-  workspaceId: string
-  installId: string
-  githubInstallId: number
+  repo: AccessibleRepo;
+  workspaceId: string;
+  installId: string;
+  githubInstallId: number;
 }) {
-  const [label, setLabel] = useState<string | null>(null)
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
+  const [label, setLabel] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const create = useMutation({
     mutationFn: (body: CreateWorkflowRequest) => api.createWorkflow(body),
     onSuccess: ({ workflow }) => {
-      queryClient.invalidateQueries({ queryKey: ["workflows"] })
-      navigate(`/workflows/${workflow.id}`)
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      navigate(`/workflows/${workflow.id}`);
     },
-  })
+  });
 
-  const ready = !!label && !!workspaceId && githubInstallId > 0
+  const ready = !!label && !!workspaceId && githubInstallId > 0;
   const run = () => {
-    if (!ready || !label) return
+    if (!ready || !label) return;
     // Preset path: stiglab expands the stage chain server-side, so we
     // send only `preset_id` (sending both `preset_id` and `stages` is an
     // explicit 400 on the backend). The draft here is only used to
@@ -204,20 +211,21 @@ function RepoRow({
       repo_owner: repo.owner,
       repo_name: repo.name,
       label,
-    })
+    });
     create.mutate({
       workspace_id: workspaceId,
       name: draft.name,
-      // Snake-case `kind_tag` from the registry manifest (#237).
-      trigger_kind: "github_issue_webhook",
+      // Structured trigger (ADR 0024 / spec #509).
+      trigger: {
+        kind: "github_issue_webhook",
+        repo: `${repo.owner}/${repo.name}`,
+        label,
+      },
       install_id: githubInstallId,
-      repo_owner: repo.owner,
-      repo_name: repo.name,
-      trigger_label: label,
       preset_id: GITHUB_ISSUE_TO_PR_PRESET,
       active: true,
-    })
-  }
+    });
+  };
 
   return (
     <li className="rounded-lg border p-3">
@@ -263,5 +271,5 @@ function RepoRow({
         )}
       </div>
     </li>
-  )
+  );
 }

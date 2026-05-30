@@ -8,42 +8,42 @@
 
 // ── Generated (Rust is SSOT) ─────────────────────────────────────────────
 
-export type { AccessibleRepo } from './generated/AccessibleRepo';
-export type { ArtifactHorizontalLineageEntry } from './generated/ArtifactHorizontalLineageEntry';
-export type { ArtifactLineageEntry } from './generated/ArtifactLineageEntry';
-export type { ArtifactVersion } from './generated/ArtifactVersion';
-export type { BackfillReport } from './generated/BackfillReport';
-export type { BackfillRequestBody } from './generated/BackfillRequestBody';
-export type { CreatePatResponse } from './generated/CreatePatResponse';
-export type { Credential } from './generated/Credential';
-export type { GitHubAccountType } from './generated/GitHubAccountType';
-export type { GitHubAppInstallation } from './generated/GitHubAppInstallation';
-export type { GovernanceEvent } from './generated/GovernanceEvent';
-export type { InstallationDeliveryHealth } from './generated/InstallationDeliveryHealth';
-export type { MeResponse } from './generated/MeResponse';
-export type { MeUser } from './generated/MeUser';
-export type { MeVia } from './generated/MeVia';
-export type { Node } from './generated/Node';
-export type { NodeStatus } from './generated/NodeStatus';
-export type { Pat } from './generated/Pat';
-export type { Project } from './generated/Project';
-export type { ProjectIssueDetail } from './generated/ProjectIssueDetail';
-export type { ProjectIssueDetailResponse } from './generated/ProjectIssueDetailResponse';
-export type { ProjectPullRow } from './generated/ProjectPullRow';
-export type { ReplayIssueTriggerRequest } from './generated/ReplayIssueTriggerRequest';
-export type { ReplayIssueTriggerResponse } from './generated/ReplayIssueTriggerResponse';
-export type { ReplayMatch } from './generated/ReplayMatch';
-export type { Session } from './generated/Session';
-export type { SessionKind } from './generated/SessionKind';
-export type { SessionState } from './generated/SessionState';
-export type { SpineArtifact } from './generated/SpineArtifact';
-export type { SpineEvent } from './generated/SpineEvent';
-export type { TaskRequest } from './generated/TaskRequest';
-export type { TokenUsage } from './generated/TokenUsage';
-export type { WorkflowGateKind } from './generated/WorkflowGateKind';
-export type { Workspace } from './generated/Workspace';
-export type { WorkspaceDeliveryHealthResponse } from './generated/WorkspaceDeliveryHealthResponse';
-export type { WorkspaceMember } from './generated/WorkspaceMember';
+export type { AccessibleRepo } from "./generated/AccessibleRepo";
+export type { ArtifactHorizontalLineageEntry } from "./generated/ArtifactHorizontalLineageEntry";
+export type { ArtifactLineageEntry } from "./generated/ArtifactLineageEntry";
+export type { ArtifactVersion } from "./generated/ArtifactVersion";
+export type { BackfillReport } from "./generated/BackfillReport";
+export type { BackfillRequestBody } from "./generated/BackfillRequestBody";
+export type { CreatePatResponse } from "./generated/CreatePatResponse";
+export type { Credential } from "./generated/Credential";
+export type { GitHubAccountType } from "./generated/GitHubAccountType";
+export type { GitHubAppInstallation } from "./generated/GitHubAppInstallation";
+export type { GovernanceEvent } from "./generated/GovernanceEvent";
+export type { InstallationDeliveryHealth } from "./generated/InstallationDeliveryHealth";
+export type { MeResponse } from "./generated/MeResponse";
+export type { MeUser } from "./generated/MeUser";
+export type { MeVia } from "./generated/MeVia";
+export type { Node } from "./generated/Node";
+export type { NodeStatus } from "./generated/NodeStatus";
+export type { Pat } from "./generated/Pat";
+export type { Project } from "./generated/Project";
+export type { ProjectIssueDetail } from "./generated/ProjectIssueDetail";
+export type { ProjectIssueDetailResponse } from "./generated/ProjectIssueDetailResponse";
+export type { ProjectPullRow } from "./generated/ProjectPullRow";
+export type { ReplayIssueTriggerRequest } from "./generated/ReplayIssueTriggerRequest";
+export type { ReplayIssueTriggerResponse } from "./generated/ReplayIssueTriggerResponse";
+export type { ReplayMatch } from "./generated/ReplayMatch";
+export type { Session } from "./generated/Session";
+export type { SessionKind } from "./generated/SessionKind";
+export type { SessionState } from "./generated/SessionState";
+export type { SpineArtifact } from "./generated/SpineArtifact";
+export type { SpineEvent } from "./generated/SpineEvent";
+export type { TaskRequest } from "./generated/TaskRequest";
+export type { TokenUsage } from "./generated/TokenUsage";
+export type { WorkflowGateKind } from "./generated/WorkflowGateKind";
+export type { Workspace } from "./generated/Workspace";
+export type { WorkspaceDeliveryHealthResponse } from "./generated/WorkspaceDeliveryHealthResponse";
+export type { WorkspaceMember } from "./generated/WorkspaceMember";
 
 // ── Hand-written (pending derive) ────────────────────────────────────────
 
@@ -69,7 +69,7 @@ export interface ProjectLiveListResponse<T> {
 export type WorkflowArtifactKind = string;
 
 export interface WorkflowTrigger {
-  kind: 'github-label';
+  kind: "github-label";
   install_id: string;
   repo_owner: string;
   repo_name: string;
@@ -86,7 +86,11 @@ export interface WorkflowTrigger {
 }
 
 // Shape returned by `GET /api/workflow/kinds` (issue #102).
-export type WorkflowMergeRule = 'overwrite' | 'merge_by_key' | 'append' | 'deep_merge';
+export type WorkflowMergeRule =
+  | "overwrite"
+  | "merge_by_key"
+  | "append"
+  | "deep_merge";
 
 // `intrinsic_schema` arrives as a `serde_json::Value`, which is any JSON
 // value — including `null`, arrays, and primitives. Modelling it as
@@ -113,7 +117,12 @@ export interface WorkflowKindInfo {
 // registry manifest (spec #131 Lever E / #150). Mirrors
 // `onsager_registry::EventDefinition`; keep field names + the
 // `EventSubsystem` union in sync by hand when the Rust struct changes.
-export type EventSubsystem = 'forge' | 'stiglab' | 'synodic' | 'ising' | 'portal';
+export type EventSubsystem =
+  | "forge"
+  | "stiglab"
+  | "synodic"
+  | "ising"
+  | "portal";
 
 export interface EventManifestEntry {
   kind: string;
@@ -139,20 +148,20 @@ export interface EventManifestEntry {
 // `onsager_spine::TriggerKind` variant. Mirrors
 // `onsager_registry::TriggerDefinition`; keep in sync with the Rust
 // struct.
-export type TriggerCategory = 'event' | 'schedule' | 'request' | 'manual';
+export type TriggerCategory = "event" | "schedule" | "request" | "manual";
 export type TriggerUiKind =
-  | 'webhook'
-  | 'github_pull_request_closed'
-  | 'github_workflow_run_completed'
-  | 'telegram_webhook'
-  | 'cron'
-  | 'delay'
-  | 'interval'
-  | 'spine_event'
-  | 'pg_notify'
-  | 'outbox'
-  | 'manual'
-  | 'replay';
+  | "webhook"
+  | "github_pull_request_closed"
+  | "github_workflow_run_completed"
+  | "telegram_webhook"
+  | "cron"
+  | "delay"
+  | "interval"
+  | "spine_event"
+  | "pg_notify"
+  | "outbox"
+  | "manual"
+  | "replay";
 
 export interface TriggerManifestEntry {
   kind_tag: string;
@@ -169,12 +178,12 @@ export interface TriggerManifestEntry {
 export interface WorkflowStage {
   id: string;
   name: string;
-  gate_kind: import('./generated/WorkflowGateKind').WorkflowGateKind;
+  gate_kind: import("./generated/WorkflowGateKind").WorkflowGateKind;
   artifact_kind: WorkflowArtifactKind;
   config: Record<string, unknown>;
 }
 
-export type WorkflowStatus = 'draft' | 'active' | 'paused' | 'archived';
+export type WorkflowStatus = "draft" | "active" | "paused" | "archived";
 
 export interface Workflow {
   id: string;
@@ -188,36 +197,36 @@ export interface Workflow {
   updated_at: string;
 }
 
-// Wire contract for workflow CRUD. Matches stiglab's `CreateWorkflowBody`
-// / `validate_create_body` exactly — flat trigger fields, numeric GitHub
-// install id, snake_case `active`. The `trigger_kind` is the registry's
-// snake-case `kind_tag` (e.g. `'github_issue_webhook'`) — fetched at
-// runtime from `/api/registry/triggers` (spec #237). Construct with
+// Wire contract for workflow CRUD. Matches portal's `CreateWorkflowBody`
+// / `validate_create_body`: a structured `trigger: TriggerKind` (ADR 0024
+// / spec #509) so any registry trigger kind is creatable, plus an optional
+// `install_id` token-mint cache hint. Construct with
 // `documentToCreateRequest` from the UI draft + installations list so the
-// numeric id is resolved from the workspace installation record id the
-// draft carries.
+// numeric install id is resolved from the workspace installation record id
+// the draft carries.
 export interface CreateWorkflowRequest {
   workspace_id: string;
   name: string;
-  trigger_kind: string;
-  repo_owner: string;
-  repo_name: string;
-  trigger_label: string;
-  install_id: number;
+  // Structured trigger (the registry-backed discriminated union); any
+  // trigger kind is creatable through one shape.
+  trigger: import("./generated/TriggerKind").TriggerKind;
+  // Optional token-mint cache hint; resolved live through the project
+  // layer at activation when absent.
+  install_id?: number | null;
   preset_id?: string;
   stages?: CreateWorkflowStage[];
   active: boolean;
 }
 
 export interface CreateWorkflowStage {
-  gate_kind: import('./generated/WorkflowGateKind').WorkflowGateKind;
+  gate_kind: import("./generated/WorkflowGateKind").WorkflowGateKind;
   params: Record<string, unknown>;
 }
 
 /** A session linked back to a run via `sessions.artifact_id` (spec #303). */
 export interface RunLinkedSession {
   id: string;
-  state: import('./generated/SessionState').SessionState;
+  state: import("./generated/SessionState").SessionState;
   node_id: string;
   created_at: string;
   updated_at: string;
@@ -225,7 +234,7 @@ export interface RunLinkedSession {
 
 /** Combined response shape for `GET /api/runs/:id` (spec #303). */
 export interface RunDetail {
-  run: import('./generated/WorkflowRun').WorkflowRun;
+  run: import("./generated/WorkflowRun").WorkflowRun;
   workflow: Workflow;
   stages: WorkflowStage[];
   sessions: RunLinkedSession[];
@@ -246,7 +255,7 @@ export interface ArtifactActionRequest {
 }
 
 export interface OverrideGateRequestBody extends ArtifactActionRequest {
-  verdict?: 'allow' | 'deny';
+  verdict?: "allow" | "deny";
 }
 
 export interface ArtifactActionResponse {

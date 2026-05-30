@@ -1,4 +1,4 @@
-import { ApiError, request } from './client';
+import { ApiError, request } from "./client";
 import type {
   GovernanceEvent,
   SpineArtifact,
@@ -10,16 +10,16 @@ import type {
   CreateWorkflowStage,
   RunDetail,
   RunLinkedSession,
-} from './types';
-import type { WorkflowRun } from './generated/WorkflowRun';
-import type { StageRunStatus } from './generated/StageRunStatus';
+} from "./types";
+import type { WorkflowRun } from "./generated/WorkflowRun";
+import type { StageRunStatus } from "./generated/StageRunStatus";
 // Generated wire shapes (spec #434 cascaded ts-rs into `onsager-spine` so
 // `TriggerKind` and `Workflow` are emitted from Rust). The dashboard
 // keeps a richer nested UI-side `Workflow` (with `status`, flattened
 // `trigger`); these adapters translate generated → UI shape so the
 // rest of the app doesn't have to know the wire format.
-import type { Workflow as BackendWorkflow } from './generated/Workflow';
-import type { TriggerKind as BackendTrigger } from './generated/TriggerKind';
+import type { Workflow as BackendWorkflow } from "./generated/Workflow";
+import type { TriggerKind as BackendTrigger } from "./generated/TriggerKind";
 
 interface BackendWorkflowStage {
   id: string;
@@ -32,14 +32,16 @@ interface BackendWorkflowStage {
 // Legacy `Spec` / `github-issue` / `PullRequest` / `github-pr` get folded
 // into the canonical `Issue` / `PR` names (issue #102). Anything else
 // passes through unchanged — registered custom kinds keep their id.
-export function normalizeWorkflowArtifactKind(kind: string): WorkflowArtifactKind {
+export function normalizeWorkflowArtifactKind(
+  kind: string,
+): WorkflowArtifactKind {
   switch (kind) {
-    case 'github-issue':
-    case 'Spec':
-      return 'Issue';
-    case 'github-pr':
-    case 'PullRequest':
-      return 'PR';
+    case "github-issue":
+    case "Spec":
+      return "Issue";
+    case "github-pr":
+    case "PullRequest":
+      return "PR";
     default:
       return kind;
   }
@@ -61,12 +63,17 @@ export function stageToCreateStage(s: WorkflowStage): CreateWorkflowStage {
 
 function stageFromBackend(s: BackendWorkflowStage): WorkflowStage {
   const params = (s.params ?? {}) as Record<string, unknown>;
-  const name = typeof params.name === 'string' ? params.name : undefined;
+  const name = typeof params.name === "string" ? params.name : undefined;
   // Registry-backed kinds (#102) — accept any string; normalize legacy values.
-  const rawKind = typeof params.artifact_kind === 'string' ? params.artifact_kind : 'Issue';
+  const rawKind =
+    typeof params.artifact_kind === "string" ? params.artifact_kind : "Issue";
   const artifactKind = normalizeWorkflowArtifactKind(rawKind);
   // Everything except the UI-only display fields is opaque stage config.
-  const { name: _n, artifact_kind: _a, ...config } = params as Record<string, unknown>;
+  const {
+    name: _n,
+    artifact_kind: _a,
+    ...config
+  } = params as Record<string, unknown>;
   void _n;
   void _a;
   return {
@@ -87,19 +94,19 @@ function workflowFromBackend(
   // (`/api/registry/triggers`) is the source of truth for which kinds
   // exist; the discriminated `TriggerKind` union narrows by `kind`.
   const { repo, label, manualName } = extractTriggerFields(w.trigger);
-  const [repoOwner = '', repoName = ''] = repo.split('/');
+  const [repoOwner = "", repoName = ""] = repo.split("/");
   return {
     id: w.id,
     workspace_id: w.workspace_id,
     name: w.name,
     preset: w.preset_id,
-    status: w.active ? 'active' : 'draft',
+    status: w.active ? "active" : "draft",
     trigger: {
-      kind: 'github-label',
+      kind: "github-label",
       // `install_id` is a nullable token-mint cache (ADR 0024); null means
       // "no cached install — resolved live at activation". The UI's
       // no-install convention is the empty string, not the literal "null".
-      install_id: w.install_id == null ? '' : String(w.install_id),
+      install_id: w.install_id == null ? "" : String(w.install_id),
       repo_owner: repoOwner,
       repo_name: repoName,
       label,
@@ -124,92 +131,99 @@ function extractTriggerFields(t: BackendTrigger): {
   manualName: string;
 } {
   switch (t.kind) {
-    case 'github_issue_webhook':
-      return { repo: t.repo, label: t.label, manualName: '' };
-    case 'github_pull_request_closed':
-    case 'github_workflow_run_completed':
-      return { repo: t.repo, label: '', manualName: '' };
-    case 'manual':
-      return { repo: '', label: '', manualName: t.name };
-    case 'telegram_webhook':
-    case 'cron':
-    case 'delay':
-    case 'interval':
-    case 'spine_event':
-    case 'pg_notify':
-    case 'outbox_row':
-    case 'replay':
-      return { repo: '', label: '', manualName: '' };
+    case "github_issue_webhook":
+      return { repo: t.repo, label: t.label, manualName: "" };
+    case "github_pull_request_closed":
+    case "github_workflow_run_completed":
+      return { repo: t.repo, label: "", manualName: "" };
+    case "manual":
+      return { repo: "", label: "", manualName: t.name };
+    case "telegram_webhook":
+    case "cron":
+    case "delay":
+    case "interval":
+    case "spine_event":
+    case "pg_notify":
+    case "outbox_row":
+    case "replay":
+      return { repo: "", label: "", manualName: "" };
     default: {
       const _exhaustive: never = t;
       void _exhaustive;
-      return { repo: '', label: '', manualName: '' };
+      return { repo: "", label: "", manualName: "" };
     }
   }
 }
 
 function defaultStageName(gate: WorkflowGateKind): string {
   switch (gate) {
-    case 'agent-session':
-      return 'Agent session';
-    case 'external-check':
-      return 'CI check';
-    case 'governance':
-      return 'Governance';
-    case 'manual-approval':
-      return 'Manual approval';
+    case "agent-session":
+      return "Agent session";
+    case "external-check":
+      return "CI check";
+    case "governance":
+      return "Governance";
+    case "manual-approval":
+      return "Manual approval";
   }
 }
 
-/// Status chip values surfaced on the Workflows tab (#456 / ADR 0019).
-/// Wire-side: the dashboard sends `?state=<value>`; the backend maps
-/// each to a derived `(active, install_id)` predicate. `all` is the
-/// no-filter pseudo-value (omitted from the query string when picked).
-export type WorkflowStatusChip =
-  | 'all'
-  | 'drafted'
-  | 'bound'
-  | 'active'
-  | 'paused';
+/// The two orthogonal filter axes on the Workflows tab (ADR 0024 / spec
+/// #509). `"all"` means the axis is unconstrained; the dashboard sends
+/// `?readiness=<v>&autofire=<v>` (each omitted when `"all"`), and the
+/// backend ANDs the two together.
+export type ReadinessFilter = "all" | "drafted" | "ready";
+export type AutofireFilter = "all" | "off" | "active" | "paused";
 
-export interface WorkflowStatusCounts {
-  drafted: number;
-  bound: number;
-  active: number;
-  paused: number;
+/// Per-axis-value counts for the filter strip. Each axis reports its own
+/// totals so the two filter groups show independent counts. Mirrors the
+/// portal `workflow_axis_counts` response.
+export interface WorkflowAxisCounts {
   all: number;
+  readiness: {
+    drafted: number;
+    ready: number;
+  };
+  autofire: {
+    off: number;
+    active: number;
+    paused: number;
+  };
 }
 
 export interface ListWorkflowsResult {
   workflows: Workflow[];
-  counts: WorkflowStatusCounts;
+  counts: WorkflowAxisCounts;
 }
 
+const EMPTY_AXIS_COUNTS: WorkflowAxisCounts = {
+  all: 0,
+  readiness: { drafted: 0, ready: 0 },
+  autofire: { off: 0, active: 0, paused: 0 },
+};
+
 export const workflows = {
-  // Workflows (issue #82) — CRUD + live runs. The API is provided by the
-  // stiglab sibling sub-issue; the dashboard is the only client today.
-  // The backend persists workflows with flat trigger fields and stage `params`;
-  // these wrappers translate backend → UI shape.
+  // Workflows (issue #82) — CRUD + live runs. The dashboard is the only
+  // client today; these wrappers translate backend → UI shape.
   listWorkflows: async (
     workspaceId: string,
-    state?: WorkflowStatusChip,
+    filter?: { readiness?: ReadinessFilter; autofire?: AutofireFilter },
   ): Promise<ListWorkflowsResult> => {
-    if (!workspaceId) throw new ApiError('workspaceId is required', 400);
+    if (!workspaceId) throw new ApiError("workspaceId is required", 400);
     const query = new URLSearchParams({ workspace_id: workspaceId });
-    if (state && state !== 'all') query.set('state', state);
+    if (filter?.readiness && filter.readiness !== "all") {
+      query.set("readiness", filter.readiness);
+    }
+    if (filter?.autofire && filter.autofire !== "all") {
+      query.set("autofire", filter.autofire);
+    }
     const raw = await request<{
       workflows: BackendWorkflow[];
-      counts?: WorkflowStatusCounts;
+      counts?: WorkflowAxisCounts;
     }>(`/workflows?${query.toString()}`);
     return {
       workflows: raw.workflows.map((w) => workflowFromBackend(w)),
-      counts: raw.counts ?? {
-        drafted: 0,
-        bound: 0,
-        active: 0,
-        paused: 0,
-        all: raw.workflows.length,
-      },
+      counts: raw.counts ?? EMPTY_AXIS_COUNTS,
     };
   },
   // Fan-out across every workspace the user belongs to. Stiglab's list
@@ -219,7 +233,7 @@ export const workflows = {
   // workspace; fine for the workspace counts we target (typically 1–3).
   listWorkflowsForUser: async (): Promise<{ workflows: Workflow[] }> => {
     const { workspaces } = await request<{ workspaces: { id: string }[] }>(
-      '/workspaces',
+      "/workspaces",
     );
     const lists = await Promise.all(
       workspaces.map((w) =>
@@ -245,45 +259,51 @@ export const workflows = {
       limit?: number;
     },
   ): Promise<{ runs: WorkflowRun[] }> => {
-    if (!workspaceId) throw new ApiError('workspaceId is required', 400);
+    if (!workspaceId) throw new ApiError("workspaceId is required", 400);
     const params = new URLSearchParams();
-    if (opts?.workflowId) params.set('workflow_id', opts.workflowId);
-    if (opts?.status) params.set('status', opts.status);
-    if (opts?.since) params.set('since', opts.since);
-    if (opts?.until) params.set('until', opts.until);
-    if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.workflowId) params.set("workflow_id", opts.workflowId);
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.since) params.set("since", opts.since);
+    if (opts?.until) params.set("until", opts.until);
+    if (opts?.limit) params.set("limit", String(opts.limit));
     const raw = params.toString();
     // `qs` is the lint-recognized variable name for query suffixes
     // in the api-contract matcher; leading `?` lives here so the
     // template stays a simple `${qs}` interpolation.
-    const qs = raw ? `?${raw}` : '';
+    const qs = raw ? `?${raw}` : "";
     return request<{ runs: WorkflowRun[] }>(
       `/workspaces/${encodeURIComponent(workspaceId)}/runs${qs}`,
     );
   },
   getWorkflow: async (id: string): Promise<{ workflow: Workflow }> => {
-    const raw = await request<{ workflow: BackendWorkflow; stages: BackendWorkflowStage[] }>(
-      `/workflows/${encodeURIComponent(id)}`,
-    );
+    const raw = await request<{
+      workflow: BackendWorkflow;
+      stages: BackendWorkflowStage[];
+    }>(`/workflows/${encodeURIComponent(id)}`);
     return { workflow: workflowFromBackend(raw.workflow, raw.stages) };
   },
-  createWorkflow: async (body: CreateWorkflowRequest): Promise<{ workflow: Workflow }> => {
-    const raw = await request<{ workflow: BackendWorkflow; stages?: BackendWorkflowStage[] }>(
-      '/workflows',
-      { method: 'POST', body: JSON.stringify(body) },
-    );
+  createWorkflow: async (
+    body: CreateWorkflowRequest,
+  ): Promise<{ workflow: Workflow }> => {
+    const raw = await request<{
+      workflow: BackendWorkflow;
+      stages?: BackendWorkflowStage[];
+    }>("/workflows", { method: "POST", body: JSON.stringify(body) });
     return { workflow: workflowFromBackend(raw.workflow, raw.stages ?? []) };
   },
-  setWorkflowActive: async (id: string, active: boolean): Promise<{ workflow: Workflow }> => {
+  setWorkflowActive: async (
+    id: string,
+    active: boolean,
+  ): Promise<{ workflow: Workflow }> => {
     const raw = await request<{ workflow: BackendWorkflow }>(
       `/workflows/${encodeURIComponent(id)}`,
-      { method: 'PATCH', body: JSON.stringify({ active }) },
+      { method: "PATCH", body: JSON.stringify({ active }) },
     );
     return { workflow: workflowFromBackend(raw.workflow) };
   },
   deleteWorkflow: (id: string) =>
     request<{ ok: boolean }>(`/workflows/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
+      method: "DELETE",
     }),
   getWorkflowRuns: (id: string, limit = 20) =>
     request<{ runs: WorkflowRun[] }>(
@@ -331,32 +351,32 @@ export const workflows = {
   ) =>
     request<{
       workflow_id: string;
-      trigger_kind: 'manual';
+      trigger_kind: "manual";
       name: string;
       trigger_event_id: number;
       actor: string;
     }>(
       `/workflows/${encodeURIComponent(workflowId)}/triggers/manual/${encodeURIComponent(name)}`,
       {
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify(payload === undefined ? {} : { payload }),
       },
     ),
   replayTrigger: (workflowId: string, sourceEventId: number) =>
     request<{
       workflow_id: string;
-      trigger_kind: 'replay';
+      trigger_kind: "replay";
       source_event_id: number;
       trigger_event_id: number;
       actor: string;
     }>(
       `/workflows/${encodeURIComponent(workflowId)}/triggers/replay/${sourceEventId}`,
-      { method: 'POST' },
+      { method: "POST" },
     ),
   // Registry-backed workflow artifact kinds (issue #102). Poll-on-load; the
   // dashboard caches the result for the session. Falls back to the static
   // list in `workflow-meta.ts` if the fetch fails (offline / dev without
   // stiglab).
   listWorkflowKinds: () =>
-    request<{ kinds: import('./types').WorkflowKindInfo[] }>('/workflow/kinds'),
+    request<{ kinds: import("./types").WorkflowKindInfo[] }>("/workflow/kinds"),
 };
