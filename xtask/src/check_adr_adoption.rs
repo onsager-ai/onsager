@@ -15,11 +15,12 @@
 //!
 //! ## Escape hatch
 //!
-//! An ADR whose metadata block carries `Adoption: ongoing` (matched
-//! case-insensitively as the substring `adoption: ongoing`) is exempt —
-//! its implementation is acknowledged as still in flight. Flip it to
-//! `Adoption: enforced` (or drop the line) and tick the boxes as the
-//! work lands.
+//! An ADR whose metadata block opts out via an `Adoption: ongoing`
+//! marker is exempt — its implementation is acknowledged as still in
+//! flight. Two forms are recognized, both case-insensitively: the
+//! rendered metadata line `- **Adoption**: ongoing` (the normal shape)
+//! and a bare `Adoption: ongoing`. Flip it to `Adoption: enforced` (or
+//! drop the line) and tick the boxes as the work lands.
 //!
 //! ## Modes
 //!
@@ -217,13 +218,24 @@ fn collect_adr_files(dir: &Path) -> Result<Vec<PathBuf>> {
         if path.extension().and_then(|s| s.to_str()) != Some("md") {
             continue;
         }
-        // ADR files start with a four-digit number; README.md does not.
-        if name.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        // ADR files are `NNNN-slug.md` — exactly four leading digits
+        // then a hyphen. The `README.md` index and any other stray
+        // markdown are skipped.
+        if is_adr_filename(name) {
             out.push(path);
         }
     }
     out.sort();
     Ok(out)
+}
+
+/// True for the ADR filename shape `NNNN-slug.md` — exactly four leading
+/// ASCII digits followed by a hyphen. The extension is checked by the
+/// caller; this only vets the numeric prefix so `README.md`, `1.md`, or
+/// a hypothetical `notes.md` are rejected.
+fn is_adr_filename(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() > 4 && bytes[..4].iter().all(u8::is_ascii_digit) && bytes[4] == b'-'
 }
 
 #[cfg(test)]
@@ -316,6 +328,18 @@ mod tests {
     #[test]
     fn ongoing_exemption_absent_by_default() {
         assert!(!is_adoption_ongoing(ACCEPTED_WITH_UNCHECKED));
+    }
+
+    #[test]
+    fn adr_filename_predicate() {
+        assert!(is_adr_filename("0024-workflow-lifecycle.md"));
+        assert!(is_adr_filename("0001-event-bus.md"));
+        // Rejected: the index, short/garbled prefixes, no hyphen.
+        assert!(!is_adr_filename("README.md"));
+        assert!(!is_adr_filename("1.md"));
+        assert!(!is_adr_filename("12-x.md"));
+        assert!(!is_adr_filename("9abc-x.md"));
+        assert!(!is_adr_filename("0024_underscore.md"));
     }
 
     #[test]
