@@ -30,7 +30,7 @@ use sqlx::Row;
 
 use crate::bridge::{PreloadedWorkflow, TriggerBridge, WorkflowMeta};
 use crate::plan_registry::{self, derive_plan_id};
-use crate::plan_runner::{PlanRunner, SchedulerLibrarySnapshot};
+use crate::plan_runner::{PlanRunner, SchedulerLibrarySnapshot, resolve_kind_versions};
 use crate::plan_store::SqlxPlanStore;
 use crate::spine_client::SpineEventStoreClient;
 
@@ -186,7 +186,13 @@ async fn recover_running_plans(
         "resuming in-flight plans after restart"
     );
     for rec in plans {
-        let snapshot = match SchedulerLibrarySnapshot::build(&rec.spec_plan, library).await {
+        let snapshot = match SchedulerLibrarySnapshot::build(
+            &rec.spec_plan,
+            library,
+            &rec.kind_versions,
+        )
+        .await
+        {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(plan_id = %rec.plan_id, "recovery library snapshot failed: {e}");
@@ -391,17 +397,26 @@ impl TriggerHandler {
             };
 
         let plan_id = derive_plan_id(&workspace_id, &spec_plan_id);
+        // Pin the workflow-library versions this run compiles against so
+        // a later recovery recompiles against the same versions, not
+        // whatever is latest then (#511). Resolved once and shared with
+        // both the persisted pin and the live snapshot so they cannot
+        // diverge.
+        let kind_versions = resolve_kind_versions(&spec_plan, &self.library)
+            .await
+            .context("resolving workflow-library versions")?;
         plan_registry::register_plan(
             self.store.pool(),
             &plan_id,
             &workspace_id,
             Some(&spec_plan_id),
             &spec_plan,
+            &kind_versions,
         )
         .await
         .context("registering plan run")?;
 
-        let snapshot = SchedulerLibrarySnapshot::build(&spec_plan, &self.library)
+        let snapshot = SchedulerLibrarySnapshot::build(&spec_plan, &self.library, &kind_versions)
             .await
             .context("building library snapshot")?;
         let scoped_spine: Arc<dyn SpineClient> =

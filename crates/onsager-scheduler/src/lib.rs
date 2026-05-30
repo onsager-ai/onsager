@@ -42,7 +42,7 @@ pub mod service;
 pub mod spine_client;
 
 pub use bridge::{TriggerBridge, TriggerBridgeError};
-pub use plan_runner::{PlanRunError, PlanRunner, SchedulerLibrarySnapshot};
+pub use plan_runner::{PlanRunError, PlanRunner, SchedulerLibrarySnapshot, resolve_kind_versions};
 pub use plan_store::SqlxPlanStore;
 pub use service::{SchedulerService, ServiceConfig};
 pub use spine_client::SpineEventStoreClient;

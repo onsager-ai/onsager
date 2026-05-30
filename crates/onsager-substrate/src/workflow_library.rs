@@ -126,7 +126,7 @@ impl WorkflowLibrary {
             {
                 // The race-loser does not know which version it lost
                 // — re-read the latest to report a useful error.
-                let current = self.latest_version(kind).await.unwrap_or(0);
+                let current = self.latest_version(kind).await.ok().flatten().unwrap_or(0);
                 Err(WorkflowLibraryError::DuplicateKind {
                     kind: kind.to_string(),
                     version: current,
@@ -166,16 +166,48 @@ impl WorkflowLibrary {
         }
     }
 
-    /// Helper for the `DuplicateKind` error path — read the current
-    /// `MAX(version)` for a kind, returning `None` if no rows yet.
-    async fn latest_version(&self, kind: &str) -> Option<i32> {
-        sqlx::query_scalar::<_, Option<i32>>(
+    /// Return the `Workflow` registered at exactly `(kind, version)`,
+    /// or `Ok(None)` when no such non-retired row exists.
+    ///
+    /// The run-path recovery counterpart of [`latest`](Self::latest)
+    /// (#511): a plan recovered after a restart resolves each kind at
+    /// the version it was *registered* with, not whatever is latest
+    /// now. Retired rows (`retired_at IS NOT NULL`) are treated as
+    /// absent so the caller falls back to [`latest`](Self::latest)
+    /// rather than resuming on a withdrawn version.
+    pub async fn lookup_versioned(
+        &self,
+        kind: &str,
+        version: i32,
+    ) -> Result<Option<Workflow>, WorkflowLibraryError> {
+        let row: Option<(serde_json::Value,)> = sqlx::query_as(
+            "SELECT workflow_json FROM workflow_library \
+             WHERE spec_kind = $1 AND version = $2 AND retired_at IS NULL",
+        )
+        .bind(kind)
+        .bind(version)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match row {
+            Some((json,)) => Ok(Some(serde_json::from_value(json)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Read the current `MAX(version)` for a kind, returning `Ok(None)`
+    /// if the kind has no rows yet.
+    ///
+    /// Used to snapshot the `{kind → version}` pin at plan registration
+    /// (#511) and to report the winning version on the `DuplicateKind`
+    /// race-loser path.
+    pub async fn latest_version(&self, kind: &str) -> Result<Option<i32>, WorkflowLibraryError> {
+        let version = sqlx::query_scalar::<_, Option<i32>>(
             "SELECT MAX(version) FROM workflow_library WHERE spec_kind = $1",
         )
         .bind(kind)
         .fetch_one(&self.pool)
-        .await
-        .ok()
-        .flatten()
+        .await?;
+        Ok(version)
     }
 }

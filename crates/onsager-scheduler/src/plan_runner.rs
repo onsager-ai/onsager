@@ -110,25 +110,75 @@ pub struct SchedulerLibrarySnapshot {
 
 impl SchedulerLibrarySnapshot {
     /// Resolve every distinct `kind` in `spec_plan` against the
-    /// persisted library. Kinds with no registered workflow are simply
-    /// absent from the snapshot — the compiler then surfaces
+    /// persisted library, pinning each kind to the version recorded in
+    /// `kind_versions` (#511). Kinds with no registered workflow are
+    /// simply absent from the snapshot — the compiler then surfaces
     /// `CompileError::MissingKind`, which is the correct hard failure
     /// per ADR 0017.
+    ///
+    /// `kind_versions` is the `{kind → version}` snapshot persisted at
+    /// registration ([`resolve_kind_versions`]). A kind present in the
+    /// map resolves via [`lookup_versioned`](PersistedWorkflowLibrary::lookup_versioned)
+    /// so a plan recovered after a restart recompiles against the
+    /// version it began on. A kind **absent** from the map (legacy rows
+    /// registered before #511, whose `kind_versions` is `{}`) or one
+    /// whose pinned version was retired falls back to
+    /// [`lookup`](PersistedWorkflowLibrary::lookup) (latest), logging a
+    /// warning so the divergence is observable rather than silent.
     pub async fn build(
         spec_plan: &SpecPlan,
         library: &PersistedWorkflowLibrary,
+        kind_versions: &HashMap<String, i32>,
     ) -> Result<Self, WorkflowLibraryError> {
         let mut by_kind = HashMap::new();
         for spec in &spec_plan.specs {
             if by_kind.contains_key(&spec.kind) {
                 continue;
             }
-            if let Some(workflow) = library.lookup(&spec.kind).await? {
+            let resolved = match kind_versions.get(&spec.kind) {
+                Some(&version) => match library.lookup_versioned(&spec.kind, version).await? {
+                    Some(workflow) => Some(workflow),
+                    None => {
+                        tracing::warn!(
+                            kind = %spec.kind,
+                            pinned_version = version,
+                            "pinned workflow version is absent or retired; \
+                             recovering against latest() instead",
+                        );
+                        library.lookup(&spec.kind).await?
+                    }
+                },
+                None => library.lookup(&spec.kind).await?,
+            };
+            if let Some(workflow) = resolved {
                 by_kind.insert(spec.kind.clone(), workflow);
             }
         }
         Ok(Self { by_kind })
     }
+}
+
+/// Snapshot the `{kind → version}` map a [`SpecPlan`] compiles against:
+/// the latest registered version for every distinct kind it
+/// references. Persisted by `register_plan` (#511) so a later recovery
+/// recompiles against these exact versions rather than whatever is
+/// latest at restart. Kinds with no registered workflow are omitted —
+/// the recovering `build` then falls through to its (also empty)
+/// `latest()` lookup and the compiler surfaces the missing kind.
+pub async fn resolve_kind_versions(
+    spec_plan: &SpecPlan,
+    library: &PersistedWorkflowLibrary,
+) -> Result<HashMap<String, i32>, WorkflowLibraryError> {
+    let mut versions = HashMap::new();
+    for spec in &spec_plan.specs {
+        if versions.contains_key(&spec.kind) {
+            continue;
+        }
+        if let Some(version) = library.latest_version(&spec.kind).await? {
+            versions.insert(spec.kind.clone(), version);
+        }
+    }
+    Ok(versions)
 }
 
 impl WorkflowLookup for SchedulerLibrarySnapshot {
