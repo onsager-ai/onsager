@@ -45,8 +45,16 @@ const SESSION_TOKEN_ENV: &str = "ONSAGER_SESSION_TOKEN";
 /// query string (the POST body carries Claude Code's *own* session id,
 /// which is unrelated to our manifest stream key).
 fn stop_hook_settings_json(hook_url_base: &str, workspace_id: &str, session_id: &str) -> String {
+    // Choose `?` vs `&` so a base URL that already carries a query
+    // string (or a trailing `?`) stays a valid URL rather than
+    // producing a double `?`.
+    let sep = if hook_url_base.contains('?') {
+        '&'
+    } else {
+        '?'
+    };
     let url = format!(
-        "{hook_url_base}?workspace_id={}&session_id={}",
+        "{hook_url_base}{sep}workspace_id={}&session_id={}",
         urlencode(workspace_id),
         urlencode(session_id),
     );
@@ -453,6 +461,21 @@ mod tests {
         assert_eq!(hook["allowedEnvVars"][0], "ONSAGER_SESSION_TOKEN");
         // Short timeout so a blip fails open promptly.
         assert_eq!(hook["timeout"], 10);
+    }
+
+    #[test]
+    fn stop_hook_url_uses_amp_when_base_already_has_query() {
+        // A base URL carrying its own query string must stay valid —
+        // append with `&`, not a second `?`.
+        let json = stop_hook_settings_json("https://h.example/live?env=prod", "ws_1", "s_1");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let url = v["hooks"]["Stop"][0]["hooks"][0]["url"].as_str().unwrap();
+        assert_eq!(
+            url,
+            "https://h.example/live?env=prod&workspace_id=ws_1&session_id=s_1"
+        );
+        // Exactly one `?` in the final URL.
+        assert_eq!(url.matches('?').count(), 1);
     }
 
     #[test]
