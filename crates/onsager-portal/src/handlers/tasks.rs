@@ -50,6 +50,13 @@ pub struct TaskDispatchPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
     pub user_id: String,
+    /// Workspace-scoped session token (spec #531), **encrypted** with the
+    /// shared credential key. Stiglab decrypts it at dispatch and injects
+    /// it as `ONSAGER_SESSION_TOKEN` so the agent can reach portal's MCP
+    /// surface + the liveness Stop hook. `None` when the session is
+    /// unscoped or no credential key is configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encrypted_session_token: Option<String>,
 }
 
 /// POST /api/tasks — create a task and its initial session.
@@ -191,6 +198,33 @@ pub async fn create_task(
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
 
+    // Mint a workspace-scoped session token (spec #531) so the agent can
+    // reach portal's MCP surface + the liveness Stop hook. Requires both a
+    // workspace scope and a configured credential key; absent either, the
+    // session runs without a token (the authoritative gate still applies).
+    let encrypted_session_token = match (
+        workspace_id.as_deref(),
+        state.config.credential_key.as_deref(),
+    ) {
+        (Some(ws), Some(key)) => {
+            match crate::session_token::mint_for_session(&state.pool, key, user_id, ws, &session.id)
+                .await
+            {
+                Ok(token) => Some(token),
+                Err(e) => {
+                    // Non-fatal: the session can still run; it just can't
+                    // emit via MCP and the Stop hook will fail open.
+                    tracing::error!(
+                        session_id = %session.id,
+                        "failed to mint session token: {e}"
+                    );
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+
     // Emit portal.session_requested so stiglab's listener can pick up the
     // session, fetch credentials, and dispatch to the agent WebSocket.
     let dispatch = TaskDispatchPayload {
@@ -206,6 +240,7 @@ pub async fn create_task(
         permission_mode: task.permission_mode.clone(),
         workspace_id: workspace_id.clone(),
         user_id: user_id.to_string(),
+        encrypted_session_token,
     };
 
     let ws_id = workspace_id.as_deref().unwrap_or("default");

@@ -479,6 +479,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let activation_spine = state.spine.clone();
     let reconciliation_pool = state.pool.clone();
     let reconciliation_spine = state.spine.clone();
+    let revoke_pool = state.pool.clone();
+    let revoke_spine = state.spine.clone();
     let activation_is_oss = !state
         .config
         .deployment
@@ -495,6 +497,16 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             crate::listeners::session_completed::run(listener_pool, listener_spine).await
         {
             tracing::error!("portal: session_completed listener exited: {e}");
+        }
+    });
+
+    // Spawn the revoke-session-token-on-end listener (spec #531). Soft-
+    // revokes a session's workspace-scoped PAT the moment its session
+    // reaches a terminal state, tightening the expiry backstop.
+    tokio::spawn(async move {
+        if let Err(e) = crate::listeners::session_token_revoke::run(revoke_pool, revoke_spine).await
+        {
+            tracing::error!("portal: session_token_revoke listener exited: {e}");
         }
     });
 
