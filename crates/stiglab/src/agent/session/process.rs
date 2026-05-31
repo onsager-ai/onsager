@@ -446,7 +446,10 @@ mod tests {
         assert!(url.contains("workspace_id=ws_123"));
         assert!(url.contains("session_id=sess_abc"));
         // Token is interpolated from env at call time, never inlined.
-        assert_eq!(hook["headers"]["Authorization"], "Bearer $ONSAGER_SESSION_TOKEN");
+        assert_eq!(
+            hook["headers"]["Authorization"],
+            "Bearer $ONSAGER_SESSION_TOKEN"
+        );
         assert_eq!(hook["allowedEnvVars"][0], "ONSAGER_SESSION_TOKEN");
         // Short timeout so a blip fails open promptly.
         assert_eq!(hook["timeout"], 10);
