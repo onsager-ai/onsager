@@ -540,6 +540,13 @@ pub enum FactoryEventKind {
         /// `ArtifactId`s the executor materialized — order matches the
         /// node's declared output edges.
         output_artifact_ids: Vec<ArtifactId>,
+        /// `Some(true)` when the executor declared it produced nothing
+        /// on purpose (an intentional empty delivery), distinguishing
+        /// it from "delivered nothing" (`output_artifact_ids` empty,
+        /// field absent). Populated by the authoritative gate (§4c,
+        /// #520); `None` until then so behavior is unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declared_empty: Option<bool>,
     },
 
     /// A node's executor returned Err. The scheduler aborts the plan

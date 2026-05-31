@@ -693,6 +693,7 @@ A node finished successfully; the scheduler persisted each output artifact under
 | `plan_id` | `String` |  |
 | `node_id` | `NodeId` |  |
 | `output_artifact_ids` | `Vec<ArtifactId>` | `ArtifactId`s the executor materialized — order matches the node's declared output edges. |
+| `declared_empty` | `Option<bool>` | `Some(true)` when the executor declared it produced nothing on purpose (an intentional empty delivery), distinguishing it from "delivered nothing" (`output_artifact_ids` empty, field absent). Populated by the authoritative gate (§4c, #520); `None` until then so behavior is unchanged. _(optional)_ |
 
 ### `node.failed`
 
