@@ -23,11 +23,19 @@ const LIVENESS_HOOK_URL_ENV: &str = "ONSAGER_LIVENESS_HOOK_URL";
 /// Env var holding the session's workspace-scoped bearer token. The
 /// Stop hook interpolates it into the `Authorization` header at call
 /// time (kept out of the on-disk settings via Claude Code's
-/// `allowedEnvVars`). Provisioning this token into the session env is a
-/// sibling of #520's deferred MCP-config wiring; until it lands the
-/// hook's request is unauthorized → `401` → the hook fails open, which
-/// is the desired degrade-to-authoritative-gate behavior.
+/// `allowedEnvVars`); the MCP server config (spec #531) interpolates the
+/// same var into its `Authorization` header. Provisioned into the session
+/// env by stiglab's dispatch path (decrypted from the
+/// `portal.session_requested` event); when absent the Stop hook's request
+/// is unauthorized → `401` → it fails open (the authoritative gate #523
+/// still applies) and no MCP server is registered.
 const SESSION_TOKEN_ENV: &str = "ONSAGER_SESSION_TOKEN";
+
+/// Env var (read on the agent node) holding portal's MCP endpoint URL,
+/// e.g. `https://app.example.com/mcp/messages`. Unset → no MCP server is
+/// registered (the agent can't emit via MCP, but the session still runs).
+/// Spec #531.
+const MCP_URL_ENV: &str = "ONSAGER_MCP_URL";
 
 /// Build the inline `--settings` JSON that registers the liveness Stop
 /// hook. Pure (no env, no IO) so the wire shape is unit-testable.
@@ -96,6 +104,30 @@ fn urlencode(s: &str) -> String {
         }
     }
     out
+}
+
+/// Build the inline `--mcp-config` JSON registering portal's MCP server
+/// (spec #531) so the agent can call `emit_artifact` / `declare_no_output`
+/// / `read_emit_status`. Pure so the wire shape is unit-testable.
+///
+/// The bearer token is interpolated from `$ONSAGER_SESSION_TOKEN` at
+/// startup (Claude Code expands `${VAR}` in MCP `headers`). This is only
+/// wired when the token is actually present in the env — Claude Code
+/// **fails to parse** an MCP config whose `${VAR}` is unset, so registering
+/// it tokenless would break the whole session rather than degrade.
+fn mcp_config_json(mcp_url: &str) -> String {
+    serde_json::json!({
+        "mcpServers": {
+            "onsager": {
+                "type": "http",
+                "url": mcp_url,
+                "headers": {
+                    "Authorization": format!("Bearer ${{{SESSION_TOKEN_ENV}}}"),
+                },
+            }
+        }
+    })
+    .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +265,21 @@ impl SessionProcess {
         {
             let settings = stop_hook_settings_json(&hook_url_base, workspace_id, session_id);
             cmd.args(["--settings", &settings]);
+        }
+
+        // Portal MCP server (spec #531). Registered only when the MCP URL
+        // is configured AND the session token is present in the env —
+        // Claude Code fails to parse an MCP config whose `${VAR}` is unset,
+        // so a tokenless registration would break the session rather than
+        // degrade. Absent either, the agent runs without MCP (no emit
+        // path); the authoritative gate (#523) still covers liveness.
+        let has_session_token = credentials.is_some_and(|c| c.contains_key(SESSION_TOKEN_ENV));
+        if let Ok(mcp_url) = std::env::var(MCP_URL_ENV)
+            && !mcp_url.is_empty()
+            && has_session_token
+        {
+            let mcp_config = mcp_config_json(&mcp_url);
+            cmd.args(["--mcp-config", &mcp_config]);
         }
 
         // Separator + prompt
@@ -491,6 +538,20 @@ mod tests {
         );
         // Exactly one `?` in the final URL.
         assert_eq!(url.matches('?').count(), 1);
+    }
+
+    #[test]
+    fn mcp_config_registers_http_server_with_interpolated_token() {
+        let json = mcp_config_json("https://app.example.com/mcp/messages");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let server = &v["mcpServers"]["onsager"];
+        assert_eq!(server["type"], "http");
+        assert_eq!(server["url"], "https://app.example.com/mcp/messages");
+        // Token interpolated from env at startup, never inlined.
+        assert_eq!(
+            server["headers"]["Authorization"],
+            "Bearer ${ONSAGER_SESSION_TOKEN}"
+        );
     }
 
     #[test]
