@@ -35,6 +35,10 @@ pub fn shaping_request_to_task(req: &onsager_spine::protocol::ShapingRequest) ->
         model,
         system_prompt: None,
         permission_mode,
+        // `ShapingRequest` carries no workspace scope; the liveness Stop
+        // hook is skipped for shaping sessions and the authoritative
+        // gate (#523) alone covers liveness.
+        workspace_id: None,
         created_at: Utc::now(),
     }
 }
@@ -234,6 +238,7 @@ mod tests {
             model: Some("claude-sonnet-4-20250514".to_string()),
             system_prompt: None,
             permission_mode: None,
+            workspace_id: None,
             created_at: Utc::now(),
         };
 

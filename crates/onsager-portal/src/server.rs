@@ -15,7 +15,8 @@ use crate::handlers::{
     nodes as node_handlers, pats as pat_handlers, projects as project_handlers,
     push as push_handlers, registry_events as registry_event_handlers,
     registry_triggers as registry_trigger_handlers, runs as run_handlers,
-    sessions as session_handlers, showcase as showcase_handlers, spine as spine_handlers,
+    session_liveness as session_liveness_handlers, sessions as session_handlers,
+    showcase as showcase_handlers, spine as spine_handlers,
     tasks as task_handlers, telegram_webhook, triggers as trigger_handlers, webhook,
     webhook_health as webhook_health_handlers, workflow_kinds as workflow_kind_handlers,
     workflow_views as workflow_view_handlers, workflows as workflow_handlers,
@@ -448,7 +449,19 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // the `AuthUser` extractor (PAT or session); workspace-scoped
         // tools call `tools::require_workspace_access` before
         // delegating. The dispatcher's `/mcp/*` block forwards here.
-        .route("/mcp/messages", post(crate::mcp::handle_messages));
+        .route("/mcp/messages", post(crate::mcp::handle_messages))
+        // In-session liveness gate (spec #520 §4d / #525). The agent
+        // session's Claude Code Stop hook POSTs here before finishing;
+        // we evaluate the session manifest (`session:<id>` in
+        // `events_ext`) and return allow (empty 2xx) or block
+        // (`{ decision, reason }`). Auth reuses the `AuthUser` extractor
+        // like the MCP tools that write the manifest; a non-2xx (e.g.
+        // 401 before session-token provisioning lands) fails the hook
+        // open, and the authoritative gate (#523) is the real guard.
+        .route(
+            "/api/internal/session-liveness",
+            post(session_liveness_handlers::evaluate),
+        );
 
     // Dev-login: always in debug builds; in release only when
     // DEV_LOGIN_ENABLED=true (Railway preview environments).

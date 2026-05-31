@@ -124,6 +124,7 @@ impl Dispatcher {
             model: payload.model.clone(),
             system_prompt: payload.system_prompt.clone(),
             permission_mode: payload.permission_mode.clone(),
+            workspace_id: payload.workspace_id.clone(),
             created_at: session.created_at,
         };
 

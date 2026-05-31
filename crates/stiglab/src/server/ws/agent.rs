@@ -210,6 +210,10 @@ async fn dispatch_pending_for_node(state: &AppState, node_id: &str, tx: &WsSende
             model: None,
             system_prompt: None,
             permission_mode: None,
+            // Shaping redispatch carries no workspace scope (all
+            // task-level fields are `None` for the original request);
+            // liveness then rests on the authoritative gate (#523).
+            workspace_id: None,
             created_at: session.created_at,
         };
         let msg = ServerMessage::DispatchTask {
