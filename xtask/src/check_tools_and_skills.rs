@@ -106,6 +106,24 @@ const PENDING_SKILL_GRANTS: &[(&str, &str)] = &[
         "run_spec_plan",
         "spec #501 — pending `onsager-author-substrate` skill",
     ),
+    // Spec #520 §4a / #521 — session output-manifest tools. Invoked by
+    // the agent session runtime, not from a public user-facing skill;
+    // their operating procedure lives in the session prompt + Stop hook
+    // (#520 §4d), not the `onsager-skills` bundle. Exempt rather than
+    // granted because there is no user-facing skill that should list
+    // them.
+    (
+        "emit_artifact",
+        "spec #521 — agent-session tool, no user-facing skill grant",
+    ),
+    (
+        "declare_no_output",
+        "spec #521 — agent-session tool, no user-facing skill grant",
+    ),
+    (
+        "read_emit_status",
+        "spec #521 — agent-session tool, no user-facing skill grant",
+    ),
 ];
 
 pub fn run() -> Result<()> {
