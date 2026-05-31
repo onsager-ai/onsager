@@ -23,7 +23,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use onsager_artifact::{Artifact, Kind, Provenance, SourceTag};
+use chrono::Utc;
+use onsager_artifact::{Artifact, ArtifactVersion, Kind, Provenance, SourceTag};
 use onsager_substrate::events as se;
 use onsager_substrate::executor::Executor as SubstrateExecutor;
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,7 @@ use uuid::Uuid;
 use crate::context::{ExecutorContext, ExecutorOutputs};
 use crate::error::ExecutorError;
 use crate::executor::Executor;
+use crate::spine::{EmittedArtifact, SessionManifest};
 
 /// LLM-agent executor.
 ///
@@ -120,17 +122,33 @@ pub struct AgentRequest {
     /// artifact. The v1 assembler is intentionally crude; the full
     /// templating story lands with the scheduler (RUN-01, #359).
     pub user_prompt: String,
+    /// Identifier for this agent session. The executor mints it and
+    /// hands it to the runner so the agent's execution environment
+    /// attributes its `emit_artifact` / `declare_no_output` MCP calls
+    /// to the same `session:<id>` manifest stream the executor reads
+    /// back authoritatively (spec #520 §4b/§4c).
+    pub session_id: String,
 }
 
 /// Response returned by an [`AgentRunner`].
 ///
-/// The agent session's final assistant text is the only piece the
-/// executor commits to today — tool-call traces and intermediate
-/// messages are an observability concern, not part of the artifact
-/// the executor emits.
+/// The agent session's final assistant text is carried in `output`.
+/// Per spec #520 §4b the response is *widened* to also surface the
+/// outputs the session emitted via `emit_artifact` — an **optimization
+/// channel only**. The authoritative source of "what came out" is the
+/// `events_ext` manifest, which [`AgentExecutor::execute`] reads back
+/// directly (spec #520 §4c). A runner that can't cheaply surface the
+/// emitted refs (e.g. the stiglab NDJSON stdout stream, where emits
+/// flow out-of-band through MCP) leaves `emitted` empty and the gate
+/// still works off the manifest.
 #[derive(Debug, Clone)]
 pub struct AgentResponse {
     pub output: String,
+    /// Outputs the runner observed the session emit. Optimization only
+    /// — never the authoritative source (see struct docs); the
+    /// executor cross-checks it against the manifest and warns on
+    /// divergence.
+    pub emitted: Vec<EmittedArtifact>,
 }
 
 /// Error returned by an [`AgentRunner::run`] call.
@@ -198,6 +216,10 @@ impl AgentRunner for StubAgentRunner {
     async fn run(&self, _request: AgentRequest) -> Result<AgentResponse, AgentRunError> {
         Ok(AgentResponse {
             output: self.output.clone(),
+            // The stub reports "session over" only — the manifest (set
+            // up by the test's `MockSpine`) is the authoritative source
+            // the gate reads (spec #520 §4c).
+            emitted: Vec::new(),
         })
     }
 }
@@ -238,20 +260,22 @@ impl Executor for AgentExecutor {
     }
 
     async fn execute(&self, ctx: ExecutorContext) -> Result<ExecutorOutputs, ExecutorError> {
-        let request = AgentRequest {
-            model: self.model.clone(),
-            system_prompt: self.system_prompt.clone(),
-            tools: self.tools.clone(),
-            credential_ref: self.credential_ref.clone(),
-            user_prompt: render_user_prompt(&ctx),
-        };
-
         // RUN-02 (#360) lifecycle events. `plan_id` comes off
         // `ExecutorContext`, populated by the scheduler so the
         // spine envelope's `stream_id` (`plan:<plan>:<node>`)
         // correlates verdicts back to a specific run.
         let plan_id = ctx.plan_id.as_str().to_string();
         let session_id = Uuid::new_v4().to_string();
+
+        let request = AgentRequest {
+            model: self.model.clone(),
+            system_prompt: self.system_prompt.clone(),
+            tools: self.tools.clone(),
+            credential_ref: self.credential_ref.clone(),
+            user_prompt: render_user_prompt(&ctx),
+            session_id: session_id.clone(),
+        };
+
         emit_event(
             &ctx,
             se::KIND_AGENT_SESSION_STARTED,
@@ -286,9 +310,9 @@ impl Executor for AgentExecutor {
             &ctx,
             se::KIND_AGENT_SESSION_COMPLETED,
             &se::AgentSessionCompleted {
-                plan_id,
+                plan_id: plan_id.clone(),
                 node_id: ctx.node_id,
-                session_id,
+                session_id: session_id.clone(),
                 // Token usage is not surfaced through `AgentResponse`
                 // yet; the live runner will fill it in via a runner-
                 // side hook in a follow-up. Leaving `None` keeps the
@@ -298,24 +322,79 @@ impl Executor for AgentExecutor {
         )
         .await;
 
-        let mut artifact = Artifact::new(
-            Kind::Document,
-            "agent-output",
-            "agent",
-            ctx.node_id.to_string(),
-            Vec::new(),
-        );
-        artifact.provenance = Executor::declared_provenance(self, &[]);
-        artifact.produced_by_node = Some(ctx.node_id);
-        // The response body lives on an `ArtifactVersion`; full
-        // version persistence (content-ref, change summary) lands
-        // with the scheduler (RUN-01, #359). For now, route the
-        // body through the artifact's `name` slot so the test
-        // harness can assert it.
-        artifact.name = response.output;
+        // ---------------------------------------------------------------
+        // Authoritative liveness gate (spec #520 §4c).
+        //
+        // The manifest — not the runner's response — is the source of
+        // truth for "what came out". Read it back over the spine port;
+        // the deployed adapter queries the `events_ext` `session:<id>`
+        // stream the agent's MCP `emit_artifact` / `declare_no_output`
+        // calls wrote to. This judgment does not depend on the in-
+        // session Stop hook (§4d) having fired.
+        // ---------------------------------------------------------------
+        let manifest = ctx
+            .spine
+            .read_session_manifest(&session_id)
+            .await
+            .map_err(|e| {
+                ExecutorError::failed(format!(
+                    "agent liveness gate: failed to read session manifest for {session_id}: {e}"
+                ))
+            })?;
 
-        let artifact_id = artifact.artifact_id.clone();
-        Ok(ExecutorOutputs::single(artifact_id, artifact))
+        // The widened response (spec #520 §4b) is an optimization
+        // channel only; cross-check it against the authoritative
+        // manifest and warn on divergence rather than trusting it.
+        cross_check_response(&ctx, &response, &manifest);
+
+        if manifest.emitted.is_empty() {
+            if manifest.declared_empty {
+                // Declared empty on purpose — finish cleanly with no
+                // artifacts, flagging the intentional empty delivery so
+                // the dashboard / scheduler can distinguish it from a
+                // silent nothing (§4e `node.completed.declared_empty`).
+                return Ok(ExecutorOutputs::declared_empty());
+            }
+            // Neither delivered nor declared empty — escalate. Reuse the
+            // existing human-escalation channel (do not invent a new
+            // one) and park the run via the Escalate-flavored
+            // `ExecutorError::Failed`, consistent with
+            // `VerifyExecutor`'s `FailPolicy::Escalate`.
+            emit_event(
+                &ctx,
+                se::KIND_NODE_AWAITING_HUMAN,
+                &se::NodeAwaitingHuman {
+                    plan_id,
+                    node_id: ctx.node_id,
+                    prompt: "Agent session ended with no output and no explicit no-output \
+                             declaration — forgotten, or genuinely nothing to deliver? Confirm."
+                        .to_string(),
+                },
+            )
+            .await;
+            return Err(ExecutorError::failed(format!(
+                "agent liveness gate: escalating — session {session_id} ended with no emitted \
+                 output and no declare_no_output; parked for human decision"
+            )));
+        }
+
+        // Non-empty: package one `Artifact` per emitted record. Each is
+        // stamped `Provenance::Uncertain { source: Agent }` HERE — never
+        // read from the manifest. Only a Verify node may upgrade
+        // provenance (ADR 0010 / ADR 0018 invariant 2); liveness is not
+        // a Verify node.
+        let artifacts: Vec<_> = manifest
+            .emitted
+            .iter()
+            .map(|rec| {
+                let (id, art) = build_emitted_artifact(self, ctx.node_id, &session_id, rec);
+                (id, art)
+            })
+            .collect();
+        Ok(ExecutorOutputs {
+            artifacts,
+            declared_empty: None,
+        })
     }
 }
 
@@ -350,6 +429,100 @@ fn render_user_prompt(ctx: &ExecutorContext) -> String {
     out
 }
 
+/// Build one DAG `Artifact` from a manifest-emitted record (spec #520
+/// §4c). The agent-supplied `content_ref` lands on an
+/// [`ArtifactVersion`]; provenance is stamped
+/// `Provenance::Uncertain { source: Agent }` here — never trusted from
+/// the manifest.
+fn build_emitted_artifact(
+    exec: &AgentExecutor,
+    node_id: onsager_artifact::NodeId,
+    session_id: &str,
+    rec: &EmittedArtifact,
+) -> (onsager_artifact::ArtifactId, Artifact) {
+    let name = if rec.summary.is_empty() {
+        "agent-output".to_string()
+    } else {
+        rec.summary.clone()
+    };
+    let mut artifact = Artifact::new(
+        kind_from_str(&rec.kind),
+        name,
+        "agent",
+        node_id.to_string(),
+        Vec::new(),
+    );
+    // Stamped HERE, not read from the manifest (spec #520 §4c, ADR 0010
+    // / ADR 0018 invariant 2). If this were ever sourced from the
+    // agent-controlled record, the agent could self-certify
+    // `Deterministic` — the mutation test guards against exactly that.
+    artifact.provenance = Executor::declared_provenance(exec, &[]);
+    artifact.produced_by_node = Some(node_id);
+    // Carry the agent-supplied content pointer on a first version.
+    artifact.versions.push(ArtifactVersion {
+        version: 1,
+        created_at: Utc::now(),
+        created_by_session: session_id.to_string(),
+        content_ref: rec.content_ref.clone(),
+        change_summary: rec.summary.clone(),
+        parent_version: None,
+    });
+    artifact.current_version = 1;
+    let id = artifact.artifact_id.clone();
+    (id, artifact)
+}
+
+/// Map a manifest `kind` tag onto the [`Kind`] enum, mirroring
+/// [`Kind`]'s `Display`. Unknown tags become [`Kind::Custom`] — the
+/// kind set is typed but open.
+fn kind_from_str(kind: &str) -> Kind {
+    match kind {
+        "code" => Kind::Code,
+        "document" => Kind::Document,
+        "pull_request" => Kind::PullRequest,
+        "github_issue" => Kind::GithubIssue,
+        other => Kind::Custom(other.to_string()),
+    }
+}
+
+/// Cross-check the runner's optimization-channel `emitted` refs (spec
+/// #520 §4b) against the authoritative manifest. The manifest always
+/// wins; a divergence means the runner's fast-path view drifted from
+/// the recorded truth — log it so the drift is visible without
+/// stalling the run. A runner that reports nothing (the common case —
+/// emits flow out-of-band through MCP) is silently fine.
+fn cross_check_response(
+    ctx: &ExecutorContext,
+    response: &AgentResponse,
+    manifest: &SessionManifest,
+) {
+    if response.emitted.is_empty() {
+        return;
+    }
+    let mut from_response: Vec<&str> = response
+        .emitted
+        .iter()
+        .map(|e| e.content_ref.uri.as_str())
+        .collect();
+    let mut from_manifest: Vec<&str> = manifest
+        .emitted
+        .iter()
+        .map(|e| e.content_ref.uri.as_str())
+        .collect();
+    from_response.sort_unstable();
+    from_manifest.sort_unstable();
+    if from_response != from_manifest {
+        tracing::warn!(
+            plan = %ctx.plan_id,
+            node = %ctx.node_id,
+            response_emits = from_response.len(),
+            manifest_emits = from_manifest.len(),
+            "agent runner response.emitted diverged from the authoritative manifest; \
+             using the manifest",
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -359,14 +532,53 @@ mod tests {
     use super::*;
     use crate::registry::ExecutorRegistry;
     use crate::spine::test_support::MockSpine;
-    use onsager_artifact::{ArtifactId, NodeId};
+    use onsager_artifact::{ArtifactId, ContentRef, NodeId};
 
     fn agent_with_stub(output: &str) -> AgentExecutor {
         AgentExecutor::new("claude-sonnet-4-6", "you are helpful")
             .with_runner(Arc::new(StubAgentRunner::new(output)))
     }
 
+    /// A manifest carrying a single emitted output — the "agent
+    /// delivered" case for the liveness gate.
+    fn manifest_one_emit() -> SessionManifest {
+        SessionManifest {
+            emitted: vec![EmittedArtifact {
+                artifact_id: "art_emit_1".into(),
+                content_ref: ContentRef {
+                    uri: "inline:base64,aGVsbG8=".into(),
+                    checksum: Some("abc123".into()),
+                },
+                kind: "document".into(),
+                summary: "the agent said hello".into(),
+            }],
+            declared_empty: false,
+        }
+    }
+
+    /// A context whose spine serves `manifest` from
+    /// `read_session_manifest`. Returns the concrete [`MockSpine`] too so
+    /// tests can read back the lifecycle events the executor emitted.
+    fn ctx_with_manifest(
+        node_id: NodeId,
+        manifest: SessionManifest,
+    ) -> (ExecutorContext, Arc<MockSpine>) {
+        let mock = Arc::new(MockSpine::with_manifest(manifest));
+        let ctx = ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
+            node_id,
+            inputs: Vec::new(),
+            spine: Arc::clone(&mock) as Arc<dyn crate::SpineClient>,
+            subworkflow_ref: None,
+        };
+        (ctx, mock)
+    }
+
     fn empty_ctx() -> ExecutorContext {
+        // Default MockSpine serves an empty (no-emit, not-declared)
+        // manifest — the liveness-gate trip condition. Tests that
+        // expect `execute` to reach the gate use the manifest-aware
+        // constructors above instead.
         ExecutorContext {
             plan_id: crate::scheduler::PlanId::generate(),
             node_id: NodeId::generate(),
@@ -425,21 +637,27 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------
+    // Authoritative liveness gate (spec #520 §4c).
+    // -----------------------------------------------------------------
+
     #[tokio::test]
-    async fn execute_returns_uncertain_agent_artifact() {
-        let exec = agent_with_stub("the agent said hello");
+    async fn execute_packages_emitted_manifest_record_as_uncertain_agent_artifact() {
+        // Stub runner reports "session over"; the manifest carries one
+        // emitted output. The gate packages it onto the DAG.
+        let exec = agent_with_stub("final assistant text");
         let node_id = NodeId::generate();
-        let ctx = ExecutorContext {
-            plan_id: crate::scheduler::PlanId::generate(),
-            node_id,
-            inputs: Vec::new(),
-            spine: Arc::new(MockSpine::default()),
-            subworkflow_ref: None,
-        };
+        let (ctx, _spine) = ctx_with_manifest(node_id, manifest_one_emit());
 
         let outputs = exec.execute(ctx).await.unwrap();
+        // node.completed.output_artifact_ids will be non-empty.
         assert_eq!(outputs.artifacts.len(), 1);
+        assert_eq!(outputs.declared_empty, None);
         let (_id, art) = &outputs.artifacts[0];
+        // Mutation guard: provenance is STAMPED here as
+        // Uncertain { Agent }, never read from the manifest. Forcing
+        // this to `Deterministic` in `build_emitted_artifact` fails
+        // this assertion (spec #520 §4c).
         assert_eq!(
             art.provenance,
             Provenance::Uncertain {
@@ -447,8 +665,65 @@ mod tests {
             }
         );
         assert_eq!(art.produced_by_node, Some(node_id));
-        // Stubbed runner output flows through.
-        assert_eq!(art.name, "the agent said hello");
+        // The agent-supplied content_ref rides on a first version.
+        assert_eq!(art.current_version, 1);
+        assert_eq!(art.versions.len(), 1);
+        assert_eq!(art.versions[0].content_ref.uri, "inline:base64,aGVsbG8=");
+        assert_eq!(art.kind, Kind::Document);
+    }
+
+    #[tokio::test]
+    async fn execute_escalates_when_empty_and_not_declared() {
+        // No emits, no declaration → emit node.awaiting_human + return
+        // the Escalate path.
+        let exec = agent_with_stub("i did some thinking but never emitted");
+        let node_id = NodeId::generate();
+        let (ctx, spine) = ctx_with_manifest(node_id, SessionManifest::default());
+
+        let err = exec.execute(ctx).await.unwrap_err();
+        match err {
+            ExecutorError::Failed(msg) => {
+                assert!(msg.contains("escalating"), "{msg}");
+                assert!(msg.contains("no emitted output"), "{msg}");
+            }
+            other => panic!("expected ExecutorError::Failed, got {other:?}"),
+        }
+
+        // node.awaiting_human was emitted on the existing escalation
+        // channel.
+        let emitted = spine.emitted.lock().unwrap();
+        assert!(
+            emitted
+                .iter()
+                .any(|(k, _)| k == se::KIND_NODE_AWAITING_HUMAN),
+            "expected node.awaiting_human emit, got: {emitted:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_finishes_clean_when_declared_empty() {
+        // No emits but an explicit declaration → clean finish, no
+        // artifacts, no escalation, declared_empty signal set.
+        let exec = agent_with_stub("nothing to deliver this time");
+        let node_id = NodeId::generate();
+        let manifest = SessionManifest {
+            emitted: Vec::new(),
+            declared_empty: true,
+        };
+        let (ctx, spine) = ctx_with_manifest(node_id, manifest);
+
+        let outputs = exec.execute(ctx).await.unwrap();
+        assert!(outputs.artifacts.is_empty());
+        // Surfaces as node.completed.declared_empty = Some(true) (§4e).
+        assert_eq!(outputs.declared_empty, Some(true));
+        // No escalation.
+        let emitted = spine.emitted.lock().unwrap();
+        assert!(
+            !emitted
+                .iter()
+                .any(|(k, _)| k == se::KIND_NODE_AWAITING_HUMAN),
+            "declared-empty must not escalate, got: {emitted:?}"
+        );
     }
 
     #[tokio::test]
@@ -465,6 +740,7 @@ mod tests {
                 *self.request.lock().unwrap() = Some(request);
                 Ok(AgentResponse {
                     output: "ok".into(),
+                    emitted: Vec::new(),
                 })
             }
         }
@@ -477,11 +753,17 @@ mod tests {
 
         let input_id = ArtifactId::new("art_input_1");
         let input_art = Artifact::new(Kind::Document, "upstream", "owner", "test", Vec::new());
+        // Declared-empty manifest so the gate lets `execute` return Ok;
+        // this test only asserts the assembled request.
+        let mock = Arc::new(MockSpine::with_manifest(SessionManifest {
+            emitted: Vec::new(),
+            declared_empty: true,
+        }));
         let ctx = ExecutorContext {
             plan_id: crate::scheduler::PlanId::generate(),
             node_id: NodeId::generate(),
             inputs: vec![(input_id.clone(), input_art)],
-            spine: Arc::new(MockSpine::default()),
+            spine: mock as Arc<dyn crate::SpineClient>,
             subworkflow_ref: None,
         };
 
@@ -496,6 +778,11 @@ mod tests {
             request.user_prompt.contains(input_id.as_str()),
             "user prompt should reference the upstream artifact id, got: {}",
             request.user_prompt
+        );
+        // The executor minted a session id and threaded it to the runner.
+        assert!(
+            !request.session_id.is_empty(),
+            "session_id must be threaded to the runner (spec #520 §4b)"
         );
     }
 
@@ -642,18 +929,55 @@ mod tests {
         assert_eq!(exec.executor_kind(), "agent");
 
         let node_id = NodeId::generate();
-        let ctx = ExecutorContext {
-            plan_id: crate::scheduler::PlanId::generate(),
-            node_id,
-            inputs: Vec::new(),
-            spine: Arc::new(MockSpine::default()),
-            subworkflow_ref: None,
-        };
+        let (ctx, _spine) = ctx_with_manifest(node_id, manifest_one_emit());
         let outputs = exec.execute(ctx).await.unwrap();
         let (_id, art) = &outputs.artifacts[0];
         assert!(art.provenance.is_uncertain());
         assert_eq!(art.provenance.source(), SourceTag::Agent);
         assert_eq!(art.produced_by_node, Some(node_id));
+    }
+
+    // -----------------------------------------------------------------
+    // §4b — widened response is an optimization, manifest is authority.
+    // -----------------------------------------------------------------
+
+    #[tokio::test]
+    async fn manifest_is_authoritative_regardless_of_response_emitted() {
+        // A runner that surfaces emitted refs on the response.
+        #[derive(Debug)]
+        struct EmittingRunner(Vec<EmittedArtifact>);
+        #[async_trait]
+        impl AgentRunner for EmittingRunner {
+            async fn run(&self, _r: AgentRequest) -> Result<AgentResponse, AgentRunError> {
+                Ok(AgentResponse {
+                    output: "done".into(),
+                    emitted: self.0.clone(),
+                })
+            }
+        }
+
+        let manifest = manifest_one_emit();
+        let node_id = NodeId::generate();
+
+        // Run A: runner reports the same emit the manifest has.
+        let exec_a = AgentExecutor::new("m", "p")
+            .with_runner(Arc::new(EmittingRunner(manifest.emitted.clone())));
+        let (ctx_a, _) = ctx_with_manifest(node_id, manifest.clone());
+        let out_a = exec_a.execute(ctx_a).await.unwrap();
+
+        // Run B: runner reports NOTHING on the response, but the
+        // manifest still carries the emit. Behavior must be identical —
+        // the executor reads the manifest, not the response.
+        let exec_b = AgentExecutor::new("m", "p").with_runner(Arc::new(EmittingRunner(Vec::new())));
+        let (ctx_b, _) = ctx_with_manifest(node_id, manifest.clone());
+        let out_b = exec_b.execute(ctx_b).await.unwrap();
+
+        assert_eq!(out_a.artifacts.len(), out_b.artifacts.len());
+        assert_eq!(out_a.artifacts.len(), 1);
+        assert_eq!(
+            out_a.artifacts[0].1.versions[0].content_ref,
+            out_b.artifacts[0].1.versions[0].content_ref,
+        );
     }
 
     /// Compile-time check: the runtime trait is still object-safe

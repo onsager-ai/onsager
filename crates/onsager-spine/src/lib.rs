@@ -37,6 +37,7 @@ pub mod factory_event;
 pub mod listener;
 pub mod namespace;
 pub mod protocol;
+pub mod session_manifest;
 pub mod store;
 pub mod trigger;
 pub mod webhook_routing;

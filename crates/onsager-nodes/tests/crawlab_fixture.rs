@@ -32,10 +32,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use onsager_artifact::{Artifact, ArtifactId, Provenance, SourceTag};
+use onsager_artifact::{Artifact, ArtifactId, ContentRef, Provenance, SourceTag};
 use onsager_nodes::{
-    AgentExecutor, ExecutorRegistry, InMemoryPlanStore, NodeState, PlanId, PlanStore, Scheduler,
-    ScriptExecutor, SpineClient, SpineError, StubAgentRunner, VerifyExecutor,
+    AgentExecutor, EmittedArtifact, ExecutorRegistry, InMemoryPlanStore, NodeState, PlanId,
+    PlanStore, Scheduler, ScriptExecutor, SessionManifest, SpineClient, SpineError,
+    StubAgentRunner, VerifyExecutor,
 };
 use onsager_nodes::{Check, FailPolicy};
 use onsager_substrate::NodeId;
@@ -193,6 +194,27 @@ impl SpineClient for ObservingSpine {
 
     async fn read_artifact(&self, _: &ArtifactId) -> Result<Option<Artifact>, SpineError> {
         Ok(None)
+    }
+
+    /// Serve a single-emit manifest for every session: the fixture's
+    /// agent "delivered" its analysis via `emit_artifact`, so the
+    /// authoritative liveness gate (spec #520 §4c) packages that one
+    /// output onto the agent node's single output edge. (Without an
+    /// emit the gate would correctly escalate — exercised by the
+    /// `AgentExecutor` unit tests, not this end-to-end pipeline.)
+    async fn read_session_manifest(&self, session_id: &str) -> Result<SessionManifest, SpineError> {
+        Ok(SessionManifest {
+            emitted: vec![EmittedArtifact {
+                artifact_id: format!("art_{session_id}"),
+                content_ref: ContentRef {
+                    uri: "inline:base64,YW5hbHlzaXM=".into(),
+                    checksum: None,
+                },
+                kind: "document".into(),
+                summary: "crawlab analysis".into(),
+            }],
+            declared_empty: false,
+        })
     }
 }
 

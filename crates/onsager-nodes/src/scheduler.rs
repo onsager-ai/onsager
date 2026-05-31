@@ -455,6 +455,11 @@ impl Scheduler {
         };
         match dispatch(&self.registry, node, ctx).await {
             Ok(outputs) => {
+                // Capture the no-output declaration before the outputs
+                // are consumed by persistence — the authoritative
+                // liveness gate (spec #520 §4c) sets it on the
+                // `AgentExecutor`'s empty-but-declared path.
+                let declared_empty = outputs.declared_empty;
                 let output_artifact_ids =
                     self.persist_outputs(plan_id, plan, node, outputs).await?;
                 state.insert(node.id, NodeState::Completed);
@@ -462,7 +467,7 @@ impl Scheduler {
                     .set_node_state(plan_id, node.id, NodeState::Completed)
                     .await
                     .map_err(|e| SchedulerError::Store(e.0))?;
-                self.emit_completed(plan_id, node.id, output_artifact_ids)
+                self.emit_completed(plan_id, node.id, output_artifact_ids, declared_empty)
                     .await;
                 Ok(())
             }
@@ -496,14 +501,16 @@ impl Scheduler {
         plan_id: &PlanId,
         node_id: NodeId,
         output_artifact_ids: Vec<ArtifactId>,
+        declared_empty: Option<bool>,
     ) {
         let payload = se::NodeCompleted {
             plan_id: plan_id.as_str().to_string(),
             node_id,
             output_artifact_ids,
-            // Populated by the authoritative gate (§4c, #520); `None`
-            // here keeps behavior unchanged.
-            declared_empty: None,
+            // Set by the authoritative liveness gate (§4c, #520) on the
+            // `AgentExecutor`'s empty-but-declared path; `None` for
+            // every other executor.
+            declared_empty,
         };
         self.emit(plan_id, node_id, EVENT_NODE_COMPLETED, &payload)
             .await;
@@ -865,6 +872,78 @@ mod tests {
         assert!(
             seen.contains(&external_input),
             "entry node executor should have received its declared input artifact, saw: {seen:?}",
+        );
+    }
+
+    /// Executor that declares it produced nothing on purpose — the
+    /// `AgentExecutor`'s declared-empty path (spec #520 §4c). Registers
+    /// under `noop` to override the default.
+    #[derive(Debug)]
+    struct DeclaredEmptyExecutor;
+
+    #[async_trait]
+    impl crate::Executor for DeclaredEmptyExecutor {
+        fn executor_kind(&self) -> &'static str {
+            "noop"
+        }
+        fn declared_provenance(
+            &self,
+            _: &[onsager_artifact::Provenance],
+        ) -> onsager_artifact::Provenance {
+            onsager_artifact::Provenance::external_deterministic()
+        }
+        async fn execute(
+            &self,
+            _: ExecutorContext,
+        ) -> Result<crate::context::ExecutorOutputs, ExecutorError> {
+            Ok(crate::context::ExecutorOutputs::declared_empty())
+        }
+    }
+
+    #[tokio::test]
+    async fn declared_empty_outputs_thread_onto_node_completed() {
+        // Single-node plan whose executor declares empty. The emitted
+        // node.completed must carry declared_empty = true (§4c/§4e).
+        let edge_out = EdgeId::generate();
+        let node_id = NodeId::generate();
+        let node = SubstrateNode {
+            id: node_id,
+            executor: Box::new(onsager_substrate::executor::NoOpExecutor),
+            inputs: vec![],
+            outputs: vec![EdgeRef::new(edge_out)],
+        };
+        let plan = ExecutionPlan {
+            nodes: vec![node],
+            edges: vec![Edge {
+                id: edge_out,
+                artifact_id: ArtifactId::new("out"),
+                requires_deterministic: false,
+            }],
+            spec_index: HashMap::new(),
+            entry_inputs: HashMap::new(),
+            node_spec_index: HashMap::new(),
+        };
+
+        let mut registry = ExecutorRegistry::new();
+        registry.register(Arc::new(DeclaredEmptyExecutor));
+        let store = Arc::new(InMemoryPlanStore::new());
+        let spine = Arc::new(MockSpine::default());
+        let scheduler = Scheduler::new(
+            Arc::new(registry),
+            Arc::clone(&store) as Arc<dyn PlanStore>,
+            Arc::clone(&spine) as Arc<dyn SpineClient>,
+        );
+        let plan_id = PlanId::generate();
+        scheduler.run(&plan_id, &plan).await.unwrap();
+
+        let emitted = spine.emitted.lock().unwrap();
+        let (_, payload) = emitted
+            .iter()
+            .find(|(k, _)| k == EVENT_NODE_COMPLETED)
+            .expect("node.completed emit");
+        assert_eq!(
+            payload["declared_empty"], true,
+            "declared_empty must thread onto node.completed, got {payload}"
         );
     }
 

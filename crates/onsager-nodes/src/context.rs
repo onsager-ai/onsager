@@ -65,6 +65,13 @@ pub struct ExecutorContext {
 #[derive(Debug, Default)]
 pub struct ExecutorOutputs {
     pub artifacts: Vec<(ArtifactId, Artifact)>,
+    /// `Some(true)` when the executor produced no artifacts **on
+    /// purpose** — an explicit empty delivery, distinguishing it from
+    /// "delivered nothing" (`artifacts` empty, field `None`). The
+    /// scheduler threads this onto `node.completed.declared_empty`
+    /// (spec #520 §4c/§4e). `None` for every executor that doesn't
+    /// have a no-output concept.
+    pub declared_empty: Option<bool>,
 }
 
 impl ExecutorOutputs {
@@ -78,6 +85,17 @@ impl ExecutorOutputs {
     pub fn single(id: ArtifactId, artifact: Artifact) -> Self {
         Self {
             artifacts: vec![(id, artifact)],
+            declared_empty: None,
+        }
+    }
+
+    /// An empty outputs value that records the executor declared it
+    /// produced nothing on purpose (spec #520 §4c). Surfaces as
+    /// `node.completed.declared_empty = Some(true)`.
+    pub fn declared_empty() -> Self {
+        Self {
+            artifacts: Vec::new(),
+            declared_empty: Some(true),
         }
     }
 }

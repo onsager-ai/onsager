@@ -25,7 +25,7 @@
 
 use async_trait::async_trait;
 use onsager_artifact::{Artifact, ArtifactId};
-use onsager_nodes::{SpineClient, SpineError};
+use onsager_nodes::{EmittedArtifact, SessionManifest, SpineClient, SpineError};
 use onsager_spine::{EventMetadata, EventStore};
 
 /// Substrate-scheduler [`SpineClient`] backed by the real spine event
@@ -110,5 +110,38 @@ impl SpineClient for SpineEventStoreClient {
         // See module docs — v1 returns None; executors gather inputs
         // through PlanStore, not through cross-plan spine reads.
         Ok(None)
+    }
+
+    /// Read an agent session's output manifest for the
+    /// `AgentExecutor`'s authoritative liveness gate (spec #520 §4c).
+    ///
+    /// Delegates to the shared manifest contract in
+    /// [`onsager_spine::session_manifest`] — the same code path portal's
+    /// MCP tools (§4a) write through — and scopes the read to this
+    /// client's `workspace_id` so a session-id collision across tenants
+    /// can't leak outputs. Maps the spine-side records onto the
+    /// executor-port `SessionManifest` (the two structs live on opposite
+    /// sides of the seam; this is the adapter that bridges them).
+    async fn read_session_manifest(&self, session_id: &str) -> Result<SessionManifest, SpineError> {
+        let manifest = onsager_spine::session_manifest::read_manifest(
+            &self.store,
+            &self.workspace_id,
+            session_id,
+        )
+        .await
+        .map_err(|e| SpineError::new(format!("read_session_manifest failed: {e}")))?;
+        Ok(SessionManifest {
+            emitted: manifest
+                .emitted
+                .into_iter()
+                .map(|r| EmittedArtifact {
+                    artifact_id: r.artifact_id,
+                    content_ref: r.content_ref,
+                    kind: r.kind,
+                    summary: r.summary,
+                })
+                .collect(),
+            declared_empty: manifest.declared_empty,
+        })
     }
 }

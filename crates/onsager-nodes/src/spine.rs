@@ -15,7 +15,7 @@
 //! introducing parallel ports.
 
 use async_trait::async_trait;
-use onsager_artifact::{Artifact, ArtifactId};
+use onsager_artifact::{Artifact, ArtifactId, ContentRef};
 use thiserror::Error;
 
 /// Error returned by a [`SpineClient`] call.
@@ -36,6 +36,36 @@ impl SpineError {
     }
 }
 
+/// One output an agent session emitted, read back from its
+/// `events_ext` manifest (spec #520 §4a). Carries identity + content
+/// pointer + agent-supplied metadata — **never** provenance. The
+/// `AgentExecutor` stamps `Provenance::Uncertain { source: Agent }`
+/// when it packages these onto the typed DAG (spec #520 §4c); the agent
+/// must not be able to self-declare a stronger provenance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmittedArtifact {
+    /// Stable id minted at emit time (`art_<ulid>`).
+    pub artifact_id: String,
+    /// Pointer to the addressable content the session produced.
+    pub content_ref: ContentRef,
+    /// Artifact kind tag (`code` / `document` / `pull_request` / …).
+    pub kind: String,
+    /// Human-readable summary of what was emitted.
+    pub summary: String,
+}
+
+/// An agent session's output manifest: the outputs it emitted plus
+/// whether it explicitly declared it produced nothing.
+///
+/// `emitted.is_empty() && !declared_empty` is the liveness-gate trip
+/// condition (spec #520 §4c) — the session ended having neither
+/// delivered nor declared empty.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SessionManifest {
+    pub emitted: Vec<EmittedArtifact>,
+    pub declared_empty: bool,
+}
+
 /// Async port over the spine event store, scoped to the surface an
 /// executor needs while it runs.
 ///
@@ -52,6 +82,20 @@ pub trait SpineClient: Send + Sync + std::fmt::Debug {
     /// `Ok(None)` for a missing id is not an error — executors decide
     /// whether absence is a failure condition.
     async fn read_artifact(&self, id: &ArtifactId) -> Result<Option<Artifact>, SpineError>;
+
+    /// Read an agent session's output manifest (spec #520 §4a / §4c).
+    ///
+    /// The default returns an empty manifest so adapters that never
+    /// serve agent sessions (most test stubs) don't have to override
+    /// it. The deployed substrate scheduler's adapter overrides this to
+    /// query the `events_ext` `session:<id>` stream — that read is what
+    /// the `AgentExecutor`'s authoritative liveness gate keys off.
+    async fn read_session_manifest(
+        &self,
+        _session_id: &str,
+    ) -> Result<SessionManifest, SpineError> {
+        Ok(SessionManifest::default())
+    }
 }
 
 #[cfg(test)]
@@ -61,10 +105,24 @@ pub(crate) mod test_support {
     use std::sync::Mutex;
 
     /// In-memory mock used by this crate's tests. Captures every
-    /// `emit` call and looks up artifacts in a fixed table.
+    /// `emit` call, looks up artifacts in a fixed table, and serves a
+    /// canned [`SessionManifest`] so the `AgentExecutor` liveness gate
+    /// (spec #520 §4c) is unit-testable without a database.
     #[derive(Debug, Default)]
     pub struct MockSpine {
         pub emitted: Mutex<Vec<(String, serde_json::Value)>>,
+        pub manifest: Mutex<SessionManifest>,
+    }
+
+    impl MockSpine {
+        /// Build a mock that serves `manifest` from
+        /// `read_session_manifest`.
+        pub fn with_manifest(manifest: SessionManifest) -> Self {
+            Self {
+                emitted: Mutex::new(Vec::new()),
+                manifest: Mutex::new(manifest),
+            }
+        }
     }
 
     #[async_trait]
@@ -79,6 +137,13 @@ pub(crate) mod test_support {
 
         async fn read_artifact(&self, _id: &ArtifactId) -> Result<Option<Artifact>, SpineError> {
             Ok(None)
+        }
+
+        async fn read_session_manifest(
+            &self,
+            _session_id: &str,
+        ) -> Result<SessionManifest, SpineError> {
+            Ok(self.manifest.lock().unwrap().clone())
         }
     }
 

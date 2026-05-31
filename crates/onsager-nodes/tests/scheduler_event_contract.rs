@@ -29,11 +29,11 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use onsager_artifact::{Artifact, ArtifactId, NodeId};
+use onsager_artifact::{Artifact, ArtifactId, ContentRef, NodeId};
 use onsager_nodes::{
-    AgentExecutor, EVENT_NODE_COMPLETED, EVENT_NODE_FAILED, EVENT_NODE_STARTED, ExecutorRegistry,
-    InMemoryPlanStore, PlanId, PlanStore, Scheduler, SpineClient, SpineError, StubAgentRunner,
-    VerifyExecutor,
+    AgentExecutor, EVENT_NODE_COMPLETED, EVENT_NODE_FAILED, EVENT_NODE_STARTED, EmittedArtifact,
+    ExecutorRegistry, InMemoryPlanStore, PlanId, PlanStore, Scheduler, SessionManifest,
+    SpineClient, SpineError, StubAgentRunner, VerifyExecutor,
     verify::{Check, FailPolicy},
 };
 use onsager_substrate::compiler::ExecutionPlan;
@@ -59,6 +59,24 @@ impl SpineClient for CapturingSpine {
     }
     async fn read_artifact(&self, _: &ArtifactId) -> Result<Option<Artifact>, SpineError> {
         Ok(None)
+    }
+    /// The agent in this plan delivers one output; serve a single-emit
+    /// manifest so the liveness gate (spec #520 §4c) packages it rather
+    /// than escalating. (The empty / declared-empty branches are
+    /// covered by the `AgentExecutor` unit tests.)
+    async fn read_session_manifest(&self, session_id: &str) -> Result<SessionManifest, SpineError> {
+        Ok(SessionManifest {
+            emitted: vec![EmittedArtifact {
+                artifact_id: format!("art_{session_id}"),
+                content_ref: ContentRef {
+                    uri: "inline:base64,aGk=".into(),
+                    checksum: None,
+                },
+                kind: "document".into(),
+                summary: "agent output".into(),
+            }],
+            declared_empty: false,
+        })
     }
 }
 

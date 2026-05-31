@@ -53,6 +53,7 @@ pub use scheduler::{
     PlanId, PlanStore, PlanStoreError, Scheduler, SchedulerError,
 };
 pub use script::{INLINE_URI_PREFIX, ScriptExecutor, decode_inline_body};
+pub use spine::{EmittedArtifact, SessionManifest};
 pub use spine::{SpineClient, SpineError};
 pub use subworkflow::{
     SUBWORKFLOW_KIND, SchedulerSubWorkflowRunner, StubSubWorkflowRunner, SubWorkflowExecutor,
