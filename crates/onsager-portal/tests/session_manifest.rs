@@ -47,7 +47,10 @@ async fn emit_then_read_status_reports_emit_count_one() {
     )
     .await
     .expect("append_emit");
-    assert!(!artifact_id.is_empty(), "emit mints an artifact id");
+    assert!(
+        artifact_id.starts_with("art_"),
+        "emit mints a canonical `art_<ulid>` id, got {artifact_id}"
+    );
 
     let status = read_status(&store, &workspace_id, &session_id)
         .await

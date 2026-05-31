@@ -34,6 +34,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use onsager_artifact::ArtifactId;
 use onsager_spine::EventMetadata;
 use onsager_spine::EventStore;
 use onsager_spine::extension_event::ExtensionEventRecord;
@@ -114,7 +115,10 @@ pub async fn append_emit(
 ) -> Result<String, sqlx::Error> {
     // Mint a stable id so the authoritative gate (spec #520 §4c) can
     // reference this output when it packages it onto the typed DAG.
-    let artifact_id = ulid::Ulid::new().to_string();
+    // Use the canonical `art_<ulid>` shape (`ArtifactId::generate`) so
+    // manifest rows match every other id that flows through the
+    // artifact model — downstream `art_`-prefix matching stays uniform.
+    let artifact_id = ArtifactId::generate().as_str().to_string();
     let data = serde_json::json!({
         "artifact_id": artifact_id,
         "content_ref": content_ref,
