@@ -1,11 +1,11 @@
 # ADR 0019 — Dashboard IA: pipeline-centric three-tab surface
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR 0026
 - **Date**: 2026-05-22
 - **Identity impact**: no
 - **Tracking issues**: #450 (implementation spec). Refines the IA frame set by spec #289 (closed 2026-05-13 as completed, sub-PRs 2a–6 unshipped) and the FTUE umbrella spec #397 (closed 2026-05-19). Retires spec #398 (universal-chat-entry, closed 2026-05-18) as a side effect. The chat surface restructuring it implies is named in the sibling ADR 0020.
 - **Supersedes**: none. The predecessor specs (#289, #397, #398) are the prior dashboard-IA frame in prose; the repo convention reserves the `Supersedes` field for ADR-to-ADR replacement, so no entry here.
-- **Superseded by**: none
+- **Superseded by**: ADR 0026 (nav IA: desktop sidebar + mobile drawer). The top-bar-with-tabs chrome below could not host non-section destinations (Settings, Workspaces), leaving those pages with no active nav item; ADR 0026 returns to a sidebar (+ mobile drawer) to fix that.
 
 ## Context
 
