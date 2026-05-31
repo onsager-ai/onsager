@@ -501,6 +501,9 @@ impl Scheduler {
             plan_id: plan_id.as_str().to_string(),
             node_id,
             output_artifact_ids,
+            // Populated by the authoritative gate (§4c, #520); `None`
+            // here keeps behavior unchanged.
+            declared_empty: None,
         };
         self.emit(plan_id, node_id, EVENT_NODE_COMPLETED, &payload)
             .await;

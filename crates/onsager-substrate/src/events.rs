@@ -127,6 +127,13 @@ pub struct NodeCompleted {
     /// `ArtifactId`s the executor materialized — order matches the
     /// node's declared output edges.
     pub output_artifact_ids: Vec<ArtifactId>,
+    /// `Some(true)` when the executor declared it produced nothing on
+    /// purpose (an intentional empty delivery), distinguishing it from
+    /// "delivered nothing" (`output_artifact_ids` empty, field absent).
+    /// Populated by the authoritative gate (§4c, #520); `None` until
+    /// then so behavior is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_empty: Option<bool>,
 }
 
 impl NodeCompleted {
@@ -353,11 +360,32 @@ mod tests {
             plan_id: pid(),
             node_id: nid(),
             output_artifact_ids: vec![ArtifactId::new("art_1"), ArtifactId::new("art_2")],
+            declared_empty: None,
         };
         let json = serde_json::to_value(&ev).unwrap();
         assert_eq!(json["output_artifact_ids"][0], "art_1");
+        // `None` is the absent-field case — must be omitted on the wire.
+        assert!(
+            json.get("declared_empty").is_none(),
+            "None declared_empty must be omitted, got: {json}"
+        );
         let back: NodeCompleted = serde_json::from_value(json).unwrap();
         assert_eq!(back, ev);
+    }
+
+    #[test]
+    fn node_completed_declared_empty_roundtrip() {
+        let ev = NodeCompleted {
+            plan_id: pid(),
+            node_id: nid(),
+            output_artifact_ids: vec![],
+            declared_empty: Some(true),
+        };
+        let json = serde_json::to_value(&ev).unwrap();
+        assert_eq!(json["declared_empty"], true);
+        let back: NodeCompleted = serde_json::from_value(json).unwrap();
+        assert_eq!(back, ev);
+        assert_eq!(back.declared_empty, Some(true));
     }
 
     #[test]

@@ -66,11 +66,13 @@ fn node_completed_payload_matches_variant() {
         plan_id: pid(),
         node_id: nid(),
         output_artifact_ids: vec![ArtifactId::new("art_1"), ArtifactId::new("art_2")],
+        declared_empty: Some(true),
     };
     let v = FactoryEventKind::NodeCompleted {
         plan_id: s.plan_id.clone(),
         node_id: s.node_id,
         output_artifact_ids: s.output_artifact_ids.clone(),
+        declared_empty: s.declared_empty,
     };
     assert_eq!(
         serde_json::to_value(&s).unwrap(),
@@ -314,6 +316,7 @@ fn wire_kind_constants_agree_with_factory_event_kind() {
                 plan_id: pid(),
                 node_id: nid(),
                 output_artifact_ids: vec![],
+                declared_empty: None,
             },
         ),
         (
