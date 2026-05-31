@@ -487,6 +487,63 @@ const get_workflow_v2: McpToolBinding = {
 }
 
 // -----------------------------------------------------------------------------
+// Session output manifest (#520 §4a / #521)
+//
+// These three are agent-session tools — an agent records its addressable
+// outputs on the main node through them. They are bound here so the
+// registry ↔ dashboard contract (`check-hitl-coverage`) stays complete;
+// in practice they are invoked by the session runtime, not from dashboard
+// chat.
+// -----------------------------------------------------------------------------
+
+const emit_artifact: McpToolBinding = {
+  name: "emit_artifact",
+  category: "constructive",
+  title: (args) => `Emit artifact · ${str(args, "kind", "output")}`,
+  buildCard: (args) => ({
+    kind: "constructive",
+    title: `Emit artifact · ${str(args, "kind", "output")}`,
+    summary: str(args, "summary", "Record an addressable deliverable on the session manifest."),
+    body: {
+      fields: [
+        field("Session", str(args, "session_id")),
+        field("Kind", str(args, "kind"), { editable: true, key: "kind" }),
+        field("Summary", str(args, "summary"), { editable: true, key: "summary" }),
+      ],
+    },
+    commit: { label: "Emit", intent: "primary" },
+    reject: { label: "Discard" },
+  }),
+}
+
+const declare_no_output: McpToolBinding = {
+  name: "declare_no_output",
+  category: "constructive",
+  title: () => "Declare no output",
+  buildCard: (args) => ({
+    kind: "constructive",
+    title: "Declare no output",
+    summary: str(args, "reason", "Declare this session produced no deliverable."),
+    body: {
+      fields: [
+        field("Session", str(args, "session_id")),
+        field("Reason", str(args, "reason"), { editable: true, key: "reason" }),
+      ],
+    },
+    commit: { label: "Declare empty", intent: "primary" },
+    reject: { label: "Cancel" },
+  }),
+}
+
+const read_emit_status: McpToolBinding = {
+  name: "read_emit_status",
+  category: "read_only",
+  title: () => "Read emit status",
+  renderInfo: (args) =>
+    `Reading the output manifest for session ${str(args, "session_id", "(unknown)")}.`,
+}
+
+// -----------------------------------------------------------------------------
 // Registry
 // -----------------------------------------------------------------------------
 
@@ -516,6 +573,10 @@ const BINDINGS: McpToolBinding[] = [
   retire_workflow,
   list_workflows_v2,
   get_workflow_v2,
+  // Session output manifest (#520 §4a / #521)
+  emit_artifact,
+  declare_no_output,
+  read_emit_status,
 ]
 
 /** All known MCP tools, in registry order. */

@@ -311,5 +311,35 @@ fn build_registry() -> Vec<ToolDescriptor> {
                 ))
             },
         },
+        // --- Session output manifest (spec #520 §4a / #521) ---
+        ToolDescriptor {
+            name: "emit_artifact",
+            description: "Record an addressable deliverable on the session output manifest. Persists `content` to addressable storage (inline base64 + sha256 checksum for the first cut) and appends an `artifact.emitted` row to `events_ext` on the `session:<session_id>` stream under the `stiglab` namespace. Returns the minted `artifact_id` and the `content_ref { uri, checksum }`. Provenance is never recorded here — `AgentExecutor` stamps `Uncertain { source: Agent }` when it reads the manifest back. Call once per deliverable a session produces.",
+            category: ToolCategory::Constructive,
+            input_schema: super::input_schema::<tools::session_manifest::EmitArtifactArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::session_manifest::emit_artifact(state, user, args))
+            },
+        },
+        ToolDescriptor {
+            name: "declare_no_output",
+            description: "Explicitly declare that this session produced no deliverable, with a `reason`. Appends an `output.declared_empty` row to the session manifest (`events_ext`, `session:<session_id>` stream). Lets the liveness gate distinguish \"delivered nothing on purpose\" from \"forgot to emit\". Use this instead of finishing silently when there is genuinely nothing to deliver.",
+            category: ToolCategory::Constructive,
+            input_schema: super::input_schema::<tools::session_manifest::DeclareNoOutputArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::session_manifest::declare_no_output(
+                    state, user, args,
+                ))
+            },
+        },
+        ToolDescriptor {
+            name: "read_emit_status",
+            description: "Summarize a session's output manifest: `{ emit_count, declared_empty }`. Counts `artifact.emitted` rows and detects any `output.declared_empty` on the `session:<session_id>` stream. Pure read (`query_ext_stream` + tally), safe to call repeatedly — the liveness Stop hook and the authoritative gate both consume it.",
+            category: ToolCategory::ReadOnly,
+            input_schema: super::input_schema::<tools::session_manifest::ReadEmitStatusArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::session_manifest::read_emit_status(state, user, args))
+            },
+        },
     ]
 }

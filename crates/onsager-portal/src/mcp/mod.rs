@@ -305,6 +305,10 @@ mod tests {
             "retire_workflow",
             "list_workflows_v2",
             "get_workflow_v2",
+            // Session output manifest (#520 §4a / #521).
+            "emit_artifact",
+            "declare_no_output",
+            "read_emit_status",
         ] {
             assert!(
                 names.contains(&required),
@@ -332,6 +336,8 @@ mod tests {
                     | "submit_workflow"
                     | "update_workflow"
                     | "retire_workflow"
+                    | "emit_artifact"
+                    | "declare_no_output"
             );
             if is_mutation {
                 assert!(
