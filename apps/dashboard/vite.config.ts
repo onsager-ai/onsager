@@ -27,6 +27,12 @@ export default defineConfig({
       // After #222 Slice 6, portal (3002) owns all /api/* routes;
       // stiglab (3000) keeps only /agent/ws for agent binary connections.
       '/api': 'http://localhost:3002',
+      // Portal also hosts the MCP server at POST /mcp/messages (ADR 0007 /
+      // spec #288). The dashboard chat and the Spec Plans page are
+      // same-origin MCP clients, so dev needs the same forward Caddy's
+      // `/mcp/*` block gives production — without it `/mcp/messages` hits
+      // the Vite dev server and 404s (breaking Plans + chat).
+      '/mcp': 'http://localhost:3002',
       '/agent': {
         target: 'ws://localhost:3000',
         ws: true,

@@ -11,19 +11,17 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 
 import { AppLayout } from "@/components/layout/AppLayout"
 
-// Top chrome shell from #463 / ADR 0019. Two Test items the spec
-// pins are covered here:
+// Nav chrome (#463 / ADR 0019, superseded by the sidebar + mobile-drawer
+// IA in #517). Covered here:
 //
-//  - Component test: the top chrome renders all regions at desktop AND
-//    mobile widths. jsdom doesn't apply media queries, so both the
-//    desktop chrome (`<nav aria-label="Workspace sections">`) and the
-//    mobile tabs row (`<nav aria-label="Workspace sections (mobile)">`)
-//    are present in the DOM; we assert each region exposes the same
-//    three tabs and that the desktop chrome carries the logo, workspace
-//    switcher, ⌘K trigger, and user-menu button.
-//  - Tab switching preserves workspace scope across the three tabs:
-//    clicking each tab inside either nav navigates to
-//    `/workspaces/<slug>/<tab>`, never bare `/<tab>`.
+//  - Desktop chrome: a persistent sidebar with the logo, workspace
+//    switcher, the section nav (`<nav aria-label="Workspace sections">`),
+//    a ⌘K trigger, and a user-menu button.
+//  - Mobile chrome: the section nav lives behind a hamburger
+//    ("Open navigation") that opens a left drawer; the drawer's nav
+//    exposes the same workspace-scoped section links.
+//  - Tab switching preserves workspace scope: clicking each section
+//    navigates to `/workspaces/<slug>/<tab>`, never bare `/<tab>`.
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({
@@ -111,14 +109,17 @@ describe("top chrome (#463 / ADR 0019)", () => {
     ).toBeGreaterThan(0)
   })
 
-  it("renders the mobile chrome with a second tabs row carrying all three tabs", async () => {
+  it("exposes the mobile section nav via a hamburger-opened drawer", async () => {
     renderChrome()
     expect(await screen.findByText("Acme")).toBeInTheDocument()
-    const mobileNav = screen.getByRole("navigation", {
-      name: /workspace sections \(mobile\)/i,
-    })
+    // The drawer is closed initially — the section nav is reached via the
+    // hamburger in the mobile top bar.
+    fireEvent.click(screen.getByRole("button", { name: /open navigation/i }))
+    // The opened drawer is a dialog; scope to it (the desktop sidebar nav
+    // shares the same accessible name, so we must not match it here).
+    const drawer = await screen.findByRole("dialog")
     for (const tab of ["Workflows", "Runs", "Activity"]) {
-      const link = within(mobileNav).getByRole("link", { name: tab })
+      const link = within(drawer).getByRole("link", { name: tab })
       expect(link).toHaveAttribute("href", `/workspaces/acme/${tab.toLowerCase()}`)
     }
   })
