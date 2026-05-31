@@ -452,6 +452,14 @@ fn build_emitted_artifact(
         node_id.to_string(),
         Vec::new(),
     );
+    // Preserve the identity minted at emit time (spec #520 §4a) rather
+    // than the throwaway id `Artifact::new` generated, so the packaged
+    // artifact matches the manifest record downstream can reference.
+    // (The scheduler still re-keys this to the edge's namespaced
+    // ArtifactId on persist — single-writer-per-edge — but the
+    // executor's own output stays faithful to the manifest, which is
+    // what direct (non-scheduler) callers and the unit tests observe.)
+    artifact.artifact_id = onsager_artifact::ArtifactId::new(rec.artifact_id.clone());
     // Stamped HERE, not read from the manifest (spec #520 §4c, ADR 0010
     // / ADR 0018 invariant 2). If this were ever sourced from the
     // agent-controlled record, the agent could self-certify
@@ -665,6 +673,8 @@ mod tests {
             }
         );
         assert_eq!(art.produced_by_node, Some(node_id));
+        // The minted manifest id is preserved (not a throwaway ULID).
+        assert_eq!(art.artifact_id.as_str(), "art_emit_1");
         // The agent-supplied content_ref rides on a first version.
         assert_eq!(art.current_version, 1);
         assert_eq!(art.versions.len(), 1);

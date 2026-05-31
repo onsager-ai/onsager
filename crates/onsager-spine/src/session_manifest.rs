@@ -85,11 +85,13 @@ pub struct EmittedRecord {
 }
 
 /// The deserialization shape of an `artifact.emitted` row's `data`
-/// field. `content_ref` is required; everything else defaults so a
-/// partially-written row is still salvageable.
+/// field. `artifact_id` and `content_ref` are required — the contract
+/// relies on the minted id as a stable identity and on the ref as the
+/// content pointer, so a row missing either is malformed and dropped
+/// (see [`parse_manifest`]). `kind` / `summary` default so a row that
+/// only omits the soft metadata is still salvageable.
 #[derive(Debug, Deserialize)]
 struct EmitData {
-    #[serde(default)]
     artifact_id: String,
     content_ref: ContentRef,
     #[serde(default)]
@@ -140,17 +142,22 @@ pub struct EmitStatus {
 /// Parse a session's raw `events_ext` rows into a typed
 /// [`SessionManifest`], scoped to a workspace.
 ///
-/// The session stream is workspace-private by construction, but rows
-/// from a different workspace are defensively skipped so a session-id
-/// collision across workspaces can never leak outputs. An
-/// `artifact.emitted` row whose `data` fails to parse (e.g. missing
-/// `content_ref`) is dropped with a warning rather than failing the
-/// whole read — a malformed row must not strand a live session.
+/// Two defensive filters guard the read. The session stream is
+/// workspace-private by construction, but rows from a different
+/// workspace are skipped so a session-id collision across workspaces
+/// can never leak outputs. `query_ext_stream` also returns every
+/// extension row on the stream regardless of namespace, so rows outside
+/// the manifest namespace (`stiglab`) are skipped too — another
+/// subsystem reusing the same `event_type` on the same stream must not
+/// be miscounted as a manifest record. An `artifact.emitted` row whose
+/// `data` fails to parse (missing `artifact_id` / `content_ref`) is
+/// dropped with a warning rather than failing the whole read — a
+/// malformed row must not strand a live session.
 pub fn parse_manifest(records: &[ExtensionEventRecord], workspace_id: &str) -> SessionManifest {
     let mut emitted = Vec::new();
     let mut declared_empty = false;
     for r in records {
-        if r.workspace_id != workspace_id {
+        if r.workspace_id != workspace_id || r.namespace != MANIFEST_NAMESPACE {
             continue;
         }
         match r.event_type.as_str() {
@@ -379,5 +386,38 @@ mod tests {
         let m = parse_manifest(&recs, "ws1");
         assert_eq!(m.emit_count(), 1);
         assert_eq!(m.emitted[0].content_ref.uri, "inline:ok");
+    }
+
+    #[test]
+    fn parse_drops_emit_row_missing_artifact_id() {
+        // `artifact_id` is required — a row carrying a valid content_ref
+        // but no minted id is malformed (the contract relies on the id
+        // as stable identity for downstream packaging) and is dropped.
+        let recs = vec![record(
+            "ws1",
+            EVENT_ARTIFACT_EMITTED,
+            serde_json::json!({
+                "content_ref": { "uri": "inline:x", "checksum": "z" },
+                "kind": "code",
+                "summary": "no id",
+            }),
+        )];
+        let m = parse_manifest(&recs, "ws1");
+        assert_eq!(m.emit_count(), 0, "row missing artifact_id must be dropped");
+    }
+
+    #[test]
+    fn parse_ignores_rows_outside_the_manifest_namespace() {
+        // `query_ext_stream` returns every extension row on the stream
+        // regardless of namespace; a row reusing `artifact.emitted`
+        // under a different namespace must not be miscounted.
+        let mut foreign = record(
+            "ws1",
+            EVENT_ARTIFACT_EMITTED,
+            emit_data("inline:a", "code", "one"),
+        );
+        foreign.namespace = "synodic".to_string();
+        let m = parse_manifest(&[foreign], "ws1");
+        assert_eq!(m.emit_count(), 0, "foreign-namespace row must be ignored");
     }
 }
