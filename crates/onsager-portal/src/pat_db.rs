@@ -180,6 +180,23 @@ pub async fn revoke_user_pat(pool: &PgPool, user_id: &str, pat_id: &str) -> anyh
     Ok(res.rows_affected() > 0)
 }
 
+/// Revoke (soft) every live PAT carrying the given `name`. Used to revoke
+/// a session-scoped token when its session ends (spec #531): the terminal
+/// spine event carries only `session_id`, so we match on the
+/// `session:<session_id>` name rather than `(user_id, pat_id)`. Session
+/// ids are unique, so the name is effectively unique. Idempotent —
+/// `revoked_at IS NULL` guards a double-revoke; returns the row count.
+pub async fn revoke_pats_by_name(pool: &PgPool, name: &str) -> anyhow::Result<u64> {
+    let now = Utc::now().to_rfc3339();
+    let res =
+        sqlx::query("UPDATE user_pats SET revoked_at = $1 WHERE name = $2 AND revoked_at IS NULL")
+            .bind(&now)
+            .bind(name)
+            .execute(pool)
+            .await?;
+    Ok(res.rows_affected())
+}
+
 pub async fn touch_user_pat(
     pool: &PgPool,
     pat_id: &str,

@@ -38,6 +38,11 @@ struct TaskDispatchPayload {
     #[serde(default)]
     workspace_id: Option<String>,
     user_id: String,
+    /// Workspace-scoped session token (spec #531), encrypted with the
+    /// shared credential key. Decrypted here and injected into the agent
+    /// env as `ONSAGER_SESSION_TOKEN`.
+    #[serde(default)]
+    encrypted_session_token: Option<String>,
 }
 
 pub async fn run(store: EventStore, app_state: AppState, since: Option<i64>) -> anyhow::Result<()> {
@@ -109,10 +114,39 @@ impl Dispatcher {
             return Ok(());
         }
 
-        let credentials = match payload.workspace_id.as_deref() {
+        let mut credentials = match payload.workspace_id.as_deref() {
             Some(ws) => fetch_workspace_credentials(state, ws, &payload.user_id).await,
             None => None,
         };
+
+        // Inject the workspace-scoped session token + the session's own
+        // identity (spec #531) so the agent can authenticate to portal's
+        // MCP surface and the liveness Stop hook, and pass its
+        // `(workspace_id, session_id)` to the emit tools. The token rides
+        // the event encrypted; decrypt it with the shared credential key.
+        if let (Some(enc), Some(ws), Some(key)) = (
+            payload.encrypted_session_token.as_deref(),
+            payload.workspace_id.as_deref(),
+            state.config.credential_key.as_deref(),
+        ) {
+            match crate::server::auth::decrypt_credential(key, enc) {
+                Ok(token) => {
+                    let creds = credentials.get_or_insert_with(std::collections::HashMap::new);
+                    creds.insert("ONSAGER_SESSION_TOKEN".to_string(), token);
+                    creds.insert("ONSAGER_SESSION_ID".to_string(), payload.session_id.clone());
+                    creds.insert("ONSAGER_WORKSPACE_ID".to_string(), ws.to_string());
+                }
+                Err(e) => {
+                    // Non-fatal: session proceeds without MCP auth; the
+                    // Stop hook then fails open and the authoritative gate
+                    // (#523) still applies.
+                    tracing::error!(
+                        session_id = %payload.session_id,
+                        "failed to decrypt session token: {e}"
+                    );
+                }
+            }
+        }
 
         let task = Task {
             id: payload.task_id.clone(),

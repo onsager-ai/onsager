@@ -54,6 +54,7 @@ pub mod remediation_db;
 pub mod runtime;
 pub mod server;
 pub mod session_db;
+pub mod session_token;
 pub mod spec_plan_db;
 pub mod sso;
 pub mod state;
