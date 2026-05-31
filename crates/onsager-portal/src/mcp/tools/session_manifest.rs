@@ -7,37 +7,23 @@
 //! holding portal MCP server is the only thing that touches the
 //! database, exactly like every other tool in this directory.
 //!
-//! Storage is `events_ext` (not a new table, not a new
-//! `FactoryEventKind`) via [`EventStore::append_ext`] /
-//! [`EventStore::query_ext_stream`]. Those rows are already on the
-//! `onsager_events` pg_notify stream, so a future Observer (OBS-01,
-//! #361) can subscribe to the same manifest with no extra plumbing.
-//! The conventions below are locked in spec #520 §3 — do not
-//! re-litigate:
-//!
-//! - `namespace = "stiglab"` (the emit happens inside a stiglab-
-//!   orchestrated session; reuse the existing validated namespace).
-//! - `stream_id = "session:<session_id>"`.
-//! - `event_type = "artifact.emitted"` for a real output;
-//!   `"output.declared_empty"` for an explicit no-output declaration.
-//!
-//! **Provenance never goes into the manifest.** Records carry
-//! `content_ref / kind / summary` (plus the minted `artifact_id`
-//! identity) only — the agent must not be able to self-declare
-//! `Deterministic`. `AgentExecutor` stamps `Provenance::Uncertain`
-//! when it reads records back (spec #520 §4c, a later layer).
+//! The manifest wire contract — the `events_ext` namespace / stream /
+//! event-type / data-field conventions, the parser, and the store-level
+//! append/read helpers — is the **single source of truth** in
+//! [`onsager_spine::session_manifest`]. It lives there (a crate both
+//! sides of the seam already depend on) because the substrate scheduler
+//! reads the same manifest from the other side of the seam to run the
+//! authoritative liveness gate (spec #520 §4c). These tools own only the
+//! MCP surface on top of it: argument schemas, workspace-scoped auth,
+//! and the inline content-storage path the agent's `emit_artifact` runs
+//! before recording a row.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ring::digest;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
-
-use onsager_artifact::ArtifactId;
-use onsager_spine::EventMetadata;
-use onsager_spine::EventStore;
-use onsager_spine::extension_event::ExtensionEventRecord;
 
 use crate::auth::AuthUser;
 use crate::state::AppState;
@@ -45,12 +31,12 @@ use crate::state::AppState;
 use super::super::{ToolError, ToolResult};
 use super::require_workspace_access;
 
-/// Namespace the manifest rows live under (spec #520 §3).
-const MANIFEST_NAMESPACE: &str = "stiglab";
-/// `events_ext.event_type` for a real emitted output.
-const EVENT_ARTIFACT_EMITTED: &str = "artifact.emitted";
-/// `events_ext.event_type` for an explicit "I produced nothing".
-const EVENT_OUTPUT_DECLARED_EMPTY: &str = "output.declared_empty";
+// Re-export the shared store-level helpers + types so existing callers
+// (the integration test, the tool wrappers below) keep one import path.
+// The contract itself is owned by `onsager-spine`.
+pub use onsager_spine::session_manifest::{
+    EmitStatus, append_declared_empty, append_emit, read_status,
+};
 
 /// Inline content-storage URI scheme. First cut matches the Script
 /// executor's convention (`crates/onsager-nodes/src/script.rs`):
@@ -58,17 +44,6 @@ const EVENT_OUTPUT_DECLARED_EMPTY: &str = "output.declared_empty";
 /// backed scheme replaces this once content storage is formalized
 /// (RUN-01 #359 — the same gap the Script executor flags).
 const INLINE_URI_PREFIX: &str = "inline:base64,";
-
-/// Build the manifest stream key for a session.
-fn session_stream_id(session_id: &str) -> String {
-    format!("session:{session_id}")
-}
-
-/// The actor stamp on every manifest write — the session itself, never
-/// a human or another subsystem.
-fn session_actor(session_id: &str) -> String {
-    format!("session:{session_id}")
-}
 
 // ---------------------------------------------------------------------------
 // emit_artifact
@@ -100,48 +75,6 @@ fn store_content(content: &str) -> Value {
     let uri = format!("{INLINE_URI_PREFIX}{}", BASE64.encode(bytes));
     let checksum = hex::encode(digest::digest(&digest::SHA256, bytes).as_ref());
     serde_json::json!({ "uri": uri, "checksum": checksum })
-}
-
-/// Append an `artifact.emitted` row to the session manifest. Returns
-/// the minted `artifact_id`. Store-level helper so the integration
-/// test can exercise the round-trip without standing up auth.
-pub async fn append_emit(
-    store: &EventStore,
-    workspace_id: &str,
-    session_id: &str,
-    content_ref: Value,
-    kind: &str,
-    summary: &str,
-) -> Result<String, sqlx::Error> {
-    // Mint a stable id so the authoritative gate (spec #520 §4c) can
-    // reference this output when it packages it onto the typed DAG.
-    // Use the canonical `art_<ulid>` shape (`ArtifactId::generate`) so
-    // manifest rows match every other id that flows through the
-    // artifact model — downstream `art_`-prefix matching stays uniform.
-    let artifact_id = ArtifactId::generate().as_str().to_string();
-    let data = serde_json::json!({
-        "artifact_id": artifact_id,
-        "content_ref": content_ref,
-        "kind": kind,
-        "summary": summary,
-    });
-    let metadata = EventMetadata {
-        correlation_id: None,
-        causation_id: None,
-        actor: session_actor(session_id),
-    };
-    store
-        .append_ext(
-            workspace_id,
-            &session_stream_id(session_id),
-            MANIFEST_NAMESPACE,
-            EVENT_ARTIFACT_EMITTED,
-            data,
-            &metadata,
-            None,
-        )
-        .await?;
-    Ok(artifact_id)
 }
 
 pub async fn emit_artifact(state: &AppState, auth_user: &AuthUser, args: Value) -> ToolResult {
@@ -186,34 +119,6 @@ pub struct DeclareNoOutputArgs {
     pub reason: String,
 }
 
-/// Append an `output.declared_empty` row to the session manifest.
-/// Store-level helper, mirroring [`append_emit`].
-pub async fn append_declared_empty(
-    store: &EventStore,
-    workspace_id: &str,
-    session_id: &str,
-    reason: &str,
-) -> Result<(), sqlx::Error> {
-    let data = serde_json::json!({ "reason": reason });
-    let metadata = EventMetadata {
-        correlation_id: None,
-        causation_id: None,
-        actor: session_actor(session_id),
-    };
-    store
-        .append_ext(
-            workspace_id,
-            &session_stream_id(session_id),
-            MANIFEST_NAMESPACE,
-            EVENT_OUTPUT_DECLARED_EMPTY,
-            data,
-            &metadata,
-            None,
-        )
-        .await?;
-    Ok(())
-}
-
 pub async fn declare_no_output(state: &AppState, auth_user: &AuthUser, args: Value) -> ToolResult {
     let args: DeclareNoOutputArgs = serde_json::from_value(args)
         .map_err(|e| ToolError::InvalidParams(format!("invalid declare_no_output args: {e}")))?;
@@ -248,53 +153,6 @@ pub struct ReadEmitStatusArgs {
     pub session_id: String,
 }
 
-/// Pure tally of a session's manifest records, scoped to a workspace.
-/// Counts `artifact.emitted` rows and detects any
-/// `output.declared_empty`. Separated from the DB read so it is
-/// unit-testable without Postgres.
-pub fn tally_status(records: &[ExtensionEventRecord], workspace_id: &str) -> EmitStatus {
-    let mut emit_count: u64 = 0;
-    let mut declared_empty = false;
-    for r in records {
-        // Defensive: the session stream is workspace-private by
-        // construction, but never count a row that names a different
-        // workspace.
-        if r.workspace_id != workspace_id {
-            continue;
-        }
-        match r.event_type.as_str() {
-            EVENT_ARTIFACT_EMITTED => emit_count += 1,
-            EVENT_OUTPUT_DECLARED_EMPTY => declared_empty = true,
-            _ => {}
-        }
-    }
-    EmitStatus {
-        emit_count,
-        declared_empty,
-    }
-}
-
-/// The manifest summary `read_emit_status` returns.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct EmitStatus {
-    pub emit_count: u64,
-    pub declared_empty: bool,
-}
-
-/// Read + tally a session's manifest. Store-level helper so the
-/// integration test can call it directly. Pure read — safe to call
-/// repeatedly.
-pub async fn read_status(
-    store: &EventStore,
-    workspace_id: &str,
-    session_id: &str,
-) -> Result<EmitStatus, sqlx::Error> {
-    let records = store
-        .query_ext_stream(&session_stream_id(session_id))
-        .await?;
-    Ok(tally_status(&records, workspace_id))
-}
-
 pub async fn read_emit_status(state: &AppState, auth_user: &AuthUser, args: Value) -> ToolResult {
     let args: ReadEmitStatusArgs = serde_json::from_value(args)
         .map_err(|e| ToolError::InvalidParams(format!("invalid read_emit_status args: {e}")))?;
@@ -314,52 +172,6 @@ pub async fn read_emit_status(state: &AppState, auth_user: &AuthUser, args: Valu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
-
-    fn record(workspace_id: &str, event_type: &str) -> ExtensionEventRecord {
-        ExtensionEventRecord {
-            id: 0,
-            stream_id: session_stream_id("s1"),
-            namespace: MANIFEST_NAMESPACE.to_string(),
-            event_type: event_type.to_string(),
-            data: serde_json::json!({}),
-            metadata: serde_json::json!({}),
-            ref_event_id: None,
-            created_at: Utc::now(),
-            correlation_id: None,
-            workspace_id: workspace_id.to_string(),
-        }
-    }
-
-    #[test]
-    fn tally_counts_emits_and_detects_declared_empty() {
-        let recs = vec![
-            record("ws1", EVENT_ARTIFACT_EMITTED),
-            record("ws1", EVENT_ARTIFACT_EMITTED),
-            record("ws1", EVENT_OUTPUT_DECLARED_EMPTY),
-        ];
-        let status = tally_status(&recs, "ws1");
-        assert_eq!(status.emit_count, 2);
-        assert!(status.declared_empty);
-    }
-
-    #[test]
-    fn tally_untouched_session_is_zero_and_not_declared() {
-        let status = tally_status(&[], "ws1");
-        assert_eq!(status.emit_count, 0);
-        assert!(!status.declared_empty);
-    }
-
-    #[test]
-    fn tally_ignores_rows_from_a_different_workspace() {
-        let recs = vec![
-            record("other", EVENT_ARTIFACT_EMITTED),
-            record("other", EVENT_OUTPUT_DECLARED_EMPTY),
-        ];
-        let status = tally_status(&recs, "ws1");
-        assert_eq!(status.emit_count, 0);
-        assert!(!status.declared_empty);
-    }
 
     #[test]
     fn store_content_round_trips_via_inline_scheme() {

@@ -66,6 +66,21 @@ struct ContentBlock {
 // Completion result forwarded from the stdout parser to the manager
 // ---------------------------------------------------------------------------
 
+/// Completion signal parsed off the `claude` CLI's NDJSON stdout
+/// stream.
+///
+/// Per spec #520 §4b this stays a "session over" signal — it carries
+/// only the final assistant `output`, **not** the artifacts the session
+/// emitted. The agent records outputs out-of-band by calling the portal
+/// MCP `emit_artifact` / `declare_no_output` tools (§4a), which write
+/// the `events_ext` `session:<id>` manifest. That manifest is the
+/// authoritative source of "what came out": the substrate
+/// `AgentExecutor` reads it back directly to run the liveness gate (§4c)
+/// rather than trusting anything parsed from this stdout stream. The
+/// optimization channel for surfacing emitted refs lives on
+/// `onsager_nodes::AgentResponse.emitted` — populated by a runner that
+/// can cheaply observe them, left empty here because the NDJSON stream
+/// genuinely does not see MCP tool side effects.
 pub enum NdjsonResult {
     Success { output: String },
     Error { error: String },

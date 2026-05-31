@@ -444,7 +444,10 @@ impl RuntimeExecutor for SubWorkflowExecutor {
             .run(workflow_ref, inputs)
             .await
             .map_err(|e| ExecutorError::failed(e.to_string()))?;
-        Ok(ExecutorOutputs { artifacts: outputs })
+        Ok(ExecutorOutputs {
+            artifacts: outputs,
+            declared_empty: None,
+        })
     }
 }
 
