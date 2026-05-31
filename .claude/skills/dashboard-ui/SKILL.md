@@ -219,11 +219,16 @@ usePageHeader({
 })
 ```
 
-`AppLayout`'s mobile bar renders:
+`AppLayout`'s mobile bar renders (ADR 0026):
 
 ```
-[← backTo OR ☰ sidebar] [title]   [...actions] [+ QuickCreate]
+[← backTo OR ☰ drawer] [title]   [...actions] [⌘K]
 ```
+
+`☰` opens the nav drawer (`MobileNavDrawer`, a left `Sheet` holding the
+same `SidebarBody` as the desktop rail); drill-down pages show `←`
+instead. The bar holds only page actions + the `⌘K` trigger — account
+and the chat/Inbox entries live in the drawer footer, not the bar.
 
 ### Rules
 
@@ -352,13 +357,14 @@ globally.
 
 ## Account / user menu lives in the sidebar footer
 
-The avatar / account dropdown is rendered by `AppSidebar` in its
-`SidebarFooter`, using `<UserMenu variant="row" />`. **Do not add
-another `UserMenu` instance** to a header, page, or any other
+The avatar / account dropdown lives in the footer of `SidebarBody`
+(`AppLayout.tsx`) — the shared body rendered both as the desktop
+`DesktopSidebar` rail and inside the mobile `MobileNavDrawer`. **Do not
+add another `UserMenu` instance** to a header, page, or any other
 surface — there is one account control, in one place, on every
-viewport. Mobile users open the sidebar (`☰` in the chrome bar) to
-reach it; desktop users see it at the bottom of the always-visible
-sidebar. This frees the mobile top bar for page-specific actions.
+viewport. Mobile users open the drawer (`☰` in the chrome bar) to reach
+it; desktop users see it at the bottom of the always-visible sidebar.
+This frees the mobile top bar for page-specific actions.
 
 If you need to surface a sub-action (e.g. "Sign out" from a settings
 page), link the user to `/settings` or use the existing

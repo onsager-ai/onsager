@@ -285,11 +285,12 @@ function MobileHeader() {
           <span className="text-base font-semibold">Onsager</span>
         )}
       </div>
+      {/* Account lives once in the drawer footer (open via ☰), per the
+          dashboard-ui skill — not duplicated here. HITL on mobile is the
+          chat FAB. The bar keeps only page actions + the ⌘K trigger. */}
       <div className="flex items-center gap-1">
         {actions}
-        <ChatBell size="sm" />
         <CommandPaletteTrigger />
-        <UserMenu variant="icon" />
       </div>
     </header>
   )

@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-05-31
 - **Identity impact**: no
-- **Adoption**: ongoing
+- **Adoption**: enforced
 - **Tracking issues**: #519 (implementation spec). Carries the nav half of #517 (L2-testing findings). Lands folded into PR #518 alongside the `/mcp` dev-proxy fix.
 - **Supersedes**: ADR 0019 (dashboard IA: pipeline-centric three-tab surface) — the top-bar-with-tabs chrome it adopted.
 - **Superseded by**: none
@@ -83,6 +83,8 @@ entry, the bell, and the mobile FAB all move into the new chrome as-is.
 - [x] `top-chrome.test.tsx` updated to the hamburger-drawer behaviour
       (mutation-checked).
 - [x] ADR 0019 marked superseded by this ADR.
-- [ ] `dashboard-ui` skill mobile-chrome rules updated in the sibling
-      repo (one global mobile bar / avatar-in-footer / ⌘K-for-nav
-      wording) — follow-up PR (#519).
+- [x] `dashboard-ui` skill (in-repo, `.claude/skills/`) reconciled: the
+      mobile-bar diagram and account-footer component references now
+      match the shipped `SidebarBody` / `DesktopSidebar` /
+      `MobileNavDrawer`. (The skill already prescribed the sidebar +
+      `☰` drawer; ADR 0019's top-tabs had diverged from it.)
