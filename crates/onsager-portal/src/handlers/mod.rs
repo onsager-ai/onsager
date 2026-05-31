@@ -20,6 +20,7 @@ pub mod push;
 pub mod registry_events;
 pub mod registry_triggers;
 pub mod runs;
+pub mod session_liveness;
 pub mod sessions;
 pub mod showcase;
 pub mod spine;

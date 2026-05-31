@@ -12,6 +12,14 @@ pub struct Task {
     pub model: Option<String>,
     pub system_prompt: Option<String>,
     pub permission_mode: Option<String>,
+    /// Workspace that owns this session, when scoped (#164). Threaded
+    /// through to `SessionProcess::spawn` so the liveness Stop hook
+    /// (spec #520 §4d / #525) can address the session's manifest by
+    /// `(workspace_id, session_id)`. `None` for personal sessions —
+    /// the hook is then skipped and the authoritative gate (#523)
+    /// alone covers liveness.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

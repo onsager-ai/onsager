@@ -473,6 +473,10 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "MCP server JSON-RPC entry (ADR 0007 / #288) — called by external AI runtimes (Claude Code, Cursor, etc.) and the dashboard chat via the bespoke `mcp-client.ts` (#311). Not a typed dashboard `request<T>` surface — the contract is JSON-RPC + schemars-derived schemas, not the REST shape this lint scans",
     ),
     (
+        "/api/internal/session-liveness",
+        "In-session liveness gate (spec #520 §4d / #525) — POSTed by the agent session's Claude Code Stop hook, not the dashboard. Evaluates the `events_ext` session manifest and returns allow/block; auth reuses the `AuthUser` extractor like the MCP manifest tools.",
+    ),
+    (
         "/api/chat/completions",
         "Anthropic relay (spec #318) — called from `lib/chat/llm-client.ts` via a bespoke fetch, outside the `lib/api/` scanner scope. Same pattern as `/mcp/messages`.",
     ),
