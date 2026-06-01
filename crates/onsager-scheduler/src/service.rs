@@ -48,6 +48,13 @@ pub struct ServiceConfig {
     /// resumes "live only", and replays use `onsager trigger replay`
     /// for surgical re-fires.
     pub replay_history: bool,
+    /// AES-256-GCM credential key (hex), shared with portal / stiglab.
+    /// Used to decrypt the plan-scoped session token (#536) off the
+    /// `plan.run_requested` event so agent nodes can be injected with
+    /// `ONSAGER_SESSION_TOKEN`. `None` disables the inject path — the
+    /// plan still runs, agents just lack MCP auth (the authoritative
+    /// liveness gate still applies). Read from `ONSAGER_CREDENTIAL_KEY`.
+    pub credential_key: Option<String>,
 }
 
 impl Default for ServiceConfig {
@@ -56,6 +63,9 @@ impl Default for ServiceConfig {
             database_url: std::env::var("DATABASE_URL").unwrap_or_default(),
             actor: "substrate-scheduler".to_string(),
             replay_history: false,
+            credential_key: std::env::var("ONSAGER_CREDENTIAL_KEY")
+                .ok()
+                .filter(|s| !s.is_empty()),
         }
     }
 }
@@ -121,6 +131,8 @@ impl SchedulerService {
             library,
             store: store.clone(),
             plan_store,
+            credential_key: self.config.credential_key.clone(),
+            actor: self.config.actor.clone(),
         };
 
         // Default: live-only. `replay_history = true` rewinds to id=0
@@ -261,6 +273,15 @@ struct TriggerHandler {
     library: PersistedWorkflowLibrary,
     store: EventStore,
     plan_store: Arc<dyn PlanStore>,
+    /// Shared credential key (hex) for decrypting the plan-scoped
+    /// session token off `plan.run_requested` (#536). `None` disables
+    /// token injection.
+    credential_key: Option<String>,
+    /// Configured actor (`ServiceConfig.actor`, via `SCHEDULER_ACTOR`)
+    /// stamped onto spine emits this handler makes directly — e.g. the
+    /// plan-terminal events in [`Self::emit_plan_terminal`]. Mirrors the
+    /// actor `base_spine` was built with.
+    actor: String,
 }
 
 #[async_trait]
@@ -403,6 +424,29 @@ impl TriggerHandler {
             };
 
         let plan_id = derive_plan_id(&workspace_id, &spec_plan_id);
+
+        // Decrypt the plan-scoped session token (#536) once per plan and
+        // thread the plaintext to the runner; the AgentExecutor injects
+        // it as `ONSAGER_SESSION_TOKEN` into every agent node. The token
+        // rides the event encrypted (`encrypted_session_token`); a
+        // missing token or absent credential key is non-fatal — the plan
+        // runs without MCP auth and the authoritative liveness gate
+        // still applies (mirrors stiglab's chat-path degradation).
+        let session_token = decode_plan_session_token(&data)
+            .zip(self.credential_key.as_deref())
+            .and_then(
+                |(enc, key)| match crate::crypto::decrypt_credential(key, &enc) {
+                    Ok(token) => Some(token),
+                    Err(e) => {
+                        tracing::error!(
+                            plan_id = %plan_id,
+                            "failed to decrypt plan session token: {e}"
+                        );
+                        None
+                    }
+                },
+            );
+
         // Pin the workflow-library versions this run compiles against so
         // a later recovery recompiles against the same versions, not
         // whatever is latest then (#511). Resolved once and shared with
@@ -431,10 +475,13 @@ impl TriggerHandler {
             Arc::clone(&self.registry),
             Arc::clone(&self.plan_store),
             scoped_spine,
-        );
+        )
+        .with_session_token(session_token);
         match runner.run(&plan_id, &spec_plan, &snapshot).await {
             Ok(()) => {
                 let _ = plan_registry::set_status(self.store.pool(), &plan_id, "completed").await;
+                self.emit_plan_terminal(&workspace_id, plan_id.as_str(), &spec_plan_id, true)
+                    .await;
                 tracing::info!(
                     event_id = event.id,
                     %workspace_id,
@@ -445,6 +492,8 @@ impl TriggerHandler {
             }
             Err(e) => {
                 let _ = plan_registry::set_status(self.store.pool(), &plan_id, "failed").await;
+                self.emit_plan_terminal(&workspace_id, plan_id.as_str(), &spec_plan_id, false)
+                    .await;
                 tracing::warn!(
                     event_id = event.id,
                     %spec_plan_id,
@@ -454,6 +503,64 @@ impl TriggerHandler {
         }
         Ok(())
     }
+
+    /// Emit the plan-terminal spine event (#536) so portal's revoke
+    /// listener can soft-revoke the plan-scoped session token the moment
+    /// the run finishes. `completed` selects
+    /// `plan.run_completed` vs `plan.run_failed`. Best-effort: a failed
+    /// emit logs and is not propagated — the token's expiry backstop
+    /// still closes the window, this just tightens it.
+    async fn emit_plan_terminal(
+        &self,
+        workspace_id: &str,
+        plan_id: &str,
+        spec_plan_id: &str,
+        completed: bool,
+    ) {
+        let kind = if completed {
+            "plan.run_completed"
+        } else {
+            "plan.run_failed"
+        };
+        let payload = serde_json::json!({
+            "plan_id": plan_id,
+            "workspace_id": workspace_id,
+            "spec_plan_id": spec_plan_id,
+        });
+        let metadata = onsager_spine::EventMetadata {
+            correlation_id: None,
+            causation_id: None,
+            actor: self.actor.clone(),
+        };
+        let stream_id = format!("plan:{plan_id}");
+        if let Err(e) = self
+            .store
+            .append_ext(
+                workspace_id,
+                &stream_id,
+                "plan",
+                kind,
+                payload,
+                &metadata,
+                None,
+            )
+            .await
+        {
+            tracing::warn!(%plan_id, kind, "failed to emit plan-terminal event: {e}");
+        }
+    }
+}
+
+/// Pull the `encrypted_session_token` (#536) off a `plan.run_requested`
+/// body. Accepts the raw-payload shape portal's `run_spec_plan` MCP tool
+/// writes (the field lives at the top level alongside `spec_plan_id`).
+/// `None` when the field is absent (older producers, or no credential
+/// key was configured at mint time).
+fn decode_plan_session_token(data: &serde_json::Value) -> Option<String> {
+    data.get("encrypted_session_token")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 /// Extract `FactoryEventKind::TriggerFired` from an `events_ext.data`
@@ -685,5 +792,88 @@ mod tests {
     fn decode_plan_run_requested_none_without_spec_plan_id() {
         let data = serde_json::json!({ "workspace_id": "ws" });
         assert!(decode_spec_plan_run_requested(&data, "fallback").is_none());
+    }
+
+    // -----------------------------------------------------------------
+    // Spec #536 — plan-scoped session token decrypt + inject seam.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn decode_plan_session_token_reads_top_level_field() {
+        let data = serde_json::json!({
+            "spec_plan_id": "github:42",
+            "workspace_id": "ws-7",
+            "encrypted_session_token": "deadbeefcafe",
+        });
+        assert_eq!(
+            decode_plan_session_token(&data).as_deref(),
+            Some("deadbeefcafe")
+        );
+    }
+
+    #[test]
+    fn decode_plan_session_token_none_when_absent_or_empty() {
+        assert!(decode_plan_session_token(&serde_json::json!({ "spec_plan_id": "x" })).is_none());
+        assert!(
+            decode_plan_session_token(&serde_json::json!({ "encrypted_session_token": "" }))
+                .is_none()
+        );
+    }
+
+    /// End-to-end of the inject seam #536 wires up: portal's
+    /// `encrypted_session_token` on the event → scheduler decrypt →
+    /// the plaintext that gets threaded onto the `PlanRunner` /
+    /// `Scheduler` / `ExecutorContext` for `ONSAGER_SESSION_TOKEN`
+    /// injection. Encrypts with the same AES-256-GCM wire format portal
+    /// uses, then asserts `decode_plan_session_token` + `decrypt` round-
+    /// trips to the original token.
+    ///
+    /// Mutation guard: break the `.zip(self.credential_key)` /
+    /// `decrypt_credential` line in `handle_plan_run_requested` and the
+    /// production path no longer injects — this asserts the two helpers
+    /// the production path composes do reconstruct the token.
+    #[test]
+    fn plan_session_token_decrypts_off_event_body() {
+        use ring::aead;
+        use ring::rand::{SecureRandom, SystemRandom};
+
+        // Mirror portal's `encrypt_credential` to produce the ciphertext
+        // the scheduler will decrypt (portal is the real producer).
+        let rng = SystemRandom::new();
+        let mut key = [0u8; 32];
+        rng.fill(&mut key).unwrap();
+        let key_hex = hex::encode(key);
+
+        let plaintext = "ons_pat_plan_scoped_token";
+        let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, &key).unwrap();
+        let sealing = aead::LessSafeKey::new(unbound);
+        let mut nonce_bytes = [0u8; 12];
+        rng.fill(&mut nonce_bytes).unwrap();
+        let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+        let mut in_out = plaintext.as_bytes().to_vec();
+        sealing
+            .seal_in_place_append_tag(nonce, aead::Aad::empty(), &mut in_out)
+            .unwrap();
+        let mut wire = nonce_bytes.to_vec();
+        wire.extend_from_slice(&in_out);
+        let encrypted_hex = hex::encode(wire);
+
+        let event_body = serde_json::json!({
+            "spec_plan_id": "github:42",
+            "workspace_id": "ws-7",
+            "plan_id": "ws-7:github:42",
+            "encrypted_session_token": encrypted_hex,
+        });
+
+        // The exact composition `handle_plan_run_requested` runs.
+        let injected = decode_plan_session_token(&event_body)
+            .zip(Some(key_hex.as_str()))
+            .and_then(|(enc, k)| crate::crypto::decrypt_credential(k, &enc).ok());
+
+        assert_eq!(
+            injected.as_deref(),
+            Some(plaintext),
+            "scheduler must decrypt the plan-scoped token off the event body"
+        );
     }
 }

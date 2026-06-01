@@ -22,7 +22,6 @@ use crate::scheduler::PlanId;
 /// future capabilities (cancellation, structured logging, secrets)
 /// extend this struct rather than adding new arguments to
 /// `Executor::execute`.
-#[derive(Debug)]
 pub struct ExecutorContext {
     /// Identifier for the Execution Plan run this dispatch belongs
     /// to. Threaded onto every substrate lifecycle event the executor
@@ -67,6 +66,39 @@ pub struct ExecutorContext {
     /// runtime `AgentExecutor` prefers it over its own fields. Other
     /// executors ignore the field. Issue #534.
     pub agent_config: Option<AgentConfig>,
+    /// Plan-scoped workspace session token (spec #536), already
+    /// decrypted, shared across every agent node in this plan run. The
+    /// `AgentExecutor` copies it onto its [`crate::AgentRequest`] so the
+    /// runner injects it as `ONSAGER_SESSION_TOKEN` into the agent's
+    /// execution environment — the scheduler-path counterpart of the
+    /// chat path's per-session token. `None` when no plan token was
+    /// minted (no credential key configured) or for non-agent nodes
+    /// that ignore it.
+    pub session_token: Option<String>,
+}
+
+// Manual `Debug` so the plaintext `session_token` (a PAT) never leaks
+// through `{:?}` / log lines. Every other field is shown verbatim;
+// `session_token` is redacted to its presence (`<redacted>` / `None`).
+impl std::fmt::Debug for ExecutorContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecutorContext")
+            .field("plan_id", &self.plan_id)
+            .field("node_id", &self.node_id)
+            .field("inputs", &self.inputs)
+            .field("spine", &self.spine)
+            .field("subworkflow_ref", &self.subworkflow_ref)
+            .field("agent_config", &self.agent_config)
+            .field(
+                "session_token",
+                if self.session_token.is_some() {
+                    &"<redacted>"
+                } else {
+                    &"None"
+                },
+            )
+            .finish()
+    }
 }
 
 /// What an executor returns to the runtime.
@@ -142,8 +174,10 @@ mod tests {
             spine: Arc::new(MockSpine::default()),
             subworkflow_ref: None,
             agent_config: None,
+            session_token: None,
         };
         assert!(ctx.inputs.is_empty());
         assert!(ctx.subworkflow_ref.is_none());
+        assert!(ctx.session_token.is_none());
     }
 }

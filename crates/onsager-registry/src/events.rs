@@ -612,6 +612,9 @@ pub const EVENTS: EventManifest = EventManifest {
             // Portal's `run_spec_plan` MCP tool emits this; the
             // substrate scheduler host consumes it, loads the stored
             // SpecPlan, compiles it, and runs it (#501, ADR 0023).
+            // Carries an additive optional `encrypted_session_token`
+            // (#536) the scheduler decrypts to inject ONSAGER_SESSION_TOKEN
+            // into agent nodes — additive, so no schema_version bump.
             producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
@@ -619,6 +622,32 @@ pub const EVENTS: EventManifest = EventManifest {
             tracking_issue: None,
             operator_grain: true,
             description: "A persisted multi-spec SpecPlan was requested to run.",
+        },
+        EventDefinition {
+            kind: "plan.run_completed",
+            schema_version: 1,
+            // Substrate scheduler emits on plan-run success; portal
+            // consumes it to revoke the plan-scoped session token (#536).
+            producers: &[Subsystem::Substrate],
+            consumers: &[Subsystem::Portal],
+            diagnostic_only: false,
+            reason: None,
+            tracking_issue: None,
+            operator_grain: true,
+            description: "A plan run finished successfully.",
+        },
+        EventDefinition {
+            kind: "plan.run_failed",
+            schema_version: 1,
+            // Substrate scheduler emits on plan-run failure; portal
+            // consumes it to revoke the plan-scoped session token (#536).
+            producers: &[Subsystem::Substrate],
+            consumers: &[Subsystem::Portal],
+            diagnostic_only: false,
+            reason: None,
+            tracking_issue: None,
+            operator_grain: true,
+            description: "A plan run failed terminally.",
         },
         // -- Registry events removed by spec #285 ---------------------------
         // The nine `registry.*` mutation events had no in-tree consumer

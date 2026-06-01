@@ -57,6 +57,11 @@ numReplicas = 1
 #   DATABASE_URL              — auto-injected by Railway Postgres plugin
 #   ONSAGER_DATABASE_URL      — set to ${{Postgres.DATABASE_URL}} (spine migrations + event bus)
 #   STIGLAB_CREDENTIAL_KEY    — 32-byte hex AES-256-GCM key (openssl rand -hex 32)
+#   ONSAGER_CREDENTIAL_KEY    — same hex key; portal decrypts webhook secrets
+#                               and the substrate scheduler decrypts the
+#                               plan-scoped session token (#536) to inject
+#                               ONSAGER_SESSION_TOKEN into agent nodes. Set
+#                               it to the same value as STIGLAB_CREDENTIAL_KEY.
 #   PORT                      — auto-injected by Railway (stiglab reads STIGLAB_PORT)
 #
 # Optional:

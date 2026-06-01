@@ -246,6 +246,8 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::IsingCatchupCompleted { .. }
         | FactoryEventKind::TriggerFired { .. }
         | FactoryEventKind::SpecPlanRunRequested { .. }
+        | FactoryEventKind::PlanRunCompleted { .. }
+        | FactoryEventKind::PlanRunFailed { .. }
         | FactoryEventKind::WorkflowManualTriggered { .. }
         | FactoryEventKind::GateCheckUpdated { .. }
         | FactoryEventKind::GateManualApprovalSignal { .. }

@@ -44,6 +44,11 @@ pub struct PlanRunner {
     registry: Arc<ExecutorRegistry>,
     store: Arc<dyn PlanStore>,
     spine: Arc<dyn SpineClient>,
+    /// Plan-scoped workspace session token (spec #536), already
+    /// decrypted, threaded onto the [`Scheduler`] so every agent node in
+    /// the run carries it for `ONSAGER_SESSION_TOKEN` injection. `None`
+    /// for the trigger.fired path and whenever no plan token was minted.
+    session_token: Option<String>,
 }
 
 impl std::fmt::Debug for PlanRunner {
@@ -62,7 +67,16 @@ impl PlanRunner {
             registry,
             store,
             spine,
+            session_token: None,
         }
+    }
+
+    /// Attach a plan-scoped session token (spec #536) threaded onto the
+    /// scheduler so agent nodes inject it as `ONSAGER_SESSION_TOKEN`.
+    /// Builder so the trigger.fired path keeps the token-free `new`.
+    pub fn with_session_token(mut self, token: Option<String>) -> Self {
+        self.session_token = token;
+        self
     }
 
     /// Compile `spec_plan` against `library` and run it under
@@ -86,7 +100,8 @@ impl PlanRunner {
             Arc::clone(&self.registry),
             Arc::clone(&self.store),
             Arc::clone(&self.spine),
-        );
+        )
+        .with_session_token(self.session_token.clone());
         scheduler.run(plan_id, &exec_plan).await?;
         Ok(())
     }
