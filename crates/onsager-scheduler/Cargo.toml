@@ -17,6 +17,7 @@ onsager-artifact = { path = "../onsager-artifact" }
 onsager-nodes    = { path = "../onsager-nodes" }
 onsager-spine    = { path = "../onsager-spine" }
 onsager-substrate = { path = "../onsager-substrate" }
+onsager-agent-spawn = { path = "../onsager-agent-spawn" }
 
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -39,3 +40,4 @@ uuid = { workspace = true }
 [dev-dependencies]
 chrono = { workspace = true }
 tokio = { workspace = true }
+tempfile = { workspace = true }

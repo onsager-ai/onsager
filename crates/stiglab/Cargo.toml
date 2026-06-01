@@ -17,6 +17,7 @@ path = "src/main.rs"
 onsager-artifact = { path = "../onsager-artifact" }
 onsager-github = { path = "../onsager-github" }
 onsager-spine = { path = "../onsager-spine" }
+onsager-agent-spawn = { path = "../onsager-agent-spawn" }
 
 # From stiglab-core
 serde = { workspace = true }
