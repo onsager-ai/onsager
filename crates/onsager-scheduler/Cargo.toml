@@ -22,11 +22,11 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true }
 hex = { workspace = true }
-# AES-256-GCM decrypt of the plan-scoped session token (#536). Pinned
-# directly (not a workspace dep) — same version portal/stiglab use. The
-# small `decrypt_credential` helper is replicated in `crypto.rs` rather
-# than imported from portal/stiglab (seam rule: no sibling-subsystem dep).
-ring = "0.17"
+# AES-256-GCM decrypt of the plan-scoped session token (#536) — same
+# version portal/stiglab use, sourced from the workspace. The small
+# `decrypt_credential` helper is replicated in `crypto.rs` rather than
+# imported from portal/stiglab (seam rule: no sibling-subsystem dep).
+ring = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }

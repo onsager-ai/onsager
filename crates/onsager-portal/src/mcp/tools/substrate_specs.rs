@@ -410,12 +410,19 @@ pub async fn run_spec_plan(state: &AppState, auth_user: &AuthUser, args: Value) 
         None => None,
     };
 
-    // Raw `{ spec_plan_id, workspace_id }` payload — the scheduler's
-    // `decode_spec_plan_run_requested` accepts this shape (alongside a
-    // FactoryEvent envelope / bare kind), mirroring how `run_workflow`
-    // emits `trigger.fired`. The `encrypted_session_token` rides
-    // alongside (additive, optional) for the scheduler to decrypt and
-    // inject as `ONSAGER_SESSION_TOKEN` into each agent node (#536).
+    // Raw payload — the scheduler's `decode_spec_plan_run_requested`
+    // accepts this shape (alongside a FactoryEvent envelope / bare
+    // kind), mirroring how `run_workflow` emits `trigger.fired`. Fields:
+    //   - `spec_plan_id`: the stored plan's id.
+    //   - `workspace_id`: owning workspace.
+    //   - `plan_id`: derived run id (ADR 0023), shared with the
+    //     scheduler so consumers can subscribe to `substrate:<plan_id>:`.
+    //   - `actor`: the requesting user, threaded into event metadata.
+    //   - `source`: always `"mcp"` on this path.
+    //   - `encrypted_session_token` (optional): present only when a
+    //     plan token was minted; the scheduler decrypts it and injects
+    //     `ONSAGER_SESSION_TOKEN` into each agent node (#536).
+    // All are in-contract — consumers may rely on the non-optional ones.
     let mut payload = serde_json::json!({
         "spec_plan_id": stored.spec_plan_id,
         "workspace_id": args.workspace_id,

@@ -112,7 +112,7 @@ impl AgentExecutor {
 
 /// Request handed to an [`AgentRunner`] when [`AgentExecutor::execute`]
 /// dispatches a session.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AgentRequest {
     pub model: String,
     pub system_prompt: String,
@@ -137,6 +137,30 @@ pub struct AgentRequest {
     /// key configured); the agent then runs without MCP auth and the
     /// authoritative liveness gate still applies.
     pub session_token: Option<String>,
+}
+
+// Manual `Debug` so the plaintext `session_token` (a PAT) never leaks
+// through `{:?}` / log lines. Every other field is shown verbatim;
+// `session_token` is redacted to its presence (`<redacted>` / `None`).
+impl std::fmt::Debug for AgentRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentRequest")
+            .field("model", &self.model)
+            .field("system_prompt", &self.system_prompt)
+            .field("tools", &self.tools)
+            .field("credential_ref", &self.credential_ref)
+            .field("user_prompt", &self.user_prompt)
+            .field("session_id", &self.session_id)
+            .field(
+                "session_token",
+                if self.session_token.is_some() {
+                    &"<redacted>"
+                } else {
+                    &"None"
+                },
+            )
+            .finish()
+    }
 }
 
 /// Response returned by an [`AgentRunner`].
@@ -880,6 +904,7 @@ mod tests {
             inputs: Vec::new(),
             spine: mock as Arc<dyn crate::SpineClient>,
             subworkflow_ref: None,
+            agent_config: None,
             session_token: Some("ons_pat_plan_token".to_string()),
         };
 
@@ -1107,6 +1132,7 @@ mod tests {
             spine: mock as Arc<dyn crate::SpineClient>,
             subworkflow_ref: None,
             agent_config: SubstrateExecutor::agent_config(&node_exec),
+            session_token: None,
         };
 
         dispatch(&registry, &node, ctx).await.unwrap();
@@ -1138,6 +1164,7 @@ mod tests {
             spine: mock as Arc<dyn crate::SpineClient>,
             subworkflow_ref: None,
             agent_config: None,
+            session_token: None,
         };
         exec.execute(ctx).await.unwrap();
         assert_eq!(runner.seen_model.lock().unwrap().as_deref(), Some("SELF"));

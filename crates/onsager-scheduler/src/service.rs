@@ -132,6 +132,7 @@ impl SchedulerService {
             store: store.clone(),
             plan_store,
             credential_key: self.config.credential_key.clone(),
+            actor: self.config.actor.clone(),
         };
 
         // Default: live-only. `replay_history = true` rewinds to id=0
@@ -276,6 +277,11 @@ struct TriggerHandler {
     /// session token off `plan.run_requested` (#536). `None` disables
     /// token injection.
     credential_key: Option<String>,
+    /// Configured actor (`ServiceConfig.actor`, via `SCHEDULER_ACTOR`)
+    /// stamped onto spine emits this handler makes directly — e.g. the
+    /// plan-terminal events in [`Self::emit_plan_terminal`]. Mirrors the
+    /// actor `base_spine` was built with.
+    actor: String,
 }
 
 #[async_trait]
@@ -524,7 +530,7 @@ impl TriggerHandler {
         let metadata = onsager_spine::EventMetadata {
             correlation_id: None,
             causation_id: None,
-            actor: "substrate-scheduler".to_string(),
+            actor: self.actor.clone(),
         };
         let stream_id = format!("plan:{plan_id}");
         if let Err(e) = self
