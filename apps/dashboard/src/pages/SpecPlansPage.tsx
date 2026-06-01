@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
+import { Link } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { AlertTriangle, ChevronDown, ChevronRight, Rocket } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronRight, Plus, Rocket } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { HitlActionButton } from "@/components/chat/HitlActionButton"
@@ -49,9 +50,28 @@ function planShape(plan: SpecPlan): string {
 
 export function SpecPlansPage() {
   const workspace = useActiveWorkspace()
+  const newPlanPath = `/workspaces/${workspace.slug}/spec-plans/new`
+  // Single primary action → inline icon button in the mobile bar
+  // (dashboard-ui chrome rule). Memoized so the header effect doesn't
+  // re-set on every render.
+  const headerActions = useMemo(
+    () => (
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Create plan"
+        title="Create plan"
+        render={<Link to={newPlanPath} />}
+      >
+        <Plus className="h-5 w-5" />
+      </Button>
+    ),
+    [newPlanPath],
+  )
   usePageHeader({
     title: "Spec Plans",
     backTo: `/workspaces/${workspace.slug}/workflows`,
+    actions: headerActions,
   })
 
   const plansQuery = useQuery({
@@ -71,12 +91,18 @@ export function SpecPlansPage() {
 
   return (
     <div className="space-y-6">
-      <div className="hidden space-y-1 md:block">
-        <h1 className="text-2xl font-bold tracking-tight">Spec Plans</h1>
-        <p className="text-sm text-muted-foreground">
-          Authored in chat, runnable here. Each plan compiles to a DAG of
-          specs and runs them in dependency order.
-        </p>
+      <div className="hidden items-start justify-between gap-3 md:flex">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight">Spec Plans</h1>
+          <p className="text-sm text-muted-foreground">
+            Author in chat or here, runnable here. Each plan compiles to a
+            DAG of specs and runs them in dependency order.
+          </p>
+        </div>
+        <Button className="shrink-0" render={<Link to={newPlanPath} />}>
+          <Plus className="h-4 w-4" />
+          Create plan
+        </Button>
       </div>
 
       {plansQuery.isLoading ? (
@@ -84,7 +110,7 @@ export function SpecPlansPage() {
       ) : plansQuery.isError ? (
         <ErrorState message={(plansQuery.error as Error).message} />
       ) : plans.length === 0 ? (
-        <EmptyState />
+        <EmptyState newPlanPath={newPlanPath} />
       ) : (
         <ul className="space-y-3">
           {plans.map((p) => (
@@ -190,17 +216,21 @@ function ErrorState({ message }: { message: string }) {
   )
 }
 
-function EmptyState() {
+function EmptyState({ newPlanPath }: { newPlanPath: string }) {
   return (
     <Card>
-      <CardContent className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
+      <CardContent className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
         <Rocket className="h-8 w-8 text-muted-foreground/50" />
         <div>No spec plans yet.</div>
         <div className="max-w-sm text-xs text-muted-foreground/80">
-          Spec plans are authored in chat — open the chat and describe the
-          batch of specs you want to run. Submitted plans show up here,
-          ready to launch.
+          Create a plan here — add specs and their dependencies and submit
+          — or describe one in chat. Either way it shows up here, ready to
+          launch.
         </div>
+        <Button size="sm" className="mt-1" render={<Link to={newPlanPath} />}>
+          <Plus className="h-4 w-4" />
+          Create plan
+        </Button>
       </CardContent>
     </Card>
   )
