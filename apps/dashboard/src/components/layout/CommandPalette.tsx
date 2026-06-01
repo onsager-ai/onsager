@@ -218,6 +218,13 @@ function CommandPaletteDialog() {
                 New workflow
               </CommandItem>
               <CommandItem
+                keywords={["new", "spec", "plan", "dag"]}
+                onSelect={() => go(scoped("spec-plans/new"))}
+              >
+                <Rocket className="mr-2 h-4 w-4" />
+                New plan
+              </CommandItem>
+              <CommandItem
                 keywords={["new"]}
                 onSelect={() => run(() => setSessionOpen(true))}
               >

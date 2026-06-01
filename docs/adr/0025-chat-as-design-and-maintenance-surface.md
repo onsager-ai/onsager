@@ -7,6 +7,7 @@
 - **Tracking issues**: #506 (umbrella spec). Amends ADR 0020 (chat as portable global component); reconciles ADR 0023 (spec-plan run orchestration).
 - **Supersedes**: none. Amends ADR 0020 — see the note below; the responsive-mount + auto-scope decisions of 0020 stand.
 - **Superseded by**: none
+- **Amended by**: #542 — the noun surface (Spec Plans) gains a guided *authoring* affordance (a "Create Plan" form), so chat is no longer the sole spec-plan **authoring** path, just as it is no longer the sole *launch* path. This is a complement, not a reversal: chat stays the conversational/design authoring surface; the form is the deterministic path for a known plan. See § "Routine actions move to the noun surfaces".
 
 ## Context
 
@@ -35,6 +36,7 @@ This amends ADR 0020's "chat is one interchangeable frontend, not privileged" to
 ### Routine actions move to the noun surfaces
 
 - A **"run a batch" button** lands on `ready` workflows (ADR 0024) and on persisted spec plans, reusing `run_spec_plan` / `run_workflow`. Starting a routine run no longer requires opening chat. Chat is no longer the *sole* launch path for spec-plan runs — this is the reconciliation with ADR 0023 Decision 2.
+- A guided **"Create Plan" form** lands on the Spec Plans surface (#542), reusing `compile_dry_run` (live lint + DAG preview) and `submit_spec_plan` (routed through a HitlCard). Authoring a known plan no longer requires describing it in chat. This extends the same reasoning from *launch* to *authoring*: a deterministic, structured action belongs on the noun surface; chat remains the conversational/design path for plans that are still being shaped.
 
 ### Desktop gains a labeled chat entry
 

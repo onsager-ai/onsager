@@ -9,6 +9,10 @@
   ADR 0015 (Spec Plan as DAG external contract), and ADR 0017 (plan
   compiler).
 - **Superseded by**: none
+- **Amended by**: ADR 0025 (chat is no longer the sole launch+monitor
+  surface for spec-plan runs) and #542 (the noun surface gains a guided
+  authoring form, so F1's in-chat `SpecPlanDAG` authoring is complemented
+  by a structured "Create Plan" surface, not replaced).
 
 ## Context
 

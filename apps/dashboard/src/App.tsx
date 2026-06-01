@@ -35,6 +35,11 @@ const RunDetailPage = lazy(() =>
 const SpecPlansPage = lazy(() =>
   import("@/pages/SpecPlansPage").then((m) => ({ default: m.SpecPlansPage })),
 )
+const CreateSpecPlanPage = lazy(() =>
+  import("@/pages/CreateSpecPlanPage").then((m) => ({
+    default: m.CreateSpecPlanPage,
+  })),
+)
 const RunsPage = lazy(() =>
   import("@/pages/RunsPage").then((m) => ({ default: m.RunsPage })),
 )
@@ -356,6 +361,13 @@ function AppRoutes() {
                         <Route
                           path="spec-plans"
                           element={<LazyRoute variant="list"><SpecPlansPage /></LazyRoute>}
+                        />
+                        {/* Guided "Create Plan" authoring surface
+                            (spec #542) — sub-route, not a modal, for
+                            the DAG preview + clean back-nav. */}
+                        <Route
+                          path="spec-plans/new"
+                          element={<LazyRoute><CreateSpecPlanPage /></LazyRoute>}
                         />
                         {/* Spine event stream at operator grain
                             (#454 / ADR 0019). */}
