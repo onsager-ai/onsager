@@ -3,8 +3,8 @@
 mod tests {
     use super::super::*;
     use crate::core::{
-        GitHubAccountType, GitHubAppInstallation, Project, Session, SessionState, Workspace,
-        WorkspaceMember,
+        GitHubAccountType, GitHubAppInstallation, Session, SessionState, Workspace,
+        WorkspaceMember, WorkspaceRepo,
     };
     use chrono::Utc;
     use sqlx::AnyPool;
@@ -145,7 +145,7 @@ mod tests {
         assert_eq!(installs.len(), 1);
         assert_eq!(installs[0].install_id, 42);
 
-        let project = Project {
+        let project = WorkspaceRepo {
             id: Uuid::new_v4().to_string(),
             workspace_id: w.id.clone(),
             github_app_installation_id: install.id.clone(),
@@ -180,7 +180,7 @@ mod tests {
             .await
             .unwrap();
 
-        let project = Project {
+        let project = WorkspaceRepo {
             id: Uuid::new_v4().to_string(),
             workspace_id: w.id.clone(),
             github_app_installation_id: install.id.clone(),
@@ -287,7 +287,7 @@ mod tests {
             0
         );
 
-        let project = Project {
+        let project = WorkspaceRepo {
             id: Uuid::new_v4().to_string(),
             workspace_id: w.id.clone(),
             github_app_installation_id: install.id.clone(),
@@ -336,7 +336,7 @@ mod tests {
         insert_github_app_installation(&pool, &install, None)
             .await
             .unwrap();
-        let project = Project {
+        let project = WorkspaceRepo {
             id: Uuid::new_v4().to_string(),
             workspace_id: w1.id.clone(),
             github_app_installation_id: install.id.clone(),

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// installation.  Opt-in per repo: installing the App on an org does not
 /// auto-mirror all of that org's repos; the user explicitly adds each one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Project {
+pub struct WorkspaceRepo {
     pub id: String,
     pub workspace_id: String,
     pub github_app_installation_id: String,

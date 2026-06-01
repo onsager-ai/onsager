@@ -40,7 +40,22 @@ CREATE TABLE IF NOT EXISTS workspace_members (
 
 CREATE INDEX IF NOT EXISTS idx_workspace_members_user_id ON workspace_members (user_id);
 
-CREATE TABLE IF NOT EXISTS projects (
+-- spec #545: `projects` is a workspace↔repo membership list, not a unit of
+-- work — rename it to `workspace_repos`. Idempotent + safe to re-run.
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'projects')
+     AND NOT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'workspace_repos') THEN
+    ALTER TABLE projects RENAME TO workspace_repos;
+    ALTER INDEX IF EXISTS idx_projects_workspace_id RENAME TO idx_workspace_repos_workspace_id;
+    BEGIN
+      ALTER TABLE workspace_repos RENAME CONSTRAINT projects_ingestion_mode_check TO workspace_repos_ingestion_mode_check;
+    EXCEPTION WHEN undefined_object THEN NULL;
+    END;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS workspace_repos (
     id                         TEXT NOT NULL PRIMARY KEY,
     workspace_id               TEXT NOT NULL,
     github_app_installation_id TEXT NOT NULL,
@@ -50,11 +65,11 @@ CREATE TABLE IF NOT EXISTS projects (
     created_at                 TEXT NOT NULL,
     ingestion_mode             TEXT NOT NULL DEFAULT 'webhook+reconciler',
     UNIQUE (workspace_id, repo_owner, repo_name),
-    CONSTRAINT projects_ingestion_mode_check
+    CONSTRAINT workspace_repos_ingestion_mode_check
         CHECK (ingestion_mode IN ('webhook+reconciler', 'polling-only', 'webhook-only'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_projects_workspace_id ON projects (workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_repos_workspace_id ON workspace_repos (workspace_id);
 
 -- ── Workflows ────────────────────────────────────────────────────────────────
 

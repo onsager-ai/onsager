@@ -18,7 +18,7 @@ use sqlx::postgres::PgPool;
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
-use crate::core::Project;
+use crate::core::WorkspaceRepo;
 use crate::handlers::workspaces::require_workspace_access;
 use crate::state::AppState;
 use crate::workspace_db;
@@ -126,7 +126,7 @@ pub async fn add_project(
         },
     };
 
-    let project = Project {
+    let project = WorkspaceRepo {
         id: Uuid::new_v4().to_string(),
         workspace_id: workspace_id.clone(),
         github_app_installation_id: body.github_app_installation_id.clone(),

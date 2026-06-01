@@ -10,7 +10,7 @@
 //! project).
 
 use crate::auth::decrypt_credential;
-use crate::core::Project;
+use crate::core::WorkspaceRepo;
 use crate::installation_db;
 use crate::state::AppState;
 use crate::workflow::Workflow;
@@ -39,7 +39,7 @@ pub async fn resolve_workflow_install_id(state: &AppState, workflow: &Workflow) 
 /// account-level), and fall back to the workflow's cached `install_id`
 /// (mint cache) when no project matches. Kept separate so the
 /// project-match-vs-fallback choice is unit-testable without a DB.
-fn pick_install_id(workflow: &Workflow, projects: &[Project]) -> Option<i64> {
+fn pick_install_id(workflow: &Workflow, projects: &[WorkspaceRepo]) -> Option<i64> {
     if let Some((repo_owner, repo_name)) = workflow.github_repo_any()
         && let Some(project) = projects
             .iter()
@@ -90,8 +90,8 @@ mod tests {
         }
     }
 
-    fn project(repo_owner: &str, repo_name: &str, install: &str) -> Project {
-        Project {
+    fn project(repo_owner: &str, repo_name: &str, install: &str) -> WorkspaceRepo {
+        WorkspaceRepo {
             id: "p1".into(),
             workspace_id: "w1".into(),
             github_app_installation_id: install.into(),

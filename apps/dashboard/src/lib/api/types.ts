@@ -26,7 +26,6 @@ export type { MeVia } from "./generated/MeVia";
 export type { Node } from "./generated/Node";
 export type { NodeStatus } from "./generated/NodeStatus";
 export type { Pat } from "./generated/Pat";
-export type { Project } from "./generated/Project";
 export type { ProjectIssueDetail } from "./generated/ProjectIssueDetail";
 export type { ProjectIssueDetailResponse } from "./generated/ProjectIssueDetailResponse";
 export type { ProjectPullRow } from "./generated/ProjectPullRow";
@@ -44,6 +43,7 @@ export type { WorkflowGateKind } from "./generated/WorkflowGateKind";
 export type { Workspace } from "./generated/Workspace";
 export type { WorkspaceDeliveryHealthResponse } from "./generated/WorkspaceDeliveryHealthResponse";
 export type { WorkspaceMember } from "./generated/WorkspaceMember";
+export type { WorkspaceRepo } from "./generated/WorkspaceRepo";
 
 // ── Hand-written (pending derive) ────────────────────────────────────────
 

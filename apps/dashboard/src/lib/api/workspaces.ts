@@ -4,7 +4,7 @@ import type {
   WorkspaceMember,
   GitHubAppInstallation,
   GitHubAccountType,
-  Project,
+  WorkspaceRepo,
   AccessibleRepo,
   GitHubLabel,
   WorkspaceDeliveryHealthResponse,
@@ -49,7 +49,7 @@ export const workspaces = {
       { method: 'DELETE' },
     ),
   listWorkspaceProjects: (id: string) =>
-    request<{ projects: Project[] }>(
+    request<{ projects: WorkspaceRepo[] }>(
       `/workspaces/${encodeURIComponent(id)}/projects`,
     ),
   addWorkspaceProject: (
@@ -61,11 +61,11 @@ export const workspaces = {
       default_branch?: string;
     },
   ) =>
-    request<{ project: Project }>(
+    request<{ project: WorkspaceRepo }>(
       `/workspaces/${encodeURIComponent(id)}/projects`,
       { method: 'POST', body: JSON.stringify(body) },
     ),
-  listAllProjects: () => request<{ projects: Project[] }>('/projects'),
+  listAllProjects: () => request<{ projects: WorkspaceRepo[] }>('/projects'),
   deleteProject: (id: string) =>
     request<{ ok: boolean }>(`/projects/${encodeURIComponent(id)}`, {
       method: 'DELETE',

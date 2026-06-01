@@ -40,7 +40,7 @@ use onsager_spine::webhook_routing::{
 
 use crate::auth::AuthUser;
 use crate::backfill::Strategy;
-use crate::core::Project;
+use crate::core::WorkspaceRepo;
 use crate::handlers::projects::installation_token_for;
 use crate::handlers::workspaces::require_workspace_access;
 use crate::state::AppState;
@@ -65,7 +65,7 @@ async fn require_project_for_user(
     state: &AppState,
     auth_user: &AuthUser,
     project_id: &str,
-) -> Result<Project, Response> {
+) -> Result<WorkspaceRepo, Response> {
     let project = match workspace_db::get_project(&state.pool, project_id).await {
         Ok(Some(p)) => p,
         Ok(None) => return Err(not_found("project not found")),

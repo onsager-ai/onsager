@@ -17,7 +17,7 @@ export type {
   WorkspaceMember,
   GitHubAccountType,
   GitHubAppInstallation,
-  Project,
+  WorkspaceRepo,
   AccessibleRepo,
   GovernanceEvent,
   TokenUsage,

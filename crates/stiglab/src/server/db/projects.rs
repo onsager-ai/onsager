@@ -1,10 +1,10 @@
-use crate::core::Project;
+use crate::core::WorkspaceRepo;
 use chrono::Utc;
 use sqlx::AnyPool;
 
-pub async fn insert_project(pool: &AnyPool, project: &Project) -> anyhow::Result<()> {
+pub async fn insert_project(pool: &AnyPool, project: &WorkspaceRepo) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO projects (id, workspace_id, github_app_installation_id, repo_owner, \
+        "INSERT INTO workspace_repos (id, workspace_id, github_app_installation_id, repo_owner, \
                                repo_name, default_branch, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
@@ -20,11 +20,14 @@ pub async fn insert_project(pool: &AnyPool, project: &Project) -> anyhow::Result
     Ok(())
 }
 
-pub async fn get_project(pool: &AnyPool, project_id: &str) -> anyhow::Result<Option<Project>> {
-    let row = sqlx::query_as::<_, ProjectRow>(
+pub async fn get_project(
+    pool: &AnyPool,
+    project_id: &str,
+) -> anyhow::Result<Option<WorkspaceRepo>> {
+    let row = sqlx::query_as::<_, WorkspaceRepoRow>(
         "SELECT id, workspace_id, github_app_installation_id, repo_owner, repo_name, \
                 default_branch, created_at \
-         FROM projects WHERE id = $1",
+         FROM workspace_repos WHERE id = $1",
     )
     .bind(project_id)
     .fetch_optional(pool)
@@ -35,11 +38,11 @@ pub async fn get_project(pool: &AnyPool, project_id: &str) -> anyhow::Result<Opt
 pub async fn list_projects_for_workspace(
     pool: &AnyPool,
     workspace_id: &str,
-) -> anyhow::Result<Vec<Project>> {
-    let rows = sqlx::query_as::<_, ProjectRow>(
+) -> anyhow::Result<Vec<WorkspaceRepo>> {
+    let rows = sqlx::query_as::<_, WorkspaceRepoRow>(
         "SELECT id, workspace_id, github_app_installation_id, repo_owner, repo_name, \
                 default_branch, created_at \
-         FROM projects WHERE workspace_id = $1 ORDER BY created_at ASC",
+         FROM workspace_repos WHERE workspace_id = $1 ORDER BY created_at ASC",
     )
     .bind(workspace_id)
     .fetch_all(pool)
@@ -47,11 +50,14 @@ pub async fn list_projects_for_workspace(
     rows.into_iter().map(|r| r.try_into()).collect()
 }
 
-pub async fn list_projects_for_user(pool: &AnyPool, user_id: &str) -> anyhow::Result<Vec<Project>> {
-    let rows = sqlx::query_as::<_, ProjectRow>(
+pub async fn list_projects_for_user(
+    pool: &AnyPool,
+    user_id: &str,
+) -> anyhow::Result<Vec<WorkspaceRepo>> {
+    let rows = sqlx::query_as::<_, WorkspaceRepoRow>(
         "SELECT p.id, p.workspace_id, p.github_app_installation_id, p.repo_owner, p.repo_name, \
                 p.default_branch, p.created_at \
-         FROM projects p \
+         FROM workspace_repos p \
          JOIN workspace_members m ON p.workspace_id = m.workspace_id \
          WHERE m.user_id = $1 \
          ORDER BY p.created_at ASC",
@@ -63,7 +69,7 @@ pub async fn list_projects_for_user(pool: &AnyPool, user_id: &str) -> anyhow::Re
 }
 
 pub async fn delete_project(pool: &AnyPool, project_id: &str) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM projects WHERE id = $1")
+    sqlx::query("DELETE FROM workspace_repos WHERE id = $1")
         .bind(project_id)
         .execute(pool)
         .await?;
@@ -90,7 +96,7 @@ pub async fn count_live_sessions_for_project(
 // ── Row types ──
 
 #[derive(sqlx::FromRow)]
-struct ProjectRow {
+struct WorkspaceRepoRow {
     id: String,
     workspace_id: String,
     github_app_installation_id: String,
@@ -100,11 +106,11 @@ struct ProjectRow {
     created_at: String,
 }
 
-impl TryFrom<ProjectRow> for Project {
+impl TryFrom<WorkspaceRepoRow> for WorkspaceRepo {
     type Error = anyhow::Error;
 
-    fn try_from(row: ProjectRow) -> anyhow::Result<Self> {
-        Ok(Project {
+    fn try_from(row: WorkspaceRepoRow) -> anyhow::Result<Self> {
+        Ok(WorkspaceRepo {
             id: row.id,
             workspace_id: row.workspace_id,
             github_app_installation_id: row.github_app_installation_id,

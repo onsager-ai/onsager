@@ -27,7 +27,7 @@ import {
   api,
   ApiError,
   type GitHubAppInstallation,
-  type Project,
+  type WorkspaceRepo,
   type Workspace,
 } from "@/lib/api"
 import { markDraftBound } from "@/lib/drafts"
@@ -364,7 +364,7 @@ function ProjectStep({
     queryFn: () => api.listWorkspaceProjects(workspace.id),
     staleTime: 30_000,
   })
-  const projects: Project[] = projectsQuery.data?.projects ?? []
+  const projects: WorkspaceRepo[] = projectsQuery.data?.projects ?? []
 
   // The user has picked a repo via RepoCombobox once these three are set.
   const repoChosen = !!installId && !!repoOwner && !!repoName

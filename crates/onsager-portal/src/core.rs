@@ -56,7 +56,7 @@ pub struct WorkspaceMemberWithUser {
 /// auto-mirror all of that org's repos; the user explicitly adds each one.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct Project {
+pub struct WorkspaceRepo {
     pub id: String,
     pub workspace_id: String,
     pub github_app_installation_id: String,
