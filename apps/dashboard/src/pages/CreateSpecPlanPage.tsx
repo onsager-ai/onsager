@@ -54,6 +54,20 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced
 }
 
+// Stable per-row identity so React keys don't track array position —
+// removing a row must not make a sibling input/combobox reuse the wrong
+// internal state or focus. Monotonic across the session; never submitted
+// (stripped by `draftToPlan`).
+let ROW_SEQ = 0
+const nextRowId = () => `row-${ROW_SEQ++}`
+
+interface SpecRow extends DraftSpec {
+  rowId: string
+}
+interface DepRow extends SpecDep {
+  rowId: string
+}
+
 export function CreateSpecPlanPage() {
   const workspace = useActiveWorkspace()
   const navigate = useNavigate()
@@ -61,17 +75,22 @@ export function CreateSpecPlanPage() {
   usePageHeader({ title: "Create Plan", backTo: plansPath })
 
   const [planId, setPlanId] = useState("")
-  const [specs, setSpecs] = useState<DraftSpec[]>([{ id: "", kind: "" }])
-  const [deps, setDeps] = useState<SpecDep[]>([])
+  const [specs, setSpecs] = useState<SpecRow[]>(() => [
+    { rowId: nextRowId(), id: "", kind: "" },
+  ])
+  const [deps, setDeps] = useState<DepRow[]>([])
 
   const plan = useMemo(() => draftToPlan(specs, deps), [specs, deps])
   const completeSpecs = specs.filter(isComplete)
-  const completeIds = completeSpecs.map((s) => s.id.trim())
+  // De-duplicate: two rows can transiently share an id (the compiler
+  // flags it), but the dep selects must not render duplicate keys/values.
+  const completeIds = [...new Set(completeSpecs.map((s) => s.id.trim()))]
 
   // Live lint: recompile the candidate plan (debounced) whenever it has
   // at least one complete spec. The compiler is the source of truth for
   // unknown kinds / cycles / dangling edges — we don't re-implement it.
-  const planKey = useDebounced(JSON.stringify(plan), 400)
+  const liveKey = JSON.stringify(plan)
+  const planKey = useDebounced(liveKey, 400)
   const compileQuery = useQuery({
     queryKey: ["compile-dry-run", workspace.id, planKey],
     queryFn: async () => {
@@ -87,8 +106,15 @@ export function CreateSpecPlanPage() {
     enabled: plan.specs.length > 0,
   })
 
-  const compileResult = plan.specs.length > 0 ? compileQuery.data : null
-  const compiling = plan.specs.length > 0 && compileQuery.isFetching
+  // The submit button sends the *current* plan, so the gate must reflect
+  // the current plan — not a stale debounced compile. While the debounce
+  // hasn't caught up (`dirty`) or the query is in flight, treat the plan
+  // as still compiling so commit stays disabled until the live plan is
+  // the one that compiled clean.
+  const dirty = liveKey !== planKey
+  const compileResult = plan.specs.length > 0 && !dirty ? compileQuery.data : null
+  const compiling =
+    plan.specs.length > 0 && (dirty || compileQuery.isFetching)
   const canSubmit =
     planId.trim().length > 0 &&
     completeSpecs.length > 0 &&
@@ -97,7 +123,8 @@ export function CreateSpecPlanPage() {
 
   const setSpec = (i: number, patch: Partial<DraftSpec>) =>
     setSpecs((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)))
-  const addSpec = () => setSpecs((prev) => [...prev, { id: "", kind: "" }])
+  const addSpec = () =>
+    setSpecs((prev) => [...prev, { rowId: nextRowId(), id: "", kind: "" }])
   const removeSpec = (i: number) => {
     const removedId = specs[i]?.id.trim()
     setSpecs((prev) => prev.filter((_, j) => j !== i))
@@ -107,7 +134,8 @@ export function CreateSpecPlanPage() {
       )
     }
   }
-  const addDep = () => setDeps((prev) => [...prev, { from: "", to: "" }])
+  const addDep = () =>
+    setDeps((prev) => [...prev, { rowId: nextRowId(), from: "", to: "" }])
   const setDep = (i: number, patch: Partial<SpecDep>) =>
     setDeps((prev) => prev.map((d, j) => (j === i ? { ...d, ...patch } : d)))
   const removeDep = (i: number) =>
@@ -150,7 +178,7 @@ export function CreateSpecPlanPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           {specs.map((spec, i) => (
-            <div key={i} className="flex items-center gap-2">
+            <div key={spec.rowId} className="flex items-center gap-2">
               <Input
                 aria-label={`Spec ${i + 1} id`}
                 value={spec.id}
@@ -197,7 +225,7 @@ export function CreateSpecPlanPage() {
             </p>
           ) : (
             deps.map((dep, i) => (
-              <div key={i} className="flex items-center gap-2">
+              <div key={dep.rowId} className="flex items-center gap-2">
                 <DepEndpointSelect
                   ariaLabel={`Dependency ${i + 1} from`}
                   value={dep.from}
@@ -345,7 +373,19 @@ function CompileStatus({
       </div>
     )
   }
-  if (!result) return null
+  if (!result) {
+    // Query resolved but the payload wasn't the expected JSON envelope —
+    // don't leave the author staring at a blank preview with no signal.
+    return (
+      <div
+        role="alert"
+        className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-sm text-destructive"
+      >
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>Couldn&apos;t read the compiler response.</span>
+      </div>
+    )
+  }
   if (result.ok) {
     return (
       <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">

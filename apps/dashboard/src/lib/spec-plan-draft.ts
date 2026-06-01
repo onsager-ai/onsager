@@ -49,9 +49,11 @@ export function draftToPlan(specs: DraftSpec[], deps: SpecDep[]): SpecPlan {
     id: s.id.trim(),
     kind: s.kind.trim(),
   }))
-  const planDeps = deps.filter(
-    (d) => d.from && d.to && ids.has(d.from) && ids.has(d.to),
-  )
+  const planDeps: SpecDep[] = deps
+    .filter((d) => d.from && d.to && ids.has(d.from) && ids.has(d.to))
+    // Map to a clean `{ from, to }` so any per-row UI metadata (e.g. a
+    // stable row id) can never leak into the submitted plan body.
+    .map((d) => ({ from: d.from, to: d.to }))
   return { specs: planSpecs, deps: planDeps }
 }
 
