@@ -17,11 +17,13 @@
 //! `claude --output-format stream-json --verbose --include-partial-messages
 //! --permission-mode bypassPermissions [--model M] [--system-prompt P]
 //! [--mcp-config …] [--settings …] -- <prompt>` with `ONSAGER_SESSION_ID`
-//! threaded into the child env from [`AgentRequest::session_id`]. The MCP
-//! config (spec #531) and liveness Stop hook (spec #520 §4d) are wired
-//! only when their env is present, mirroring stiglab's gating exactly:
-//! Claude Code fails to parse an MCP config whose `${VAR}` is unset, so a
-//! tokenless registration would break the session rather than degrade.
+//! threaded into the child env from [`AgentRequest::session_id`] and the
+//! plan-scoped token (#536) injected as `ONSAGER_SESSION_TOKEN` from
+//! [`AgentRequest::session_token`]. The MCP config (spec #531) and
+//! liveness Stop hook (spec #520 §4d) are wired only when their inputs
+//! are present, mirroring stiglab's gating exactly: Claude Code fails to
+//! parse an MCP config whose `${VAR}` is unset, so a tokenless
+//! registration would break the session rather than degrade.
 //!
 //! ## What it returns
 //!
@@ -136,13 +138,18 @@ impl AgentRunner for ClaudeCliRunner {
         }
 
         // Portal MCP server (spec #531). Registered only when the MCP
-        // URL is configured AND the session token is present in the env —
-        // Claude Code fails to parse an MCP config whose `${VAR}` is
-        // unset, so a tokenless registration would break the session
-        // rather than degrade. Absent either → the agent runs without
-        // MCP (no emit path); the authoritative gate (#523) still covers
-        // liveness. Same gating stiglab applies.
-        let has_session_token = std::env::var(SESSION_TOKEN_ENV).is_ok_and(|t| !t.is_empty());
+        // URL is configured AND the plan-scoped session token (#536) is
+        // present on the request — Claude Code fails to parse an MCP
+        // config whose `${VAR}` is unset, so a tokenless registration
+        // would break the session rather than degrade. Absent either →
+        // the agent runs without MCP (no emit path); the authoritative
+        // gate (#523) still covers liveness. The token rides the request
+        // (decrypted once per plan by the scheduler, #538/#539), not the
+        // process env — each plan run carries its own.
+        let has_session_token = request
+            .session_token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty());
         if let Ok(mcp_url) = std::env::var(MCP_URL_ENV)
             && !mcp_url.is_empty()
             && has_session_token
@@ -158,6 +165,15 @@ impl AgentRunner for ClaudeCliRunner {
         // its MCP emits to the same `session:<id>` manifest stream the
         // executor reads back authoritatively (spec #520 §4b/§4c).
         cmd.env(SESSION_ID_ENV, &request.session_id);
+
+        // Inject the plan-scoped session token (#536) as
+        // `ONSAGER_SESSION_TOKEN` so the `${VAR}` interpolation in the MCP
+        // config + Stop-hook `Authorization` headers resolves at startup.
+        // Only set when present; an empty/absent token means no MCP auth
+        // (and the MCP config above was not registered).
+        if let Some(token) = request.session_token.as_deref().filter(|t| !t.is_empty()) {
+            cmd.env(SESSION_TOKEN_ENV, token);
+        }
 
         // stderr is discarded, not piped: this runner has no consumer
         // for it (unlike stiglab, which forwards stderr as UI chunks),
@@ -321,6 +337,7 @@ mod tests {
              {{\n\
                echo \"ARGS: $*\"\n\
                echo \"SESSION_ID: ${{ONSAGER_SESSION_ID:-}}\"\n\
+               echo \"SESSION_TOKEN: ${{ONSAGER_SESSION_TOKEN:-}}\"\n\
              }} >> \"{capture}\"\n\
              cat <<'NDJSON'\n{body}\nNDJSON\n",
             capture = capture_path.display(),
@@ -334,6 +351,14 @@ mod tests {
     }
 
     fn request(prompt: &str, session_id: &str) -> AgentRequest {
+        request_with_token(prompt, session_id, None)
+    }
+
+    fn request_with_token(
+        prompt: &str,
+        session_id: &str,
+        session_token: Option<&str>,
+    ) -> AgentRequest {
         AgentRequest {
             model: "claude-sonnet-4-6".into(),
             system_prompt: "you are helpful".into(),
@@ -341,6 +366,7 @@ mod tests {
             credential_ref: None,
             user_prompt: prompt.into(),
             session_id: session_id.into(),
+            session_token: session_token.map(Into::into),
         }
     }
 
@@ -455,26 +481,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_config_wired_when_url_and_token_present() {
+    async fn mcp_config_wired_and_token_injected_when_url_and_token_present() {
         let _guard = ENV_LOCK.lock().await;
         let capture = tempfile::tempdir().unwrap();
         let cap_file = capture.path().join("argv.txt");
         let body = r#"{"type":"result","subtype":"success","result":"ok"}"#;
         let (_dir, script) = fake_claude(body, &cap_file);
 
-        // SAFETY: env mutation is serialized by ENV_LOCK; vars are
-        // cleared before the guard drops so no other test observes them.
+        // The MCP endpoint URL is deployment config (process env); the
+        // session token is plan-scoped and rides the request (#536/#538).
+        // SAFETY: env mutation is serialized by ENV_LOCK and cleared
+        // before the guard drops, so no other test observes it.
         unsafe {
             std::env::set_var(MCP_URL_ENV, "https://app.example.com/mcp/messages");
-            std::env::set_var(SESSION_TOKEN_ENV, "tok_secret");
         }
 
         let runner = ClaudeCliRunner::with_command(script);
-        runner.run(request("p", "sess_mcp")).await.unwrap();
+        runner
+            .run(request_with_token("p", "sess_mcp", Some("tok_secret")))
+            .await
+            .unwrap();
 
         unsafe {
             std::env::remove_var(MCP_URL_ENV);
-            std::env::remove_var(SESSION_TOKEN_ENV);
         }
 
         let recorded = std::fs::read_to_string(&cap_file).unwrap();
@@ -487,6 +516,14 @@ mod tests {
             recorded.contains("https://app.example.com/mcp/messages"),
             "the MCP config JSON should carry the portal URL, got: {recorded}"
         );
+        // The plan-scoped token is injected into the child env as
+        // ONSAGER_SESSION_TOKEN so the `${VAR}` headers resolve at
+        // startup. Mutation guard: dropping the `cmd.env(SESSION_TOKEN_ENV
+        // ..)` line makes this assertion fail.
+        assert!(
+            recorded.contains("SESSION_TOKEN: tok_secret"),
+            "ONSAGER_SESSION_TOKEN must be injected from the request, got: {recorded}"
+        );
     }
 
     #[tokio::test]
@@ -497,13 +534,12 @@ mod tests {
         let body = r#"{"type":"result","subtype":"success","result":"ok"}"#;
         let (_dir, script) = fake_claude(body, &cap_file);
 
-        // MCP URL set but NO session token → Claude Code would fail to
-        // parse a tokenless config, so the runner must omit it (mirrors
-        // stiglab's gating). Mutation guard: dropping the
-        // `has_session_token` check here makes this assertion fail.
+        // MCP URL set but the request carries NO session token → Claude
+        // Code would fail to parse a tokenless config, so the runner must
+        // omit it (mirrors stiglab's gating). Mutation guard: dropping the
+        // `has_session_token` check makes this assertion fail.
         unsafe {
             std::env::set_var(MCP_URL_ENV, "https://app.example.com/mcp/messages");
-            std::env::remove_var(SESSION_TOKEN_ENV);
         }
 
         let runner = ClaudeCliRunner::with_command(script);
@@ -517,6 +553,11 @@ mod tests {
         assert!(
             !recorded.contains("--mcp-config"),
             "argv must omit --mcp-config when the session token is absent, got: {recorded}"
+        );
+        // The token env stays empty in the child when the request has none.
+        assert!(
+            recorded.contains("SESSION_TOKEN: \n"),
+            "ONSAGER_SESSION_TOKEN must be empty when the request has no token, got: {recorded}"
         );
     }
 }
