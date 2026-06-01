@@ -464,6 +464,7 @@ mod tests {
             inputs,
             spine: Arc::new(MockSpine::default()),
             subworkflow_ref: None,
+            agent_config: None,
         }
     }
 
@@ -478,6 +479,7 @@ mod tests {
             inputs,
             spine: Arc::new(MockSpine::default()),
             subworkflow_ref: Some(workflow_ref),
+            agent_config: None,
         }
     }
 

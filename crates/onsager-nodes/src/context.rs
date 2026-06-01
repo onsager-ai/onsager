@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use onsager_artifact::{Artifact, ArtifactId, NodeId};
+use onsager_substrate::executor::AgentConfig;
 use onsager_substrate::ids::WorkflowId;
 
 use crate::SpineClient;
@@ -54,6 +55,18 @@ pub struct ExecutorContext {
     /// scheduler reads it off the substrate executor and threads it
     /// through here. Other executors ignore the field.
     pub subworkflow_ref: Option<WorkflowId>,
+    /// `Some(config)` if the node's substrate-side executor is an Agent
+    /// (its [`onsager_substrate::executor::Executor::agent_config`]
+    /// returned `Some`); `None` otherwise.
+    ///
+    /// The agent-config sibling of [`Self::subworkflow_ref`], for the
+    /// same reason: dispatch shares one registered `AgentExecutor`
+    /// across every agent node, so its per-instance config is invisible
+    /// to the runtime instance. The scheduler reads the per-node config
+    /// off the substrate executor and threads it through here; the
+    /// runtime `AgentExecutor` prefers it over its own fields. Other
+    /// executors ignore the field. Issue #534.
+    pub agent_config: Option<AgentConfig>,
 }
 
 /// What an executor returns to the runtime.
@@ -128,6 +141,7 @@ mod tests {
             inputs: vec![],
             spine: Arc::new(MockSpine::default()),
             subworkflow_ref: None,
+            agent_config: None,
         };
         assert!(ctx.inputs.is_empty());
         assert!(ctx.subworkflow_ref.is_none());

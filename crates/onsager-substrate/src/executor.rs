@@ -81,6 +81,42 @@ pub trait Executor: std::fmt::Debug + Send + Sync {
     fn subworkflow_ref(&self) -> Option<WorkflowId> {
         None
     }
+
+    /// If this executor is an Agent, the per-node [`AgentConfig`] it
+    /// carries. Default `None` covers every non-agent executor — they
+    /// inherit it untouched, so no impl churn.
+    ///
+    /// This is the agent-config sibling of [`Self::subworkflow_ref`]:
+    /// dispatch resolves a node to the *registered singleton* runtime
+    /// executor by `executor_kind()` string, so per-instance config on
+    /// the node's own boxed executor is invisible to the runtime
+    /// instance. The scheduler reads this off the substrate executor
+    /// and threads it through `ExecutorContext` so the registered
+    /// `AgentExecutor` runs each node with *its* model / prompt /
+    /// tools / credential rather than the singleton's (issue #534).
+    fn agent_config(&self) -> Option<AgentConfig> {
+        None
+    }
+}
+
+/// Per-node configuration an Agent executor carries — the slice of an
+/// agent node's state the runtime needs to dispatch a session with the
+/// *node's* parameters rather than the registered singleton's.
+///
+/// Mirrors the fields stiglab's `Task` carries (`model`,
+/// `system_prompt`, allowed `tools`, a credential bundle reference);
+/// the runtime wiring (the session runner) stays on the singleton and
+/// is deliberately *not* part of this serializable shape. Lives in the
+/// substrate because [`Executor::agent_config`] must return a
+/// substrate-visible type (issue #534).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConfig {
+    pub model: String,
+    pub system_prompt: String,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default)]
+    pub credential_ref: Option<String>,
 }
 
 /// A no-op executor — declares deterministic output, performs nothing.

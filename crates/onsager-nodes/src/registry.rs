@@ -122,6 +122,7 @@ mod tests {
             inputs: vec![],
             spine: Arc::new(MockSpine::default()),
             subworkflow_ref: None,
+            agent_config: None,
         };
         let outputs = exec.execute(ctx).await.unwrap();
         assert!(outputs.artifacts.is_empty());
