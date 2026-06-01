@@ -67,6 +67,15 @@ pub struct ExecutorContext {
     /// runtime `AgentExecutor` prefers it over its own fields. Other
     /// executors ignore the field. Issue #534.
     pub agent_config: Option<AgentConfig>,
+    /// Plan-scoped workspace session token (spec #536), already
+    /// decrypted, shared across every agent node in this plan run. The
+    /// `AgentExecutor` copies it onto its [`crate::AgentRequest`] so the
+    /// runner injects it as `ONSAGER_SESSION_TOKEN` into the agent's
+    /// execution environment — the scheduler-path counterpart of the
+    /// chat path's per-session token. `None` when no plan token was
+    /// minted (no credential key configured) or for non-agent nodes
+    /// that ignore it.
+    pub session_token: Option<String>,
 }
 
 /// What an executor returns to the runtime.
@@ -142,8 +151,10 @@ mod tests {
             spine: Arc::new(MockSpine::default()),
             subworkflow_ref: None,
             agent_config: None,
+            session_token: None,
         };
         assert!(ctx.inputs.is_empty());
         assert!(ctx.subworkflow_ref.is_none());
+        assert!(ctx.session_token.is_none());
     }
 }

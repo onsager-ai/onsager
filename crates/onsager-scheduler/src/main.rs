@@ -40,6 +40,12 @@ struct ServeArgs {
     /// default — surgical re-fires use `onsager trigger replay`.
     #[arg(long, env = "SCHEDULER_REPLAY_HISTORY", default_value_t = false)]
     replay_history: bool,
+    /// AES-256-GCM credential key (hex), shared with portal / stiglab.
+    /// Decrypts the plan-scoped session token (#536) off
+    /// `plan.run_requested` so agent nodes get `ONSAGER_SESSION_TOKEN`.
+    /// When unset, agent nodes run without MCP auth (gate still applies).
+    #[arg(long, env = "ONSAGER_CREDENTIAL_KEY")]
+    credential_key: Option<String>,
 }
 
 #[tokio::main]
@@ -59,6 +65,7 @@ async fn main() -> Result<()> {
                 database_url: args.database_url,
                 actor: args.actor,
                 replay_history: args.replay_history,
+                credential_key: args.credential_key.filter(|s| !s.is_empty()),
             };
             SchedulerService::new(config).run().await
         }

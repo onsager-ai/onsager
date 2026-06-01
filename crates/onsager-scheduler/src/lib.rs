@@ -34,6 +34,7 @@
 //! spine / artifact only — never on a sibling subsystem crate.
 
 pub mod bridge;
+pub mod crypto;
 pub mod migrate;
 pub mod plan_registry;
 pub mod plan_runner;

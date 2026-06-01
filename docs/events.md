@@ -61,7 +61,7 @@ that requires a coordinated rollout.
 | `ising` | ising | 6 |
 | `workflow` | stiglab (trigger) / substrate scheduler (stage) | 3 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
-| `plan` | (unknown — update `stream_producer` in xtask) | 1 |
+| `plan` | (unknown — update `stream_producer` in xtask) | 3 |
 | `gate` | onsager-portal (GitHub) / substrate scheduler (manual) | 2 |
 | `substrate` | substrate scheduler (onsager-nodes) + executor catalog (RUN-02, #360) | 10 |
 
@@ -630,6 +630,32 @@ A persisted multi-spec `SpecPlan` was requested to run (#501, ADR 0023). Emitted
 |---|---|---|
 | `spec_plan_id` | `String` | `(workspace_id, spec_plan_id)` keys the `spec_plans` row the scheduler loads and compiles. |
 | `workspace_id` | `String` |  |
+
+### `plan.run_completed`
+
+- Variant: `FactoryEventKind::PlanRunCompleted`
+- Stream: `plan`
+
+A plan run reached a terminal state (#536). Emitted by the substrate scheduler when [`SpecPlanRunRequested`] finishes; portal consumes it to revoke the plan-scoped session token. The `plan_id` is the derived run id (`derive_plan_id`), not the spec_plan_id.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `workspace_id` | `String` |  |
+| `spec_plan_id` | `String` |  |
+
+### `plan.run_failed`
+
+- Variant: `FactoryEventKind::PlanRunFailed`
+- Stream: `plan`
+
+A plan run failed terminally (#536). Same producer/consumer as [`PlanRunCompleted`] — portal revokes the plan-scoped token on either terminal signal.
+
+| Field | Type | Description |
+|---|---|---|
+| `plan_id` | `String` |  |
+| `workspace_id` | `String` |  |
+| `spec_plan_id` | `String` |  |
 
 ## `gate` events
 

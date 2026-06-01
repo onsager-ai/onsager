@@ -303,6 +303,14 @@ pub struct Scheduler {
     pub registry: Arc<ExecutorRegistry>,
     pub store: Arc<dyn PlanStore>,
     pub spine: Arc<dyn SpineClient>,
+    /// Plan-scoped workspace session token (spec #536), already
+    /// decrypted, threaded onto every node's [`ExecutorContext`] for
+    /// this run. The deployed scheduler host decrypts the token off the
+    /// `plan.run_requested` event once per plan and sets it via
+    /// [`Scheduler::with_session_token`]; the `AgentExecutor` copies it
+    /// onto its runner request for `ONSAGER_SESSION_TOKEN` injection.
+    /// `None` when no plan token was minted.
+    pub session_token: Option<String>,
 }
 
 impl Scheduler {
@@ -315,7 +323,17 @@ impl Scheduler {
             registry,
             store,
             spine,
+            session_token: None,
         }
+    }
+
+    /// Set the plan-scoped session token (spec #536) threaded onto every
+    /// node's [`ExecutorContext`] for this run. Builder so the bare
+    /// `new` constructor stays token-free for the many call sites that
+    /// don't run agent nodes.
+    pub fn with_session_token(mut self, token: Option<String>) -> Self {
+        self.session_token = token;
+        self
     }
 
     /// Run `plan` to completion under `plan_id`. Restart-safe:
@@ -457,6 +475,10 @@ impl Scheduler {
             // prompt / tools / credential off the context rather than
             // its own placeholder fields (issue #534).
             agent_config: node.executor.agent_config(),
+            // Plan-scoped session token (#536), shared across every
+            // node in this run — the AgentExecutor copies it onto its
+            // runner request for ONSAGER_SESSION_TOKEN injection.
+            session_token: self.session_token.clone(),
         };
         match dispatch(&self.registry, node, ctx).await {
             Ok(outputs) => {

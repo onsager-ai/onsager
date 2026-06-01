@@ -128,6 +128,15 @@ pub struct AgentRequest {
     /// to the same `session:<id>` manifest stream the executor reads
     /// back authoritatively (spec #520 §4b/§4c).
     pub session_id: String,
+    /// Plan-scoped workspace session token (spec #536), already
+    /// decrypted. The production runner injects it as
+    /// `ONSAGER_SESSION_TOKEN` into the agent's execution environment so
+    /// the scheduler-dispatched agent can reach portal's MCP surface +
+    /// the liveness Stop hook — the same auth the chat path provisions
+    /// per session. `None` when no plan token was minted (no credential
+    /// key configured); the agent then runs without MCP auth and the
+    /// authoritative liveness gate still applies.
+    pub session_token: Option<String>,
 }
 
 /// Response returned by an [`AgentRunner`].
@@ -301,6 +310,10 @@ impl Executor for AgentExecutor {
             credential_ref: effective.credential_ref.clone(),
             user_prompt: render_user_prompt(&ctx),
             session_id: session_id.clone(),
+            // Plan-scoped token (#536) flows context → request so the
+            // runner injects it as ONSAGER_SESSION_TOKEN. The scheduler
+            // decrypted it once per plan and set it on the context.
+            session_token: ctx.session_token.clone(),
         };
 
         emit_event(
@@ -606,6 +619,7 @@ mod tests {
             spine: Arc::clone(&mock) as Arc<dyn crate::SpineClient>,
             subworkflow_ref: None,
             agent_config: None,
+            session_token: None,
         };
         (ctx, mock)
     }
@@ -622,6 +636,7 @@ mod tests {
             spine: Arc::new(MockSpine::default()),
             subworkflow_ref: None,
             agent_config: None,
+            session_token: None,
         }
     }
 
@@ -805,6 +820,7 @@ mod tests {
             spine: mock as Arc<dyn crate::SpineClient>,
             subworkflow_ref: None,
             agent_config: None,
+            session_token: None,
         };
 
         exec.execute(ctx).await.unwrap();
@@ -823,6 +839,57 @@ mod tests {
         assert!(
             !request.session_id.is_empty(),
             "session_id must be threaded to the runner (spec #520 §4b)"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_threads_plan_session_token_to_runner() {
+        // Spec #536: the scheduler decrypts the plan-scoped token once
+        // and sets it on `ExecutorContext::session_token`; the agent
+        // executor must copy it onto the `AgentRequest` so the runner
+        // injects it as `ONSAGER_SESSION_TOKEN`. Mutation guard: drop
+        // the `session_token: ctx.session_token.clone()` line in
+        // `execute` and this assertion fails.
+        #[derive(Debug, Default)]
+        struct CapturingRunner {
+            request: std::sync::Mutex<Option<AgentRequest>>,
+        }
+        #[async_trait]
+        impl AgentRunner for CapturingRunner {
+            async fn run(&self, request: AgentRequest) -> Result<AgentResponse, AgentRunError> {
+                *self.request.lock().unwrap() = Some(request);
+                Ok(AgentResponse {
+                    output: "ok".into(),
+                    emitted: Vec::new(),
+                })
+            }
+        }
+
+        let captured: Arc<CapturingRunner> = Arc::new(CapturingRunner::default());
+        let exec = AgentExecutor::new("claude-sonnet-4-6", "you are helpful")
+            .with_runner(captured.clone());
+        let node_id = NodeId::generate();
+        // Declared-empty manifest so the gate lets `execute` return Ok.
+        let mock = Arc::new(MockSpine::with_manifest(SessionManifest {
+            emitted: Vec::new(),
+            declared_empty: true,
+        }));
+        let ctx = ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
+            node_id,
+            inputs: Vec::new(),
+            spine: mock as Arc<dyn crate::SpineClient>,
+            subworkflow_ref: None,
+            session_token: Some("ons_pat_plan_token".to_string()),
+        };
+
+        exec.execute(ctx).await.unwrap();
+
+        let request = captured.request.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            request.session_token.as_deref(),
+            Some("ons_pat_plan_token"),
+            "plan-scoped session token must reach the runner for env injection"
         );
     }
 

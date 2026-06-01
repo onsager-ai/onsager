@@ -477,6 +477,26 @@ pub enum FactoryEventKind {
         workspace_id: String,
     },
 
+    /// A plan run reached a terminal state (#536). Emitted by the
+    /// substrate scheduler when [`SpecPlanRunRequested`] finishes;
+    /// portal consumes it to revoke the plan-scoped session token. The
+    /// `plan_id` is the derived run id (`derive_plan_id`), not the
+    /// spec_plan_id.
+    PlanRunCompleted {
+        plan_id: String,
+        workspace_id: String,
+        spec_plan_id: String,
+    },
+
+    /// A plan run failed terminally (#536). Same producer/consumer as
+    /// [`PlanRunCompleted`] — portal revokes the plan-scoped token on
+    /// either terminal signal.
+    PlanRunFailed {
+        plan_id: String,
+        workspace_id: String,
+        spec_plan_id: String,
+    },
+
     // -- Registry events removed by spec #285 -------------------------------
     // The nine `registry.*` mutation events (`type_proposed`, `type_approved`,
     // `type_deprecated`, `adapter_registered`, `adapter_deprecated`,
@@ -680,6 +700,8 @@ impl FactoryEventKind {
             Self::StageEntered { .. } => "stage.entered",
             Self::StageAdvanced { .. } => "stage.advanced",
             Self::SpecPlanRunRequested { .. } => "plan.run_requested",
+            Self::PlanRunCompleted { .. } => "plan.run_completed",
+            Self::PlanRunFailed { .. } => "plan.run_failed",
             Self::GateCheckUpdated { .. } => "gate.check_updated",
             Self::GateManualApprovalSignal { .. } => "gate.manual_approval_signal",
             Self::NodeStarted { .. } => "node.started",
@@ -736,10 +758,14 @@ impl FactoryEventKind {
             Self::TriggerFired { .. } | Self::StageEntered { .. } | Self::StageAdvanced { .. } => {
                 "workflow"
             }
-            // Plan-run intent (portal → scheduler host). Its own
-            // namespace so the dashboard can scope plan-run requests
-            // without mixing them with per-node substrate lifecycle.
-            Self::SpecPlanRunRequested { .. } => "plan",
+            // Plan-run intent (portal → scheduler host) and the
+            // plan-terminal signals (scheduler → portal, #536). Their
+            // own namespace so the dashboard can scope plan-run
+            // lifecycle without mixing it with per-node substrate
+            // lifecycle.
+            Self::SpecPlanRunRequested { .. }
+            | Self::PlanRunCompleted { .. }
+            | Self::PlanRunFailed { .. } => "plan",
             // Audit-only fan-out for manual fires (#241). Lives in the
             // `audit` namespace so audit views can filter without
             // mixing with first-class workflow runtime events.
@@ -817,6 +843,11 @@ impl FactoryEventKind {
                 workspace_id,
                 spec_plan_id,
             } => format!("plan:{workspace_id}:{spec_plan_id}"),
+            // Keyed by the derived run id so portal's revoke listener
+            // reads `plan_id` straight off the stream (#536).
+            Self::PlanRunCompleted { plan_id, .. } | Self::PlanRunFailed { plan_id, .. } => {
+                format!("plan:{plan_id}")
+            }
             Self::GateCheckUpdated {
                 repo_owner,
                 repo_name,

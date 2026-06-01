@@ -449,6 +449,7 @@ mod tests {
             spine: Arc::clone(&spine) as Arc<dyn crate::SpineClient>,
             subworkflow_ref: None,
             agent_config: None,
+            session_token: None,
         };
         (ctx, spine)
     }

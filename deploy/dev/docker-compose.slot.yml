@@ -133,6 +133,9 @@ services:
     environment:
       DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
       SCHEDULER_ACTOR: substrate-scheduler-slot
+      # Plan-scoped session token decrypt (#536) — same key portal/stiglab
+      # use. Unset → scheduler-dispatched agents run without MCP auth.
+      ONSAGER_CREDENTIAL_KEY: ${ONSAGER_CREDENTIAL_KEY:-${STIGLAB_CREDENTIAL_KEY:-}}
       RUST_LOG: ${RUST_LOG:-info}
     command: >
       cargo watch -q -w crates/onsager-scheduler -w crates/onsager-nodes
