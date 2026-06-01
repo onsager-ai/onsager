@@ -74,16 +74,27 @@ pub struct ClaudeCliRunner {
     command: String,
 }
 
+/// Env var overriding the `claude` binary the default runner spawns.
+/// Empty / unset falls back to `claude` on PATH. Lets a deployment pin
+/// a specific install and lets the production `default_executor_registry`
+/// (#537) be exercised end-to-end against a fixture script without a
+/// parallel registry builder.
+const CLAUDE_BIN_ENV: &str = "ONSAGER_CLAUDE_BIN";
+
 impl Default for ClaudeCliRunner {
     fn default() -> Self {
         Self {
-            command: "claude".to_string(),
+            command: std::env::var(CLAUDE_BIN_ENV)
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "claude".to_string()),
         }
     }
 }
 
 impl ClaudeCliRunner {
-    /// Runner spawning the default `claude` binary on PATH.
+    /// Runner spawning the `claude` binary — `$ONSAGER_CLAUDE_BIN` when
+    /// set and non-empty, else `claude` on PATH.
     pub fn new() -> Self {
         Self::default()
     }
@@ -368,6 +379,26 @@ mod tests {
             session_id: session_id.into(),
             session_token: session_token.map(Into::into),
         }
+    }
+
+    #[tokio::test]
+    async fn new_honors_claude_bin_env_override() {
+        // The production `default_executor_registry` (#537) builds
+        // `ClaudeCliRunner::new()`; the env override is what lets that
+        // exact path be driven against a fixture. Mutation guard: drop
+        // the `ONSAGER_CLAUDE_BIN` read in `Default` and this fails.
+        let _guard = ENV_LOCK.lock().await;
+        // SAFETY: serialized by ENV_LOCK; cleared before the guard drops.
+        unsafe {
+            std::env::set_var(CLAUDE_BIN_ENV, "/opt/pinned/claude");
+        }
+        let runner = ClaudeCliRunner::new();
+        unsafe {
+            std::env::remove_var(CLAUDE_BIN_ENV);
+        }
+        assert_eq!(runner.command, "/opt/pinned/claude");
+        // Unset → falls back to `claude` on PATH.
+        assert_eq!(ClaudeCliRunner::new().command, "claude");
     }
 
     #[tokio::test]

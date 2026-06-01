@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use onsager_nodes::{ExecutorRegistry, NoOpExecutor, PlanStore, SpineClient};
+use onsager_nodes::{AgentExecutor, ExecutorRegistry, NoOpExecutor, PlanStore, SpineClient};
 use onsager_spine::factory_event::{FactoryEvent, FactoryEventKind};
 use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 use onsager_substrate::workflow_library::WorkflowLibrary as PersistedWorkflowLibrary;
@@ -32,6 +32,7 @@ use crate::bridge::{PreloadedWorkflow, TriggerBridge, WorkflowMeta};
 use crate::plan_registry::{self, derive_plan_id};
 use crate::plan_runner::{PlanRunner, SchedulerLibrarySnapshot, resolve_kind_versions};
 use crate::plan_store::SqlxPlanStore;
+use crate::runners::ClaudeCliRunner;
 use crate::spine_client::SpineEventStoreClient;
 
 /// Configuration the service reads from env / CLI.
@@ -241,26 +242,38 @@ async fn events_ext_max_id(store: &EventStore) -> anyhow::Result<Option<i64>> {
 
 /// Build the default registry the deployed binary uses.
 ///
-/// v1 registers only [`NoOpExecutor`]. Script / Verify / Agent /
-/// SubWorkflow are wired through the registry by `executor_kind`, and
-/// the dispatch path (`onsager_nodes::dispatch`) runs the *registered*
-/// instance. Per-node config reaches that instance through the
-/// `ExecutorContext` escape hatch the scheduler threads off each
+/// Registers [`NoOpExecutor`] and the production [`AgentExecutor`]
+/// backed by [`ClaudeCliRunner`] (spec #537, closing #533's headline
+/// loop). Executors are wired through the registry by `executor_kind`,
+/// and the dispatch path (`onsager_nodes::dispatch`) runs the
+/// *registered* instance. Per-node config reaches that instance through
+/// the `ExecutorContext` escape hatch the scheduler threads off each
 /// substrate executor: `subworkflow_ref` for SubWorkflow (#357) and
-/// `agent_config` for Agent (#534). A registered singleton
+/// `agent_config` for Agent (#534). The registered singleton
 /// `AgentExecutor` therefore dispatches each agent node with *its*
-/// model / prompt / tools / credential.
+/// model / prompt / tools / credential — its own placeholder fields
+/// (empty model / prompt) are never used on the scheduler path. The
+/// plan-scoped session token (#536) is threaded separately onto the
+/// runner request for `ONSAGER_SESSION_TOKEN` injection.
 ///
 /// Script / Verify per-node config is *not* yet threaded (those keep
 /// only the compile-side round-trip assertion), so registering a
 /// singleton `ScriptExecutor` with no command would still dispatch
-/// every script node through that empty config — silently wrong.
-/// Registering only NoOp means non-NoOp nodes fail with
-/// [`ExecutorError::UnknownKind`], which is the correct loud failure;
-/// tests inject a richer registry via [`SchedulerService::with_registry`].
+/// every script node through that empty config — silently wrong. They
+/// stay unregistered; a script / verify node therefore fails with
+/// [`onsager_nodes::ExecutorError::UnknownKind`], the correct loud
+/// failure, until their threading lands. Tests inject a richer or
+/// narrower registry via [`SchedulerService::with_registry`].
 pub fn default_executor_registry() -> ExecutorRegistry {
     let mut r = ExecutorRegistry::new();
     r.register(Arc::new(NoOpExecutor));
+    // Agent: one runtime singleton backed by the production
+    // `ClaudeCliRunner`. The placeholder model / prompt are overridden
+    // per node by `ExecutorContext::agent_config` (#534); the runner
+    // binary is `claude` on PATH, overridable via `ONSAGER_CLAUDE_BIN`.
+    r.register(Arc::new(
+        AgentExecutor::new("", "").with_runner(Arc::new(ClaudeCliRunner::new())),
+    ));
     r
 }
 

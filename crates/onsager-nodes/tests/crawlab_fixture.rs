@@ -34,9 +34,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use onsager_artifact::{Artifact, ArtifactId, ContentRef, Provenance, SourceTag};
 use onsager_nodes::{
-    AgentExecutor, EmittedArtifact, ExecutorRegistry, InMemoryPlanStore, NodeState, PlanId,
-    PlanStore, Scheduler, ScriptExecutor, SessionManifest, SpineClient, SpineError,
-    StubAgentRunner, VerifyExecutor,
+    AgentExecutor, AgentRequest, AgentResponse, AgentRunError, AgentRunner, EmittedArtifact,
+    ExecutorRegistry, InMemoryPlanStore, NodeState, PlanId, PlanStore, Scheduler, ScriptExecutor,
+    SessionManifest, SpineClient, SpineError, VerifyExecutor,
 };
 use onsager_nodes::{Check, FailPolicy};
 use onsager_substrate::NodeId;
@@ -275,15 +275,16 @@ fn crawlab_ingest_workflow() -> Workflow {
     };
     let analyse = Node {
         id: NodeId::generate(),
-        executor: Box::new(
-            AgentExecutor::new(
-                "claude-sonnet-4-6",
-                "you are a code-review agent — analyse the Crawlab inventory",
-            )
-            .with_runner(Arc::new(StubAgentRunner::new(
-                "analysis: README is light, web/ lacks tests, main.go has a stale TODO",
-            ))),
-        ),
+        // No `with_runner` here: dispatch runs the *registry's* singleton
+        // (#534), and compile's serde round-trip drops the node's
+        // `#[serde(skip)]` runner regardless. The node carries only the
+        // per-node config the scheduler threads via
+        // `ExecutorContext::agent_config` — the assertion below proves
+        // that config (not the singleton's placeholder) reaches the runner.
+        executor: Box::new(AgentExecutor::new(
+            "claude-sonnet-4-6",
+            "you are a code-review agent — analyse the Crawlab inventory",
+        )),
         inputs: vec![EdgeRef::new(inv_to_agent)],
         outputs: vec![EdgeRef::new(agent_to_verify)],
     };
@@ -416,6 +417,30 @@ fn build_spec_plan() -> SpecPlan {
 }
 
 // ---------------------------------------------------------------------------
+// Agent runner that records the model + system prompt it was dispatched
+// with, so the pipeline can assert the agent node's *own* config reached
+// the registered singleton via `ExecutorContext::agent_config` (#534) —
+// not the singleton's placeholder. Returns a canned analysis so the §4c
+// gate (fed by `ObservingSpine`'s one-emit manifest) packages an output.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default)]
+struct ConfigCapturingRunner {
+    seen: Mutex<Option<(String, String)>>,
+}
+
+#[async_trait]
+impl AgentRunner for ConfigCapturingRunner {
+    async fn run(&self, request: AgentRequest) -> Result<AgentResponse, AgentRunError> {
+        *self.seen.lock().unwrap() = Some((request.model.clone(), request.system_prompt.clone()));
+        Ok(AgentResponse {
+            output: "analysis ok".into(),
+            emitted: Vec::new(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The acceptance test.
 // ---------------------------------------------------------------------------
 
@@ -538,9 +563,14 @@ async fn crawlab_brownfield_pipeline_runs_end_to_end() {
         "-c",
         "echo 'crawlab brownfield pipeline output'",
     ])));
+    // Register the agent singleton with a DISTINCT placeholder model so
+    // the post-run assertion is load-bearing: if per-node config did not
+    // thread (#534), the runner would observe "SINGLETON-PLACEHOLDER"
+    // instead of the analyse node's "claude-sonnet-4-6".
+    let agent_runner = Arc::new(ConfigCapturingRunner::default());
     registry.register(Arc::new(
-        AgentExecutor::new("claude-sonnet-4-6", "")
-            .with_runner(Arc::new(StubAgentRunner::new("analysis ok"))),
+        AgentExecutor::new("SINGLETON-PLACEHOLDER", "singleton prompt")
+            .with_runner(Arc::clone(&agent_runner) as Arc<dyn AgentRunner>),
     ));
     registry.register(Arc::new(VerifyExecutor::with_checks(
         vec![Check::TestRun {
@@ -568,6 +598,26 @@ async fn crawlab_brownfield_pipeline_runs_end_to_end() {
         .expect("Crawlab brownfield pipeline runs to completion");
 
     // ---- assert ----------------------------------------------------------
+    // 0) Per-node agent config reached the registered singleton (#534).
+    //    The analyse node carries model "claude-sonnet-4-6" / its own
+    //    prompt; the singleton's placeholders ("SINGLETON-PLACEHOLDER")
+    //    must NOT be what the runner saw. Mutation guard: stop threading
+    //    `agent_config` in `Scheduler::execute_node` and this fails.
+    let (seen_model, seen_prompt) = agent_runner
+        .seen
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the agent node dispatched, so the runner recorded its config");
+    assert_eq!(
+        seen_model, "claude-sonnet-4-6",
+        "the analyse node's own model must reach the runner, not the singleton placeholder",
+    );
+    assert!(
+        seen_prompt.contains("analyse the Crawlab inventory"),
+        "the analyse node's own system prompt must reach the runner, got: {seen_prompt}",
+    );
+
     // 1) All 4 nodes terminated `Completed`.
     let states = store.node_states(&plan_id).await.unwrap();
     assert_eq!(states.len(), 4, "every node should have a persisted state");

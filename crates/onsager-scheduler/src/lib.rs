@@ -46,11 +46,12 @@ pub mod spine_client;
 pub use bridge::{TriggerBridge, TriggerBridgeError};
 pub use plan_runner::{PlanRunError, PlanRunner, SchedulerLibrarySnapshot, resolve_kind_versions};
 pub use plan_store::SqlxPlanStore;
-// The production agent runner (spec #535). Threading it into
-// `default_executor_registry` requires per-node `AgentExecutor` config
-// (model / prompt / runner), which lands with registration in #533.4 —
-// registering a singleton today would dispatch every agent node through
-// one config (see the note on `service::default_executor_registry`).
+// The production agent runner (spec #535), registered in
+// `default_executor_registry` (spec #537) as the runtime backend of the
+// singleton `AgentExecutor`. Per-node config reaches that singleton via
+// `ExecutorContext::agent_config` (#534), so one runner serves every
+// agent node. Re-exported for `with_command` overrides in tests and
+// deployments pinning a specific `claude` install.
 pub use runners::ClaudeCliRunner;
 pub use service::{SchedulerService, ServiceConfig};
 pub use spine_client::SpineEventStoreClient;
