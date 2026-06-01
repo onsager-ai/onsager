@@ -7,6 +7,7 @@ members = [
     "crates/onsager-substrate",
     "crates/onsager-nodes",
     "crates/onsager-observers",
+    "crates/onsager-agent-spawn",
     "crates/onsager",
     "crates/onsager-github",
     "crates/onsager-portal",

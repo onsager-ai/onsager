@@ -2227,6 +2227,13 @@ name = "onsager"
 version = "0.2.0-alpha.1"
 
 [[package]]
+name = "onsager-agent-spawn"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "onsager-artifact"
 version = "0.2.0-alpha.1"
 dependencies = [
@@ -2359,6 +2366,7 @@ dependencies = [
  "chrono",
  "clap",
  "hex",
+ "onsager-agent-spawn",
  "onsager-artifact",
  "onsager-nodes",
  "onsager-spine",
@@ -2367,6 +2375,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3586,6 +3595,7 @@ dependencies = [
  "hex",
  "hostname",
  "jsonwebtoken",
+ "onsager-agent-spawn",
  "onsager-artifact",
  "onsager-github",
  "onsager-spine",
