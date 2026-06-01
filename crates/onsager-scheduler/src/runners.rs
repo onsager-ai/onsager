@@ -159,8 +159,15 @@ impl AgentRunner for ClaudeCliRunner {
         // executor reads back authoritatively (spec #520 §4b/§4c).
         cmd.env(SESSION_ID_ENV, &request.session_id);
 
+        // stderr is discarded, not piped: this runner has no consumer
+        // for it (unlike stiglab, which forwards stderr as UI chunks),
+        // and an unread pipe would deadlock — if `claude` writes enough
+        // diagnostics to fill the OS pipe buffer, the child blocks on the
+        // stderr write before closing stdout and the NDJSON read loop
+        // below waits forever. `Stdio::null()` lets the child write
+        // freely with nowhere to block.
         cmd.stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .stdin(Stdio::null());
 
         let mut child = cmd
