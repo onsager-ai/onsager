@@ -458,11 +458,13 @@ async fn crawlab_brownfield_pipeline_runs_end_to_end() {
     // node-level command / prompt / checks would still let the
     // registry-dispatch path produce green output — silently passing.
     //
-    // Today (RUN-01 / #381), the scheduler dispatches by `executor_kind`
-    // and runs the *registry* instance instead of the node's; threading
-    // per-node config through dispatch is RUN-02 (#360). Until then,
-    // the compile-side guarantee that node config round-trips is the
-    // best mechanical assertion we can make.
+    // The scheduler dispatches by `executor_kind` and runs the
+    // *registry* instance. For Agent nodes, per-node config now reaches
+    // that instance via `ExecutorContext::agent_config`, threaded off
+    // the substrate executor (RUN-02 / #534). Script / Verify per-node
+    // config is not yet threaded, so for those kinds the compile-side
+    // guarantee that node config round-trips is still the best
+    // mechanical assertion we can make.
     let kinds: Vec<&str> = exec_plan
         .nodes
         .iter()
@@ -520,13 +522,16 @@ async fn crawlab_brownfield_pipeline_runs_end_to_end() {
     );
 
     // ---- act -------------------------------------------------------------
-    // Today's `dispatch` (RUN-01) resolves a node to *the registry's*
-    // instance for that kind — not to the node's own boxed executor
-    // (see `crates/onsager-nodes/src/dispatch.rs`). Threading per-node
-    // configuration through dispatch is RUN-02 (#360). The compile-
-    // side assertions above prove the node-level config survives
-    // instantiation; here we register one canonical handler per kind
-    // that the scheduler actually invokes during this run.
+    // `dispatch` resolves a node to *the registry's* instance for that
+    // kind — not to the node's own boxed executor (see
+    // `crates/onsager-nodes/src/dispatch.rs`). For Agent nodes the
+    // registry instance now reads per-node config off
+    // `ExecutorContext::agent_config`, threaded by the scheduler off
+    // the substrate executor (RUN-02 / #534); Script / Verify per-node
+    // config is not yet threaded. The compile-side assertions above
+    // prove the node-level config survives instantiation; here we
+    // register one canonical handler per kind that the scheduler
+    // actually invokes during this run.
     let mut registry = ExecutorRegistry::new();
     registry.register(Arc::new(ScriptExecutor::new([
         "sh",

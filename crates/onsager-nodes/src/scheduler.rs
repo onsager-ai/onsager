@@ -452,6 +452,11 @@ impl Scheduler {
             // SubWorkflow runtime (#357) learns which workflow to
             // run for *this* node.
             subworkflow_ref: node.executor.subworkflow_ref(),
+            // Same mechanism for the per-node agent config — the
+            // registered singleton `AgentExecutor` reads its model /
+            // prompt / tools / credential off the context rather than
+            // its own placeholder fields (issue #534).
+            agent_config: node.executor.agent_config(),
         };
         match dispatch(&self.registry, node, ctx).await {
             Ok(outputs) => {

@@ -105,6 +105,7 @@ mod tests {
             inputs: vec![],
             spine: Arc::new(MockSpine::default()),
             subworkflow_ref: None,
+            agent_config: None,
         }
     }
 

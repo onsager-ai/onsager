@@ -230,16 +230,22 @@ async fn events_ext_max_id(store: &EventStore) -> anyhow::Result<Option<i64>> {
 /// Build the default registry the deployed binary uses.
 ///
 /// v1 registers only [`NoOpExecutor`]. Script / Verify / Agent /
-/// SubWorkflow are wired through the registry by `executor_kind`,
-/// but the dispatch path (`onsager_nodes::dispatch`) runs the
-/// *registered* instance — not the node's per-instance config (see
-/// dispatch.rs and the RUN-02 follow-up note in `crawlab_fixture.rs`).
-/// Until per-node config threading lands, registering a singleton
-/// ScriptExecutor with no command would dispatch every script node
-/// through that empty config — silently wrong. Registering only NoOp
-/// means non-NoOp nodes fail with [`ExecutorError::UnknownKind`],
-/// which is the correct loud failure; tests inject a richer registry
-/// via [`SchedulerService::with_registry`].
+/// SubWorkflow are wired through the registry by `executor_kind`, and
+/// the dispatch path (`onsager_nodes::dispatch`) runs the *registered*
+/// instance. Per-node config reaches that instance through the
+/// `ExecutorContext` escape hatch the scheduler threads off each
+/// substrate executor: `subworkflow_ref` for SubWorkflow (#357) and
+/// `agent_config` for Agent (#534). A registered singleton
+/// `AgentExecutor` therefore dispatches each agent node with *its*
+/// model / prompt / tools / credential.
+///
+/// Script / Verify per-node config is *not* yet threaded (those keep
+/// only the compile-side round-trip assertion), so registering a
+/// singleton `ScriptExecutor` with no command would still dispatch
+/// every script node through that empty config — silently wrong.
+/// Registering only NoOp means non-NoOp nodes fail with
+/// [`ExecutorError::UnknownKind`], which is the correct loud failure;
+/// tests inject a richer registry via [`SchedulerService::with_registry`].
 pub fn default_executor_registry() -> ExecutorRegistry {
     let mut r = ExecutorRegistry::new();
     r.register(Arc::new(NoOpExecutor));

@@ -448,6 +448,7 @@ mod tests {
             inputs: vec![],
             spine: Arc::clone(&spine) as Arc<dyn crate::SpineClient>,
             subworkflow_ref: None,
+            agent_config: None,
         };
         (ctx, spine)
     }

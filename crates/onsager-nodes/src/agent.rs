@@ -26,7 +26,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use onsager_artifact::{Artifact, ArtifactVersion, Kind, Provenance, SourceTag};
 use onsager_substrate::events as se;
-use onsager_substrate::executor::Executor as SubstrateExecutor;
+use onsager_substrate::executor::{AgentConfig, Executor as SubstrateExecutor};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -241,6 +241,19 @@ impl SubstrateExecutor for AgentExecutor {
             source: SourceTag::Agent,
         }
     }
+
+    /// Expose this node's per-instance config so the scheduler can
+    /// thread it through [`ExecutorContext`] to the registered runtime
+    /// singleton (issue #534). The `runner` is intentionally excluded —
+    /// it's runtime wiring on the singleton, not node-level config.
+    fn agent_config(&self) -> Option<AgentConfig> {
+        Some(AgentConfig {
+            model: self.model.clone(),
+            system_prompt: self.system_prompt.clone(),
+            tools: self.tools.clone(),
+            credential_ref: self.credential_ref.clone(),
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -267,11 +280,25 @@ impl Executor for AgentExecutor {
         let plan_id = ctx.plan_id.as_str().to_string();
         let session_id = Uuid::new_v4().to_string();
 
-        let request = AgentRequest {
+        // The registered runtime instance is shared across every agent
+        // node — its own `model` / `system_prompt` / `tools` /
+        // `credential_ref` are placeholders. The scheduler reads the
+        // per-node config off the substrate executor and threads it
+        // through the context; prefer that. Fall back to `self`'s own
+        // fields for the direct-execute path (tests, and any caller
+        // that bypasses the scheduler). Issue #534.
+        let effective = ctx.agent_config.clone().unwrap_or_else(|| AgentConfig {
             model: self.model.clone(),
             system_prompt: self.system_prompt.clone(),
             tools: self.tools.clone(),
             credential_ref: self.credential_ref.clone(),
+        });
+
+        let request = AgentRequest {
+            model: effective.model.clone(),
+            system_prompt: effective.system_prompt.clone(),
+            tools: effective.tools.clone(),
+            credential_ref: effective.credential_ref.clone(),
             user_prompt: render_user_prompt(&ctx),
             session_id: session_id.clone(),
         };
@@ -283,7 +310,7 @@ impl Executor for AgentExecutor {
                 plan_id: plan_id.clone(),
                 node_id: ctx.node_id,
                 session_id: session_id.clone(),
-                model: self.model.clone(),
+                model: effective.model.clone(),
             },
         )
         .await;
@@ -578,6 +605,7 @@ mod tests {
             inputs: Vec::new(),
             spine: Arc::clone(&mock) as Arc<dyn crate::SpineClient>,
             subworkflow_ref: None,
+            agent_config: None,
         };
         (ctx, mock)
     }
@@ -593,6 +621,7 @@ mod tests {
             inputs: Vec::new(),
             spine: Arc::new(MockSpine::default()),
             subworkflow_ref: None,
+            agent_config: None,
         }
     }
 
@@ -775,6 +804,7 @@ mod tests {
             inputs: vec![(input_id.clone(), input_art)],
             spine: mock as Arc<dyn crate::SpineClient>,
             subworkflow_ref: None,
+            agent_config: None,
         };
 
         exec.execute(ctx).await.unwrap();
@@ -945,6 +975,118 @@ mod tests {
         assert!(art.provenance.is_uncertain());
         assert_eq!(art.provenance.source(), SourceTag::Agent);
         assert_eq!(art.produced_by_node, Some(node_id));
+    }
+
+    // -----------------------------------------------------------------
+    // Per-node agent config threading (issue #534).
+    //
+    // A registered singleton AgentExecutor dispatches every agent node;
+    // the per-node model / prompt / tools / credential must reach it
+    // via ExecutorContext::agent_config, threaded off the substrate
+    // executor — not the singleton's own placeholder fields.
+    // -----------------------------------------------------------------
+
+    /// Runner that records the model it was dispatched with, so a test
+    /// can prove which config the executor actually used.
+    #[derive(Debug, Default)]
+    struct ModelCapturingRunner {
+        seen_model: std::sync::Mutex<Option<String>>,
+    }
+    #[async_trait]
+    impl AgentRunner for ModelCapturingRunner {
+        async fn run(&self, request: AgentRequest) -> Result<AgentResponse, AgentRunError> {
+            *self.seen_model.lock().unwrap() = Some(request.model.clone());
+            Ok(AgentResponse {
+                output: "ok".into(),
+                emitted: Vec::new(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_threads_per_node_agent_config_over_singleton() {
+        use crate::dispatch;
+        use onsager_substrate::executor::Executor as SubstrateExecutor;
+        use onsager_substrate::workflow::Node;
+
+        // Register a singleton AgentExecutor with model "SINGLETON" and
+        // a capturing runner.
+        let runner: Arc<ModelCapturingRunner> = Arc::new(ModelCapturingRunner::default());
+        let singleton = AgentExecutor::new("SINGLETON", "singleton prompt")
+            .with_runner(Arc::clone(&runner) as Arc<dyn AgentRunner>);
+        let mut registry = ExecutorRegistry::new();
+        registry.register(Arc::new(singleton));
+
+        // Build a node whose *own* AgentExecutor carries model "NODE".
+        let node_exec = AgentExecutor::new("NODE", "node prompt");
+        let node = Node {
+            id: NodeId::generate(),
+            executor: Box::new(node_exec.clone()),
+            inputs: vec![],
+            outputs: vec![],
+        };
+
+        // The scheduler reads `node.executor.agent_config()` into the
+        // context. Replicate that exactly. Declared-empty manifest so
+        // the liveness gate lets execute return Ok.
+        let mock = Arc::new(MockSpine::with_manifest(SessionManifest {
+            emitted: Vec::new(),
+            declared_empty: true,
+        }));
+        let ctx = ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
+            node_id: node.id,
+            inputs: Vec::new(),
+            spine: mock as Arc<dyn crate::SpineClient>,
+            subworkflow_ref: None,
+            agent_config: SubstrateExecutor::agent_config(&node_exec),
+        };
+
+        dispatch(&registry, &node, ctx).await.unwrap();
+
+        // The runner saw the NODE's model, not the SINGLETON's. With the
+        // threading removed (agent_config: None) the runner would see
+        // "SINGLETON" and this assertion fails — proving the threading
+        // is load-bearing (the spec's mutation check).
+        assert_eq!(runner.seen_model.lock().unwrap().as_deref(), Some("NODE"),);
+    }
+
+    #[tokio::test]
+    async fn execute_falls_back_to_self_config_when_context_is_none() {
+        // Direct-execute path (no scheduler): agent_config is None, so
+        // the executor uses its own fields. The existing unit tests all
+        // run this way; this asserts the fallback explicitly.
+        let runner: Arc<ModelCapturingRunner> = Arc::new(ModelCapturingRunner::default());
+        let exec = AgentExecutor::new("SELF", "self prompt")
+            .with_runner(Arc::clone(&runner) as Arc<dyn AgentRunner>);
+
+        let mock = Arc::new(MockSpine::with_manifest(SessionManifest {
+            emitted: Vec::new(),
+            declared_empty: true,
+        }));
+        let ctx = ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
+            node_id: NodeId::generate(),
+            inputs: Vec::new(),
+            spine: mock as Arc<dyn crate::SpineClient>,
+            subworkflow_ref: None,
+            agent_config: None,
+        };
+        exec.execute(ctx).await.unwrap();
+        assert_eq!(runner.seen_model.lock().unwrap().as_deref(), Some("SELF"));
+    }
+
+    #[test]
+    fn substrate_agent_config_reflects_executor_fields() {
+        use onsager_substrate::executor::Executor as SubstrateExecutor;
+        let exec = AgentExecutor::new("claude-sonnet-4-6", "be helpful")
+            .with_tools(vec!["edit".into(), "read".into()])
+            .with_credential_ref("creds_42");
+        let cfg = SubstrateExecutor::agent_config(&exec).expect("agent exposes config");
+        assert_eq!(cfg.model, "claude-sonnet-4-6");
+        assert_eq!(cfg.system_prompt, "be helpful");
+        assert_eq!(cfg.tools, vec!["edit".to_string(), "read".to_string()]);
+        assert_eq!(cfg.credential_ref.as_deref(), Some("creds_42"));
     }
 
     // -----------------------------------------------------------------
