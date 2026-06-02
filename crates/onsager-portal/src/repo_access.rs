@@ -142,7 +142,8 @@ pub async fn mint_repo_write_token(
 
     let cfg = gh_app::AppConfig::from_env()
         .ok_or_else(|| WriteTokenError::AppUnavailable("GitHub App not configured".into()))?;
-    let jwt = gh_app::mint_app_jwt(&cfg).map_err(|e| WriteTokenError::AppUnavailable(e.to_string()))?;
+    let jwt =
+        gh_app::mint_app_jwt(&cfg).map_err(|e| WriteTokenError::AppUnavailable(e.to_string()))?;
 
     gh_app::mint_repo_write_token(&jwt, install_id, &[name.to_string()])
         .await

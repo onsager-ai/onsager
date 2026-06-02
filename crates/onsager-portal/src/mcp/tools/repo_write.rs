@@ -139,7 +139,11 @@ fn authenticated_remote(owner: &str, name: &str, token: &str) -> String {
 /// `None` on timeout (the caller then applies the fail policy). The
 /// request and verdict share `gate_id` as their stream id, so this read
 /// is bounded to that one stream.
-async fn await_verdict(store: &EventStore, gate_id: &str, timeout: Duration) -> Option<GateVerdict> {
+async fn await_verdict(
+    store: &EventStore,
+    gate_id: &str,
+    timeout: Duration,
+) -> Option<GateVerdict> {
     let start = Instant::now();
     loop {
         if let Ok(rows) = store.query_ext_stream(gate_id).await {
@@ -337,7 +341,10 @@ mod tests {
 
     #[test]
     fn allow_verdict_grants() {
-        assert_eq!(decide_from_verdict(&GateVerdict::Allow), WriteDecision::Grant);
+        assert_eq!(
+            decide_from_verdict(&GateVerdict::Allow),
+            WriteDecision::Grant
+        );
     }
 
     #[test]
