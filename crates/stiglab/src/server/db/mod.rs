@@ -66,10 +66,22 @@ pub use workspaces::{
 
 // ── Pool initialisation ──
 
+/// Whether a database URL addresses SQLite, across every scheme form sqlx
+/// accepts: the `sqlite://<path>` file URL, the bare `sqlite:<path>` form,
+/// and `sqlite::memory:`. This drives the migration dialect (`run_pg_only`
+/// skips Postgres-only legacy statements), so it must match the broad
+/// `sqlite:` scheme — classifying a SQLite URL as Postgres would run
+/// Postgres-only statements against SQLite and fail hard (issue #550 review).
+fn is_sqlite_url(database_url: &str) -> bool {
+    database_url.starts_with("sqlite:")
+}
+
 pub async fn init_pool(database_url: &str) -> anyhow::Result<AnyPool> {
-    let is_sqlite = database_url.starts_with("sqlite://");
-    // For SQLite: ensure parent directory exists and enable create-if-missing
-    let connect_url = if is_sqlite {
+    let is_sqlite = is_sqlite_url(database_url);
+    // The parent-directory creation + `mode=rwc` handling below is specific
+    // to the file-backed `sqlite://<path>` form (a no-op for `sqlite::memory:`
+    // and for non-SQLite URLs).
+    let connect_url = if database_url.starts_with("sqlite://") {
         let path = database_url.trim_start_matches("sqlite://");
         if let Some(parent) = std::path::Path::new(path).parent()
             && !parent.as_os_str().is_empty()

@@ -354,6 +354,19 @@ mod tests {
         assert!(u2_projects.is_empty());
     }
 
+    #[test]
+    fn is_sqlite_url_matches_all_sqlite_schemes() {
+        // The migration dialect flag must recognise every SQLite URL form,
+        // not just the `sqlite://` file URL — a missed form (e.g.
+        // `sqlite::memory:`) would run Postgres-only statements against
+        // SQLite and fail hard (issue #550 review).
+        assert!(is_sqlite_url("sqlite://./data/stiglab.db"));
+        assert!(is_sqlite_url("sqlite::memory:"));
+        assert!(is_sqlite_url("sqlite:stiglab.db"));
+        assert!(!is_sqlite_url("postgres://localhost/onsager"));
+        assert!(!is_sqlite_url("postgresql://localhost/onsager"));
+    }
+
     // ── run_pg_only (issue #550) ──
     //
     // The legacy best-effort migration statements route through
