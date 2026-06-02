@@ -51,6 +51,7 @@ pub mod push;
 pub mod push_db;
 pub mod reconciliation;
 pub mod remediation_db;
+pub mod repo_access;
 pub mod runtime;
 pub mod server;
 pub mod session_db;

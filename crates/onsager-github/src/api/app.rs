@@ -130,6 +130,52 @@ pub async fn mint_installation_token(
     })
 }
 
+/// Exchange an App JWT for a **read-scoped** installation access token,
+/// narrowed to a specific set of repositories (spec #546).
+///
+/// Unlike [`mint_installation_token`] (which yields a token carrying the
+/// App's full granted permissions across every repo in the install), this
+/// requests least-privilege: `contents:read` + `metadata:read`, scoped to
+/// `repo_names` only. It is the token an agent session gets to *clone and
+/// read* a workspace's bound repos — *writes* to origin are gated and
+/// minted separately (#548).
+///
+/// `repo_names` are the short repo names (no owner prefix), all under the
+/// install's account. An empty slice would let GitHub fall back to the
+/// install's full repo set, so callers must pass at least one name.
+pub async fn mint_read_token_for_repos(
+    app_jwt: &str,
+    install_id: i64,
+    repo_names: &[String],
+) -> Result<InstallationToken, GithubError> {
+    let url = format!("https://api.github.com/app/installations/{install_id}/access_tokens");
+    let body = serde_json::json!({
+        "repositories": repo_names,
+        "permissions": { "contents": "read", "metadata": "read" },
+    });
+    let resp = client()
+        .post(&url)
+        .bearer_auth(app_jwt)
+        .header("Accept", "application/vnd.github+json")
+        .json(&body)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        return Err(GithubError::from_response(resp).await);
+    }
+
+    let parsed: InstallationTokenResponse = resp
+        .json()
+        .await
+        .map_err(|e| GithubError::Decode(e.to_string()))?;
+    Ok(InstallationToken {
+        token: parsed.token,
+        expires_at: parsed.expires_at,
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct AccountJson {
     login: String,

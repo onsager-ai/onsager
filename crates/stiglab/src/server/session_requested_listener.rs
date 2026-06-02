@@ -43,6 +43,13 @@ struct TaskDispatchPayload {
     /// env as `ONSAGER_SESSION_TOKEN`.
     #[serde(default)]
     encrypted_session_token: Option<String>,
+    /// The workspace's bound repo set with read-scoped per-repo
+    /// credentials (spec #546). Decrypted here and surfaced to the agent
+    /// as `ONSAGER_REPOS` so it can clone on demand. Empty for an unscoped
+    /// session or a workspace with no bound repos — the single-repo
+    /// `working_dir` path is unchanged.
+    #[serde(default)]
+    repos: Vec<onsager_spine::protocol::RepoAccess>,
 }
 
 pub async fn run(store: EventStore, app_state: AppState, since: Option<i64>) -> anyhow::Result<()> {
@@ -146,6 +153,22 @@ impl Dispatcher {
                     );
                 }
             }
+        }
+
+        // Surface the workspace's bound repo set to the agent (spec #546).
+        // Decrypt each read token and expose the set as `ONSAGER_REPOS` so
+        // the agent can clone whichever repos it needs beneath its
+        // `working_dir`. Empty set → nothing injected (single-repo path
+        // unchanged).
+        if let Some(repos_json) = crate::server::repo_env::repos_env_from_access(
+            &payload.repos,
+            state.config.credential_key.as_deref(),
+        ) {
+            let creds = credentials.get_or_insert_with(std::collections::HashMap::new);
+            creds.insert(
+                crate::server::repo_env::REPOS_ENV.to_string(),
+                repos_json,
+            );
         }
 
         let task = Task {

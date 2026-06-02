@@ -57,6 +57,14 @@ pub struct TaskDispatchPayload {
     /// unscoped or no credential key is configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encrypted_session_token: Option<String>,
+    /// The workspace's bound repo set with read-scoped per-repo
+    /// credentials (spec #546). One entry per bound repo (possibly across
+    /// orgs); stiglab decrypts each token and surfaces the set to the
+    /// agent so it can clone on demand. Empty for an unscoped session or a
+    /// workspace with no bound repos — the single-repo / `working_dir`
+    /// path is unchanged. Omitted from the wire when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repos: Vec<onsager_spine::protocol::RepoAccess>,
 }
 
 /// POST /api/tasks — create a task and its initial session.
@@ -225,6 +233,16 @@ pub async fn create_task(
         _ => None,
     };
 
+    // Resolve the workspace's bound repo set with read-scoped per-repo
+    // credentials (spec #546). Eager read access: the agent gets the whole
+    // set and clones on demand. Unscoped sessions and workspaces with no
+    // bound repos yield an empty set — the single-repo `working_dir` path
+    // is unchanged.
+    let repos = match workspace_id.as_deref() {
+        Some(ws) => crate::repo_access::build_workspace_repo_access(&state, ws).await,
+        None => Vec::new(),
+    };
+
     // Emit portal.session_requested so stiglab's listener can pick up the
     // session, fetch credentials, and dispatch to the agent WebSocket.
     let dispatch = TaskDispatchPayload {
@@ -241,6 +259,7 @@ pub async fn create_task(
         workspace_id: workspace_id.clone(),
         user_id: user_id.to_string(),
         encrypted_session_token,
+        repos,
     };
 
     let ws_id = workspace_id.as_deref().unwrap_or("default");

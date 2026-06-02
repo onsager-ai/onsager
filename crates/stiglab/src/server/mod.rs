@@ -3,6 +3,7 @@ pub mod config;
 pub mod db;
 pub mod github_app;
 pub mod handler;
+pub mod repo_env;
 pub mod routes;
 pub mod session_cancel_requested_listener;
 pub mod session_requested_listener;
