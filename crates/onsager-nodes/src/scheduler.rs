@@ -311,6 +311,13 @@ pub struct Scheduler {
     /// onto its runner request for `ONSAGER_SESSION_TOKEN` injection.
     /// `None` when no plan token was minted.
     pub session_token: Option<String>,
+    /// Pre-built `ONSAGER_REPOS` value (spec #555) threaded onto every
+    /// node's [`ExecutorContext`] for this run. The scheduler host
+    /// decrypts the workspace repo set off the `plan.run_requested` event
+    /// once per plan and sets it via [`Scheduler::with_repos_env`]; the
+    /// `AgentExecutor` copies it onto its runner request for
+    /// `ONSAGER_REPOS` injection. `None` when the workspace binds no repos.
+    pub repos_env: Option<String>,
 }
 
 impl Scheduler {
@@ -324,6 +331,7 @@ impl Scheduler {
             store,
             spine,
             session_token: None,
+            repos_env: None,
         }
     }
 
@@ -333,6 +341,15 @@ impl Scheduler {
     /// don't run agent nodes.
     pub fn with_session_token(mut self, token: Option<String>) -> Self {
         self.session_token = token;
+        self
+    }
+
+    /// Set the pre-built `ONSAGER_REPOS` value (spec #555) threaded onto
+    /// every node's [`ExecutorContext`] for this run. Builder so the bare
+    /// `new` constructor stays repo-free for the many call sites that
+    /// don't run agent nodes.
+    pub fn with_repos_env(mut self, repos_env: Option<String>) -> Self {
+        self.repos_env = repos_env;
         self
     }
 
@@ -479,6 +496,9 @@ impl Scheduler {
             // node in this run — the AgentExecutor copies it onto its
             // runner request for ONSAGER_SESSION_TOKEN injection.
             session_token: self.session_token.clone(),
+            // Workspace repo set (#555), same sharing — the AgentExecutor
+            // copies it onto its runner request for ONSAGER_REPOS.
+            repos_env: self.repos_env.clone(),
         };
         match dispatch(&self.registry, node, ctx).await {
             Ok(outputs) => {

@@ -612,9 +612,11 @@ pub const EVENTS: EventManifest = EventManifest {
             // Portal's `run_spec_plan` MCP tool emits this; the
             // substrate scheduler host consumes it, loads the stored
             // SpecPlan, compiles it, and runs it (#501, ADR 0023).
-            // Carries an additive optional `encrypted_session_token`
-            // (#536) the scheduler decrypts to inject ONSAGER_SESSION_TOKEN
-            // into agent nodes — additive, so no schema_version bump.
+            // Carries two additive optional fields the scheduler decrypts
+            // to provision agent nodes: `encrypted_session_token` (#536)
+            // → ONSAGER_SESSION_TOKEN, and `repos` (a Vec<RepoAccess> with
+            // encrypted read tokens, #555) → ONSAGER_REPOS. Both additive,
+            // so no schema_version bump.
             producers: &[Subsystem::Portal],
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,

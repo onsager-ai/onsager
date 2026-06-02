@@ -137,6 +137,15 @@ pub struct AgentRequest {
     /// key configured); the agent then runs without MCP auth and the
     /// authoritative liveness gate still applies.
     pub session_token: Option<String>,
+    /// Pre-built `ONSAGER_REPOS` value (spec #555), already decrypted: the
+    /// JSON array of the run's workspace repos with authenticated clone
+    /// URLs. The production runner injects it as `ONSAGER_REPOS` so the
+    /// scheduler-dispatched agent can clone whichever repos it needs —
+    /// parity with the chat path's stiglab-side handoff (#546). `None`
+    /// when the workspace binds no repos (the single-`working_dir` run is
+    /// unchanged). Carries embedded read tokens, so it is redacted in
+    /// [`Debug`] like [`Self::session_token`].
+    pub repos_env: Option<String>,
 }
 
 // Manual `Debug` so the plaintext `session_token` (a PAT) never leaks
@@ -154,6 +163,14 @@ impl std::fmt::Debug for AgentRequest {
             .field(
                 "session_token",
                 if self.session_token.is_some() {
+                    &"<redacted>"
+                } else {
+                    &"None"
+                },
+            )
+            .field(
+                "repos_env",
+                if self.repos_env.is_some() {
                     &"<redacted>"
                 } else {
                     &"None"
@@ -338,6 +355,10 @@ impl Executor for AgentExecutor {
             // runner injects it as ONSAGER_SESSION_TOKEN. The scheduler
             // decrypted it once per plan and set it on the context.
             session_token: ctx.session_token.clone(),
+            // Workspace repo set (#555) rides the same context → request
+            // channel so the runner injects it as ONSAGER_REPOS. The
+            // scheduler decrypted + built it once per plan.
+            repos_env: ctx.repos_env.clone(),
         };
 
         emit_event(
@@ -644,6 +665,7 @@ mod tests {
             subworkflow_ref: None,
             agent_config: None,
             session_token: None,
+            repos_env: None,
         };
         (ctx, mock)
     }
@@ -661,6 +683,7 @@ mod tests {
             subworkflow_ref: None,
             agent_config: None,
             session_token: None,
+            repos_env: None,
         }
     }
 
@@ -845,6 +868,7 @@ mod tests {
             subworkflow_ref: None,
             agent_config: None,
             session_token: None,
+            repos_env: None,
         };
 
         exec.execute(ctx).await.unwrap();
@@ -906,6 +930,7 @@ mod tests {
             subworkflow_ref: None,
             agent_config: None,
             session_token: Some("ons_pat_plan_token".to_string()),
+            repos_env: None,
         };
 
         exec.execute(ctx).await.unwrap();
@@ -915,6 +940,59 @@ mod tests {
             request.session_token.as_deref(),
             Some("ons_pat_plan_token"),
             "plan-scoped session token must reach the runner for env injection"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_threads_repos_env_to_runner() {
+        // Spec #555: the scheduler decrypts + builds the workspace repo
+        // set once and sets it on `ExecutorContext::repos_env`; the agent
+        // executor must copy it onto the `AgentRequest` so the runner
+        // injects it as `ONSAGER_REPOS`. Mutation guard: drop the
+        // `repos_env: ctx.repos_env.clone()` line in `execute` and this
+        // assertion fails.
+        #[derive(Debug, Default)]
+        struct CapturingRunner {
+            request: std::sync::Mutex<Option<AgentRequest>>,
+        }
+        #[async_trait]
+        impl AgentRunner for CapturingRunner {
+            async fn run(&self, request: AgentRequest) -> Result<AgentResponse, AgentRunError> {
+                *self.request.lock().unwrap() = Some(request);
+                Ok(AgentResponse {
+                    output: "ok".into(),
+                    emitted: Vec::new(),
+                })
+            }
+        }
+
+        let captured: Arc<CapturingRunner> = Arc::new(CapturingRunner::default());
+        let exec = AgentExecutor::new("claude-sonnet-4-6", "you are helpful")
+            .with_runner(captured.clone());
+        // Declared-empty manifest so the gate lets `execute` return Ok.
+        let mock = Arc::new(MockSpine::with_manifest(SessionManifest {
+            emitted: Vec::new(),
+            declared_empty: true,
+        }));
+        let repos_env = r#"[{"owner":"acme","name":"widgets","default_branch":"main","clone_url":"https://x-access-token:tok@github.com/acme/widgets.git"}]"#;
+        let ctx = ExecutorContext {
+            plan_id: crate::scheduler::PlanId::generate(),
+            node_id: NodeId::generate(),
+            inputs: Vec::new(),
+            spine: mock as Arc<dyn crate::SpineClient>,
+            subworkflow_ref: None,
+            agent_config: None,
+            session_token: None,
+            repos_env: Some(repos_env.to_string()),
+        };
+
+        exec.execute(ctx).await.unwrap();
+
+        let request = captured.request.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            request.repos_env.as_deref(),
+            Some(repos_env),
+            "the workspace repo set must reach the runner for ONSAGER_REPOS injection"
         );
     }
 
@@ -1133,6 +1211,7 @@ mod tests {
             subworkflow_ref: None,
             agent_config: SubstrateExecutor::agent_config(&node_exec),
             session_token: None,
+            repos_env: None,
         };
 
         dispatch(&registry, &node, ctx).await.unwrap();
@@ -1165,6 +1244,7 @@ mod tests {
             subworkflow_ref: None,
             agent_config: None,
             session_token: None,
+            repos_env: None,
         };
         exec.execute(ctx).await.unwrap();
         assert_eq!(runner.seen_model.lock().unwrap().as_deref(), Some("SELF"));

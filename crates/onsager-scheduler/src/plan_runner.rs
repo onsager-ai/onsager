@@ -49,6 +49,12 @@ pub struct PlanRunner {
     /// the run carries it for `ONSAGER_SESSION_TOKEN` injection. `None`
     /// for the trigger.fired path and whenever no plan token was minted.
     session_token: Option<String>,
+    /// Pre-built `ONSAGER_REPOS` value (spec #555) threaded onto the
+    /// [`Scheduler`] so every agent node in the run carries the
+    /// workspace's bound repo set for `ONSAGER_REPOS` injection. `None`
+    /// for the trigger.fired path and whenever the workspace binds no
+    /// repos.
+    repos_env: Option<String>,
 }
 
 impl std::fmt::Debug for PlanRunner {
@@ -68,6 +74,7 @@ impl PlanRunner {
             store,
             spine,
             session_token: None,
+            repos_env: None,
         }
     }
 
@@ -76,6 +83,14 @@ impl PlanRunner {
     /// Builder so the trigger.fired path keeps the token-free `new`.
     pub fn with_session_token(mut self, token: Option<String>) -> Self {
         self.session_token = token;
+        self
+    }
+
+    /// Attach the pre-built `ONSAGER_REPOS` value (spec #555) threaded
+    /// onto the scheduler so agent nodes inject it as `ONSAGER_REPOS`.
+    /// Builder so the trigger.fired path keeps the repo-free `new`.
+    pub fn with_repos_env(mut self, repos_env: Option<String>) -> Self {
+        self.repos_env = repos_env;
         self
     }
 
@@ -101,7 +116,8 @@ impl PlanRunner {
             Arc::clone(&self.store),
             Arc::clone(&self.spine),
         )
-        .with_session_token(self.session_token.clone());
+        .with_session_token(self.session_token.clone())
+        .with_repos_env(self.repos_env.clone());
         scheduler.run(plan_id, &exec_plan).await?;
         Ok(())
     }

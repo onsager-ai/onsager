@@ -450,6 +450,7 @@ mod tests {
             subworkflow_ref: None,
             agent_config: None,
             session_token: None,
+            repos_env: None,
         };
         (ctx, spine)
     }

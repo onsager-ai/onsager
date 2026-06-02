@@ -12,37 +12,23 @@
 //! no bound repos surfaces nothing (`None`), leaving the existing
 //! single-`working_dir` behavior untouched. *Writes* to origin are out of
 //! scope — these are read/checkout credentials, gated separately (#548).
+//!
+//! Spec #555 extended the same env var to the scheduler/`AgentExecutor`
+//! launch path. The agent-facing JSON shape is the contract both paths
+//! must produce identically, so it moved to `onsager-agent-spawn`
+//! ([`onsager_agent_spawn::repos_env_json`]); this module keeps only
+//! stiglab's spine→agent decrypt boundary.
 
 use onsager_spine::protocol::RepoAccess;
-use serde::Serialize;
 
 use crate::server::auth::decrypt_credential;
 
-/// Env var carrying the JSON-encoded repo set the agent clones on demand.
-pub const REPOS_ENV: &str = "ONSAGER_REPOS";
-
-/// One repo surfaced to the agent, with the read token already decrypted.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ClonableRepo {
-    pub owner: String,
-    pub name: String,
-    pub default_branch: String,
-    /// Decrypted read-scoped token, or `None` (public-repo / unconfigured
-    /// path) — the clone URL is then unauthenticated.
-    pub token: Option<String>,
-}
-
-/// What each `ONSAGER_REPOS` array element looks like to the agent.
-#[derive(Debug, Serialize)]
-struct RepoEntry {
-    owner: String,
-    name: String,
-    default_branch: String,
-    /// Ready-to-use clone URL: authenticated with the read token via the
-    /// `x-access-token` convention when one is present, plain HTTPS
-    /// otherwise.
-    clone_url: String,
-}
+// The agent-facing wire shape (`ClonableRepo` → `ONSAGER_REPOS` JSON) is
+// the contract shared with the scheduler launch path, so it lives in
+// `onsager-agent-spawn` (spec #555). Stiglab keeps only the spine→agent
+// decrypt boundary below — mapping each encrypted `RepoAccess` onto a
+// plaintext `ClonableRepo` across its own `decrypt_credential`.
+pub use onsager_agent_spawn::{ClonableRepo, REPOS_ENV};
 
 /// Decrypt the wire repo set and build the `ONSAGER_REPOS` env value.
 ///
@@ -85,41 +71,7 @@ pub fn repos_env_from_access(repos: &[RepoAccess], key: Option<&str>) -> Option<
             }
         })
         .collect();
-    repos_env_json(&clonable)
-}
-
-/// Build the `ONSAGER_REPOS` JSON array from already-decrypted repos.
-/// `None` for an empty set so the caller injects nothing.
-fn repos_env_json(repos: &[ClonableRepo]) -> Option<String> {
-    if repos.is_empty() {
-        return None;
-    }
-    let entries: Vec<RepoEntry> = repos
-        .iter()
-        .map(|r| RepoEntry {
-            owner: r.owner.clone(),
-            name: r.name.clone(),
-            default_branch: r.default_branch.clone(),
-            clone_url: clone_url(&r.owner, &r.name, r.token.as_deref()),
-        })
-        .collect();
-    serde_json::to_string(&entries).ok()
-}
-
-/// HTTPS clone URL, authenticated via `x-access-token` when a token is
-/// present (the GitHub convention for installation tokens). The token is
-/// percent-encoded into the userinfo so a token carrying a reserved
-/// character (`@`, `:`, `/`, …) can't truncate or corrupt the URL. GitHub
-/// installation tokens are URL-safe today, but encoding keeps this correct
-/// if that ever changes.
-fn clone_url(owner: &str, name: &str, token: Option<&str>) -> String {
-    match token {
-        Some(t) => format!(
-            "https://x-access-token:{}@github.com/{owner}/{name}.git",
-            onsager_agent_spawn::urlencode(t)
-        ),
-        None => format!("https://github.com/{owner}/{name}.git"),
-    }
+    onsager_agent_spawn::repos_env_json(&clonable)
 }
 
 #[cfg(test)]

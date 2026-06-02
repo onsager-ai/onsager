@@ -124,6 +124,7 @@ mod tests {
             subworkflow_ref: None,
             agent_config: None,
             session_token: None,
+            repos_env: None,
         };
         let outputs = exec.execute(ctx).await.unwrap();
         assert!(outputs.artifacts.is_empty());

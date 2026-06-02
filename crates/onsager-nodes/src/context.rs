@@ -75,6 +75,17 @@ pub struct ExecutorContext {
     /// minted (no credential key configured) or for non-agent nodes
     /// that ignore it.
     pub session_token: Option<String>,
+    /// Pre-built `ONSAGER_REPOS` value (spec #555) — the JSON array of the
+    /// workspace's bound repos with authenticated clone URLs, shared
+    /// across every agent node in this plan run. The scheduler host
+    /// decrypts the repo set off the `plan.run_requested` event once per
+    /// plan and sets it here; the `AgentExecutor` copies it onto its
+    /// [`crate::AgentRequest`] so the runner injects it as `ONSAGER_REPOS`
+    /// — parity with the chat path's stiglab-side handoff. `None` when the
+    /// workspace binds no repos (single-`working_dir` run, unchanged) or
+    /// for non-agent nodes that ignore it. Carries embedded read tokens,
+    /// so it is redacted in [`Debug`] like [`Self::session_token`].
+    pub repos_env: Option<String>,
 }
 
 // Manual `Debug` so the plaintext `session_token` (a PAT) never leaks
@@ -92,6 +103,14 @@ impl std::fmt::Debug for ExecutorContext {
             .field(
                 "session_token",
                 if self.session_token.is_some() {
+                    &"<redacted>"
+                } else {
+                    &"None"
+                },
+            )
+            .field(
+                "repos_env",
+                if self.repos_env.is_some() {
                     &"<redacted>"
                 } else {
                     &"None"
@@ -175,9 +194,11 @@ mod tests {
             subworkflow_ref: None,
             agent_config: None,
             session_token: None,
+            repos_env: None,
         };
         assert!(ctx.inputs.is_empty());
         assert!(ctx.subworkflow_ref.is_none());
         assert!(ctx.session_token.is_none());
+        assert!(ctx.repos_env.is_none());
     }
 }

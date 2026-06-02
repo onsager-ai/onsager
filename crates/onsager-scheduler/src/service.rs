@@ -460,6 +460,20 @@ impl TriggerHandler {
                 },
             );
 
+        // Resolve the workspace's bound repo set (#555) the same way the
+        // session token is resolved: portal attached it (read tokens
+        // encrypted) to the event, the scheduler decrypts each and builds
+        // the `ONSAGER_REPOS` value once per plan, then threads it to the
+        // runner; the AgentExecutor injects it into every agent node. An
+        // empty set (no bound repos, or no credential key) injects
+        // nothing — single-`working_dir` runs are unchanged. This is the
+        // scheduler-path parity #555 closes: spec-plan runs now span the
+        // workspace's repos, not just the one the chat path got.
+        let repos_env = crate::repo_env::repos_env_from_access(
+            &decode_plan_repos(&data),
+            self.credential_key.as_deref(),
+        );
+
         // Pin the workflow-library versions this run compiles against so
         // a later recovery recompiles against the same versions, not
         // whatever is latest then (#511). Resolved once and shared with
@@ -489,7 +503,8 @@ impl TriggerHandler {
             Arc::clone(&self.plan_store),
             scoped_spine,
         )
-        .with_session_token(session_token);
+        .with_session_token(session_token)
+        .with_repos_env(repos_env);
         match runner.run(&plan_id, &spec_plan, &snapshot).await {
             Ok(()) => {
                 let _ = plan_registry::set_status(self.store.pool(), &plan_id, "completed").await;
@@ -574,6 +589,20 @@ fn decode_plan_session_token(data: &serde_json::Value) -> Option<String> {
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
+}
+
+/// Pull the workspace's bound repo set (#555) off a `plan.run_requested`
+/// body. Portal's `run_spec_plan` MCP tool attaches it as an additive
+/// top-level `repos` array — one [`onsager_spine::protocol::RepoAccess`]
+/// per bound repo, read tokens encrypted with the shared credential key,
+/// alongside `encrypted_session_token`. Empty when the field is absent
+/// (older producers, or the workspace binds no repos) or does not parse,
+/// so the single-`working_dir` path stays unchanged.
+fn decode_plan_repos(data: &serde_json::Value) -> Vec<onsager_spine::protocol::RepoAccess> {
+    data.get("repos")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
 }
 
 /// Extract `FactoryEventKind::TriggerFired` from an `events_ext.data`
@@ -831,6 +860,42 @@ mod tests {
             decode_plan_session_token(&serde_json::json!({ "encrypted_session_token": "" }))
                 .is_none()
         );
+    }
+
+    // -----------------------------------------------------------------
+    // Spec #555 — workspace repo set decode (the transport layer of the
+    // scheduler-path ONSAGER_REPOS parity).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn decode_plan_repos_reads_top_level_array() {
+        // Portal attaches the workspace repo set as a top-level `repos`
+        // array, decoded here alongside the session token. Mutation
+        // guard: drop the `repos` key and the length assertion fails.
+        let data = serde_json::json!({
+            "spec_plan_id": "github:42",
+            "workspace_id": "ws-7",
+            "repos": [
+                { "owner": "acme", "name": "widgets", "default_branch": "main",
+                  "encrypted_read_token": "deadbeef" },
+                { "owner": "acme", "name": "gadgets", "default_branch": "trunk" },
+            ],
+        });
+        let repos = decode_plan_repos(&data);
+        assert_eq!(repos.len(), 2);
+        assert_eq!(repos[0].name, "widgets");
+        assert_eq!(repos[0].encrypted_read_token.as_deref(), Some("deadbeef"));
+        // A tokenless entry (public repo) survives — surfaced by identity.
+        assert_eq!(repos[1].encrypted_read_token, None);
+    }
+
+    #[test]
+    fn decode_plan_repos_empty_when_absent_or_malformed() {
+        // Absent `repos` (older producer / no bound repos) → empty set,
+        // so the single-`working_dir` path is unchanged.
+        assert!(decode_plan_repos(&serde_json::json!({ "spec_plan_id": "x" })).is_empty());
+        // A non-array `repos` does not parse → empty, never a panic.
+        assert!(decode_plan_repos(&serde_json::json!({ "repos": "nope" })).is_empty());
     }
 
     /// End-to-end of the inject seam #536 wires up: portal's
