@@ -124,6 +124,14 @@ const PENDING_SKILL_GRANTS: &[(&str, &str)] = &[
         "read_emit_status",
         "spec #521 — agent-session tool, no user-facing skill grant",
     ),
+    // Spec #548 — repo-write gate. Invoked by the agent session runtime
+    // when it needs to push to a bound-but-unpinned repo, not from a
+    // public user-facing skill; exempt rather than granted for the same
+    // reason as the session output-manifest tools above.
+    (
+        "request_repo_write",
+        "spec #548 — agent-session tool, no user-facing skill grant",
+    ),
 ];
 
 pub fn run() -> Result<()> {

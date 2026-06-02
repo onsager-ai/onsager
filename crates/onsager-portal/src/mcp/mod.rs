@@ -336,6 +336,7 @@ mod tests {
                     | "submit_workflow"
                     | "update_workflow"
                     | "retire_workflow"
+                    | "request_repo_write"
                     | "emit_artifact"
                     | "declare_no_output"
             );

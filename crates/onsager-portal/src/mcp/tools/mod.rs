@@ -19,6 +19,7 @@ use super::ToolError;
 
 pub mod artifacts;
 pub mod diagnostics;
+pub mod repo_write;
 pub mod runs;
 pub mod session_manifest;
 pub mod substrate_specs;

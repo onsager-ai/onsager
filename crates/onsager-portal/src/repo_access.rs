@@ -95,6 +95,60 @@ pub async fn build_workspace_repo_access(state: &AppState, workspace_id: &str) -
     assemble_repo_access(&repos, &encrypted_by_install)
 }
 
+/// Why a write-token mint did not happen. The MCP `request_repo_write`
+/// tool (#548) maps each variant to a caller-facing outcome: `RepoNotBound`
+/// is a hard "not a candidate" deny, the rest are transient infra failures.
+#[derive(Debug)]
+pub enum WriteTokenError {
+    /// The repo is not a member of the workspace — binding grants
+    /// candidacy, so an unbound repo can never be written to.
+    RepoNotBound,
+    /// The GitHub App is unconfigured (no `GITHUB_APP_*` env) or its JWT
+    /// could not be minted — a deploy-level problem, not a per-repo one.
+    AppUnavailable(String),
+    /// GitHub rejected the access-token request.
+    Mint(String),
+}
+
+impl std::fmt::Display for WriteTokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RepoNotBound => write!(f, "repo is not bound to this workspace"),
+            Self::AppUnavailable(e) => write!(f, "GitHub App unavailable: {e}"),
+            Self::Mint(e) => write!(f, "write-token mint failed: {e}"),
+        }
+    }
+}
+
+/// Mint a **write-scoped** installation token for one bound repo, after a
+/// Synodic `RepoWrite` gate has approved it (#548).
+///
+/// This is the per-repo resolver's first write consumer (the #545-absorbed
+/// `resolve_install_for_repo` picks the install; this adds the write mint
+/// on top). It resolves the repo's install id, mints an App JWT, and
+/// exchanges it for a `contents:write` + `pull_requests:write` token
+/// scoped to that single repo — least-privilege, on demand, never eager.
+/// An unbound repo returns [`WriteTokenError::RepoNotBound`] without
+/// touching GitHub.
+pub async fn mint_repo_write_token(
+    state: &AppState,
+    workspace_id: &str,
+    owner: &str,
+    name: &str,
+) -> Result<onsager_github::api::app::InstallationToken, WriteTokenError> {
+    let install_id = resolve_install_for_repo(state, workspace_id, owner, name)
+        .await
+        .ok_or(WriteTokenError::RepoNotBound)?;
+
+    let cfg = gh_app::AppConfig::from_env()
+        .ok_or_else(|| WriteTokenError::AppUnavailable("GitHub App not configured".into()))?;
+    let jwt = gh_app::mint_app_jwt(&cfg).map_err(|e| WriteTokenError::AppUnavailable(e.to_string()))?;
+
+    gh_app::mint_repo_write_token(&jwt, install_id, &[name.to_string()])
+        .await
+        .map_err(|e| WriteTokenError::Mint(e.to_string()))
+}
+
 /// Mint + encrypt a read-scoped token per install id present in `repos`.
 /// Returns a map keyed by install id; an install absent from the map had
 /// no usable token (unconfigured App, no credential key, or mint error).
