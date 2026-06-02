@@ -1,7 +1,8 @@
 //! Multi-repo session-launch handoff (spec #546, Part of #544).
 //!
 //! A run is no longer pinned to one repo. A workspace binds an unlimited
-//! set of repos (`workspace_repos`, renamed from `projects` in #549), and
+//! set of repos (`workspace_repos`, the membership rename specced under
+//! #545 / #544 and landed in PR #549), and
 //! a workspace-scoped agent session is handed the *whole* bound set with
 //! read-scoped per-repo credentials so the agent can clone whichever it
 //! needs on demand. The single-repo / pinned case degenerates to a

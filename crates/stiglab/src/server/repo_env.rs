@@ -57,7 +57,24 @@ pub fn repos_env_from_access(repos: &[RepoAccess], key: Option<&str>) -> Option<
         .iter()
         .map(|r| {
             let token = match (key, r.encrypted_read_token.as_deref()) {
-                (Some(k), Some(enc)) => decrypt_credential(k, enc).ok(),
+                (Some(k), Some(enc)) => match decrypt_credential(k, enc) {
+                    Ok(t) => Some(t),
+                    Err(e) => {
+                        // Observability: a decrypt failure (mismatched /
+                        // rotated credential key) silently degrades a
+                        // private-repo clone to an unauthenticated URL,
+                        // which then fails far from here. Surface it — the
+                        // error is about the cipher, never the plaintext
+                        // token, so it is safe to log.
+                        tracing::warn!(
+                            owner = %r.owner,
+                            repo = %r.name,
+                            "repo_env: failed to decrypt read token; surfacing \
+                             unauthenticated clone URL: {e}"
+                        );
+                        None
+                    }
+                },
                 _ => None,
             };
             ClonableRepo {
@@ -90,10 +107,17 @@ fn repos_env_json(repos: &[ClonableRepo]) -> Option<String> {
 }
 
 /// HTTPS clone URL, authenticated via `x-access-token` when a token is
-/// present (the GitHub convention for installation tokens).
+/// present (the GitHub convention for installation tokens). The token is
+/// percent-encoded into the userinfo so a token carrying a reserved
+/// character (`@`, `:`, `/`, …) can't truncate or corrupt the URL. GitHub
+/// installation tokens are URL-safe today, but encoding keeps this correct
+/// if that ever changes.
 fn clone_url(owner: &str, name: &str, token: Option<&str>) -> String {
     match token {
-        Some(t) => format!("https://x-access-token:{t}@github.com/{owner}/{name}.git"),
+        Some(t) => format!(
+            "https://x-access-token:{}@github.com/{owner}/{name}.git",
+            onsager_agent_spawn::urlencode(t)
+        ),
         None => format!("https://github.com/{owner}/{name}.git"),
     }
 }

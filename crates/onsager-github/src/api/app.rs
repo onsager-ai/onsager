@@ -148,6 +148,15 @@ pub async fn mint_read_token_for_repos(
     install_id: i64,
     repo_names: &[String],
 ) -> Result<InstallationToken, GithubError> {
+    // Enforce least-privilege at the boundary: GitHub treats an omitted
+    // `repositories` body as "the install's full repo set", so an empty
+    // slice would silently *widen* the token rather than narrow it.
+    if repo_names.is_empty() {
+        return Err(GithubError::Other(anyhow::anyhow!(
+            "mint_read_token_for_repos requires at least one repo name; \
+             an empty set would widen the token to the install's full repo set"
+        )));
+    }
     let url = format!("https://api.github.com/app/installations/{install_id}/access_tokens");
     let body = serde_json::json!({
         "repositories": repo_names,
@@ -464,6 +473,21 @@ KHLHs4NWfuFIhN/tCfpZ/g==
         let pem = "-----BEGIN RSA PRIVATE KEY-----\nXX\n-----END RSA PRIVATE KEY-----\n";
         let b64 = base64::engine::general_purpose::STANDARD.encode(pem.as_bytes());
         assert_eq!(normalize_pem(&b64), pem);
+    }
+
+    #[tokio::test]
+    async fn mint_read_token_rejects_empty_repo_set() {
+        // Least-privilege guard: an empty repo set must error *before* any
+        // network call (GitHub would otherwise issue a token for the
+        // install's full repo set). Mutation guard: drop the `is_empty()`
+        // check and this returns a network error instead of the message.
+        let err = mint_read_token_for_repos("jwt-unused", 123, &[])
+            .await
+            .expect_err("empty repo set must be rejected");
+        assert!(
+            err.to_string().contains("at least one repo name"),
+            "got: {err}"
+        );
     }
 
     #[test]
