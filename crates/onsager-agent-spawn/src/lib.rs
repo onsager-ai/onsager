@@ -13,6 +13,19 @@
 //!
 //! Behavior is unchanged from the stiglab originals; the unit tests
 //! below are the parity assertions #532 added, moved with the functions.
+//!
+//! Per spec #555 the same charter brought the `ONSAGER_REPOS` builder
+//! here too: multi-repo read (#546) was first wired on stiglab's
+//! `portal.session_requested` path, but the scheduler/`AgentExecutor`
+//! launch path needs the *identical* env var. The agent-facing wire
+//! shape (the JSON array the agent reads to clone its repos) is the
+//! contract that must not drift across the two launch paths, so it lives
+//! here, in the one crate both sides depend on. Each subsystem still
+//! owns the spine→agent decrypt boundary (`RepoAccess` ciphertext →
+//! plaintext token) with its own `decrypt_credential` replica — the
+//! same split the session token already uses.
+
+use serde::Serialize;
 
 /// Env var (read on the agent node) holding the base URL of portal's
 /// liveness endpoint, e.g.
@@ -135,6 +148,75 @@ pub fn mcp_config_json(mcp_url: &str) -> String {
     .to_string()
 }
 
+/// Env var carrying the JSON-encoded repo set the agent clones on demand
+/// (spec #546 / #555). One array element per repo bound to the run's
+/// workspace; an empty set injects nothing, leaving the single-repo /
+/// pinned `working_dir` behavior untouched.
+pub const REPOS_ENV: &str = "ONSAGER_REPOS";
+
+/// One repo surfaced to the agent, with the read token **already
+/// decrypted** by the caller. The caller maps each spine-side
+/// `RepoAccess` (encrypted token) onto a `ClonableRepo` (plaintext)
+/// across its own `decrypt_credential` replica — keeping the crypto out
+/// of this pure crate, exactly as the session token does.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClonableRepo {
+    pub owner: String,
+    pub name: String,
+    pub default_branch: String,
+    /// Decrypted read-scoped token, or `None` (public-repo / unconfigured
+    /// path) — the clone URL is then unauthenticated.
+    pub token: Option<String>,
+}
+
+/// What each `ONSAGER_REPOS` array element looks like to the agent.
+#[derive(Debug, Serialize)]
+struct RepoEntry {
+    owner: String,
+    name: String,
+    default_branch: String,
+    /// Ready-to-use clone URL: authenticated with the read token via the
+    /// `x-access-token` convention when one is present, plain HTTPS
+    /// otherwise.
+    clone_url: String,
+}
+
+/// Build the `ONSAGER_REPOS` JSON array from already-decrypted repos.
+/// `None` for an empty set so the caller injects nothing (the
+/// single/zero-repo path is unchanged). This is the agent-facing
+/// contract — the shape both launch paths must produce identically.
+pub fn repos_env_json(repos: &[ClonableRepo]) -> Option<String> {
+    if repos.is_empty() {
+        return None;
+    }
+    let entries: Vec<RepoEntry> = repos
+        .iter()
+        .map(|r| RepoEntry {
+            owner: r.owner.clone(),
+            name: r.name.clone(),
+            default_branch: r.default_branch.clone(),
+            clone_url: clone_url(&r.owner, &r.name, r.token.as_deref()),
+        })
+        .collect();
+    serde_json::to_string(&entries).ok()
+}
+
+/// HTTPS clone URL, authenticated via `x-access-token` when a token is
+/// present (the GitHub convention for installation tokens). The token is
+/// percent-encoded into the userinfo so a token carrying a reserved
+/// character (`@`, `:`, `/`, …) can't truncate or corrupt the URL. GitHub
+/// installation tokens are URL-safe today, but encoding keeps this correct
+/// if that ever changes.
+fn clone_url(owner: &str, name: &str, token: Option<&str>) -> String {
+    match token {
+        Some(t) => format!(
+            "https://x-access-token:{}@github.com/{owner}/{name}.git",
+            urlencode(t)
+        ),
+        None => format!("https://github.com/{owner}/{name}.git"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +280,62 @@ mod tests {
     fn urlencode_passes_safe_ids_and_escapes_reserved() {
         assert_eq!(urlencode("ws_01HZX-abc.def~9"), "ws_01HZX-abc.def~9");
         assert_eq!(urlencode("a b&c=d"), "a%20b%26c%3Dd");
+    }
+
+    fn clonable(owner: &str, name: &str, token: Option<&str>) -> ClonableRepo {
+        ClonableRepo {
+            owner: owner.into(),
+            name: name.into(),
+            default_branch: "main".into(),
+            token: token.map(|t| t.to_string()),
+        }
+    }
+
+    #[test]
+    fn repos_env_json_builds_one_authenticated_entry_per_repo() {
+        // The shared agent-facing contract (spec #546 / #555): every
+        // bound repo surfaces one entry with an `x-access-token` clone
+        // URL. Mutation guard: drop a repo from the input and the length
+        // assertion below fails.
+        let repos = vec![
+            clonable("acme", "widgets", Some("tok_a")),
+            clonable("other", "thing", Some("tok_b")),
+        ];
+        let json = repos_env_json(&repos).expect("two repos surface a value");
+        let arr: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let arr = arr.as_array().unwrap();
+        assert_eq!(arr.len(), 2, "one entry per bound repo");
+        assert_eq!(
+            arr[0]["clone_url"],
+            "https://x-access-token:tok_a@github.com/acme/widgets.git"
+        );
+        assert_eq!(
+            arr[1]["clone_url"],
+            "https://x-access-token:tok_b@github.com/other/thing.git"
+        );
+        assert_eq!(arr[0]["default_branch"], "main");
+    }
+
+    #[test]
+    fn repos_env_json_single_repo_surfaces_exactly_one_entry() {
+        let json = repos_env_json(&[clonable("acme", "widgets", Some("tok_a"))]).unwrap();
+        let arr: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn repos_env_json_empty_set_is_none() {
+        // Zero bound repos → nothing injected, so the single-`working_dir`
+        // behavior is untouched.
+        assert_eq!(repos_env_json(&[]), None);
+    }
+
+    #[test]
+    fn repos_env_json_tokenless_repo_is_unauthenticated() {
+        // A repo whose token the caller couldn't decrypt (or a public
+        // repo) is still surfaced, just with a plain HTTPS clone URL.
+        let json = repos_env_json(&[clonable("acme", "public", None)]).unwrap();
+        let arr: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(arr[0]["clone_url"], "https://github.com/acme/public.git");
     }
 }

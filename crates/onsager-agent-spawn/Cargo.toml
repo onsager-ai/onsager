@@ -7,4 +7,5 @@ repository.workspace = true
 description = "Shared agent-session spawn wiring — env-var constants + claude MCP/Stop-hook JSON builders reused across stiglab and the scheduler-side runner (spec #535)."
 
 [dependencies]
+serde = { workspace = true }
 serde_json = { workspace = true }

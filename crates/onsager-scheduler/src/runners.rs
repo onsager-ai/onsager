@@ -40,7 +40,8 @@ use std::process::Stdio;
 
 use async_trait::async_trait;
 use onsager_agent_spawn::{
-    LIVENESS_HOOK_URL_ENV, MCP_URL_ENV, SESSION_TOKEN_ENV, mcp_config_json, stop_hook_settings_json,
+    LIVENESS_HOOK_URL_ENV, MCP_URL_ENV, REPOS_ENV, SESSION_TOKEN_ENV, mcp_config_json,
+    stop_hook_settings_json,
 };
 use onsager_nodes::{AgentRequest, AgentResponse, AgentRunError, AgentRunner};
 use serde::Deserialize;
@@ -184,6 +185,18 @@ impl AgentRunner for ClaudeCliRunner {
         // (and the MCP config above was not registered).
         if let Some(token) = request.session_token.as_deref().filter(|t| !t.is_empty()) {
             cmd.env(SESSION_TOKEN_ENV, token);
+        }
+
+        // Surface the run's workspace repo set (spec #555) as
+        // `ONSAGER_REPOS` so the scheduler-dispatched agent can clone
+        // whichever repos it needs — parity with the chat path, where
+        // stiglab injects the same var off the `portal.session_requested`
+        // event. The scheduler decrypted + built this value once per plan
+        // (`repo_env::repos_env_from_access`); empty/absent means the
+        // workspace binds no repos and the single-`working_dir` behavior
+        // is unchanged.
+        if let Some(repos) = request.repos_env.as_deref().filter(|s| !s.is_empty()) {
+            cmd.env(REPOS_ENV, repos);
         }
 
         // stderr is discarded, not piped: this runner has no consumer
@@ -349,6 +362,7 @@ mod tests {
                echo \"ARGS: $*\"\n\
                echo \"SESSION_ID: ${{ONSAGER_SESSION_ID:-}}\"\n\
                echo \"SESSION_TOKEN: ${{ONSAGER_SESSION_TOKEN:-}}\"\n\
+               echo \"REPOS: ${{ONSAGER_REPOS:-}}\"\n\
              }} >> \"{capture}\"\n\
              cat <<'NDJSON'\n{body}\nNDJSON\n",
             capture = capture_path.display(),
@@ -378,6 +392,14 @@ mod tests {
             user_prompt: prompt.into(),
             session_id: session_id.into(),
             session_token: session_token.map(Into::into),
+            repos_env: None,
+        }
+    }
+
+    fn request_with_repos(prompt: &str, session_id: &str, repos_env: Option<&str>) -> AgentRequest {
+        AgentRequest {
+            repos_env: repos_env.map(Into::into),
+            ..request(prompt, session_id)
         }
     }
 
@@ -589,6 +611,55 @@ mod tests {
         assert!(
             recorded.contains("SESSION_TOKEN: \n"),
             "ONSAGER_SESSION_TOKEN must be empty when the request has no token, got: {recorded}"
+        );
+    }
+
+    #[tokio::test]
+    async fn repos_injected_as_onsager_repos_when_present() {
+        // Spec #555 consumption seam: a request carrying the pre-built
+        // repo set is injected into the child env as ONSAGER_REPOS so the
+        // scheduler-dispatched agent can clone its workspace's repos.
+        // Mutation guard: dropping the `cmd.env(REPOS_ENV ..)` line makes
+        // this assertion fail.
+        let _guard = ENV_LOCK.lock().await;
+        let capture = tempfile::tempdir().unwrap();
+        let cap_file = capture.path().join("argv.txt");
+        let body = r#"{"type":"result","subtype":"success","result":"ok"}"#;
+        let (_dir, script) = fake_claude(body, &cap_file);
+
+        let repos_env = r#"[{"owner":"acme","name":"widgets","default_branch":"main","clone_url":"https://x-access-token:tok@github.com/acme/widgets.git"}]"#;
+        let runner = ClaudeCliRunner::with_command(script);
+        runner
+            .run(request_with_repos("p", "sess_repos", Some(repos_env)))
+            .await
+            .unwrap();
+
+        let recorded = std::fs::read_to_string(&cap_file).unwrap();
+        assert!(
+            recorded.contains("REPOS: ")
+                && recorded.contains("x-access-token:tok@github.com/acme/widgets.git"),
+            "ONSAGER_REPOS must be injected from the request, got: {recorded}"
+        );
+    }
+
+    #[tokio::test]
+    async fn repos_env_empty_when_request_has_none() {
+        // Regression: a no-repo run injects nothing, so the child sees an
+        // empty ONSAGER_REPOS (the single-`working_dir` behavior is
+        // unchanged). Mirrors `mcp_config_omitted_when_token_absent`.
+        let _guard = ENV_LOCK.lock().await;
+        let capture = tempfile::tempdir().unwrap();
+        let cap_file = capture.path().join("argv.txt");
+        let body = r#"{"type":"result","subtype":"success","result":"ok"}"#;
+        let (_dir, script) = fake_claude(body, &cap_file);
+
+        let runner = ClaudeCliRunner::with_command(script);
+        runner.run(request("p", "sess_no_repos")).await.unwrap();
+
+        let recorded = std::fs::read_to_string(&cap_file).unwrap();
+        assert!(
+            recorded.contains("REPOS: \n"),
+            "ONSAGER_REPOS must be empty when the request has no repo set, got: {recorded}"
         );
     }
 }

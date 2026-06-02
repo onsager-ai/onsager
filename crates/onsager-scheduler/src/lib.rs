@@ -39,6 +39,7 @@ pub mod migrate;
 pub mod plan_registry;
 pub mod plan_runner;
 pub mod plan_store;
+pub mod repo_env;
 pub mod runners;
 pub mod service;
 pub mod spine_client;

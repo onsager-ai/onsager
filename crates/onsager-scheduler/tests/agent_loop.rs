@@ -10,7 +10,7 @@
 //! the session manifest back → a packaged `Artifact`
 //! (`Uncertain { source: Agent }`) on the node's output edge.
 //!
-//! Three tests:
+//! Four tests:
 //!
 //! 1. `agent_node_runs_to_terminal_with_uncertain_agent_artifact` — the
 //!    §520 acceptance bullet, now on the scheduler path, against the
@@ -26,13 +26,17 @@
 //!    the spawned agent carries `ONSAGER_SESSION_TOKEN`, `--mcp-config`,
 //!    and `--settings` (Stop hook). The token's presence is exactly what
 //!    lets the §4d hook authenticate instead of 401→fail-open.
+//! 4. `scheduler_path_surfaces_repos_to_agent_spawn` — the #555
+//!    multi-repo read parity: a run for a workspace with two bound repos
+//!    threads `ONSAGER_REPOS` through `PlanRunner` to the spawned agent,
+//!    which sees both authenticated clone URLs.
 
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use onsager_agent_spawn::{LIVENESS_HOOK_URL_ENV, MCP_URL_ENV};
+use onsager_agent_spawn::{ClonableRepo, LIVENESS_HOOK_URL_ENV, MCP_URL_ENV, repos_env_json};
 use onsager_artifact::{Artifact, ArtifactId, ContentRef, NodeId, Provenance, SourceTag};
 use onsager_nodes::{
     AgentExecutor, EmittedArtifact, ExecutorRegistry, InMemoryPlanStore, NoOpExecutor, PlanId,
@@ -166,6 +170,7 @@ fn fake_claude(capture_path: &std::path::Path) -> (tempfile::TempDir, String) {
          {{\n\
            echo \"ARGS: $*\"\n\
            echo \"SESSION_TOKEN: ${{ONSAGER_SESSION_TOKEN:-}}\"\n\
+           echo \"REPOS: ${{ONSAGER_REPOS:-}}\"\n\
          }} >> \"{capture}\"\n\
          echo '{{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"analysis done\"}}'\n",
         capture = capture_path.display(),
@@ -342,5 +347,81 @@ async fn scheduler_path_injects_session_token_and_mcp_into_agent_spawn() {
     assert!(
         recorded.contains("--settings"),
         "the §4d Stop hook (--settings) must be wired on the scheduler path, got: {recorded}",
+    );
+}
+
+#[tokio::test]
+async fn scheduler_path_surfaces_repos_to_agent_spawn() {
+    // §555: a scheduler-launched run for a workspace with ≥2 bound repos
+    // must surface BOTH in ONSAGER_REPOS with authenticated clone URLs —
+    // the multi-repo read parity the chat path already had. The set is
+    // built once per plan and threaded PlanRunner → Scheduler →
+    // ExecutorContext → AgentExecutor → AgentRequest → ClaudeCliRunner →
+    // the spawned agent's env. Mutation guard: drop a repo from
+    // `repos_env` (or the `with_repos_env` thread) and an assertion below
+    // fails. (The decrypt-off-the-event half is unit-tested in
+    // `onsager_scheduler::repo_env`.)
+    let _guard = ENV_LOCK.lock().await;
+    let cap = tempfile::tempdir().unwrap();
+    let cap_file = cap.path().join("argv.txt");
+    let (_dir, script) = fake_claude(&cap_file);
+
+    // SAFETY: serialized by ENV_LOCK; removed before the guard drops.
+    unsafe {
+        std::env::set_var(CLAUDE_BIN_ENV, &script);
+    }
+
+    // The agent-facing shape the scheduler builds from the decrypted repo
+    // set — two bound repos, each with a read token.
+    let repos_env = repos_env_json(&[
+        ClonableRepo {
+            owner: "acme".into(),
+            name: "widgets".into(),
+            default_branch: "main".into(),
+            token: Some("tok_a".into()),
+        },
+        ClonableRepo {
+            owner: "other".into(),
+            name: "thing".into(),
+            default_branch: "main".into(),
+            token: Some("tok_b".into()),
+        },
+    ])
+    .expect("two repos build a value");
+
+    let spine = Arc::new(ManifestSpine::default());
+    let runner = PlanRunner::new(
+        Arc::new(default_executor_registry()),
+        Arc::new(InMemoryPlanStore::new()) as Arc<dyn PlanStore>,
+        Arc::clone(&spine) as Arc<dyn SpineClient>,
+    )
+    .with_repos_env(Some(repos_env));
+
+    let plan_id = PlanId::generate();
+    let result = runner
+        .run(
+            &plan_id,
+            &one_agent_spec_plan(),
+            &AgentLibrary {
+                workflow: agent_workflow(),
+            },
+        )
+        .await;
+
+    unsafe {
+        std::env::remove_var(CLAUDE_BIN_ENV);
+    }
+    result.expect("agent-node plan runs to terminal");
+
+    let recorded = std::fs::read_to_string(&cap_file).unwrap();
+    // Both repos surface, each with an authenticated (x-access-token)
+    // clone URL — "surfaces both with read-auth", on the scheduler path.
+    assert!(
+        recorded.contains("https://x-access-token:tok_a@github.com/acme/widgets.git"),
+        "the first bound repo must reach the agent env via ONSAGER_REPOS, got: {recorded}",
+    );
+    assert!(
+        recorded.contains("https://x-access-token:tok_b@github.com/other/thing.git"),
+        "the second bound repo must reach the agent env via ONSAGER_REPOS, got: {recorded}",
     );
 }

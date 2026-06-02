@@ -410,6 +410,16 @@ pub async fn run_spec_plan(state: &AppState, auth_user: &AuthUser, args: Value) 
         None => None,
     };
 
+    // Resolve the workspace's bound repo set with read-scoped per-repo
+    // credentials (spec #555, parity with #546's chat path). Portal owns
+    // the mint — it has the GitHub App config + credential key; the
+    // scheduler can't reach them across the seam — so, exactly like the
+    // plan session token above, the set rides the event encrypted and the
+    // scheduler decrypts it to surface `ONSAGER_REPOS` to each agent node.
+    // Empty for a workspace with no bound repos; the single-repo /
+    // `working_dir` path is then unchanged.
+    let repos = crate::repo_access::build_workspace_repo_access(state, &args.workspace_id).await;
+
     // Raw payload — the scheduler's `decode_spec_plan_run_requested`
     // accepts this shape (alongside a FactoryEvent envelope / bare
     // kind), mirroring how `run_workflow` emits `trigger.fired`. Fields:
@@ -422,6 +432,11 @@ pub async fn run_spec_plan(state: &AppState, auth_user: &AuthUser, args: Value) 
     //   - `encrypted_session_token` (optional): present only when a
     //     plan token was minted; the scheduler decrypts it and injects
     //     `ONSAGER_SESSION_TOKEN` into each agent node (#536).
+    //   - `repos` (optional): the workspace's bound repo set with
+    //     read-scoped encrypted tokens (#555); present only when the
+    //     workspace binds ≥1 repo. The scheduler decrypts each and
+    //     surfaces the set as `ONSAGER_REPOS`. Additive — older
+    //     consumers ignore it.
     // All are in-contract — consumers may rely on the non-optional ones.
     let mut payload = serde_json::json!({
         "spec_plan_id": stored.spec_plan_id,
@@ -432,6 +447,9 @@ pub async fn run_spec_plan(state: &AppState, auth_user: &AuthUser, args: Value) 
     });
     if let Some(token) = &encrypted_session_token {
         payload["encrypted_session_token"] = serde_json::Value::String(token.clone());
+    }
+    if !repos.is_empty() {
+        payload["repos"] = serde_json::to_value(&repos).unwrap_or_default();
     }
     let metadata = onsager_spine::EventMetadata {
         correlation_id: None,
