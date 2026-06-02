@@ -49,6 +49,15 @@ pub fn gate_request_to_intercept(req: &GateRequest) -> InterceptRequest {
             tool_name: "forge:consumer_routing".to_string(),
             tool_input: serde_json::to_value(&req.context).unwrap_or_default(),
         },
+        // Repo-write authorization (spec #548): a run wants to push +
+        // open a PR to a bound-but-unpinned repo. The target repo rides
+        // in `context.extra` ({ target_repo, session_id }); the engine
+        // evaluates it under the synthetic `forge:repo_write` tool name so
+        // a policy rule can deny writes to specific repos / orgs.
+        GatePoint::RepoWrite => InterceptRequest {
+            tool_name: "forge:repo_write".to_string(),
+            tool_input: serde_json::to_value(&req.context).unwrap_or_default(),
+        },
     }
 }
 
@@ -144,6 +153,24 @@ mod tests {
         gate.context.gate_point = GatePoint::ConsumerRouting;
         let req = gate_request_to_intercept(&gate);
         assert_eq!(req.tool_name, "forge:consumer_routing");
+    }
+
+    #[test]
+    fn repo_write_uses_synthetic_tool_name_and_carries_target() {
+        // Spec #548: the repo-write gate routes through a dedicated
+        // synthetic tool, and the target repo (in `context.extra`) must
+        // survive into the engine's tool input so a rule can match on it.
+        // Mutation guard: drop the `extra` serialization and the
+        // `target_repo` assertion fails.
+        let mut gate = pre_dispatch_request();
+        gate.context.gate_point = GatePoint::RepoWrite;
+        gate.context.extra = Some(serde_json::json!({
+            "target_repo": "acme/widgets",
+            "session_id": "sess_1",
+        }));
+        let req = gate_request_to_intercept(&gate);
+        assert_eq!(req.tool_name, "forge:repo_write");
+        assert_eq!(req.tool_input["extra"]["target_repo"], "acme/widgets");
     }
 
     #[test]

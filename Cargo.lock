@@ -2316,6 +2316,7 @@ dependencies = [
  "clap",
  "futures-util",
  "hex",
+ "onsager-agent-spawn",
  "onsager-artifact",
  "onsager-github",
  "onsager-registry",

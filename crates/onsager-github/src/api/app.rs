@@ -185,6 +185,66 @@ pub async fn mint_read_token_for_repos(
     })
 }
 
+/// Exchange an App JWT for a **write-scoped** installation access token,
+/// narrowed to a single repository (spec #548, Part of #544).
+///
+/// The write counterpart of [`mint_read_token_for_repos`]: least-
+/// privilege `contents:write` + `pull_requests:write` (+ `metadata:read`),
+/// scoped to `repo_names` only. It is minted *on demand* and only after a
+/// Synodic gate (`GatePoint::RepoWrite`) approves the target repo for the
+/// run — so the token for a repo exists only once that repo is approved.
+/// `metadata:read` rides along because GitHub requires it for the
+/// `contents` / `pull_requests` scopes to resolve.
+///
+/// `repo_names` are the short repo names (no owner prefix), all under the
+/// install's account. An empty slice would let GitHub fall back to the
+/// install's full repo set, so callers must pass at least one name.
+pub async fn mint_repo_write_token(
+    app_jwt: &str,
+    install_id: i64,
+    repo_names: &[String],
+) -> Result<InstallationToken, GithubError> {
+    // Least-privilege at the boundary, identical reasoning to
+    // `mint_read_token_for_repos`: an omitted `repositories` body widens
+    // the token to the install's full repo set, the opposite of intent.
+    if repo_names.is_empty() {
+        return Err(GithubError::Other(anyhow::anyhow!(
+            "mint_repo_write_token requires at least one repo name; \
+             an empty set would widen the token to the install's full repo set"
+        )));
+    }
+    let url = format!("https://api.github.com/app/installations/{install_id}/access_tokens");
+    let body = serde_json::json!({
+        "repositories": repo_names,
+        "permissions": {
+            "contents": "write",
+            "pull_requests": "write",
+            "metadata": "read",
+        },
+    });
+    let resp = client()
+        .post(&url)
+        .bearer_auth(app_jwt)
+        .header("Accept", "application/vnd.github+json")
+        .json(&body)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        return Err(GithubError::from_response(resp).await);
+    }
+
+    let parsed: InstallationTokenResponse = resp
+        .json()
+        .await
+        .map_err(|e| GithubError::Decode(e.to_string()))?;
+    Ok(InstallationToken {
+        token: parsed.token,
+        expires_at: parsed.expires_at,
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct AccountJson {
     login: String,
@@ -482,6 +542,22 @@ KHLHs4NWfuFIhN/tCfpZ/g==
         // install's full repo set). Mutation guard: drop the `is_empty()`
         // check and this returns a network error instead of the message.
         let err = mint_read_token_for_repos("jwt-unused", 123, &[])
+            .await
+            .expect_err("empty repo set must be rejected");
+        assert!(
+            err.to_string().contains("at least one repo name"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_write_token_rejects_empty_repo_set() {
+        // Least-privilege guard (spec #548): an empty repo set must error
+        // *before* any network call — GitHub would otherwise issue a
+        // write token for the install's full repo set. Mutation guard:
+        // drop the `is_empty()` check and this returns a network error
+        // instead of the message.
+        let err = mint_repo_write_token("jwt-unused", 123, &[])
             .await
             .expect_err("empty repo set must be rejected");
         assert!(

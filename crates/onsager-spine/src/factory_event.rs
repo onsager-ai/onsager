@@ -919,6 +919,13 @@ pub enum GatePoint {
     StateTransition,
     ConsumerRouting,
     ToolLevel,
+    /// A run wants to *write* (push + open PR) to a bound-but-unpinned
+    /// repo it selected mid-run (spec #548, Part of #544). Binding a repo
+    /// to a workspace grants candidacy, not blanket write consent — this
+    /// gate is the consent point. The write-scoped token is minted only
+    /// after the verdict is `Allow`. The pinned repo (named in the
+    /// trigger) is pre-approved and never reaches this point.
+    RepoWrite,
 }
 
 /// Summary of a Synodic verdict (for event spine recording).

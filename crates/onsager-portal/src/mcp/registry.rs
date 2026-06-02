@@ -311,6 +311,16 @@ fn build_registry() -> Vec<ToolDescriptor> {
                 ))
             },
         },
+        // --- Repo-write gate (spec #548 / #544) ---
+        ToolDescriptor {
+            name: "request_repo_write",
+            description: "Request write access (push + open PR) to a bound-but-unpinned repo in a workspace-scoped run. Binding a repo grants candidacy, not write consent: this emits a `forge.gate_requested` (GatePoint::RepoWrite) to Synodic and awaits the verdict. On `allow`, mints a least-privilege `contents:write` + `pull_requests:write` token scoped to that one repo and returns an authenticated `remote` to push to. On `deny` / `escalate` / verdict-timeout, no token is minted and the write is parked per `SYNODIC_FAIL_POLICY`. The pinned repo (named in the trigger) is pre-approved and uses the normal push path — do not call this for it.",
+            category: ToolCategory::Destructive,
+            input_schema: super::input_schema::<tools::repo_write::RequestRepoWriteArgs>(),
+            invoke: |state, user, args| {
+                Box::pin(tools::repo_write::request_repo_write(state, user, args))
+            },
+        },
         // --- Session output manifest (spec #520 §4a / #521) ---
         ToolDescriptor {
             name: "emit_artifact",

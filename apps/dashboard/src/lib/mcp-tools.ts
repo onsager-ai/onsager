@@ -487,6 +487,40 @@ const get_workflow_v2: McpToolBinding = {
 }
 
 // -----------------------------------------------------------------------------
+// Repo-write gate (#548 / #544)
+//
+// Agent-session tool: an agent calls this to request write access to a
+// bound-but-unpinned repo in a workspace-scoped run. Bound here so the
+// registry ↔ dashboard contract (`check-hitl-coverage`) stays complete;
+// in practice it is invoked by the session runtime, not from dashboard
+// chat. Destructive because it authorizes pushes + PRs to a repo.
+// -----------------------------------------------------------------------------
+
+const request_repo_write: McpToolBinding = {
+  name: "request_repo_write",
+  category: "destructive",
+  title: (args) => `Authorize write · ${str(args, "owner")}/${str(args, "name")}`,
+  buildCard: (args) => {
+    const repo = `${str(args, "owner")}/${str(args, "name")}`
+    return {
+      kind: "destructive",
+      title: `Authorize write · ${repo}`,
+      body: {
+        info: `Grant the run write access (push + open PR) to ${repo}. Binding a repo grants candidacy, not write consent — this is the consent point.`,
+      },
+      sideEffects: [
+        `Mints a least-privilege \`contents:write\` + \`pull_requests:write\` token scoped to ${repo}`,
+        "Emits `forge.gate_requested` (RepoWrite) and acts on Synodic's `synodic.gate_verdict`",
+        "On deny / escalate / timeout no token is minted and the write is parked",
+      ],
+      reversibility:
+        "The token is short-lived and single-repo; revoke by letting it expire. The PR it enables is reviewable before merge.",
+      commit: { label: `Authorize ${repo}`, intent: "destructive" },
+      reject: { label: "Deny write" },
+    }
+  },
+}
+
 // Session output manifest (#520 §4a / #521)
 //
 // These three are agent-session tools — an agent records its addressable
@@ -573,6 +607,8 @@ const BINDINGS: McpToolBinding[] = [
   retire_workflow,
   list_workflows_v2,
   get_workflow_v2,
+  // Repo-write gate (#548 / #544)
+  request_repo_write,
   // Session output manifest (#520 §4a / #521)
   emit_artifact,
   declare_no_output,
