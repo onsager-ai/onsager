@@ -13,7 +13,7 @@ import {
   type AccessibleRepo,
   type Workspace,
   type GitHubAppInstallation,
-  type Project,
+  type WorkspaceRepo,
   type WorkspaceMember,
 } from "@/lib/api"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -490,7 +490,7 @@ export interface ProjectsSectionHandle {
 interface ProjectsSectionProps {
   workspaceId: string
   installations: GitHubAppInstallation[]
-  projects: Project[]
+  projects: WorkspaceRepo[]
 }
 
 const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(

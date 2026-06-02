@@ -419,8 +419,24 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // spec #545: rename legacy `projects` → `workspace_repos` on existing
+    // installs. Postgres-only `DO $$` block; SQLite tests rebuild the schema
+    // from the CREATE TABLE below, so the ignored error here is expected.
+    let _ = sqlx::query(
+        "DO $$ \
+         BEGIN \
+           IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'projects') \
+              AND NOT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'workspace_repos') THEN \
+             ALTER TABLE projects RENAME TO workspace_repos; \
+             ALTER INDEX IF EXISTS idx_projects_workspace_id RENAME TO idx_workspace_repos_workspace_id; \
+           END IF; \
+         END $$",
+    )
+    .execute(pool)
+    .await;
+
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS projects (
+        "CREATE TABLE IF NOT EXISTS workspace_repos (
             id TEXT PRIMARY KEY,
             workspace_id TEXT NOT NULL,
             github_app_installation_id TEXT NOT NULL,
@@ -434,9 +450,11 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_projects_workspace_id ON projects (workspace_id)")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_workspace_repos_workspace_id ON workspace_repos (workspace_id)",
+    )
+    .execute(pool)
+    .await?;
 
     // PAT backfill: rows with NULL `workspace_id` get pinned to the user's
     // first workspace membership; rows with no membership at all are
@@ -569,7 +587,7 @@ pub async fn run_migrations(pool: &AnyPool) -> anyhow::Result<()> {
     let _ = sqlx::query(
         "UPDATE sessions \
          SET workspace_id = ( \
-             SELECT p.workspace_id FROM projects p WHERE p.id = sessions.project_id \
+             SELECT p.workspace_id FROM workspace_repos p WHERE p.id = sessions.project_id \
          ) \
          WHERE workspace_id IS NULL AND project_id IS NOT NULL",
     )

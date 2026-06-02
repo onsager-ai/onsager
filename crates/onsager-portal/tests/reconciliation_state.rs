@@ -169,7 +169,7 @@ async fn ingestion_mode_check_constraint_rejects_unknown_values() {
     for mode in ["webhook+reconciler", "polling-only", "webhook-only"] {
         let project_id = format!("proj-{}", Uuid::new_v4());
         let ok = sqlx::query(
-            "INSERT INTO projects \
+            "INSERT INTO workspace_repos \
                 (id, workspace_id, github_app_installation_id, \
                  repo_owner, repo_name, default_branch, created_at, \
                  ingestion_mode) \
@@ -181,7 +181,7 @@ async fn ingestion_mode_check_constraint_rejects_unknown_values() {
         .execute(&pool)
         .await;
         assert!(ok.is_ok(), "mode {mode} should be accepted: {ok:?}");
-        sqlx::query("DELETE FROM projects WHERE id = $1")
+        sqlx::query("DELETE FROM workspace_repos WHERE id = $1")
             .bind(&project_id)
             .execute(&pool)
             .await
@@ -191,7 +191,7 @@ async fn ingestion_mode_check_constraint_rejects_unknown_values() {
     // Anything else must be rejected.
     let project_id = format!("proj-{}", Uuid::new_v4());
     let bad = sqlx::query(
-        "INSERT INTO projects \
+        "INSERT INTO workspace_repos \
             (id, workspace_id, github_app_installation_id, \
              repo_owner, repo_name, default_branch, created_at, \
              ingestion_mode) \

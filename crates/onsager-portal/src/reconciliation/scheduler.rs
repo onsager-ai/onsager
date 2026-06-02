@@ -41,9 +41,9 @@ use super::state::{load_state, touch_polled_at, upsert_state};
 use super::translator::{translate_issue, translate_pull_request};
 
 /// Project row shape the scheduler needs. A narrow projection over
-/// `projects` — we don't want the full row coupling.
+/// `workspace_repos` — we don't want the full row coupling.
 #[derive(Debug, Clone)]
-struct ProjectRow {
+struct WorkspaceRepoRow {
     id: String,
     workspace_id: String,
     repo_owner: String,
@@ -105,11 +105,11 @@ pub fn spawn_all(pool: PgPool, spine: EventStore) {
     });
 }
 
-async fn load_polling_projects(pool: &PgPool) -> Result<Vec<ProjectRow>, sqlx::Error> {
+async fn load_polling_projects(pool: &PgPool) -> Result<Vec<WorkspaceRepoRow>, sqlx::Error> {
     let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
         r#"
         SELECT id, workspace_id, repo_owner, repo_name, ingestion_mode
-        FROM projects
+        FROM workspace_repos
         "#,
     )
     .fetch_all(pool)
@@ -117,7 +117,7 @@ async fn load_polling_projects(pool: &PgPool) -> Result<Vec<ProjectRow>, sqlx::E
     Ok(rows
         .into_iter()
         .map(
-            |(id, workspace_id, repo_owner, repo_name, ingestion_mode)| ProjectRow {
+            |(id, workspace_id, repo_owner, repo_name, ingestion_mode)| WorkspaceRepoRow {
                 id,
                 workspace_id,
                 repo_owner,
@@ -146,7 +146,7 @@ fn project_offset(project_id: &str, interval: Duration) -> Duration {
 async fn run_project_loop(
     pool: PgPool,
     spine: EventStore,
-    project: ProjectRow,
+    project: WorkspaceRepoRow,
     mode: IngestionMode,
 ) {
     let interval = mode.poll_interval();
@@ -182,7 +182,7 @@ async fn run_project_loop(
 async fn tick_project(
     pool: &PgPool,
     spine: &EventStore,
-    project: &ProjectRow,
+    project: &WorkspaceRepoRow,
 ) -> anyhow::Result<()> {
     // v1: unauthenticated reads. Per-installation credential
     // resolution is a deferred follow-up listed on spec #430 (open
@@ -289,7 +289,7 @@ async fn tick_project(
 async fn emit_normalized(
     pool: &PgPool,
     spine: &EventStore,
-    project: &ProjectRow,
+    project: &WorkspaceRepoRow,
     resource_kind: &str,
     events: &[NormalizedEvent],
 ) -> anyhow::Result<EmitOutcome> {
@@ -390,7 +390,7 @@ async fn emit_normalized(
 /// the issue), so we query per-label. Empty map → nothing to fire.
 async fn collect_label_workflows(
     pool: &PgPool,
-    project: &ProjectRow,
+    project: &WorkspaceRepoRow,
     issue: &Issue,
 ) -> anyhow::Result<HashMap<String, Vec<WorkflowMatch>>> {
     let mut by_label: HashMap<String, Vec<WorkflowMatch>> = HashMap::new();

@@ -99,7 +99,7 @@ pub async fn find_active_github_workflows_for_label(
 
 /// A project row resolved from `(installation, repo_owner, repo_name)`.
 #[derive(Debug, Clone)]
-pub struct ProjectRecord {
+pub struct WorkspaceRepoRecord {
     pub id: String,
     pub tenant_id: String,
     pub github_app_installation_id: String,
@@ -116,10 +116,10 @@ pub async fn find_project_for_repo(
     installation_id: &str,
     owner: &str,
     name: &str,
-) -> anyhow::Result<Option<ProjectRecord>> {
+) -> anyhow::Result<Option<WorkspaceRepoRecord>> {
     let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
         "SELECT id, tenant_id, github_app_installation_id, repo_owner, repo_name, default_branch \
-         FROM projects \
+         FROM workspace_repos \
          WHERE github_app_installation_id = $1 AND repo_owner = $2 AND repo_name = $3",
     )
     .bind(installation_id)
@@ -129,7 +129,7 @@ pub async fn find_project_for_repo(
     .await?;
     Ok(row.map(
         |(id, tenant_id, github_app_installation_id, repo_owner, repo_name, default_branch)| {
-            ProjectRecord {
+            WorkspaceRepoRecord {
                 id,
                 tenant_id,
                 github_app_installation_id,
@@ -141,17 +141,20 @@ pub async fn find_project_for_repo(
     ))
 }
 
-pub async fn get_project(pool: &PgPool, project_id: &str) -> anyhow::Result<Option<ProjectRecord>> {
+pub async fn get_project(
+    pool: &PgPool,
+    project_id: &str,
+) -> anyhow::Result<Option<WorkspaceRepoRecord>> {
     let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
         "SELECT id, tenant_id, github_app_installation_id, repo_owner, repo_name, default_branch \
-         FROM projects WHERE id = $1",
+         FROM workspace_repos WHERE id = $1",
     )
     .bind(project_id)
     .fetch_optional(pool)
     .await?;
     Ok(row.map(
         |(id, tenant_id, github_app_installation_id, repo_owner, repo_name, default_branch)| {
-            ProjectRecord {
+            WorkspaceRepoRecord {
                 id,
                 tenant_id,
                 github_app_installation_id,

@@ -5,4 +5,4 @@
  * installation. Opt-in per repo: installing the App on an org does not
  * auto-mirror all of that org's repos; the user explicitly adds each one.
  */
-export type Project = { id: string, workspace_id: string, github_app_installation_id: string, repo_owner: string, repo_name: string, default_branch: string, created_at: string, };
+export type WorkspaceRepo = { id: string, workspace_id: string, github_app_installation_id: string, repo_owner: string, repo_name: string, default_branch: string, created_at: string, };

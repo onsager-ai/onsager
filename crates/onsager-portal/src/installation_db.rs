@@ -151,11 +151,12 @@ pub async fn count_projects_for_installation(
     pool: &PgPool,
     install_row_id: &str,
 ) -> anyhow::Result<i64> {
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE github_app_installation_id = $1")
-            .bind(install_row_id)
-            .fetch_one(pool)
-            .await?;
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workspace_repos WHERE github_app_installation_id = $1",
+    )
+    .bind(install_row_id)
+    .fetch_one(pool)
+    .await?;
     Ok(count)
 }
 

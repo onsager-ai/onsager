@@ -16,7 +16,7 @@ pub use error::StiglabError;
 pub use event::Event;
 pub use github_app_installation::{GitHubAccountType, GitHubAppInstallation};
 pub use node::{Node, NodeInfo, NodeStatus};
-pub use project::Project;
+pub use project::WorkspaceRepo;
 pub use protocol::{AgentMessage, ServerMessage};
 pub use session::{Session, SessionState};
 pub use task::{Task, TaskRequest};
