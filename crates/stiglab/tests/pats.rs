@@ -27,7 +27,7 @@ async fn test_pool() -> AnyPool {
         .connect("sqlite::memory:")
         .await
         .expect("sqlite connect");
-    db::run_migrations(&pool).await.expect("migrations");
+    db::run_migrations(&pool, true).await.expect("migrations");
     pool
 }
 
