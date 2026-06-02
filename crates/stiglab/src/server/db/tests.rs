@@ -18,7 +18,7 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("failed to connect to sqlite in-memory");
-        run_migrations(&pool)
+        run_migrations(&pool, true)
             .await
             .expect("migrations should succeed");
         pool
@@ -352,5 +352,44 @@ mod tests {
 
         let u2_projects = list_projects_for_user(&pool, "u2").await.unwrap();
         assert!(u2_projects.is_empty());
+    }
+
+    // ── run_pg_only (issue #550) ──
+    //
+    // The legacy best-effort migration statements route through
+    // `run_pg_only`, which must skip on SQLite and propagate errors on
+    // Postgres. These two tests pin both branches without a Postgres harness
+    // by driving the `is_sqlite` flag directly.
+
+    #[tokio::test]
+    async fn run_pg_only_skips_statements_on_sqlite() {
+        // On SQLite the helper must skip the statement entirely, so even
+        // syntactically invalid SQL is a no-op. (If the helper executed the
+        // statement, SQLite would reject it and this would error.)
+        let pool = test_pool().await;
+        run_pg_only(&pool, true, "this is not valid sql at all")
+            .await
+            .expect("run_pg_only must skip every statement on SQLite");
+    }
+
+    #[tokio::test]
+    async fn run_pg_only_propagates_errors_off_sqlite() {
+        // Off SQLite the helper executes the statement and propagates any
+        // error instead of swallowing it (issue #550). We exercise the
+        // propagate branch by forcing `is_sqlite = false` and running a
+        // statement that fails on the backend (missing table). A
+        // swallow-everything helper would return Ok here — that is the
+        // mutation check.
+        let pool = test_pool().await;
+        let result = run_pg_only(
+            &pool,
+            false,
+            "ALTER TABLE missing_table_550 RENAME COLUMN a TO b",
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "run_pg_only must propagate execution errors when not on SQLite"
+        );
     }
 }
