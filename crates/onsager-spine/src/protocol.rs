@@ -368,7 +368,10 @@ mod tests {
         };
         let json = serde_json::to_value(&without).unwrap();
         assert!(
-            !json.as_object().unwrap().contains_key("encrypted_read_token"),
+            !json
+                .as_object()
+                .unwrap()
+                .contains_key("encrypted_read_token"),
             "a None read token must be omitted from the wire"
         );
         // Legacy / tokenless payloads still parse (serde default).

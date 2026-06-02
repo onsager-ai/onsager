@@ -165,10 +165,7 @@ impl Dispatcher {
             state.config.credential_key.as_deref(),
         ) {
             let creds = credentials.get_or_insert_with(std::collections::HashMap::new);
-            creds.insert(
-                crate::server::repo_env::REPOS_ENV.to_string(),
-                repos_json,
-            );
+            creds.insert(crate::server::repo_env::REPOS_ENV.to_string(), repos_json);
         }
 
         let task = Task {

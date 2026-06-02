@@ -164,9 +164,6 @@ mod tests {
         let repos = vec![access("acme", "public", KEY, None)];
         let json = repos_env_from_access(&repos, Some(KEY)).unwrap();
         let arr: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            arr[0]["clone_url"],
-            "https://github.com/acme/public.git"
-        );
+        assert_eq!(arr[0]["clone_url"], "https://github.com/acme/public.git");
     }
 }

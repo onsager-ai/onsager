@@ -104,7 +104,9 @@ async fn mint_encrypted_read_tokens(
     let mut out = HashMap::new();
 
     let Some(cfg) = gh_app::AppConfig::from_env() else {
-        tracing::warn!("repo_access: GitHub App not configured; repos surfaced without read tokens");
+        tracing::warn!(
+            "repo_access: GitHub App not configured; repos surfaced without read tokens"
+        );
         return out;
     };
     let jwt = match gh_app::mint_app_jwt(&cfg) {
@@ -127,7 +129,9 @@ async fn mint_encrypted_read_tokens(
                     out.insert(install_id, enc);
                 }
                 Err(e) => {
-                    tracing::error!("repo_access: encrypt read token for install {install_id}: {e}");
+                    tracing::error!(
+                        "repo_access: encrypt read token for install {install_id}: {e}"
+                    );
                 }
             },
             Err(e) => {
@@ -276,7 +280,10 @@ mod tests {
         let access = assemble_repo_access(&repos, &enc);
         assert_eq!(access.len(), 3);
         let acme_widgets = access.iter().find(|a| a.name == "widgets").unwrap();
-        assert_eq!(acme_widgets.encrypted_read_token.as_deref(), Some("enc_acme"));
+        assert_eq!(
+            acme_widgets.encrypted_read_token.as_deref(),
+            Some("enc_acme")
+        );
         assert_eq!(acme_widgets.default_branch, "main");
         let other = access.iter().find(|a| a.owner == "other").unwrap();
         assert_eq!(other.encrypted_read_token, None);
