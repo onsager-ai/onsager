@@ -464,11 +464,15 @@ impl TriggerHandler {
         // session token is resolved: portal attached it (read tokens
         // encrypted) to the event, the scheduler decrypts each and builds
         // the `ONSAGER_REPOS` value once per plan, then threads it to the
-        // runner; the AgentExecutor injects it into every agent node. An
-        // empty set (no bound repos, or no credential key) injects
-        // nothing — single-`working_dir` runs are unchanged. This is the
-        // scheduler-path parity #555 closes: spec-plan runs now span the
-        // workspace's repos, not just the one the chat path got.
+        // runner; the AgentExecutor injects it into every agent node. Only
+        // an empty set (no bound repos) injects nothing, leaving
+        // single-`working_dir` runs unchanged. A missing/rotated
+        // credential key does NOT drop the set — each repo degrades to an
+        // unauthenticated clone URL (still surfaced), so a private repo
+        // fails loudly at clone time rather than vanishing silently
+        // (matches `repo_env::repos_env_from_access` + stiglab). This is
+        // the scheduler-path parity #555 closes: spec-plan runs now span
+        // the workspace's repos, not just the one the chat path got.
         let repos_env = crate::repo_env::repos_env_from_access(
             &decode_plan_repos(&data),
             self.credential_key.as_deref(),
