@@ -120,7 +120,7 @@ describe("WorkspaceCard — OAuth-first Add project flow", () => {
     renderCard()
     fireEvent.click(await screen.findByRole("button", { name: /add project/i }))
     const trigger = await screen.findByRole("button", {
-      name: /select a repository/i,
+      name: /select repositories/i,
     })
     expect(trigger).toBeInTheDocument()
     expect(trigger.getAttribute("aria-expanded")).toBe("false")
@@ -234,7 +234,7 @@ describe("WorkspaceCard — NextStepCallout (post-#403 demolition)", () => {
       expect(screen.getByTestId("add-project-form")).toBeInTheDocument(),
     )
     expect(
-      await screen.findByRole("button", { name: /select a repository/i }),
+      await screen.findByRole("button", { name: /select repositories/i }),
     ).toBeInTheDocument()
   })
 
@@ -331,5 +331,91 @@ describe("WorkspaceCard — human-readable member + installation labels", () => 
       expect(selectValue?.textContent).toMatch(/onsager-ai/i)
       expect(selectValue?.textContent).not.toMatch(/inst1/)
     })
+  })
+})
+
+describe("WorkspaceCard — multi-select repo binding (#547)", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("binds every selected repo in one pass", async () => {
+    await primeMocks({
+      repos: [
+        { owner: "onsager-ai", name: "onsager", default_branch: "main", private: false },
+        { owner: "onsager-ai", name: "onsager-skills", default_branch: "main", private: false },
+        { owner: "onsager-ai", name: "dev-skills", default_branch: "trunk", private: true },
+      ],
+    })
+    const { api } = await import("@/lib/api")
+    vi.mocked(api.addWorkspaceProject).mockImplementation(
+      (async (_ws: string, body: { repo_owner: string; repo_name: string; github_app_installation_id: string; default_branch?: string }) => ({
+        project: {
+          id: `p-${body.repo_name}`,
+          workspace_id: "ws1",
+          github_app_installation_id: body.github_app_installation_id,
+          repo_owner: body.repo_owner,
+          repo_name: body.repo_name,
+          default_branch: body.default_branch ?? "main",
+          created_at: "2026-01-01",
+        },
+      })) as never,
+    )
+    renderCard()
+    fireEvent.click(await screen.findByRole("button", { name: /^add project/i }))
+    // Open the multi-select and pick two of the three repos.
+    fireEvent.click(
+      await screen.findByRole("button", { name: /select repositories/i }),
+    )
+    fireEvent.click(await screen.findByText("onsager-ai/onsager"))
+    fireEvent.click(await screen.findByText("onsager-ai/onsager-skills"))
+    // Submit count reflects the pending selection.
+    fireEvent.click(
+      await screen.findByRole("button", { name: /add 2 repositories/i }),
+    )
+    await waitFor(() =>
+      expect(api.addWorkspaceProject).toHaveBeenCalledTimes(2),
+    )
+    expect(api.addWorkspaceProject).toHaveBeenCalledWith(
+      "ws1",
+      expect.objectContaining({ repo_name: "onsager" }),
+    )
+    expect(api.addWorkspaceProject).toHaveBeenCalledWith(
+      "ws1",
+      expect.objectContaining({ repo_name: "onsager-skills" }),
+    )
+    // The unpicked repo is never bound.
+    expect(api.addWorkspaceProject).not.toHaveBeenCalledWith(
+      "ws1",
+      expect.objectContaining({ repo_name: "dev-skills" }),
+    )
+  })
+
+  it("marks already-bound repos as Added so they can't be re-bound", async () => {
+    await primeMocks({
+      repos: [
+        { owner: "onsager-ai", name: "onsager", default_branch: "main", private: false },
+        { owner: "onsager-ai", name: "onsager-skills", default_branch: "main", private: false },
+      ],
+      projects: [
+        {
+          id: "p1",
+          workspace_id: "ws1",
+          github_app_installation_id: "inst1",
+          repo_owner: "onsager-ai",
+          repo_name: "onsager",
+          default_branch: "main",
+          created_at: "2026-01-01",
+        },
+      ],
+    })
+    renderCard()
+    // A workspace with a project already shows "Add another project".
+    fireEvent.click(
+      await screen.findByRole("button", { name: /add another project/i }),
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: /select repositories/i }),
+    )
+    // The bound repo surfaces an "Added" marker in the picker.
+    expect(await screen.findByText(/^added$/i)).toBeInTheDocument()
   })
 })

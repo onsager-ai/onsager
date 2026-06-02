@@ -50,6 +50,7 @@ import {
   Sparkles,
   Trash2,
   Users,
+  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { BackfillDialog } from "@/components/BackfillDialog"
@@ -497,18 +498,28 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
   function ProjectsSection({ workspaceId, installations, projects }, ref) {
   const [adding, setAdding] = useState(false)
   const [installationId, setInstallationId] = useState("")
-  const [repoOwner, setRepoOwner] = useState("")
-  const [repoName, setRepoName] = useState("")
-  const [defaultBranch, setDefaultBranch] = useState("")
+  // Repos picked in the current add session but not yet bound. The picker is
+  // a multi-select (spec #547) so a user binds an arbitrary set of repos in
+  // one pass rather than re-opening the form once per repo. Selection is
+  // installation-scoped — switching installations clears it.
+  const [selected, setSelected] = useState<AccessibleRepo[]>([])
   const [error, setError] = useState<string | null>(null)
-  // After a successful add-project, prompt the user to backfill the
-  // project's existing GitHub issues + PRs as reference-only artifacts (#168).
-  // Otherwise the inbox stays empty until the next webhook event arrives.
-  const [backfillCandidate, setBackfillCandidate] = useState<{
-    id: string
-    label: string
-  } | null>(null)
+  // After a successful add, prompt the user to backfill each freshly bound
+  // repo's existing GitHub issues + PRs as reference-only artifacts (#168).
+  // Multi-add enqueues one prompt per repo; they surface one at a time.
+  const [backfillQueue, setBackfillQueue] = useState<
+    { id: string; label: string }[]
+  >([])
   const queryClient = useQueryClient()
+
+  const toggleSelected = (repo: AccessibleRepo) => {
+    const key = `${repo.owner}/${repo.name}`
+    setSelected((cur) =>
+      cur.some((r) => `${r.owner}/${r.name}` === key)
+        ? cur.filter((r) => `${r.owner}/${r.name}` !== key)
+        : [...cur, repo],
+    )
+  }
 
   useImperativeHandle(
     ref,
@@ -517,6 +528,7 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
         if (installations.length === 0) return
         setAdding(true)
         setError(null)
+        setSelected([])
         setInstallationId((current) => current || installations[0]?.id || "")
       },
     }),
@@ -533,6 +545,13 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
     retry: false,
   })
   const repos = reposData?.repos ?? []
+  // Repos already bound under the selected installation — rendered as
+  // "Added" + disabled in the picker so the set can't be double-bound.
+  const boundKeysForInstall = new Set(
+    projects
+      .filter((p) => p.github_app_installation_id === installationId)
+      .map((p) => `${p.repo_owner}/${p.repo_name}`),
+  )
   const selectedInstallation = installations.find((i) => i.id === installationId)
   const configureUrl = selectedInstallation
     ? selectedInstallation.account_type === "organization"
@@ -541,34 +560,45 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
     : null
 
   const add = useMutation({
-    mutationFn: () =>
-      api.addWorkspaceProject(workspaceId, {
-        github_app_installation_id: installationId,
-        repo_owner: repoOwner,
-        repo_name: repoName,
-        default_branch: defaultBranch || undefined,
-      }),
+    mutationFn: async (picks: AccessibleRepo[]) => {
+      // Bind sequentially so a mid-batch failure surfaces against the repo
+      // that caused it; the rows already written survive (the membership
+      // table is the source of truth, not this transient form). The
+      // onSettled refetch reconciles the list either way.
+      const created: WorkspaceRepo[] = []
+      for (const r of picks) {
+        const res = await api.addWorkspaceProject(workspaceId, {
+          github_app_installation_id: installationId,
+          repo_owner: r.owner,
+          repo_name: r.name,
+          default_branch: r.default_branch ?? undefined,
+        })
+        if (res?.project) created.push(res.project)
+      }
+      return created
+    },
     onSuccess: (created) => {
+      // Queue a backfill prompt per freshly bound repo — each starts with an
+      // empty inbox until a webhook fires or the user backfills.
+      setBackfillQueue((q) => [
+        ...q,
+        ...created.map((p) => ({
+          id: p.id,
+          label: `${p.repo_owner}/${p.repo_name}`,
+        })),
+      ])
+      // Keep the form open so the user can switch installation and keep
+      // binding; just clear the pending selection.
+      setSelected([])
+      setError(null)
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : "Failed"),
+    onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: ["workspace-projects", workspaceId],
       })
       queryClient.invalidateQueries({ queryKey: ["all-projects"] })
-      // Surface the backfill prompt — projects start with an empty inbox
-      // until either a webhook fires or the user backfills.
-      if (created?.project) {
-        setBackfillCandidate({
-          id: created.project.id,
-          label: `${created.project.repo_owner}/${created.project.repo_name}`,
-        })
-      }
-      setAdding(false)
-      setInstallationId("")
-      setRepoOwner("")
-      setRepoName("")
-      setDefaultBranch("")
-      setError(null)
     },
-    onError: (err) => setError(err instanceof Error ? err.message : "Failed"),
   })
 
   const remove = useMutation({
@@ -647,15 +677,19 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            if (add.isPending) return
-            if (installationId && repoOwner && repoName) add.mutate()
+            if (add.isPending || selected.length === 0) return
+            add.mutate(selected)
           }}
           className="space-y-2 rounded-md border border-dashed p-3"
           data-testid="add-project-form"
         >
           <Select
             value={installationId}
-            onValueChange={(v) => setInstallationId(v ?? "")}
+            onValueChange={(v) => {
+              setInstallationId(v ?? "")
+              // Pending picks belong to the previous installation's repo set.
+              setSelected([])
+            }}
           >
             <SelectTrigger className="w-full">
               {/* Base UI's `<Select.Value>` renders the raw `value` (here an
@@ -686,15 +720,35 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
           {installationId && !reposLoading && repos.length > 0 && (
             <RepoCombobox
               repos={repos}
-              selected={
-                repoOwner && repoName ? `${repoOwner}/${repoName}` : ""
-              }
-              onSelect={(picked) => {
-                setRepoOwner(picked.owner)
-                setRepoName(picked.name)
-                setDefaultBranch(picked.default_branch ?? "")
-              }}
+              boundKeys={boundKeysForInstall}
+              selected={selected}
+              onToggle={toggleSelected}
             />
+          )}
+          {selected.length > 0 && (
+            <ul
+              className="flex flex-wrap gap-1.5"
+              aria-label="Repositories to add"
+            >
+              {selected.map((r) => (
+                <li key={`${r.owner}/${r.name}`}>
+                  <Badge
+                    variant="secondary"
+                    className="gap-1 font-mono text-[11px]"
+                  >
+                    {r.owner}/{r.name}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${r.owner}/${r.name}`}
+                      onClick={() => toggleSelected(r)}
+                      className="ml-0.5 rounded-sm opacity-70 hover:opacity-100"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                </li>
+              ))}
+            </ul>
           )}
           {installationId && !reposLoading && repos.length === 0 && configureUrl && (
             <div className="space-y-1 rounded-md bg-muted/50 p-2 text-xs">
@@ -728,11 +782,13 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
             <Button
               size="sm"
               type="submit"
-              disabled={
-                !installationId || !repoOwner || !repoName || add.isPending
-              }
+              disabled={selected.length === 0 || add.isPending}
             >
-              Add
+              {add.isPending
+                ? "Adding…"
+                : selected.length > 1
+                  ? `Add ${selected.length} repositories`
+                  : "Add repository"}
             </Button>
             <Button
               size="sm"
@@ -748,13 +804,14 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
           </div>
         </form>
       )}
-      {backfillCandidate ? (
+      {backfillQueue.length > 0 ? (
         <BackfillDialog
-          projectId={backfillCandidate.id}
-          repoLabel={backfillCandidate.label}
+          key={backfillQueue[0].id}
+          projectId={backfillQueue[0].id}
+          repoLabel={backfillQueue[0].label}
           open
           onOpenChange={(o) => {
-            if (!o) setBackfillCandidate(null)
+            if (!o) setBackfillQueue((q) => q.slice(1))
           }}
         />
       ) : null}
@@ -762,32 +819,46 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
   )
 })
 
+/**
+ * Multi-select repo picker over an installation's accessible repos (spec
+ * #547). Repos already bound to the workspace under this installation are
+ * shown as "Added" and disabled; the popover stays open across picks so a
+ * user accumulates a set and binds it in one pass.
+ */
 function RepoCombobox({
   repos,
+  boundKeys,
   selected,
-  onSelect,
+  onToggle,
 }: {
   repos: AccessibleRepo[]
-  selected: string
-  onSelect: (repo: AccessibleRepo) => void
+  boundKeys: Set<string>
+  selected: AccessibleRepo[]
+  onToggle: (repo: AccessibleRepo) => void
 }) {
   const [open, setOpen] = useState(false)
-  const selectedRepo = repos.find((r) => `${r.owner}/${r.name}` === selected)
+  const selectedKeys = new Set(selected.map((r) => `${r.owner}/${r.name}`))
+  const label =
+    selected.length === 0
+      ? "Select repositories"
+      : selected.length === 1
+        ? `${selected[0].owner}/${selected[0].name}`
+        : `${selected.length} repositories selected`
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-expanded={open}
-        aria-label="Select a repository"
+        aria-label="Select repositories"
         className={cn(
           buttonVariants({ variant: "outline" }),
           "w-full justify-between font-normal",
         )}
       >
-        <span className={cn("truncate", !selectedRepo && "text-muted-foreground")}>
-          {selectedRepo
-            ? `${selectedRepo.owner}/${selectedRepo.name}`
-            : "Select a repository"}
+        <span
+          className={cn("truncate", selected.length === 0 && "text-muted-foreground")}
+        >
+          {label}
         </span>
         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
       </PopoverTrigger>
@@ -799,22 +870,37 @@ function RepoCombobox({
             <CommandGroup>
               {repos.map((r) => {
                 const value = `${r.owner}/${r.name}`
+                const bound = boundKeys.has(value)
+                const checked = selectedKeys.has(value)
                 return (
                   <CommandItem
                     key={value}
                     value={value}
-                    data-checked={selected === value}
+                    disabled={bound}
+                    data-checked={checked}
+                    // Toggle without closing — the picker is multi-select so
+                    // the popover persists until the user dismisses it.
                     onSelect={() => {
-                      onSelect(r)
-                      setOpen(false)
+                      if (!bound) onToggle(r)
                     }}
                   >
+                    <Check
+                      className={cn(
+                        "h-4 w-4 shrink-0",
+                        checked ? "opacity-100" : "opacity-0",
+                      )}
+                    />
                     <span className="truncate font-mono text-xs">
                       {r.owner}/{r.name}
                     </span>
                     {r.private && (
                       <span className="ml-2 text-[10px] uppercase text-muted-foreground">
                         private
+                      </span>
+                    )}
+                    {bound && (
+                      <span className="ml-auto text-[10px] uppercase text-muted-foreground">
+                        Added
                       </span>
                     )}
                   </CommandItem>
