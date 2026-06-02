@@ -130,9 +130,15 @@ fn decide_on_timeout(policy: FailPolicy) -> WriteDecision {
 
 /// Authenticated HTTPS remote the agent uses to `git push`. The token
 /// rides in the `x-access-token` userinfo per GitHub's installation-token
-/// convention. GitHub installation tokens are URL-safe.
+/// convention, percent-encoded so a reserved character can't truncate or
+/// corrupt the URL — same defensive shape the read side uses for clone
+/// URLs (`stiglab/src/server/repo_env.rs`). GitHub installation tokens are
+/// URL-safe today; encoding keeps this correct if that ever changes.
 fn authenticated_remote(owner: &str, name: &str, token: &str) -> String {
-    format!("https://x-access-token:{token}@github.com/{owner}/{name}.git")
+    format!(
+        "https://x-access-token:{}@github.com/{owner}/{name}.git",
+        onsager_agent_spawn::urlencode(token)
+    )
 }
 
 /// Poll the gate stream for the matching `synodic.gate_verdict`. Returns
@@ -146,20 +152,33 @@ async fn await_verdict(
 ) -> Option<GateVerdict> {
     let start = Instant::now();
     loop {
-        if let Ok(rows) = store.query_ext_stream(gate_id).await {
-            for row in &rows {
-                if row.event_type != "synodic.gate_verdict" {
-                    continue;
+        match store.query_ext_stream(gate_id).await {
+            Ok(rows) => {
+                for row in &rows {
+                    if row.event_type != "synodic.gate_verdict" {
+                        continue;
+                    }
+                    if let Ok(FactoryEventKind::SynodicGateVerdict {
+                        gate_id: verdict_gate_id,
+                        verdict,
+                        ..
+                    }) = serde_json::from_value::<FactoryEventKind>(row.data.clone())
+                        && verdict_gate_id == gate_id
+                    {
+                        return Some(verdict);
+                    }
                 }
-                if let Ok(FactoryEventKind::SynodicGateVerdict {
-                    gate_id: verdict_gate_id,
-                    verdict,
-                    ..
-                }) = serde_json::from_value::<FactoryEventKind>(row.data.clone())
-                    && verdict_gate_id == gate_id
-                {
-                    return Some(verdict);
-                }
+            }
+            // A transient read error must not look like "no verdict yet":
+            // log it so a persistent failure is visible (it would
+            // otherwise present as a timeout, and under SYNODIC_FAIL_POLICY
+            // = allow that is a silent fail-open). Keep polling — a blip
+            // recovers, and the deadline still bounds the wait.
+            Err(e) => {
+                tracing::warn!(
+                    %gate_id,
+                    "request_repo_write: gate-stream read failed while awaiting verdict: {e}"
+                );
             }
         }
         if start.elapsed() >= timeout {
@@ -232,9 +251,13 @@ pub async fn request_repo_write(state: &AppState, auth_user: &AuthUser, args: Va
         gate_point: GatePoint::RepoWrite,
         request: Some(request),
     };
+    // Attribute the gate request to the authenticated principal making
+    // the call, not a fixed subsystem string — mirrors `cancel_run` and
+    // keeps the audit trail pointed at who asked for write access.
     let metadata = EventMetadata {
-        actor: "onsager-portal".into(),
-        ..Default::default()
+        correlation_id: None,
+        causation_id: None,
+        actor: auth_user.user_id.clone(),
     };
     state
         .spine
@@ -273,12 +296,15 @@ pub async fn request_repo_write(state: &AppState, auth_user: &AuthUser, args: Va
             )
             .await
             {
+                // The token is returned only once, embedded in `remote`
+                // (sufficient for `git push`). Returning it as a separate
+                // field too would duplicate a secret and widen the chance
+                // a client logs or persists it.
                 Ok(token) => Ok(serde_json::json!({
                     "granted": true,
                     "status": "granted",
                     "gate_id": gate_id,
                     "remote": authenticated_remote(&args.owner, &args.name, &token.token),
-                    "token": token.token,
                     "expires_at": token.expires_at,
                 })),
                 Err(WriteTokenError::RepoNotBound) => Ok(serde_json::json!({
