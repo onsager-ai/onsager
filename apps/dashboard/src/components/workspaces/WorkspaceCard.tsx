@@ -561,6 +561,11 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
 
   const add = useMutation({
     mutationFn: async (picks: AccessibleRepo[]) => {
+      // Snapshot the install id at submit time — the installation Select
+      // stays enabled while the batch is in flight, so reading component
+      // state per-iteration could bind later repos against a newly-picked
+      // installation. Pin it for the whole batch.
+      const installId = installationId
       // Bind sequentially so a mid-batch failure surfaces against the repo
       // that caused it; the rows already written survive (the membership
       // table is the source of truth, not this transient form). The
@@ -568,7 +573,7 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
       const created: WorkspaceRepo[] = []
       for (const r of picks) {
         const res = await api.addWorkspaceProject(workspaceId, {
-          github_app_installation_id: installationId,
+          github_app_installation_id: installId,
           repo_owner: r.owner,
           repo_name: r.name,
           default_branch: r.default_branch ?? undefined,
@@ -632,6 +637,7 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
             onClick={() => {
               setAdding(true)
               setError(null)
+              setSelected([])
               setInstallationId(installations[0]?.id ?? "")
             }}
           >
@@ -797,6 +803,8 @@ const ProjectsSection = forwardRef<ProjectsSectionHandle, ProjectsSectionProps>(
               onClick={() => {
                 setAdding(false)
                 setError(null)
+                // Drop pending picks so re-opening starts a fresh session.
+                setSelected([])
               }}
             >
               Cancel
@@ -849,7 +857,7 @@ function RepoCombobox({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-expanded={open}
-        aria-label="Select repositories"
+        aria-label={label}
         className={cn(
           buttonVariants({ variant: "outline" }),
           "w-full justify-between font-normal",
