@@ -18,3 +18,7 @@
 /.dev-slots.json
 /worktrees/
 **/.env.slot
+
+# Local runtime data. Stiglab defaults its DB to sqlite://./data/stiglab.db
+# (see .env.example); the file is per-machine dev state, never committed.
+/data/

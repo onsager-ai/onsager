@@ -1,6 +1,11 @@
 # Onsager monorepo task runner.
 # Rust + TS workspaces coexist; this file is just a command registry.
 
+# Load .env into every recipe's environment. Lets `just dev` (which runs
+# cargo directly, not via docker-compose) pick up credential keys and other
+# config from .env — e.g. ONSAGER_CREDENTIAL_KEY / STIGLAB_CREDENTIAL_KEY.
+set dotenv-load := true
+
 default:
     @just --list
 
