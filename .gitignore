@@ -22,3 +22,7 @@
 # Local runtime data. Stiglab defaults its DB to sqlite://./data/stiglab.db
 # (see .env.example); the file is per-machine dev state, never committed.
 /data/
+
+# Codegraph local code-index (SQLite knowledge graph). Per-machine dev
+# state built by `codegraph init/index`; never committed.
+/.codegraph/
