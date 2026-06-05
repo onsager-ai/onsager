@@ -4,93 +4,89 @@ AI factory stack — monorepo for the Onsager event bus and its subsystems.
 
 ## What makes Onsager Onsager
 
-These commitments define Onsager-the-factory's identity — the monorepo and its subsystems. They do not, in general, prescribe the internal structure of what the factory produces; downstream artifacts and deployed systems are their own viable systems with their own identities.
+These commitments define Onsager-the-factory's identity — the monorepo and its subsystems. They do not, in general, prescribe the internal structure of what the factory produces; downstream artifacts and deployed systems are their own viable systems with their own identities. The exception is **how** the factory operates on its work (specs as ground truth, below) — that commitment binds both Onsager's self-construction and its production discipline.
 
-The exception is **how** the factory operates on its work (specs as ground truth, below) — that commitment binds both Onsager's self-construction and its production discipline.
+- **Event-bus factory, not service mesh.** Coordination flows through the spine (events, pg_notify, shared tables), not synchronous calls. [ADR 0001](docs/adr/0001-event-bus-coordination-model.md) first concretized this; [ADR 0009](docs/adr/0009-three-layer-pipeline.md) / [ADR 0017](docs/adr/0017-plan-compiler-three-step-algorithm.md) (both `Identity impact: yes`) reframe it: the spine is still the runtime medium but is no longer authored directly by feature subsystems. Authorship flows Spec Plan → Workflow → Execution Plan → substrate scheduler, and the scheduler is what emits on the spine. Scope: factory only.
+- **Artifacts are the unit of meaning.** Every persistent, lifecycle-bearing object in the factory is an artifact — internal-authored (specs, designs) and external-referenced (PRs, Issues) alike. Workflow nodes (via executors) and the remaining subsystems (Stiglab, Synodic) operate on artifacts; events are state-change notifications, not first-class entities. Every artifact carries first-class **provenance** ([ADR 0010](docs/adr/0010-provenance-as-substrate-first-class.md), `Identity impact: yes`) — `Deterministic` or `Uncertain`, with a `SourceTag` — that the substrate validates and propagates. Scope: factory only — products have their own ontology.
+- **Specs are ground truth, code is downstream.** When spec and code conflict, the code is wrong. Specs are amended deliberately; code is amended to match. Scope: both factory self-construction and production discipline — Onsager sessions producing artifacts inherit this.
+- **Internal symmetry is load-bearing.** Equivalent concepts must have equivalent shapes (names, types, error models, write paths). Asymmetry between equivalents is a defect, not a polish concern. The seam rule and three lints (`lint-seams`, `check-events`, `check-api-contract`) are the enforcement surface. Scope: factory only; applies to session-produced code once it lands in the monorepo.
 
-- **Event-bus factory, not service mesh.** Coordination flows through the spine (events, pg_notify, shared tables), not synchronous calls. [ADR 0001](docs/adr/0001-event-bus-coordination-model.md) was this commitment's first concretization; [ADR 0009](docs/adr/0009-three-layer-pipeline.md) / [ADR 0017](docs/adr/0017-plan-compiler-three-step-algorithm.md) (both `Identity impact: yes`) reframe it: the spine is still the runtime medium, but it is no longer authored directly by feature subsystems. Authorship flows Spec Plan → Workflow → Execution Plan → substrate scheduler, and the scheduler is what emits on the spine. Scope: factory only.
-- **Artifacts are the unit of meaning.** Every persistent, lifecycle-bearing object in the factory is an artifact — internal-authored ones (specs, designs) and external-referenced ones (PRs, Issues) alike. Workflow nodes (via executors) and the remaining subsystems (Stiglab, Synodic) operate on artifacts; events are state-change notifications, not first-class entities. Every artifact also carries first-class **provenance** ([ADR 0010](docs/adr/0010-provenance-as-substrate-first-class.md), `Identity impact: yes`) — `Deterministic` or `Uncertain`, with a `SourceTag` — that the substrate validates and propagates. Scope: factory only — products of the factory have their own ontology.
-- **Specs are ground truth, code is downstream.** When spec and code conflict, the code is wrong. Specs are amended deliberately; code is amended to match. Scope: both factory self-construction and factory production discipline — Onsager sessions producing artifacts inherit this constraint.
-- **Internal symmetry is load-bearing.** Equivalent concepts must have equivalent shapes (names, types, error models, write paths). Asymmetry between equivalents is a defect, not a polish concern. The seam rule and three lints (`lint-seams`, `check-events`, `check-api-contract`) are this commitment's enforcement surface. Scope: factory only; applies to session-produced code when it lands in the monorepo.
-
-Changes to the four bullets above carry an `Identity impact: yes` flag in the modifying ADR and require explicit rationale. Changes to anything below in this file are by default `Identity impact: no`. ADRs themselves may carry either value — the flag tracks whether the ADR touches the four bullets above, not where the change lives.
+Changes to the four bullets above carry an `Identity impact: yes` flag in the modifying ADR and require explicit rationale. Changes to anything below in this file default to `Identity impact: no`. The flag tracks whether an ADR touches the four bullets above, not where the change lives.
 
 ### Honoring commitment 3: claim-honesty checks
 
-Commitment 3 binds both directions. Code drifting from spec is a bug; shipping under a Plan item without having met it is the same bug from the other side. Before claiming a Plan item done — in a session message, a checkbox tick, or a PR description — pass these checks. The point is not to inflate scope; if a check exposes that the spec was wrong, amend the spec, then ship.
+Commitment 3 binds both directions. Code drifting from spec is a bug; shipping under a Plan item without having met it is the same bug from the other side. Before claiming a Plan item done — in a session message, checkbox tick, or PR description — pass these checks. The point isn't to inflate scope; if a check exposes that the spec was wrong, amend the spec, then ship.
 
-- **"The main path works, so it's essentially done."** Plan items are atomic. There is no "essentially." Either the item is complete, or split it into `N.1` (done) and `N.2` (deferred, with reason) and amend the spec before merge. "Essentially done" is narrative, not state.
-- **"Tests pass, so the change is correct."** A green CI proves the test suite did not catch a bug, not that your code is exercised. Before claiming done, break the new code path locally (mutate one line); the corresponding test must fail. Green CI plus uncovered new logic is theater.
-- **"I'll handle the edge case as a follow-up."** A follow-up that has no issue does not exist. Either open a sub-issue (`Part of #N`) and narrow the current PR's stated scope, or do it now. Untracked defers become permanent corners.
-- **"The workaround is fine; the proper fix is too invasive."** The judgment may be right. Honesty requires one of: (a) amend the Plan item to read "workaround, because X"; or (b) open a follow-up issue for the proper fix and link it. Shipping a workaround under unchanged Plan wording is silent scope reduction.
-- **"`cargo check` passes, so the refactor holds."** Compilation proves types align, not that behavior is preserved. Refactors carry the same proof obligation as features: tests pass and the changed paths are exercised by them. Without that, you are shipping a hypothesis.
-- **"To be done, I should test every edge case I can think of."** No. Done means the spec's Test section is satisfied. If the Test section is too thin or too fat, the spec is wrong — amend it. Silently exceeding or shrinking the bar is the same defect as silently delivering less than the Plan.
+- **"The main path works, so it's essentially done."** Plan items are atomic — no "essentially." Either complete, or split into `N.1` (done) / `N.2` (deferred, with reason) and amend the spec before merge. "Essentially done" is narrative, not state.
+- **"Tests pass, so the change is correct."** Green CI proves the suite didn't catch a bug, not that your code is exercised. Before claiming done, mutate one line of the new path locally; the corresponding test must fail. Green CI plus uncovered logic is theater.
+- **"I'll handle the edge case as a follow-up."** A follow-up with no issue doesn't exist. Open a sub-issue (`Part of #N`) and narrow the PR's stated scope, or do it now. Untracked defers become permanent corners.
+- **"The workaround is fine; the proper fix is too invasive."** The judgment may be right. Honesty requires one of: (a) amend the Plan item to read "workaround, because X"; or (b) open a follow-up issue and link it. Shipping a workaround under unchanged Plan wording is silent scope reduction.
+- **"`cargo check` passes, so the refactor holds."** Compilation proves types align, not that behavior is preserved. Refactors carry the same proof obligation as features: tests pass and exercise the changed paths. Without that, you're shipping a hypothesis.
+- **"To be done, I should test every edge case I can think of."** No — done means the spec's Test section is satisfied. If that section is too thin or too fat, the spec is wrong; amend it. Silently exceeding or shrinking the bar is the same defect as delivering less than the Plan.
 
 ### Named failure modes
 
-The rebuttals above point at recurring shapes. Naming them lets PR review, spec comments, and session messages reference them in one token instead of re-describing the failure each time. When you spot one — in your own work or someone else's — name it.
+The rebuttals above point at recurring shapes; naming them lets PR review, spec comments, and session messages reference them in one token. When you spot one — yours or someone else's — name it.
 
-- **claim ≠ reality** — the umbrella name for this whole annex: a session asserts done while reality has not met the spec.
-- **silent scope reduction** — shipping a workaround, partial fix, or narrowed behavior under a Plan item whose wording still describes the full scope. The workaround may be the right call; shipping it without amending the Plan or opening a follow-up is the defect.
-- **theater coverage** — green CI plus tests that do not actually exercise the new code path. Catch it by mutating a line of new code locally; if no test fails, the coverage is theater.
-- **narrative-as-state** — using prose like "essentially done", "basically works", "mostly complete" in place of an atomic Plan item state. Plan items are binary; either complete, or split and amended.
+- **claim ≠ reality** — the umbrella name for this annex: a session asserts done while reality hasn't met the spec.
+- **silent scope reduction** — shipping a workaround, partial fix, or narrowed behavior under a Plan item whose wording still describes the full scope. The defect is shipping it without amending the Plan or opening a follow-up.
+- **theater coverage** — green CI plus tests that don't exercise the new code path. Catch it by mutating a line of new code; if no test fails, the coverage is theater.
+- **narrative-as-state** — prose like "essentially done", "basically works", "mostly complete" in place of an atomic Plan item state. Plan items are binary: complete, or split and amended.
 - **untracked defer** — a follow-up that lives only in a session message or PR description, with no issue. It evaporates at squash-merge.
 
-These names apply symmetrically: catching them in your own draft before claiming done is the same skill as flagging them in review.
-
-See [ADR 0005](docs/adr/0005-s5-governance-scales-with-scale.md) for the meta-rule on how this S5 layer evolves with operational scale.
+These names apply symmetrically: catching them in your own draft is the same skill as flagging them in review. See [ADR 0005](docs/adr/0005-s5-governance-scales-with-scale.md) for the meta-rule on how this S5 layer evolves with operational scale.
 
 ## Operating posture: pre-launch
 
-Onsager has not yet been launched live to users. That fact removes one category of scaffolding from our work — the kind that protects users from our half-finished state. It does NOT loosen the internal discipline that produces well-built work in the first place. The point of pre-launch is to ship more learning per unit time, not to ship less rigorously, and not to defer hard problems past launch.
+Onsager has not yet been launched live to users. That removes one category of scaffolding — the kind that protects users from our half-finished state. It does NOT loosen the internal discipline that produces well-built work. The point is to ship more learning per unit time, not less rigorously, and not to defer hard problems past launch.
 
 ### What pre-launch removes
 
-User-protection scaffolding only makes sense once humans depend on us; we skip it now:
+User-protection scaffolding only makes sense once humans depend on us; skip it now:
 
-- **Feature flags meant solely to hide work from a userbase that doesn't exist yet.** When a surface lands, it lands visibly. Flags are still legitimate for in-flight A/B work or workspace-level admin choices (e.g. "this workspace's owner doesn't want the agent enabled") — but not for hiding incomplete surfaces from a userbase of zero.
-- **Mock implementations as bridges to absent dependencies.** If spec A needs spec B and B hasn't landed, reorder the work so B lands first. Throwaway mocks become "bridges that ossify" (see § "Architectural drift patterns to watch") — pre-launch is exactly when you can pay the reorder cost cheaply.
-- **"Preview" / "beta" banners** on surfaces that are the product for our internal team. We know what we're building; we don't need to warn ourselves.
-- **Bookmark / deprecation preservation work** for routes nobody has bookmarked yet. Delete the old route and its backend handler in the same PR as the replacement. Redirects are still cheap and worth adding when free; long deprecation windows are not.
+- **Feature flags that only hide work from a userbase that doesn't exist yet.** Surfaces land visibly. Flags are still legitimate for in-flight A/B work or workspace-level admin choices (e.g. an owner disabling the agent) — just not for hiding incomplete surfaces from a userbase of zero.
+- **Mock implementations as bridges to absent dependencies.** If spec A needs spec B and B hasn't landed, reorder so B lands first. Throwaway mocks become "bridges that ossify" — pre-launch is when the reorder is cheap.
+- **"Preview" / "beta" banners** on surfaces that are the product for our internal team. We don't need to warn ourselves.
+- **Bookmark / deprecation preservation** for routes nobody has bookmarked. Delete the old route and its backend handler in the same PR as the replacement. Free redirects are fine; long deprecation windows aren't.
 
 ### What pre-launch does NOT loosen
 
-Pre-launch is not a license to ship less rigorous work. Internal discipline matters *more* at high velocity, not less — code we touch faster needs more guardrails to catch the mistakes that velocity invites, not fewer:
+Pre-launch is not a license to ship less rigorous work. Internal discipline matters *more* at high velocity — code we touch faster needs more guardrails, not fewer:
 
-- **Spec discipline.** Specs remain ground truth (commitment 3). Pre-launch lets us amend specs more cheaply, not skip them. Implementation without a spec is *untracked defer* (named failure mode above) — the absence of users does not change that.
-- **Claim-honesty.** "Done" still means the spec's bar is met, not "essentially works." *Theater coverage* (green CI with uncovered new code) is theater whether we have users or not. Plan items are still atomic; split-and-amend, don't silently reduce scope.
-- **Tests.** "Nobody will hit this path yet" is not a reason to skip tests. Tests are how we know the code works *before* we find out it doesn't. The claim-honesty annex's mutation check (mutate one line of new code; a test must fail) applies regardless of launch status.
-- **Review.** Velocity comes from small PRs reviewed quickly, not large PRs reviewed never. Self-review (the claim-honesty checks in commitment 3) is the floor; a second pair of eyes is the norm. Squashing a PR onto `main` does not retire the review obligation.
-- **Root-cause fixes over band-aids.** Pre-launch is the cheapest moment to fix a problem properly — no migration choreography, no in-flight runs, no operational scar tissue. A workaround shipped under unchanged Plan wording is *silent scope reduction*. A workaround shipped with a follow-up issue and an amended Plan is fine. A workaround shipped with neither is the longest-half-life untracked-defer pattern — "I'll fix it after launch" almost never holds, because launch makes the fix more expensive, not less.
-- **Internal symmetry, seam rule, file budget, lint enforcement.** `lint-seams`, `check-events`, `check-api-contract`, and `check-file-budget` stay hard-fail. Code structure rots *faster* pre-launch, not slower, because we touch more of it per unit time.
-- **Identity commitments** (the four bullets at the top of this file). Those define the factory, not its launch status.
+- **Spec discipline.** Specs remain ground truth (commitment 3); pre-launch makes amending them cheaper, not skippable. Implementation without a spec is *untracked defer*, with or without users.
+- **Claim-honesty.** "Done" still means the spec's bar is met, not "essentially works." *Theater coverage* (green CI, uncovered code) is theater with or without users. Plan items stay atomic; split-and-amend, don't silently reduce scope.
+- **Tests.** "Nobody will hit this path yet" is no reason to skip tests — they're how we know the code works *before* we find out it doesn't. The mutation check (mutate one line of new code; a test must fail) applies regardless.
+- **Review.** Velocity comes from small PRs reviewed quickly, not large PRs reviewed never. Self-review is the floor; a second pair of eyes is the norm. Squashing onto `main` doesn't retire it.
+- **Root-cause fixes over band-aids.** Pre-launch is the cheapest moment to fix properly — no migration choreography, no in-flight runs, no scar tissue. A workaround under unchanged Plan wording is *silent scope reduction*; with a follow-up issue and amended Plan it's fine; with neither it's the longest-half-life untracked defer — "I'll fix it after launch" rarely holds, since launch makes the fix more expensive.
+- **Internal symmetry, seam rule, file budget, lint enforcement.** `lint-seams`, `check-events`, `check-api-contract`, and `check-file-budget` stay hard-fail. Structure rots *faster* pre-launch, not slower.
+- **Identity commitments** (the four bullets atop this file). Those define the factory, not its launch status.
 
 ### What pre-launch is for
 
-The window only opens once. Use it for moves that are cheap now and expensive later:
+The window only opens once. Use it for moves cheap now and expensive later:
 
 - **Reordering work** when a dependency surfaces — nobody depends on the current sequence.
-- **Schema changes and migrations** without choreography — no production data to preserve, no zero-downtime constraint.
-- **Discovering wrong abstractions** and rewriting them — no public contract yet, no client code to coordinate with.
-- **Replacing whole subsystems** when the original guess was wrong — no operational scar tissue, no on-call rotation to brief.
+- **Schema changes and migrations** without choreography — no production data, no zero-downtime constraint.
+- **Discovering wrong abstractions** and rewriting them — no public contract, no client code to coordinate with.
+- **Replacing whole subsystems** when the original guess was wrong — no scar tissue, no on-call to brief.
 
-Use the window for those *structural* moves. Quality shortcuts the discipline above forbids are not the same thing — they don't get cheaper at launch, they get more expensive. **Pre-launch removes user protection. It does not remove work-quality protection.**
+Those are *structural* moves. Quality shortcuts are not — they get more expensive at launch, not cheaper. **Pre-launch removes user protection, not work-quality protection.**
 
 ### Flipping the posture
 
-When we launch, delete this section and replace it with the post-launch operating bars (bookmark preservation, deprecation windows, feature-flag gating for high-blast-radius surfaces, mock-implementation policy for unmerged dependencies, communication discipline for breaking changes). The flip is itself a deliberate ADR-worthy moment — landing live to users is a commitment, not a deploy event.
+When we launch, delete this section and replace it with the post-launch operating bars (bookmark preservation, deprecation windows, feature-flag gating for high-blast-radius surfaces, mock-implementation policy for unmerged deps, communication discipline for breaking changes). The flip is itself an ADR-worthy moment — landing live is a commitment, not a deploy event.
 
 ## Architecture
 
-See § What makes Onsager Onsager (above) for the identity commitments these architectural choices instantiate. For the *why* behind any rule, see the ADRs under [`docs/adr/`](docs/adr/) — [`docs/adr/README.md`](docs/adr/README.md) is the current index with per-ADR status. (Note: `docs/architecture.md` predates the ADR 0009–0026 "0.2 refoundation" and is stale; trust this file and the ADRs.)
+See § What makes Onsager Onsager (above) for the identity commitments these choices instantiate, and the ADRs under [`docs/adr/`](docs/adr/) for the *why* behind any rule ([`docs/adr/README.md`](docs/adr/README.md) is the current index). (`docs/architecture.md` predates the ADR 0009–0026 "0.2 refoundation" and is stale; trust this file and the ADRs.)
 
 The shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel is still the single runtime coordination medium — components stay runtime-decoupled and coordinate through stigmergy (indirect signals via the shared medium), not direct calls. The `onsager` dispatcher is a ~100-LOC CLI with zero business deps that discovers subsystem binaries on `PATH` (`scheduler`, `stiglab`, `synodic`, `trigger`).
 
-[ADR 0002](docs/adr/0002-process-product-isomorphism.md)'s two-loop framing — the **inner loop** (spec → PR → merge) and the **outer loop** (observe drift → propose rule → activate → modify the inner loop) — is superseded as a mechanism by the observer citizen (ADR 0013) but kept as a design principle: every factory primitive ships with its dev-process counterpart, and every durable dev-process pattern is evidence for a future primitive.
+[ADR 0002](docs/adr/0002-process-product-isomorphism.md)'s two-loop framing — the **inner loop** (spec → PR → merge) and the **outer loop** (observe drift → propose rule → activate → modify the inner loop) — is superseded as a mechanism by the observer citizen (ADR 0013) but kept as a principle: every factory primitive ships with its dev-process counterpart, and every durable dev-process pattern is evidence for a future primitive.
 
 ### The 0.2 substrate: a three-layer pipeline
 
-What changed in the 0.2 refoundation (ADRs 0009–0018) is *what authors the spine*. The old feature subsystems (forge, ising, the planned refract) no longer emit business events directly. Authorship now flows through three named layers, isomorphic to a query compiler ([ADR 0009](docs/adr/0009-three-layer-pipeline.md)):
+What changed in the 0.2 refoundation (ADRs 0009–0018) is *what authors the spine*. The old feature subsystems (forge, ising, the planned refract) no longer emit business events directly; authorship now flows through three named layers, isomorphic to a query compiler ([ADR 0009](docs/adr/0009-three-layer-pipeline.md)):
 
 | Layer | Role | Analog |
 |---|---|---|
@@ -98,48 +94,42 @@ What changed in the 0.2 refoundation (ADRs 0009–0018) is *what authors the spi
 | **Workflow** | A reusable template (node graph + IO contract) for one spec `kind`; library-resident, authored once per kind. | Template |
 | **Execution Plan** | An immutable, fully-resolved node graph the scheduler runs. | Physical plan |
 
-The **Plan Compiler** ([ADR 0017](docs/adr/0017-plan-compiler-three-step-algorithm.md)) is the only thing that turns a Spec Plan + Workflow Library into an Execution Plan — three steps (lookup → instantiate → connect) plus a final validation. It is pure, deterministic, and LLM-free; all non-determinism lives inside node executors. The **substrate scheduler** (`onsager-scheduler`, replacing forge's tick loop) is the only thing that executes an Execution Plan and the only emitter of business events on the spine.
+The **Plan Compiler** ([ADR 0017](docs/adr/0017-plan-compiler-three-step-algorithm.md)) is the only thing that turns a Spec Plan + Workflow Library into an Execution Plan — three steps (lookup → instantiate → connect) plus a final validation. It is pure, deterministic, LLM-free; all non-determinism lives inside node executors. The **substrate scheduler** (`onsager-scheduler`, replacing forge's tick loop) is the only thing that executes an Execution Plan and the only emitter of business events on the spine.
 
 Two more 0.2 pillars:
 
-- **Executor catalog, not `NodeKind`** ([ADR 0012](docs/adr/0012-executor-catalog-replaces-nodekind.md)). Nodes carry `executor: Box<dyn Executor>`; implementations live side-by-side in `onsager-nodes` (`script`, `agent`, `verify`, `subworkflow`, `human`, …) and register in an `ExecutorRegistry`. Adding an executor is one file, no schema migration. **Verify** is kernel-special: it is the *only* executor allowed to upgrade an artifact's provenance from `Uncertain` to `Deterministic` ([ADR 0010](docs/adr/0010-provenance-as-substrate-first-class.md)).
+- **Executor catalog, not `NodeKind`** ([ADR 0012](docs/adr/0012-executor-catalog-replaces-nodekind.md)). Nodes carry `executor: Box<dyn Executor>`; impls live side-by-side in `onsager-nodes` (`script`, `agent`, `verify`, `subworkflow`, `human`, …) and register in an `ExecutorRegistry`. Adding one is one file, no schema migration. **Verify** is kernel-special: the *only* executor allowed to upgrade an artifact's provenance from `Uncertain` to `Deterministic` ([ADR 0010](docs/adr/0010-provenance-as-substrate-first-class.md)).
 - **Observers, the second substrate citizen** ([ADR 0013](docs/adr/0013-observer-as-second-substrate-citizen.md), replacing ising). Non-blocking, cannot mutate state, read the spine, emit typed `QualitySignal` / `Insight` / `Alert` into `observer_outputs`. VSM S3* (audit), structurally separate from the workflow citizen's S1/S2/S3.
 
-**Five kernel invariants** ([ADR 0018](docs/adr/0018-five-kernel-invariants.md)) are the substrate's constitutional check, run statically at Execution Plan compile time (`onsager-substrate/src/validate.rs`): (1) `requires_deterministic` edges reject `Uncertain` upstreams; (2) `Uncertain` is contagious except through Verify; (3) a workflow's declared `OutputSpec` provenance matches its actual exit-path provenance; (4) every `SubWorkflow` `workflow_ref` resolves (no cycles); (5) single writer per artifact. A workflow that violates one does not load.
+**Five kernel invariants** ([ADR 0018](docs/adr/0018-five-kernel-invariants.md)) are the substrate's constitutional check, run statically at Execution Plan compile time (`onsager-substrate/src/validate.rs`): (1) `requires_deterministic` edges reject `Uncertain` upstreams; (2) `Uncertain` is contagious except through Verify; (3) a workflow's declared `OutputSpec` provenance matches its actual exit-path provenance; (4) every `SubWorkflow` `workflow_ref` resolves (no cycles); (5) single writer per artifact. A workflow violating one doesn't load.
 
 ### Remaining subsystems and the edge
 
-Mid-migration, two factory subsystems survive behind the seam and still coordinate exclusively via the spine: **stiglab** (distributed AI agent session orchestration) and **synodic** (AI agent governance — gates, verdicts, escalations). `forge` is retired (→ substrate scheduler) and `ising` is deprecated (→ `onsager-observers`).
+Mid-migration, two factory subsystems survive behind the seam and still coordinate exclusively via the spine: **stiglab** (distributed AI agent session orchestration) and **synodic** (AI agent governance — gates, verdicts, escalations). `forge` is retired (→ substrate scheduler), `ising` deprecated (→ `onsager-observers`).
 
-**Architectural invariant**: subsystems must NOT import each other and must NOT be statically linked into the same binary. The substrate library crates (`onsager-substrate`, `onsager-nodes`, `onsager-observers`) and the shared utility crate `onsager-agent-spawn` sit below the seam and may be depended on by any side — a utility crate is not a subsystem.
+**Architectural invariant**: subsystems must NOT import each other or be statically linked into the same binary. The substrate library crates (`onsager-substrate`, `onsager-nodes`, `onsager-observers`) and the shared utility crate `onsager-agent-spawn` sit below the seam and may be depended on by any side — a utility crate isn't a subsystem.
 
-`portal` (`onsager-portal`) is the **edge** subsystem — the only one that hosts public HTTP routes (dashboard API, GitHub webhooks, OAuth, credential CRUD, the MCP server, the agent control-plane WebSocket). The route-level move landed via spec #222; the process-level move landed via [ADR 0006](docs/adr/0006-edge-dispatcher-as-the-public-boundary.md) (spec #283 — Caddy in front of portal in production) and [ADR 0008](docs/adr/0008-portal-owns-the-agent-control-plane.md) (spec #291 — portal terminates `/agent/ws` and proxies bytes to stiglab on loopback). Stiglab no longer accepts external connections at either layer.
+`portal` (`onsager-portal`) is the **edge** subsystem — the only one hosting public HTTP routes (dashboard API, GitHub webhooks, OAuth, credential CRUD, the MCP server, the agent control-plane WebSocket). The route-level move landed via spec #222; the process-level move via [ADR 0006](docs/adr/0006-edge-dispatcher-as-the-public-boundary.md) (spec #283 — Caddy in front of portal) and [ADR 0008](docs/adr/0008-portal-owns-the-agent-control-plane.md) (spec #291 — portal terminates `/agent/ws`, proxies bytes to stiglab on loopback). Stiglab no longer accepts external connections at either layer.
 
-In production the externally-reachable process is Caddy (the edge dispatcher), bundled in the same image. Stiglab binds to `127.0.0.1:3000` and serves only `/agent/ws-internal`; portal binds to `127.0.0.1:3002` and owns every external route, including the public `/agent/ws` it forwards to stiglab over loopback.
+In production the externally-reachable process is Caddy (the edge dispatcher), bundled in the same image. Stiglab binds `127.0.0.1:3000` and serves only `/agent/ws-internal`; portal binds `127.0.0.1:3002` and owns every external route, including the public `/agent/ws` it forwards to stiglab over loopback.
 
 ## MCP server + public skills bundle
 
-[ADR 0007](docs/adr/0007-tools-and-skills-as-the-public-contract.md) names the **protocol shape** of clause 1 for AI runtimes: portal hosts an **MCP server** at `POST /mcp/messages` (JSON-RPC 2.0 over HTTP), and a sibling **public skills bundle** at `onsager-ai/onsager-skills` packages the operating-procedures knowledge that pairs with the tools (`npx skills add onsager-ai/onsager-skills`).
+[ADR 0007](docs/adr/0007-tools-and-skills-as-the-public-contract.md) names the **protocol shape** of clause 1 for AI runtimes: portal hosts an **MCP server** at `POST /mcp/messages` (JSON-RPC 2.0 over HTTP), and a sibling **public skills bundle** at `onsager-ai/onsager-skills` packages the operating-procedures knowledge pairing with the tools.
 
-The MCP server is portal's clause-1 surface for AI clients (Claude Code, Cursor, Codex, custom agents, *and* the dashboard chat — which becomes one MCP client among many). The same workspace-scope auth (`AuthUser` extractor + `require_workspace_access`) gates both REST and MCP. Tools delegate to the same DB helpers the REST handlers use — no new business logic, just typed wrappers.
+The MCP server is portal's clause-1 surface for AI clients (Claude Code, Cursor, Codex, custom agents, *and* the dashboard chat — one MCP client among many). The same workspace-scope auth (`AuthUser` + `require_workspace_access`) gates both REST and MCP. Tools delegate to the same DB helpers the REST handlers use — no new business logic, just typed wrappers.
 
-Tool schemas SSOT: derived from Rust serde structs via `schemars` (`#[derive(JsonSchema)]`) — no hand-written JSON Schema, no parallel-source-of-truth drift. The TS-side counterpart (generated TS from the same Rust structs) is a follow-up.
+Tool schemas SSOT: derived from Rust serde structs via `schemars` (`#[derive(JsonSchema)]`) — no hand-written JSON Schema, no parallel-source drift. A TS-side counterpart from the same structs is a follow-up.
 
-The pieces (landed in stages under #288; see ADR 0007 for the full history):
+The pieces (landed in stages under #288; ADR 0007 has the full history):
 
 - **Backend** — MCP tools live in `crates/onsager-portal/src/mcp/` (action + diagnostic tools, schemas from `schemars`).
-- **Skills bundle** — the public user-facing skills live canonically in `onsager-ai/onsager-skills` (`npx skills add onsager-ai/onsager-skills`); cross-repo dev-process skills (`issue-spec`, `ci-triage`, …) live in `onsager-ai/dev-skills` (`npx skills add -g onsager-ai/dev-skills --skill '*' -a claude-code`). See each repo's `README.md` for the trigger-phrase matrix.
-- **Dashboard client** — the dashboard chat is itself a same-origin MCP client; it routes every mutation tool call through `HitlCard.tsx` and every read-only call through a plain info block. `xtask check-hitl-coverage` hard-fails on drift between the Rust registry and the dashboard bindings.
+- **Skills bundle** — public user-facing skills live canonically in `onsager-ai/onsager-skills` (`npx skills add onsager-ai/onsager-skills`); cross-repo dev-process skills (`issue-spec`, `ci-triage`, …) live in `onsager-ai/dev-skills` (`npx skills add -g onsager-ai/dev-skills --skill '*' -a claude-code`). See each repo's `README.md` for the trigger-phrase matrix.
+- **Dashboard client** — the dashboard chat is a same-origin MCP client; it routes every mutation call through `HitlCard.tsx` and every read-only call through a plain info block. `xtask check-hitl-coverage` hard-fails on drift between the Rust registry and the dashboard bindings.
 
-`xtask check-tools-and-skills` is the enforcement counterpart of ADR 0007's dev-process clause (every public tool has a skill grant; every skill grant references a real tool). It runs in CI via a transient `git clone` of `onsager-ai/onsager-skills` (spec #323) and is part of `just lint`. For local two-checkout dev, set `ONSAGER_SKILLS_DIR=../onsager-skills just lint`; without the override, `just lint` clones the sibling into `target/onsager-skills/` automatically.
+`xtask check-tools-and-skills` enforces ADR 0007's dev-process clause (every public tool has a skill grant; every grant references a real tool). It's part of `just lint` and runs in CI via a transient `git clone` of `onsager-ai/onsager-skills` (spec #323). For local two-checkout dev, set `ONSAGER_SKILLS_DIR=../onsager-skills just lint`; otherwise `just lint` clones the sibling into `target/onsager-skills/` automatically.
 
-**Shared skill editing.** Skills installed under `.claude/skills/` via `npx skills add onsager-ai/onsager-skills` are read-only copies — do not edit them directly. A `PreToolUse` hook (`.claude/hooks/check-skill-edit.sh`) blocks direct edits to any skill directory that carries a `.upstream-source` marker file. To change a shared skill:
-
-1. Edit it in `onsager-ai/onsager-skills`.
-2. Open a PR there, get it reviewed, and merge it.
-3. Re-run `npx skills add onsager-ai/onsager-skills` in this repo.
-
-Editing the installed copy is blocked by the hook and wrong — a future `npx skills add` run would silently overwrite the change.
+**Shared skill editing.** Skills installed under `.claude/skills/` via `npx skills add onsager-ai/onsager-skills` are read-only copies — don't edit them directly (a `PreToolUse` hook, `.claude/hooks/check-skill-edit.sh`, blocks edits to any skill dir with a `.upstream-source` marker, since a future `npx skills add` would silently overwrite the change). To change a shared skill: edit it in `onsager-ai/onsager-skills`, open + merge a PR there, then re-run `npx skills add onsager-ai/onsager-skills` here.
 
 ## The seam rule (canonical)
 
@@ -147,96 +137,90 @@ Editing the installed copy is blocked by the hook and wrong — a future `npx sk
 >
 > The external HTTP boundary is owned by `portal` (the edge subsystem). Factory subsystems (`stiglab`, `synodic`) coordinate **exclusively** via the spine: events on the bus + reads against shared spine tables. No subsystem makes HTTP calls to another subsystem. No subsystem imports another subsystem's crate. (Substrate library crates — `onsager-substrate`, `onsager-nodes`, `onsager-observers` — and the `onsager-agent-spawn` utility sit below the seam and may be shared by any side.)
 
-This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md) captured the decision to make it machine-checkable via a six-lever execution plan (spec #131, A–F: persisted rule → mechanical guardrails → finish the ADR 0001 migration → spine as SoT → registry-backed event types → API/UI contract enforcement). All six levers have landed and are CI-enforced via `lint-seams`, `check-api-contract`, and `check-events`; the seam rule is now mechanical, not review-time discipline. [ADR 0018](docs/adr/0018-five-kernel-invariants.md) partially supersedes ADR 0004: the six code-level seam levers remain in force for cross-subsystem discipline, but the substrate's *internal* correctness contract is now the five kernel invariants (above), checked statically at Execution Plan compile time. Note `lint-seams` currently scopes the cross-subsystem checks to `stiglab` / `synodic` / `ising`; portal is the edge and the substrate hosts (`scheduler`, `trigger`) sit below the seam.
+This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md) made it machine-checkable via a six-lever plan (spec #131, all landed and CI-enforced via `lint-seams`, `check-api-contract`, `check-events`); the seam rule is now mechanical, not review-time discipline. [ADR 0018](docs/adr/0018-five-kernel-invariants.md) partially supersedes ADR 0004: the six code-level seam levers remain in force for cross-subsystem discipline, but the substrate's *internal* correctness contract is now the five kernel invariants (above). Note `lint-seams` currently scopes the cross-subsystem checks to `stiglab` / `synodic` / `ising`; portal is the edge and the substrate hosts (`scheduler`, `trigger`) sit below the seam.
 
-[ADR 0006](docs/adr/0006-edge-dispatcher-as-the-public-boundary.md) and [ADR 0008](docs/adr/0008-portal-owns-the-agent-control-plane.md) close the process-level half of clause 1: production runs Caddy as the edge dispatcher, portal owns 100% of the external HTTP surface (including `/agent/ws`), and stiglab is loopback-only. `xtask check-api-contract` enforces "every stiglab route is loopback-only" — any new route on a factory subsystem outside the loopback-only allowlist is a hard failure.
+[ADR 0006](docs/adr/0006-edge-dispatcher-as-the-public-boundary.md) and [ADR 0008](docs/adr/0008-portal-owns-the-agent-control-plane.md) close the process-level half of clause 1 (Caddy as edge dispatcher; portal owns 100% of the external HTTP surface including `/agent/ws`; stiglab loopback-only). `xtask check-api-contract` enforces "every stiglab route is loopback-only" — any new route on a factory subsystem outside the allowlist is a hard failure.
 
-ADR 0004's six levers (A–F) all landed; the per-lever history is in [ADR 0004](docs/adr/0004-tighten-the-seams.md)'s adoption checklist. The two rules a session still needs day-to-day: the static event manifest at `crates/onsager-registry/src/events.rs` has one row per `FactoryEventKind` variant, each either **real** (non-empty `consumers`) or **diagnostic-only** (`diagnostic_only: true` + a `reason`) — `check-events` rejects anything else and verifies call-sites match; and `check-api-contract` requires every backend route to have a dashboard caller (or an allowlisted external-only reason) and vice versa.
+The two rules a session still needs day-to-day: the static event manifest at `crates/onsager-registry/src/events.rs` has one row per `FactoryEventKind` variant, each either **real** (non-empty `consumers`) or **diagnostic-only** (`diagnostic_only: true` + a `reason`) — `check-events` rejects anything else and verifies call-sites match; and `check-api-contract` requires every backend route to have a dashboard caller (or an allowlisted external-only reason) and vice versa.
 
 ## Internal aesthetic
 
-Care about the inside the same way you'd care about the outside. The wires inside an Apple product are routed and dressed even though no user will ever open the case. We hold the codebase to the same standard: the seams between subsystems, the shape of internal modules, the consistency of names and errors, the absence of dead wires — these are first-class quality, not cleanup chores deferred until "after the feature lands."
+Care about the inside the same way you'd care about the outside — the wires inside an Apple product are dressed even though no user opens the case. The seams between subsystems, the shape of internal modules, the consistency of names and errors, the absence of dead wires are first-class quality, not cleanup chores deferred until "after the feature lands."
 
 This is a value, not a checklist. Three operating principles fall out of it:
 
-- **Internal symmetry is a feature.** When two things are *the same concept*, they should have the same shape — same name, same type, same error model, same write path. Asymmetry between equivalent things (`TriggerKind` here, `TriggerSpec` there; one creation path setting `current_version=0`, another setting `=1`) is a defect, even when nothing user-visible is broken.
-- **No dangling wires.** Code marked `#[allow(dead_code)]` "for later," event types with no consumer, endpoints with no UI caller, and compat aliases with no removal date are all the same defect: a wire connected at one end. Either finish the connection in the same PR, or remove the loose end.
-- **The inside is reviewable.** Files that grow past ~500 LOC, modules that mix unrelated concerns, error types that change shape across a subsystem boundary — these aren't style preferences, they're a tax on every future reader. Splitting and unifying them is real work, worth scheduling.
+- **Internal symmetry is a feature.** Two things that are *the same concept* should have the same shape — same name, type, error model, write path. Asymmetry between equivalents (`TriggerKind` here, `TriggerSpec` there; one creation path setting `current_version=0`, another `=1`) is a defect, even when nothing user-visible breaks.
+- **No dangling wires.** `#[allow(dead_code)]` "for later," event types with no consumer, endpoints with no UI caller, compat aliases with no removal date — all the same defect: a wire connected at one end. Finish it in the same PR, or remove the loose end.
+- **The inside is reviewable.** Files past ~500 LOC, modules mixing unrelated concerns, error types that change shape across a subsystem boundary — not style preferences but a tax on every future reader. Splitting and unifying them is real work, worth scheduling.
 
 ### File budget
 
-`xtask check-file-budget` (wired into `just lint` and CI) enforces a **8000 prod-token ceiling** per `.rs` / `.ts` / `.tsx` file. "Prod" means: test blocks stripped for Rust (`#[cfg(test)]` items); test files skipped for TypeScript (`*.test.ts`, `__tests__/`).
+`xtask check-file-budget` (wired into `just lint` and CI) enforces an **8000 prod-token ceiling** per `.rs` / `.ts` / `.tsx` file. "Prod" strips Rust test blocks (`#[cfg(test)]`) and skips TypeScript test files (`*.test.ts`, `__tests__/`).
 
-Tokens are counted with `tiktoken-rs` against the `o200k_base` encoding, vendored at `xtask/assets/o200k_base.tiktoken` for offline determinism. Within ~10% of Claude's actual tokenizer; stable across machines.
+Tokens are counted with `tiktoken-rs` against `o200k_base`, vendored at `xtask/assets/o200k_base.tiktoken` for offline determinism — within ~10% of Claude's tokenizer, stable across machines.
 
-To **exempt** a file that legitimately exceeds the ceiling (out-of-scope for an active spec, binary entrypoint, generated file):
+To **exempt** a file that legitimately exceeds the ceiling (out-of-scope for an active spec, binary entrypoint, generated file), place `// budget-allow: <non-empty reason>` anywhere in it. Reason text is mandatory and grep-able. Mirrors the `// seam-allow:` shape.
 
-```rust
-// budget-allow: <non-empty reason explaining why this file is exempt>
-```
+**Ratchet plan.** The stated value (~500 LOC ≈ ~5000 tokens) is tighter than the current 8000 ceiling. Once all exempted files are split or justified, a follow-up spec tightens the ceiling to 5000–6000. (Spec #261 set 8000 as the initial floor; ratcheting is a separate spec.)
 
-Place the comment anywhere in the file. Reason text is mandatory and grep-able. Mirrors the `// seam-allow:` shape.
-
-**Ratchet plan.** The stated value (~500 LOC ≈ ~5000 tokens) is tighter than the current 8000 ceiling. Once all exempted files are either split or justified, a follow-up spec tightens the ceiling to 5000–6000 to align with the stated value. (Spec #261 established 8000 as the initial floor; ratcheting is a separate spec.)
-
-The seam rule above and the "Architectural drift patterns to watch" list below are both operational projections of this value onto the seams between subsystems. Internal-quality work that doesn't fit those projections — interior-to-a-subsystem hygiene — is equally in scope and should be specced and shipped on the same footing as feature work.
+The seam rule above and the "Architectural drift patterns to watch" list below are both operational projections of this value onto the seams between subsystems. Interior-to-a-subsystem hygiene is equally in scope and should be specced and shipped on the same footing as feature work.
 
 ### Dashboard API types: Rust is the SSOT
 
-Portal's serde structs are the single source of truth for the wire shapes the dashboard consumes. `#[derive(ts_rs::TS)]` on a portal struct emits a committed `.ts` file under `apps/dashboard/src/lib/api/generated/` when `cargo test` runs (export dir wired in `.cargo/config.toml`); `xtask check-generated-types` regenerates + diffs against the committed tree, drift is hard-fail. Don't hand-write types the dashboard could import from `generated/`. (Companion to the `schemars` SSOT for MCP tool schemas; migration to `generated/` is ongoing — see `crates/onsager-portal/CLAUDE.md`.)
+Portal's serde structs are the single source of truth for the wire shapes the dashboard consumes. `#[derive(ts_rs::TS)]` on a portal struct emits a committed `.ts` file under `apps/dashboard/src/lib/api/generated/` when `cargo test` runs (export dir wired in `.cargo/config.toml`); `xtask check-generated-types` regenerates + diffs against the committed tree, drift is hard-fail. Don't hand-write types the dashboard could import from `generated/`. (Companion to the `schemars` SSOT for MCP tool schemas; migration is ongoing — see `crates/onsager-portal/CLAUDE.md`.)
 
 ## User-facing vocabulary (canonical 4 nouns)
 
-Per spec #286 the dashboard, public API field names, route segments, button copy, page titles, and user-visible docs use exactly four top-level nouns. Anything else is internal-only or surface-internal (visible only inside a workflow/run drill-down, never as a top-level navigation noun).
+Per spec #286, the dashboard, public API field names, route segments, button copy, page titles, and user-visible docs use exactly four top-level nouns. Anything else is internal-only or surface-internal (visible only inside a workflow/run drill-down, never a top-level nav noun).
 
 The four canonical nouns:
 
-- **Workflow** — the automation unit (trigger + ordered stages + prompts). Lives at `/api/workflows`. Persisted in spine `workflows` / `workflow_stages` (Lever D).
-- **Run** — one execution of a workflow against an artifact. Lives at `/api/workflows/:id/runs`. Has a status and a sequence of stage outcomes.
-- **Artifact** — what a run produces (issue, PR, deployment, etc.). Already the core noun; lives at `/api/spine/artifacts`. Persisted in spine `artifacts`.
-- **Stage** — a step within a workflow definition (gate kind + parameters). A workflow's structural unit; never a top-level navigation noun.
+- **Workflow** — the automation unit (trigger + ordered stages + prompts). `/api/workflows`; spine `workflows` / `workflow_stages` (Lever D).
+- **Run** — one execution of a workflow against an artifact. `/api/workflows/:id/runs`; has a status and a sequence of stage outcomes.
+- **Artifact** — what a run produces (issue, PR, deployment, etc.). The core noun; `/api/spine/artifacts`; spine `artifacts`.
+- **Stage** — a step within a workflow definition (gate kind + parameters). A workflow's structural unit; never a top-level nav noun.
 
-**Sanctioned carve-out — "Plans" (spec plans).** ADR 0023 made the authored spec-plan graph a first-class user concept, and ADR 0025 / spec #514 require a noun-surface launch path for it so chat stops being the sole way to run one. The dashboard therefore carries a fifth top-level nav noun, **Plans** (`/workspaces/:slug/spec-plans`), listing persisted spec plans with a HitlCard-routed "Run" button. This is *not* a violation of the four-noun rule but a deliberate exception under it: a spec **plan** (a substrate authoring artifact — a DAG of specs run in dependency order) is distinct from the internal-only dev-process **spec** (a GitHub issue with implementation intent) demoted below. The carve-out is scoped to this one surface; new top-level nav nouns still default to "no" and need their own ADR.
+**Sanctioned carve-out — "Plans" (spec plans).** ADR 0023 made the authored spec-plan graph a first-class user concept; ADR 0025 / spec #514 require a noun-surface launch path so chat isn't the sole way to run one. The dashboard carries a fifth nav noun, **Plans** (`/workspaces/:slug/spec-plans`), listing persisted spec plans with a HitlCard-routed "Run" button. A deliberate exception under the four-noun rule, not a violation: a spec **plan** (a substrate authoring artifact — a DAG of specs run in dependency order) is distinct from the internal-only dev-process **spec** (a GitHub issue) demoted below. Scoped to this one surface; new nav nouns still default to "no" and need their own ADR.
 
-**Demoted to internal-only.** These terms stay rich in Rust / migration / spine vocabulary but never surface to users:
+**Demoted to internal-only.** These stay rich in Rust / migration / spine vocabulary but never surface to users:
 
-- **shaping** — legacy term for agent-session dispatch. Stays in internal Rust (`shaping_listener.rs`, `ShapingRequest`, `ShapingResult`). The user-facing event-name leakage (`stiglab.shaping_result_ready`) was renamed to `stiglab.session_result_ready` per spec #285.
-- **bundle / sealed / ArtifactVersionId** — internal storage terms. The user-facing concept is "artifact version".
+- **shaping** — legacy term for agent-session dispatch; stays in internal Rust (`shaping_listener.rs`, `ShapingRequest`, `ShapingResult`). The event-name leakage `stiglab.shaping_result_ready` was renamed to `stiglab.session_result_ready` per spec #285.
+- **bundle / sealed / ArtifactVersionId** — internal storage terms; the user-facing concept is "artifact version".
 - **spec** — dev-process term for a GitHub issue with implementation intent. Lives in CLAUDE.md and the `issue-spec` skill; never surfaces in the dashboard.
 
-**Demoted to surface-internal.** Visible only inside a workflow / run drill-down, not as a top-level navigation item:
+**Demoted to surface-internal.** Visible only inside a workflow / run drill-down, never a top-level nav item:
 
-- **gate / verdict** — control points within a stage. Visible in workflow detail and run history; never a top-level surface.
-- **governance** — the audit/escalation surface. Subsumed into run history's verdict view.
-- **session** — a stage execution context. Visible only as a stage gate kind ("agent-session") and as a drill-down from a run's stage history.
-- **node** — infrastructure; visible only in settings, not as a top-level noun.
-- **issue** — the GitHub issue that triggered or was produced by a run. An artifact kind, not a separate concept.
+- **gate / verdict** — control points within a stage; visible in workflow detail and run history.
+- **governance** — the audit/escalation surface, subsumed into run history's verdict view.
+- **session** — a stage execution context; visible as the "agent-session" stage gate kind and as a drill-down from a run's stage history.
+- **node** — infrastructure; visible only in settings.
+- **issue** — the GitHub issue that triggered or was produced by a run; an artifact kind, not a separate concept.
 
-**Enforcement is doc-only.** Dashboard tsx is too varied for a useful grep-based vocabulary lint, and the 2026-05-09 audit found no significant leakage. The doc commitment plus PR review is the enforcement mechanism; a mechanical lint can be added later if drift recurs. This vocabulary is for surfaces users see — the seam-level / internal vocabulary stays rich per "Internal aesthetic" above.
+**Enforcement is doc-only.** Dashboard tsx is too varied for a useful grep-based vocabulary lint, and the 2026-05-09 audit found no significant leakage. Doc commitment plus PR review is the mechanism; a lint can be added later if drift recurs. This vocabulary is for user-facing surfaces only — seam-level / internal vocabulary stays rich per "Internal aesthetic" above.
 
 ## Architectural drift patterns to watch
 
-Loose runtime coupling is correct and stays — but the seams it creates are informal. When designing or reviewing a change, watch for these and prefer **unification at the seam** over a bridge; collapse a bridge in the same PR that introduces it. All six are caught mechanically (`lint-seams`, `check-api-contract`, `check-events`, and the `artifacts_external_ref_no_provider_fields` CHECK constraint); the list is the glossary of failure modes those checks were designed against.
+Loose runtime coupling is correct and stays — but the seams it creates are informal. When designing or reviewing, prefer **unification at the seam** over a bridge; collapse a bridge in the same PR that introduces it. All are caught mechanically (`lint-seams`, `check-api-contract`, `check-events`, and the `artifacts_external_ref_no_provider_fields` CHECK constraint); the list is the glossary of failure modes those checks target.
 
-- **Parallel schemas across subsystems.** Two subsystems persisting their own version of one concept. The spine wins — collapse the private table into the spine table with a `workspace_id` discriminator. The mirror/translator pattern is a bridge, not a destination.
+- **Parallel schemas across subsystems.** Two subsystems persisting their own version of one concept. The spine wins — collapse the private table into the spine table with a `workspace_id` discriminator. Mirror/translator is a bridge, not a destination.
 - **Producer with no consumer.** New event types are a contract: producer + consumer + deploy land together, or the producer waits.
 - **In-memory caches drifting from the bus.** Default to reading the spine; cache only with an explicit invalidation path tied to a spine event.
 - **Half-wired API/UI contracts.** Backend and dashboard changes for one surface land in one PR (or two with a contract test that fails until both sides exist).
 - **Divergent shapes from multiple write paths.** Either both paths produce the same shape, or the read side is defensive in one named place — never at every call site.
-- **Compat aliases that ossify.** Land a rename and its alias removal in the same PR; no removal-date window. `lint-seams` hard-fails on new `serde(alias)` and legacy type aliases.
-- **Denormalized external state.** When an external system (GitHub, …) authors a field, copying it into the spine creates a drift surface. Per spec #170, external-origin artifacts are **reference-only**: the spine row carries identity (`external_ref`), *our* derived lifecycle (`state`, `current_version`, `last_observed_at`), and *our* relationships — nothing the external system owns. Provider-authored fields (title, body, labels, author) are hydrated live via a portal proxy, not denormalized. New integrations ship a proxy, not a denormalizer; the CHECK constraint rejects a provider title in `artifacts.name` alongside a non-NULL `external_ref` at INSERT time.
+- **Compat aliases that ossify.** Land a rename and its alias removal in the same PR, no removal-date window. `lint-seams` hard-fails on new `serde(alias)` and legacy type aliases.
+- **Denormalized external state.** Copying an externally-authored field (GitHub, …) into the spine creates a drift surface. Per spec #170, external-origin artifacts are **reference-only**: the spine row carries identity (`external_ref`), *our* derived lifecycle (`state`, `current_version`, `last_observed_at`), and *our* relationships — nothing the external system owns. Provider-authored fields (title, body, labels, author) are hydrated live via a portal proxy. New integrations ship a proxy, not a denormalizer; the CHECK constraint rejects a provider title in `artifacts.name` alongside a non-NULL `external_ref` at INSERT time.
 
 ### Occam's-razor checklist (spec #275)
 
-The patterns above all share one shape: a wire connected at one end. The seam rule's six levers caught seam-level instances; spec #275 adds three xtask lints that catch the **interior** instances — speculative abstractions and untracked defers that drift inside a single subsystem. Same warn-then-ratchet rollout as `check-file-budget`.
+The patterns above share one shape: a wire connected at one end. The seam levers caught seam-level instances; spec #275 adds xtask lints for the **interior** ones — speculative abstractions and untracked defers inside a single subsystem (same warn-then-ratchet rollout as `check-file-budget`). Each escapes with `// occam-allow: <reason>`.
 
-- **`xtask check-orphan-crates`** — flags library crates (non-`[[bin]]`) with zero in-tree reverse deps. Would have caught the warehouse / delivery skeleton on day one. Escape: `// occam-allow: <reason>` in `src/lib.rs`.
-- **`xtask check-single-impl-traits`** — flags `pub trait` defs with exactly one implementor in the workspace (counting test impls so a mock doesn't false-trigger). A trait with one impl is a speculative seam; inline it or wait for the second implementor. Escape: `// occam-allow: <reason>` on the line above the `pub trait`.
-- **`xtask check-deferred-todos`** — flags `TODO` / `FIXME` / `#[allow(dead_code)]` / `// phase N` / `// vN.M` without a same-line `#NNN` issue reference. Untracked defers evaporate at squash-merge; every "for later" must point at a real spec or carry `// occam-allow: <reason>`.
-- **`xtask check-events`** also surfaces diagnostic-only event rows without a `tracking_issue` (warn-mode), so dangling skeletons in the manifest get re-examined too.
-- **`xtask check-adr-adoption`** (ADR 0024 / 0025, spec #506) — flags `Accepted` ADRs (`docs/adr/`) whose `## Adoption checklist` still has unchecked `- [ ]` items. An Accepted decision with owed follow-through is a wire connected at one end. Escape: mark the ADR `Adoption: ongoing` in its metadata block while implementation is genuinely in flight, then flip to `enforced` and tick the boxes as the work lands.
+- **`xtask check-orphan-crates`** — flags library crates (non-`[[bin]]`) with zero in-tree reverse deps. Catches dead skeleton crates on day one.
+- **`xtask check-single-impl-traits`** — flags `pub trait` defs with exactly one implementor in the workspace (counting test impls so a mock doesn't false-trigger). A one-impl trait is a speculative seam; inline it or wait for the second impl.
+- **`xtask check-deferred-todos`** — flags `TODO` / `FIXME` / `#[allow(dead_code)]` / `// phase N` / `// vN.M` without a same-line `#NNN` issue reference. Every "for later" must point at a real spec.
+- **`xtask check-events`** also surfaces diagnostic-only event rows without a `tracking_issue` (warn-mode), so dangling skeletons in the manifest get re-examined.
+- **`xtask check-adr-adoption`** (ADR 0024 / 0025, spec #506) — flags `Accepted` ADRs whose `## Adoption checklist` still has unchecked `- [ ]` items. Mark the ADR `Adoption: ongoing` while implementation is in flight, then flip to `enforced` and tick the boxes as work lands.
 
-All five land in warn mode initially (warn-then-ratchet); a follow-up spec will ratchet them to fail once the floor is clean.
+All five land in warn mode initially; a follow-up spec ratchets them to fail once the floor is clean.
 
 ## Workspace layout
 
@@ -264,16 +248,9 @@ apps/
 
 Crate → support-crate dependencies (no crate depends on a sibling subsystem):
 
-- `onsager-substrate`  → `onsager-artifact`
-- `onsager-nodes`      → `onsager-{artifact, substrate}`
-- `onsager-observers`  → `onsager-{artifact, spine}`
-- `onsager-registry`   → `onsager-{artifact, spine}`
-- `onsager-github`     → `onsager-{artifact, spine}`
-- `onsager-portal`     → `onsager-{artifact, spine, github, registry, substrate}` (edge)
-- `onsager-scheduler`  → `onsager-{artifact, spine, substrate, nodes, agent-spawn}`
-- `onsager-trigger`    → `onsager-{spine, registry}`
-- `stiglab`            → `onsager-{artifact, spine, github, agent-spawn}`
-- `synodic`            → `onsager-{artifact, spine}`
+- `onsager-substrate` → `artifact`; `onsager-nodes` → `{artifact, substrate}`; `onsager-observers` / `onsager-registry` / `onsager-github` → `{artifact, spine}`
+- `onsager-portal` (edge) → `{artifact, spine, github, registry, substrate}`; `onsager-scheduler` → `{artifact, spine, substrate, nodes, agent-spawn}`; `onsager-trigger` → `{spine, registry}`
+- `stiglab` → `{artifact, spine, github, agent-spawn}`; `synodic` → `{artifact, spine}` (all `onsager-*`)
 
 ## Getting Started
 
@@ -288,30 +265,30 @@ just smoke-test                 # verify everything works (in another terminal)
 To run agent sessions, add your `CLAUDE_CODE_OAUTH_TOKEN` via Dashboard > Settings > Credentials (encrypted at rest, passed to agents as env vars).
 
 Services (`just dev` launches portal, stiglab, synodic, and the substrate scheduler):
-- **Dashboard**: http://localhost:5173 (Vite dev server with HMR)
+- **Dashboard**: http://localhost:5173 (Vite dev server, HMR)
 - **Portal (edge)**: http://localhost:3002 (dashboard API, GitHub webhooks, OAuth, credentials, MCP server, `/agent/ws`)
 - **Stiglab API**: http://localhost:3000 (agent sessions, nodes, WebSocket)
 - **Synodic API**: http://localhost:3001 (governance)
 - **onsager-scheduler**: substrate scheduler (no HTTP — watches the spine for `trigger.fired`)
 - **Postgres**: localhost:5432 (event spine)
 
-To stop: `Ctrl+C` for services, `just dev-down` for Postgres.
+Stop with `Ctrl+C` for services, `just dev-down` for Postgres.
 
 ### Parallel dev environments (per-worktree slots)
 
-When two agents (or a human + an agent) need to run the stack on the same VM at the same time, the **slot system** (#194) gives each worktree a private, fully-containerized copy of the stack on a disjoint port block. Slot 0 is the main checkout and uses today's port layout via `just dev`; slots 1..=99 use a 10-port stride starting at 9000.
+When two agents (or a human + an agent) run the stack on the same VM at once, the **slot system** (#194) gives each worktree a private, fully-containerized copy on a disjoint port block. Slot 0 is the main checkout (`just dev`, today's ports); slots 1..=99 use a 10-port stride from 9000.
 
 ```bash
-just worktree-new feat-a              # branch + slot + compose project, all up
-just worktree-list                    # see slots, ports, container status
-just slot-exec  feat-a cargo test -p stiglab    # one-off command in the slot
-just worktree-tunnel feat-a           # SSH `-L` flags for laptop access
-just worktree-up    feat-a            # bring an existing slot back after reboot
-just worktree-rm    feat-a            # tear down + remove worktree (keeps branch)
-just worktree-rm    feat-a --with-branch  # also delete the branch
+just worktree-new feat-a       # branch + slot + compose project, all up
+just worktree-list             # see slots, ports, container status
+just slot-exec feat-a cargo test -p stiglab   # one-off command in the slot
+just worktree-tunnel feat-a    # SSH `-L` flags for laptop access
+just worktree-up feat-a        # bring an existing slot back after reboot
+just worktree-rm feat-a        # tear down + remove worktree (keeps branch)
+just worktree-rm feat-a --with-branch   # also delete the branch
 ```
 
-The slot's edge port serves the dashboard and reverse-proxies the backend APIs same-origin (`/api/synodic/...`, `/api/...` → portal/stiglab), so the dashboard makes relative-path fetches with no per-environment URL config and no CORS surface. SSH-forward `localhost:9010` (slot 1's edge), open `http://localhost:9010/`, done. See [spec #194](https://github.com/onsager-ai/onsager/issues/194).
+The slot's edge port serves the dashboard and reverse-proxies the backend APIs same-origin (`/api/synodic/...`, `/api/...` → portal/stiglab), so the dashboard makes relative-path fetches with no per-environment URL config and no CORS surface. SSH-forward `localhost:9010` (slot 1's edge), open it, done. See [spec #194](https://github.com/onsager-ai/onsager/issues/194).
 
 ## Build & Test
 
@@ -322,62 +299,46 @@ just test-all        # All tests including spine integration tests
 just lint            # fmt + clippy + eslint
 ```
 
-Or directly:
-
-```bash
-cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-```
+(These wrap the standard `cargo build/test/clippy/fmt --workspace` and the dashboard's pnpm scripts.)
 
 ## Conventions
 
-- Rust edition 2024, rustfmt formatting, clippy with warnings-as-errors
+- Rust edition 2024, rustfmt, clippy with warnings-as-errors
 - thiserror for library errors, anyhow for application errors
 - Small focused commits, imperative mood, under 72 characters
 - Unit tests co-located in `#[cfg(test)]` modules
-- All internal deps use `path = "../..."` -- no git deps, no crates.io
+- Internal deps use `path = "../..."` — no git deps, no crates.io
 
 ## Merge policy
 
-- **PR → main: squash only.** Merge commits and rebase-merges are disabled at the repo level; the GitHub merge button only offers squash. One PR = one commit on `main`.
-- **main → PR: rebase, not merge.** When updating a PR branch with `main` (locally or via the "Update branch" button), use rebase. This keeps PR history linear and avoids merge commits inside feature branches that would then be squashed away anyway.
-- Local equivalent: `git pull --rebase origin main` (or set `git config --global pull.rebase true` once).
+- **PR → main: squash only.** Merge and rebase-merges are disabled at the repo level; the merge button only offers squash. One PR = one commit on `main`.
+- **main → PR: rebase, not merge.** Update a PR branch with `main` via rebase (locally or the "Update branch" button) to keep history linear and avoid merge commits that get squashed away anyway. Local: `git pull --rebase origin main` (or set `git config --global pull.rebase true` once).
 
 ## Environment variables
 
 Subsystem-specific env vars worth calling out:
 
-- Synodic-gate fail policy — what verdict is returned when the Synodic gate is unreachable, returns 5xx, or its response cannot be parsed. One of `escalate` | `deny` | `allow`: `escalate` parks the decision non-blockingly; `deny` keeps the artifact in its current state; `allow` is the legacy fail-open behavior and must be opted into explicitly. 4xx responses and parse errors always deny regardless of policy — those are protocol bugs that should surface loudly. This was forge's `SYNODIC_FAIL_POLICY` env var; in the 0.2 substrate the same choice lives in the Verify executor (`crates/onsager-nodes/src/verify.rs`). See `crates/synodic/CLAUDE.md`.
+- Synodic-gate fail policy — the verdict returned when the Synodic gate is unreachable, returns 5xx, or can't be parsed. One of `escalate` | `deny` | `allow`: `escalate` parks the decision non-blockingly; `deny` keeps the artifact in its current state; `allow` is legacy fail-open and must be opted into explicitly. 4xx and parse errors always deny regardless of policy — those are protocol bugs that should surface loudly. Was forge's `SYNODIC_FAIL_POLICY`; in the 0.2 substrate the choice lives in the Verify executor (`crates/onsager-nodes/src/verify.rs`). See `crates/synodic/CLAUDE.md`.
 
 ## File editing (Claude Code tools)
 
-Prefer the `Edit` tool over `Write` for any change to an existing file. Full rewrites with `Write` can hit a stream idle timeout on files larger than ~150 lines and there is no automatic retry — a stalled `Write` silently leaves the file in its previous state or, worse, half-written. If a rewrite is genuinely necessary, split it: write a smaller initial version, then extend with follow-up `Edit` calls.
+Prefer `Edit` over `Write` for any change to an existing file. Full rewrites with `Write` can hit a stream idle timeout on files larger than ~150 lines with no automatic retry — a stalled `Write` silently leaves the file in its previous state or half-written. If a rewrite is genuinely necessary, split it: write a smaller initial version, then extend with follow-up `Edit` calls.
 
 ## Session defaults (Claude Code cloud)
 
 If the current branch name starts with `claude/` (the prefix cloud sessions create), treat PR creation and CI auto-fix as part of finishing the task — do not wait to be asked:
 
 1. Push the branch.
-2. Open a pull request. **Before calling `mcp__github__create_pull_request`, answer the spec-vs-trivial gate** (the same gate `pr-spec-sync.yml` enforces) and bake the answer into the PR at creation time:
-   - If a spec issue exists or you should write one, include `Closes #N` or `Part of #N` in the PR body.
-   - If the change is genuinely `trivial` (typo, doc-only, formatting, one-line obvious fix — see `onsager-dev-process` for the full list), pass `labels: ["trivial"]` on creation.
-   - Default is spec, not trivial. When in doubt, create the spec issue first via the `issue-spec` skill, then open the PR with `Closes #N`.
+2. Open a pull request. **Before calling `mcp__github__create_pull_request`, answer the spec-vs-trivial gate** (the same gate `pr-spec-sync.yml` enforces) and bake the answer into the PR at creation:
+   - If a spec issue exists or you should write one, include `Closes #N` or `Part of #N` in the body.
+   - If the change is genuinely `trivial` (typo, doc-only, formatting, one-line obvious fix — see `onsager-dev-process`), pass `labels: ["trivial"]`.
+   - Default is spec, not trivial. When in doubt, create the spec issue first via the `issue-spec` skill, then open the PR with `Closes #N`. This answers the bot's `<!-- pr-spec-sync:no-spec-link -->` reminder up front and keeps it silent.
 
-   This is the upstream answer to the bot's `<!-- pr-spec-sync:no-spec-link -->` reminder — answering it at PR creation keeps the bot silent.
-
-   **Always pass `body` as a plain inline string.** Never wrap it in shell heredoc syntax (`$(cat <<'EOF'...EOF)`) — that is Bash substitution and produces a literal `$(cat <<'EOF'...` in the PR description when passed to an MCP tool parameter.
+   **Always pass `body` as a plain inline string** — never shell heredoc (`$(cat <<'EOF'...EOF)`), which is Bash substitution and lands a literal `$(cat <<'EOF'...` in the PR when passed to an MCP tool parameter.
 3. Subscribe to PR activity so CI failures and review comments are auto-fixed.
 
 Skip this for branches that don't start with `claude/` (local/manual work).
 
 ## Per-crate context
 
-Several crates carry their own CLAUDE.md or `.claude/` directory with crate-specific instructions:
-
-- `crates/onsager-spine/CLAUDE.md`
-- `crates/onsager-portal/CLAUDE.md`
-- `crates/onsager-registry/CLAUDE.md`
-- `crates/stiglab/CLAUDE.md` + `crates/stiglab/.claude/`
-- `crates/synodic/CLAUDE.md` + `crates/synodic/.claude/`
+Several crates carry their own CLAUDE.md or `.claude/` directory with crate-specific instructions: `onsager-spine`, `onsager-portal`, `onsager-registry`, `stiglab` (+ `.claude/`), `synodic` (+ `.claude/`).
