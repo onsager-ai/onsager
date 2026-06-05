@@ -1,6 +1,10 @@
-import { Sparkles } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   WORKFLOW_PRESETS,
   type WorkflowDocument,
@@ -12,9 +16,11 @@ export interface PresetPickerProps {
   onApply: (next: WorkflowDocument) => void
 }
 
-// Preset picker shown above the chat builder. Applying a preset fills the
+// Preset picker shown above the card stack. Applying a preset fills the
 // stage list while keeping the trigger (install/repo/label) intact so the
-// user doesn't have to re-pick a repo they already chose.
+// user doesn't have to re-pick a repo they already chose. De-emphasized to
+// one compact line — the name + card stack are the focus, presets are a
+// shortcut.
 export function PresetPicker({ draft, onApply }: PresetPickerProps) {
   const apply = (preset: WorkflowPreset) => {
     const next = preset.build(draft.trigger)
@@ -26,30 +32,29 @@ export function PresetPicker({ draft, onApply }: PresetPickerProps) {
     })
   }
 
+  const onValueChange = (id: string | null) => {
+    const preset = WORKFLOW_PRESETS.find((p) => p.id === id)
+    if (preset) apply(preset)
+  }
+
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-3 p-4">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Sparkles className="h-3.5 w-3.5" />
-          Start from a preset, or build from scratch below.
-        </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <span className="shrink-0">Start from a preset</span>
+      <Select value="" onValueChange={onValueChange}>
+        <SelectTrigger size="sm" className="w-full" aria-label="Start from a preset">
+          <SelectValue placeholder="Choose a preset…" />
+        </SelectTrigger>
+        <SelectContent>
           {WORKFLOW_PRESETS.map((p) => (
-            <Button
-              key={p.id}
-              type="button"
-              variant="outline"
-              className="h-auto flex-col items-start gap-1 whitespace-normal p-3 text-left"
-              onClick={() => apply(p)}
-            >
-              <span className="text-sm font-medium">{p.label}</span>
-              <span className="text-xs font-normal text-muted-foreground">
-                {p.description}
+            <SelectItem key={p.id} value={p.id}>
+              <span className="flex flex-col">
+                <span className="text-sm font-medium text-foreground">{p.label}</span>
+                <span className="text-xs text-muted-foreground">{p.description}</span>
               </span>
-            </Button>
+            </SelectItem>
           ))}
-        </div>
-      </CardContent>
-    </Card>
+        </SelectContent>
+      </Select>
+    </div>
   )
 }

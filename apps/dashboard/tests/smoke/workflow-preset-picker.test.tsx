@@ -7,15 +7,35 @@ import {
   type WorkflowDocument,
 } from "@/components/workflows/workflow-draft"
 
+// Open the preset dropdown and choose the option whose label matches.
+function choosePreset(label: string) {
+  fireEvent.click(screen.getByRole("combobox", { name: "Start from a preset" }))
+  fireEvent.click(screen.getByText(label))
+}
+
 describe("PresetPicker", () => {
-  it("renders one button per preset", () => {
+  it("renders a single compact preset dropdown, not a button grid", () => {
     render(<PresetPicker draft={emptyDocument()} onApply={() => {}} />)
+    // One de-emphasized control: the Select trigger, labeled for a11y.
+    expect(
+      screen.getByRole("combobox", { name: "Start from a preset" }),
+    ).toBeTruthy()
+    // The old per-preset buttons are gone.
     for (const p of WORKFLOW_PRESETS) {
-      expect(screen.getByRole("button", { name: new RegExp(p.label) })).toBeTruthy()
+      expect(screen.queryByRole("button", { name: new RegExp(p.label) })).toBeNull()
     }
   })
 
-  it("applying a preset fills stages but preserves the existing trigger", () => {
+  it("lists every preset (label + description) inside the dropdown", () => {
+    render(<PresetPicker draft={emptyDocument()} onApply={() => {}} />)
+    fireEvent.click(screen.getByRole("combobox", { name: "Start from a preset" }))
+    for (const p of WORKFLOW_PRESETS) {
+      expect(screen.getByText(p.label)).toBeTruthy()
+      expect(screen.getByText(p.description)).toBeTruthy()
+    }
+  })
+
+  it("choosing a preset fills stages but preserves the existing trigger", () => {
     const onApply = vi.fn()
     const draft: WorkflowDocument = {
       name: "",
@@ -28,7 +48,7 @@ describe("PresetPicker", () => {
       stages: [],
     }
     render(<PresetPicker draft={draft} onApply={onApply} />)
-    fireEvent.click(screen.getByRole("button", { name: /Issue → PR/ }))
+    choosePreset("Issue → PR")
     const next = onApply.mock.calls[0][0] as WorkflowDocument
     expect(next.trigger).toEqual(draft.trigger)
     expect(next.stages.length).toBeGreaterThan(0)
@@ -41,7 +61,7 @@ describe("PresetPicker", () => {
       name: "My custom workflow",
     }
     render(<PresetPicker draft={draft} onApply={onApply} />)
-    fireEvent.click(screen.getByRole("button", { name: /Issue → PR/ }))
+    choosePreset("Issue → PR")
     const next = onApply.mock.calls[0][0] as WorkflowDocument
     expect(next.name).toBe("My custom workflow")
   })
@@ -49,7 +69,7 @@ describe("PresetPicker", () => {
   it("falls back to the preset-generated name when the draft name is blank", () => {
     const onApply = vi.fn()
     render(<PresetPicker draft={emptyDocument()} onApply={onApply} />)
-    fireEvent.click(screen.getByRole("button", { name: /Issue → PR/ }))
+    choosePreset("Issue → PR")
     const next = onApply.mock.calls[0][0] as WorkflowDocument
     expect(next.name.length).toBeGreaterThan(0)
   })

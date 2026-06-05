@@ -5,6 +5,7 @@ import { api, type CreateWorkflowRequest, type GitHubAppInstallation } from "@/l
 import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { CardStackEditor } from "./CardStackEditor"
 import { PresetPicker } from "./PresetPicker"
 import {
@@ -28,6 +29,9 @@ export function WorkflowBuilder({
   onCreated,
 }: WorkflowBuilderProps) {
   const [draft, setDraft] = useState<WorkflowDocument>(initialDraft ?? emptyDocument())
+  // Creation and activation are distinct acts; default OFF preserves today's
+  // draft-by-default behavior (the old "Save as draft" path).
+  const [active, setActive] = useState(false)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const activeWorkspace = useOptionalActiveWorkspace()
@@ -84,25 +88,26 @@ export function WorkflowBuilder({
         </p>
       )}
 
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <label
+          htmlFor="workflow-active"
+          className="flex items-center gap-2 text-sm font-medium"
+        >
+          <Switch
+            id="workflow-active"
+            checked={active}
+            onCheckedChange={setActive}
+          />
+          Active
+        </label>
         <Button
           type="button"
-          variant="outline"
           size="lg"
-          className="w-full sm:flex-1"
+          className="w-full sm:w-auto"
           disabled={!canSave || create.isPending}
-          onClick={() => save(false)}
+          onClick={() => save(active)}
         >
-          Save as draft
-        </Button>
-        <Button
-          type="button"
-          size="lg"
-          className="w-full sm:flex-1"
-          disabled={!canSave || create.isPending}
-          onClick={() => save(true)}
-        >
-          {create.isPending ? "Saving…" : "Activate workflow"}
+          {create.isPending ? "Creating…" : "Create workflow"}
         </Button>
       </div>
     </div>
