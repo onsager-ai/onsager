@@ -1,6 +1,8 @@
 import { useState } from "react"
-import { ChevronRight, GitBranch, Tag } from "lucide-react"
+import { Link } from "react-router-dom"
+import { ChevronRight, FolderGit2, GitBranch, Tag } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import { type GitHubAppInstallation } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -113,6 +115,7 @@ function TriggerForm({
   onChange: (next: WorkflowTriggerDraft) => void
 }) {
   const isManual = value.kind_tag === "manual"
+  const workspace = useOptionalActiveWorkspace()
 
   return (
     <>
@@ -122,21 +125,56 @@ function TriggerForm({
       />
 
       {isManual ? (
-        <div className="space-y-1.5">
-          <label htmlFor="manual-trigger-name" className="text-sm font-medium">
-            Trigger name
-          </label>
-          <Input
-            id="manual-trigger-name"
-            value={value.manual_name}
-            onChange={(e) => onChange({ ...value, manual_name: e.target.value })}
-            placeholder="e.g. Run nightly batch"
-          />
-          <p className="text-xs text-muted-foreground">
-            The button label; fire it from the dashboard or{" "}
-            <code>onsager trigger fire</code>. No repo required.
-          </p>
-        </div>
+        <>
+          <div className="space-y-1.5">
+            <label htmlFor="manual-trigger-name" className="text-sm font-medium">
+              Trigger name
+            </label>
+            <Input
+              id="manual-trigger-name"
+              value={value.manual_name}
+              onChange={(e) =>
+                onChange({ ...value, manual_name: e.target.value })
+              }
+              placeholder="e.g. Run nightly batch"
+            />
+            <p className="text-xs text-muted-foreground">
+              The button label; fire it from the dashboard or{" "}
+              <code>onsager trigger fire</code>. No repo required.
+            </p>
+          </div>
+
+          {/* Repo-less workflows are workspace-scoped (#553): the run is
+              handed every repo bound to the workspace and the agent clones
+              what it needs. Per-workflow repo pinning is a backend
+              follow-up (#566); for now this states the actual runtime
+              behavior rather than offering a choice we can't honor. */}
+          <div className="space-y-1.5">
+            <span className="text-sm font-medium">Repositories</span>
+            <div className="flex items-start gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <FolderGit2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                Runs against{" "}
+                <span className="font-medium text-foreground">
+                  any repository bound to this workspace
+                </span>
+                {" "}— the agent gets the whole set and clones what it needs.
+                {workspace ? (
+                  <>
+                    {" "}
+                    <Link
+                      to={`/workspaces/${workspace.slug}/settings`}
+                      className="underline underline-offset-2 hover:text-foreground"
+                    >
+                      Manage workspace repositories
+                    </Link>
+                    .
+                  </>
+                ) : null}
+              </span>
+            </div>
+          </div>
+        </>
       ) : (
         <>
           <div className="space-y-1.5">

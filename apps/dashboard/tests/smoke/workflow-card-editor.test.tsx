@@ -64,6 +64,15 @@ describe("Trigger card editor", () => {
     manual_name: "",
   }
 
+  const manual: WorkflowTriggerDraft = {
+    kind_tag: "manual",
+    install_id: "",
+    repo_owner: "",
+    repo_name: "",
+    label: "",
+    manual_name: "Run nightly batch",
+  }
+
   it("has no free-text inputs for the linkable fields (install/repo/label)", () => {
     mount(
       <TriggerCard
@@ -78,6 +87,41 @@ describe("Trigger card editor", () => {
     // should contain zero native `<input type="text">` fields.
     const textboxes = screen.queryAllByRole("textbox")
     expect(textboxes.length).toBe(0)
+  })
+
+  it("tells a repo-less (manual) trigger it runs workspace-scoped (#553)", () => {
+    mount(
+      <TriggerCard
+        workspaceId="t1"
+        installations={[]}
+        value={manual}
+        onChange={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Edit trigger/i }))
+    // A repo-less workflow defaults to "any bound repo" — the form states
+    // that runtime behavior rather than pinning a repo. Mutation guard:
+    // delete the Repositories note from the manual branch and this fails.
+    expect(
+      screen.getByText(/any repository bound to this workspace/i),
+    ).toBeInTheDocument()
+  })
+
+  it("does not show the workspace-scoped note for a GitHub webhook trigger", () => {
+    mount(
+      <TriggerCard
+        workspaceId="t1"
+        installations={[]}
+        value={empty}
+        onChange={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Edit trigger/i }))
+    // GitHub webhook triggers pin exactly one repo via the webhook itself,
+    // so the workspace-scoped note must not appear (no regression).
+    expect(
+      screen.queryByText(/any repository bound to this workspace/i),
+    ).not.toBeInTheDocument()
   })
 })
 
