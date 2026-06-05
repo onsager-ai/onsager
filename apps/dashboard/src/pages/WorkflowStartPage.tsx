@@ -207,10 +207,12 @@ function RepoRow({
     // explicit 400 on the backend). The draft here is only used to
     // compute a nice default name.
     const draft = githubIssueToPrPreset({
+      kind_tag: "github_issue_webhook",
       install_id: installId,
       repo_owner: repo.owner,
       repo_name: repo.name,
       label,
+      manual_name: "",
     });
     create.mutate({
       workspace_id: workspaceId,

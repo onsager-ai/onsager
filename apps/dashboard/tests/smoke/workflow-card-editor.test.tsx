@@ -56,16 +56,18 @@ describe("Stage card editor", () => {
 
 describe("Trigger card editor", () => {
   const empty: WorkflowTriggerDraft = {
+    kind_tag: "github_issue_webhook",
     install_id: "",
     repo_owner: "",
     repo_name: "",
     label: "",
+    manual_name: "",
   }
 
   it("has no free-text inputs for the linkable fields (install/repo/label)", () => {
     mount(
       <TriggerCard
-        tenantId="t1"
+        workspaceId="t1"
         installations={[]}
         value={empty}
         onChange={() => {}}
@@ -82,10 +84,12 @@ describe("Trigger card editor", () => {
 describe("workflow-draft serialization", () => {
   it("only produces structured trigger values on the wire", () => {
     const t: WorkflowTriggerDraft = {
+      kind_tag: "github_issue_webhook",
       install_id: "inst_1",
       repo_owner: "onsager-ai",
       repo_name: "onsager",
       label: "factory",
+      manual_name: "",
     }
     expect(isTriggerReady(t)).toBe(true)
     const wire = draftToRequestTrigger(t)
@@ -103,18 +107,22 @@ describe("workflow-draft serialization", () => {
   it("rejects drafts with empty linkable fields", () => {
     expect(
       isTriggerReady({
+        kind_tag: "github_issue_webhook",
         install_id: "inst_1",
         repo_owner: "onsager-ai",
         repo_name: "onsager",
         label: "",
+        manual_name: "",
       }),
     ).toBe(false)
     expect(
       isTriggerReady({
+        kind_tag: "github_issue_webhook",
         install_id: "",
         repo_owner: "a",
         repo_name: "b",
         label: "c",
+        manual_name: "",
       }),
     ).toBe(false)
   })

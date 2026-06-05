@@ -4,6 +4,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { type GitHubAppInstallation } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import {
   Sheet,
   SheetContent,
@@ -76,7 +77,9 @@ export function TriggerCard({
           <SheetHeader>
             <SheetTitle>Edit trigger</SheetTitle>
             <SheetDescription>
-              Pick the repo and label that starts the workflow.
+              {value.kind_tag === "manual"
+                ? "Name the manual trigger that starts the workflow."
+                : "Pick the repo and label that starts the workflow."}
             </SheetDescription>
           </SheetHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4">
@@ -109,53 +112,78 @@ function TriggerForm({
   value: WorkflowTriggerDraft
   onChange: (next: WorkflowTriggerDraft) => void
 }) {
+  const isManual = value.kind_tag === "manual"
+
   return (
     <>
-      <TriggerKindPicker kindTag="github_issue_webhook" />
+      <TriggerKindPicker
+        kindTag={value.kind_tag}
+        onKindChange={(kind_tag) => onChange({ ...value, kind_tag })}
+      />
 
-      <div className="space-y-1.5">
-        <span className="text-sm font-medium">Repository</span>
-        <RepoCombobox
-          workspaceId={workspaceId}
-          installations={installations}
-          installId={value.install_id}
-          repoOwner={value.repo_owner}
-          repoName={value.repo_name}
-          onChange={(next) =>
-            onChange({
-              ...value,
-              install_id: next.install_id,
-              repo_owner: next.repo_owner,
-              repo_name: next.repo_name,
-              label:
-                next.install_id === value.install_id &&
-                next.repo_owner === value.repo_owner &&
-                next.repo_name === value.repo_name
-                  ? value.label
-                  : "",
-            })
-          }
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <span className="text-sm font-medium">Trigger label</span>
-        {value.install_id && value.repo_owner && value.repo_name ? (
-          <LabelCombobox
-            workspaceId={workspaceId}
-            installId={value.install_id}
-            repoOwner={value.repo_owner}
-            repoName={value.repo_name}
-            value={value.label || null}
-            onChange={(label) => onChange({ ...value, label })}
+      {isManual ? (
+        <div className="space-y-1.5">
+          <label htmlFor="manual-trigger-name" className="text-sm font-medium">
+            Trigger name
+          </label>
+          <Input
+            id="manual-trigger-name"
+            value={value.manual_name}
+            onChange={(e) => onChange({ ...value, manual_name: e.target.value })}
+            placeholder="e.g. Run nightly batch"
           />
-        ) : (
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <GitBranch className="h-3.5 w-3.5" />
-            Pick a repository above.
+          <p className="text-xs text-muted-foreground">
+            The button label; fire it from the dashboard or{" "}
+            <code>onsager trigger fire</code>. No repo required.
           </p>
-        )}
-      </div>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-1.5">
+            <span className="text-sm font-medium">Repository</span>
+            <RepoCombobox
+              workspaceId={workspaceId}
+              installations={installations}
+              installId={value.install_id}
+              repoOwner={value.repo_owner}
+              repoName={value.repo_name}
+              onChange={(next) =>
+                onChange({
+                  ...value,
+                  install_id: next.install_id,
+                  repo_owner: next.repo_owner,
+                  repo_name: next.repo_name,
+                  label:
+                    next.install_id === value.install_id &&
+                    next.repo_owner === value.repo_owner &&
+                    next.repo_name === value.repo_name
+                      ? value.label
+                      : "",
+                })
+              }
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="text-sm font-medium">Trigger label</span>
+            {value.install_id && value.repo_owner && value.repo_name ? (
+              <LabelCombobox
+                workspaceId={workspaceId}
+                installId={value.install_id}
+                repoOwner={value.repo_owner}
+                repoName={value.repo_name}
+                value={value.label || null}
+                onChange={(label) => onChange({ ...value, label })}
+              />
+            ) : (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <GitBranch className="h-3.5 w-3.5" />
+                Pick a repository above.
+              </p>
+            )}
+          </div>
+        </>
+      )}
     </>
   )
 }
@@ -164,6 +192,12 @@ function summarizeTrigger(t: WorkflowTriggerDraft): {
   title: string
   detail: string
 } {
+  if (t.kind_tag === "manual") {
+    return {
+      title: t.manual_name.trim() || "Name the trigger",
+      detail: "Fires manually — no repo required",
+    }
+  }
   if (!t.install_id || !t.repo_owner || !t.repo_name) {
     return {
       title: "Pick a repository",

@@ -54,7 +54,11 @@ export function CardStackEditor({
             Flow
           </div>
           <ArtifactFlowOverview
-            triggerLabel={draft.trigger.label}
+            triggerLabel={
+              draft.trigger.kind_tag === "manual"
+                ? draft.trigger.manual_name
+                : draft.trigger.label
+            }
             stages={draft.stages}
             currentStageIndex={currentStageIndex}
           />

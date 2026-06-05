@@ -36,7 +36,14 @@ function newId(): string {
 function emptyDocument(): WorkflowDocument {
   return {
     name: "",
-    trigger: { install_id: "", repo_owner: "", repo_name: "", label: "" },
+    trigger: {
+      kind_tag: "github_issue_webhook",
+      install_id: "",
+      repo_owner: "",
+      repo_name: "",
+      label: "",
+      manual_name: "",
+    },
     stages: [],
   }
 }
