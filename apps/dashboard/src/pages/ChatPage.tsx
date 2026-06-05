@@ -228,10 +228,16 @@ function extractWorkflowDocument(
     return {
       name,
       trigger: {
+        kind_tag:
+          typeof trigger.kind_tag === "string" && trigger.kind_tag
+            ? trigger.kind_tag
+            : "github_issue_webhook",
         install_id: String(trigger.install_id ?? ""),
         repo_owner: typeof trigger.repo_owner === "string" ? trigger.repo_owner : "",
         repo_name: typeof trigger.repo_name === "string" ? trigger.repo_name : "",
         label: typeof trigger.label === "string" ? trigger.label : "",
+        manual_name:
+          typeof trigger.manual_name === "string" ? trigger.manual_name : "",
       },
       stages,
     }

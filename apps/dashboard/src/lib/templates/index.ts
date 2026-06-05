@@ -52,10 +52,12 @@ export function templateToDocument(template: FtueTemplate): WorkflowDocument {
   return {
     name: template.name,
     trigger: {
+      kind_tag: "github_issue_webhook",
       install_id: "",
       repo_owner: "",
       repo_name: "",
       label: template.trigger_label,
+      manual_name: "",
     },
     stages: template.stages.map((s) =>
       makeStage(s.gate_kind, s.artifact_kind, s.name),

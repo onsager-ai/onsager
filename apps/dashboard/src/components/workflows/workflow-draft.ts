@@ -26,10 +26,23 @@ export interface WorkflowDocument {
 }
 
 export interface WorkflowTriggerDraft {
+  /**
+   * Snake-case registry `kind_tag` for the selected trigger kind (e.g.
+   * `'github_issue_webhook'`, `'manual'`). Drives `isTriggerReady`'s
+   * per-kind readiness branch and which `TriggerKind` variant
+   * `documentToCreateRequest` emits. Defaults to `'github_issue_webhook'`
+   * (the original, GitHub-webhook-only behavior — see `emptyDocument`).
+   */
+  kind_tag: string;
   install_id: string;
   repo_owner: string;
   repo_name: string;
   label: string;
+  /**
+   * Manual-trigger button name; used only when `kind_tag === 'manual'`.
+   * Empty for every other kind.
+   */
+  manual_name: string;
 }
 
 /**
@@ -103,7 +116,14 @@ export function defaultStageName(gate: WorkflowGateKind): string {
 export function emptyDocument(): WorkflowDocument {
   return {
     name: "",
-    trigger: { install_id: "", repo_owner: "", repo_name: "", label: "" },
+    trigger: {
+      kind_tag: "github_issue_webhook",
+      install_id: "",
+      repo_owner: "",
+      repo_name: "",
+      label: "",
+      manual_name: "",
+    },
     stages: [],
   };
 }
@@ -197,6 +217,12 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
 ];
 
 export function isTriggerReady(t: WorkflowTriggerDraft): boolean {
+  // Manual triggers (#561) are repo-less: a non-empty button name is the
+  // only requirement — no install, repo, or label. The GitHub webhook leg
+  // stays exactly as it was (#545: webhook repo is required, no regression).
+  if (t.kind_tag === "manual") {
+    return t.manual_name.trim() !== "";
+  }
   return (
     t.install_id.trim() !== "" &&
     t.repo_owner.trim() !== "" &&
@@ -214,8 +240,8 @@ export function draftToRequestTrigger(
     repo_owner: t.repo_owner,
     repo_name: t.repo_name,
     label: t.label,
-    kind_tag: "github_issue_webhook",
-    manual_name: "",
+    kind_tag: t.kind_tag,
+    manual_name: t.kind_tag === "manual" ? t.manual_name : "",
   };
 }
 
@@ -241,10 +267,30 @@ export function documentToCreateRequest(
   }
   if (!isTriggerReady(doc.trigger)) {
     throw new ApiError(
-      "pick an install, repo, and label before activating",
+      doc.trigger.kind_tag === "manual"
+        ? "name the manual trigger before activating"
+        : "pick an install, repo, and label before activating",
       400,
     );
   }
+
+  // Manual triggers (#561) are repo-less: emit the `manual` variant with
+  // just its button name — no `repo`, no install token-mint hint. The
+  // backend's `trigger.repo` is optional (#545) and a Manual workflow
+  // resolves repos workspace-scoped at runtime (#546/#556).
+  if (doc.trigger.kind_tag === "manual") {
+    return {
+      workspace_id: workspaceId,
+      name: doc.name.trim(),
+      trigger: {
+        kind: "manual",
+        name: doc.trigger.manual_name.trim(),
+      },
+      stages: doc.stages.map(stageToCreateStage),
+      active: activate,
+    };
+  }
+
   const install = installations.find((i) => i.id === doc.trigger.install_id);
   if (!install) {
     throw new ApiError(
@@ -255,9 +301,8 @@ export function documentToCreateRequest(
   return {
     workspace_id: workspaceId,
     name: doc.name.trim(),
-    // Structured trigger (ADR 0024 / spec #509). The UI draft is
-    // GitHub-only today, so we assemble the `github_issue_webhook`
-    // variant; the wire contract accepts any registry trigger kind.
+    // Structured trigger (ADR 0024 / spec #509). The GitHub-webhook leg is
+    // unchanged from before #561 — `github_issue_webhook` with a `repo`.
     trigger: {
       kind: "github_issue_webhook",
       repo: `${doc.trigger.repo_owner}/${doc.trigger.repo_name}`,
