@@ -320,9 +320,13 @@ Subsystem-specific env vars worth calling out:
 
 - Synodic-gate fail policy — the verdict returned when the Synodic gate is unreachable, returns 5xx, or can't be parsed. One of `escalate` | `deny` | `allow`: `escalate` parks the decision non-blockingly; `deny` keeps the artifact in its current state; `allow` is legacy fail-open and must be opted into explicitly. 4xx and parse errors always deny regardless of policy — those are protocol bugs that should surface loudly. Was forge's `SYNODIC_FAIL_POLICY`; in the 0.2 substrate the choice lives in the Verify executor (`crates/onsager-nodes/src/verify.rs`). See `crates/synodic/CLAUDE.md`.
 
+## Code exploration: codegraph vs grep
+
+A gitignored `.codegraph/` index is available (`codegraph_explore`/`callers`/`impact` MCP tools + a `codegraph` CLI) — use it to **orient and traverse**. But it's an *unsound* tree-sitter approximation (silent false negatives on method/trait dispatch, fuzzy on overloads), so **grep stays the source of truth for completeness** — every caller before a rename. See the `codegraph` skill.
+
 ## File editing (Claude Code tools)
 
-Prefer `Edit` over `Write` for any change to an existing file. Full rewrites with `Write` can hit a stream idle timeout on files larger than ~150 lines with no automatic retry — a stalled `Write` silently leaves the file in its previous state or half-written. If a rewrite is genuinely necessary, split it: write a smaller initial version, then extend with follow-up `Edit` calls.
+Prefer `Edit` over `Write` for existing files; a `Write` rewrite over ~150 lines can stall on a stream idle timeout (no retry) and leave the file half-written. Split big rewrites into a small `Write` + `Edit` follow-ups.
 
 ## Session defaults (Claude Code cloud)
 
