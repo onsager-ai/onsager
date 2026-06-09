@@ -5,7 +5,6 @@ import type {
   Workflow,
   WorkflowStage,
   WorkflowGateKind,
-  WorkflowArtifactKind,
   CreateWorkflowRequest,
   CreateWorkflowStage,
   RunDetail,
@@ -29,34 +28,15 @@ interface BackendWorkflowStage {
   params: Record<string, unknown>;
 }
 
-// Legacy `Spec` / `github-issue` / `PullRequest` / `github-pr` get folded
-// into the canonical `Issue` / `PR` names (issue #102). Anything else
-// passes through unchanged — registered custom kinds keep their id.
-export function normalizeWorkflowArtifactKind(
-  kind: string,
-): WorkflowArtifactKind {
-  switch (kind) {
-    case "github-issue":
-    case "Spec":
-      return "Issue";
-    case "github-pr":
-    case "PullRequest":
-      return "PR";
-    default:
-      return kind;
-  }
-}
-
-// Pack a UI stage into the backend's `{ gate_kind, params }` pair. UI-only
-// display fields ride in `params` so they survive the round-trip without
-// a backend-schema change.
+// Pack a UI stage into the backend's `{ gate_kind, params }` pair. The
+// UI-only `name` rides in `params` so it survives the round-trip without a
+// backend-schema change.
 export function stageToCreateStage(s: WorkflowStage): CreateWorkflowStage {
   return {
     gate_kind: s.gate_kind,
     params: {
       ...(s.config ?? {}),
       name: s.name,
-      artifact_kind: s.artifact_kind,
     },
   };
 }
@@ -64,11 +44,9 @@ export function stageToCreateStage(s: WorkflowStage): CreateWorkflowStage {
 function stageFromBackend(s: BackendWorkflowStage): WorkflowStage {
   const params = (s.params ?? {}) as Record<string, unknown>;
   const name = typeof params.name === "string" ? params.name : undefined;
-  // Registry-backed kinds (#102) — accept any string; normalize legacy values.
-  const rawKind =
-    typeof params.artifact_kind === "string" ? params.artifact_kind : "Issue";
-  const artifactKind = normalizeWorkflowArtifactKind(rawKind);
-  // Everything except the UI-only display fields is opaque stage config.
+  // Strip the UI-only display fields. `artifact_kind` is a legacy field
+  // (demoted in #568) dropped on read so it never re-serializes from old
+  // persisted workflows.
   const {
     name: _n,
     artifact_kind: _a,
@@ -80,7 +58,6 @@ function stageFromBackend(s: BackendWorkflowStage): WorkflowStage {
     id: s.id,
     name: name ?? defaultStageName(s.gate_kind),
     gate_kind: s.gate_kind,
-    artifact_kind: artifactKind,
     config,
   };
 }

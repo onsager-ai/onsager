@@ -173,13 +173,12 @@ export interface TriggerManifestEntry {
 
 // Workflow CRUD wrapper shape used by the dashboard's workflow client.
 // The generated `WorkflowStage` describes the spine row; this richer
-// wrapper carries the UI-side `name` / `artifact_kind` / `config`. Phase B
+// wrapper carries the UI-side `name` / `config`. Phase B
 // (#298 sub-issue B) collapses these.
 export interface WorkflowStage {
   id: string;
   name: string;
   gate_kind: import("./generated/WorkflowGateKind").WorkflowGateKind;
-  artifact_kind: WorkflowArtifactKind;
   config: Record<string, unknown>;
 }
 

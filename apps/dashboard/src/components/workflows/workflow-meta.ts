@@ -75,21 +75,6 @@ export function artifactKindMeta(value: WorkflowArtifactKind): ArtifactKindMeta 
   )
 }
 
-// Derive the artifact kind a stage emits from its gate and input kind.
-// Only agent-session can change the artifact kind (issue → PR). All other
-// gates are inspect-and-forward, so the output kind equals the input.
-//
-// Normalizes legacy `github-issue` on the input side so old persisted
-// workflows keep working through the UI transformation.
-export function outputArtifactKind(
-  gate: WorkflowGateKind,
-  input: WorkflowArtifactKind,
-): WorkflowArtifactKind {
-  const canonical = LEGACY_KIND_ALIASES[input] ?? input
-  if (gate === "agent-session" && canonical === "Issue") return "PR"
-  return canonical
-}
-
 export const GATE_KINDS: {
   value: WorkflowGateKind
   label: string

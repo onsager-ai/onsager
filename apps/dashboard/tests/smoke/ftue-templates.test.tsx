@@ -20,12 +20,6 @@ const VALID_GATE_KINDS = new Set([
   "manual-approval",
 ])
 
-// Registered workflow artifact kinds from `crates/onsager-registry/src/
-// catalog.rs` (BUILTIN_WORKFLOW_KINDS). A template's stages and
-// primary_artifact_kind must match one of these — otherwise the workflow
-// can't be persisted and the spec's acceptance criterion #4 fails.
-const REGISTERED_ARTIFACT_KINDS = new Set(["Issue", "PR", "Deployment", "Session"])
-
 // Trigger taxonomy from `crates/onsager-registry/src/triggers.rs`. Per
 // spec #406's Substrate touchpoints, templates must reshape to a coarser
 // existing trigger rather than introducing a new TriggerKind.
@@ -77,22 +71,6 @@ describe("FTUE template manifest (#406)", () => {
       for (const stage of template.stages) {
         expect(VALID_GATE_KINDS.has(stage.gate_kind)).toBe(true)
       }
-    },
-  )
-
-  it.each(TEMPLATES)(
-    "template $id stage artifact kinds are registered",
-    (template: FtueTemplate) => {
-      for (const stage of template.stages) {
-        expect(REGISTERED_ARTIFACT_KINDS.has(stage.artifact_kind)).toBe(true)
-      }
-    },
-  )
-
-  it.each(TEMPLATES)(
-    "template $id primary_artifact_kind is registered",
-    (template: FtueTemplate) => {
-      expect(REGISTERED_ARTIFACT_KINDS.has(template.primary_artifact_kind)).toBe(true)
     },
   )
 

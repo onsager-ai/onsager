@@ -7,7 +7,6 @@ import { FlowRail } from "./FlowRail"
 import { StageEditor } from "./StageEditor"
 import { TriggerEditor } from "./TriggerEditor"
 import { isTriggerReady, makeStage, type WorkflowDocument } from "./workflow-draft"
-import { outputArtifactKind } from "./workflow-meta"
 
 /** Which node the right-pane editor is bound to. Stages are addressed by id
  *  (not index) so the selection survives reorders and neighbour removals. */
@@ -56,13 +55,7 @@ export function FlowEditor({
   }
 
   const addStage = (gate: WorkflowGateKind) => {
-    // Chain the new step onto the previous one's output so the default input
-    // kind is usually already right (Issue → PR → PR …).
-    const prev = draft.stages[draft.stages.length - 1]
-    const input = prev
-      ? outputArtifactKind(prev.gate_kind, prev.artifact_kind)
-      : "Issue"
-    const stage = makeStage(gate, input)
+    const stage = makeStage(gate)
     onChange({ ...draft, stages: [...draft.stages, stage] })
     select({ kind: "stage", id: stage.id })
   }

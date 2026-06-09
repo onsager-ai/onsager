@@ -10,7 +10,7 @@ import {
 // shape. These tests pin the UI → backend adapter against its contract:
 // a structured `trigger: TriggerKind` (ADR 0024 / spec #509), numeric
 // install_id resolved from the install record, `active`, and stage params
-// that carry the UI-only name + artifact_kind alongside any gate config.
+// that carry the UI-only name alongside any gate config.
 describe("documentToCreateRequest", () => {
   const installation: GitHubAppInstallation = {
     id: "inst_abc",
@@ -34,7 +34,6 @@ describe("documentToCreateRequest", () => {
         id: "s1",
         name: "Spec → PR",
         gate_kind: "agent-session",
-        artifact_kind: "github-issue",
         config: { agent_profile: "default" },
       },
     ],
@@ -64,7 +63,7 @@ describe("documentToCreateRequest", () => {
     expect("activate" in out).toBe(false);
   });
 
-  it("maps stages to { gate_kind, params } and carries UI display fields in params", () => {
+  it("maps stages to { gate_kind, params } and carries the UI name in params", () => {
     const out = documentToCreateRequest(draft(), [installation], "t_1", true);
     expect(out.stages).toEqual([
       {
@@ -72,7 +71,6 @@ describe("documentToCreateRequest", () => {
         params: {
           agent_profile: "default",
           name: "Spec → PR",
-          artifact_kind: "github-issue",
         },
       },
     ]);

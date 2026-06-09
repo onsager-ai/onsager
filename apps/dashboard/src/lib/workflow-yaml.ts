@@ -11,11 +11,7 @@ import type {
   WorkflowDocument,
   WorkflowTriggerDraft,
 } from "@/components/workflows/workflow-draft"
-import type {
-  WorkflowArtifactKind,
-  WorkflowGateKind,
-  WorkflowStage,
-} from "@/lib/api"
+import type { WorkflowGateKind, WorkflowStage } from "@/lib/api"
 
 const GATE_KINDS: WorkflowGateKind[] = [
   "agent-session",
@@ -41,7 +37,6 @@ export function workflowDocumentToYaml(doc: WorkflowDocument): string {
         id: s.id,
         name: s.name,
         gate_kind: s.gate_kind,
-        artifact_kind: s.artifact_kind,
         config: s.config,
       })),
     },
@@ -59,9 +54,9 @@ export class WorkflowYamlError extends Error {}
  * inline copy on the YAML side per spec #400's "couldn't parse" path.
  *
  * "Required" mirrors the WorkflowDocument shape: `name`, `trigger.{install_id,
- * repo_owner, repo_name, label}`, every stage's `{id, name, gate_kind,
- * artifact_kind}`. Empty strings are allowed (a half-filled draft still
- * round-trips); missing keys are not.
+ * repo_owner, repo_name, label}`, every stage's `{id, name, gate_kind}`.
+ * Empty strings are allowed (a half-filled draft still round-trips); missing
+ * keys are not.
  */
 export function workflowDocumentFromYaml(text: string): WorkflowDocument {
   let raw: unknown
@@ -121,11 +116,6 @@ function parseStages(raw: unknown): WorkflowStage[] {
       id: requireString(entry, "id", ctx),
       name: requireString(entry, "name", ctx),
       gate_kind: gateKindRaw as WorkflowGateKind,
-      artifact_kind: requireString(
-        entry,
-        "artifact_kind",
-        ctx,
-      ) as WorkflowArtifactKind,
       config: (config ?? {}) as Record<string, unknown>,
     }
   })

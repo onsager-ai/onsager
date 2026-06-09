@@ -29,7 +29,6 @@ import {
 // Card is intentionally not imported — ADR 0021 inv. 5: detail pages are
 // one document of labelled sections, not a stack of Cards.
 import { ArtifactBadge } from "@/components/workflows/ArtifactBadge"
-import { outputArtifactKind } from "@/components/workflows/workflow-meta"
 import { ChatAskButton } from "@/components/chat/ChatAskButton"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { useActiveWorkspace } from "@/lib/workspace"
@@ -123,6 +122,17 @@ export function RunDetailPage() {
     for (const e of verdictsQuery.data?.events ?? []) byId.set(e.id, e)
     return [...byId.values()]
   }, [eventsQuery.data, verdictsQuery.data])
+
+  // The run's artifact carries its real, observed kind (#568). The stage
+  // rows below show this rather than a stage-config prediction — the run
+  // produces exactly one artifact (`run.artifact_id`).
+  const artifactId = data?.run.artifact_id ?? null
+  const artifactQuery = useQuery({
+    queryKey: ["artifact", artifactId],
+    queryFn: () => api.getArtifact(artifactId as string),
+    enabled: !!artifactId,
+  })
+  const artifactKind = artifactQuery.data?.artifact.kind ?? null
 
   usePageHeader({
     title: data ? (
@@ -254,6 +264,7 @@ export function RunDetailPage() {
               sessions={stageSessions}
               events={stageEvents}
               artifactId={run.artifact_id}
+              artifactKind={artifactKind}
               workspaceSlug={workspace.slug}
               runId={run.id}
             />
@@ -296,6 +307,7 @@ function StagePanel({
   sessions,
   events,
   artifactId,
+  artifactKind,
   workspaceSlug,
   runId,
 }: {
@@ -305,6 +317,7 @@ function StagePanel({
   sessions: RunLinkedSession[]
   events: SpineEvent[]
   artifactId: string | null
+  artifactKind: string | null
   workspaceSlug: string
   runId: string
 }) {
@@ -312,9 +325,6 @@ function StagePanel({
   const Icon = STATUS_ICON[status]
   const name = stage?.name ?? `Stage ${index}`
   const gateKind = stage?.gate_kind ?? ""
-  const outputKind = stage
-    ? outputArtifactKind(stage.gate_kind, stage.artifact_kind)
-    : null
   const verdicts = events.filter(
     (e) => e.event_type === "synodic.gate_verdict",
   )
@@ -345,8 +355,9 @@ function StagePanel({
       </button>
       {open && (
         <div className="space-y-4 border-t bg-muted/20 px-3 py-3 text-sm">
-          {/* Output artifact (former Artifacts tab). The kind comes from
-              the registered stage output kind — no hardcoded "Issue". */}
+          {/* Output artifact (former Artifacts tab). The kind is the run
+              artifact's real, observed kind (#568) — not a stage-config
+              prediction. */}
           {artifactId && (
             <div className="space-y-1">
               <FieldLabel>Output</FieldLabel>
@@ -355,7 +366,7 @@ function StagePanel({
                 className="flex items-center justify-between rounded-md border bg-background px-3 py-2 hover:bg-muted/50"
               >
                 <span className="truncate font-mono text-xs">{artifactId}</span>
-                {outputKind && <ArtifactBadge kind={outputKind} />}
+                {artifactKind && <ArtifactBadge kind={artifactKind} />}
               </Link>
             </div>
           )}

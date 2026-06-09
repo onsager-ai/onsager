@@ -221,7 +221,6 @@ function extractWorkflowDocument(
           id: typeof s.id === "string" ? s.id : `stage-${i}`,
           name: typeof s.name === "string" ? s.name : "",
           gate_kind: (typeof s.gate_kind === "string" ? s.gate_kind : "agent-session") as import("@/lib/api").WorkflowGateKind,
-          artifact_kind: (typeof s.artifact_kind === "string" ? s.artifact_kind : "Issue") as import("@/lib/api").WorkflowArtifactKind,
           config: (typeof s.config === "object" && s.config ? s.config : {}) as Record<string, unknown>,
         }))
       : []
