@@ -44,7 +44,7 @@ export function TriggerEditor({
           <h3 className="text-sm font-semibold">Trigger</h3>
           <p className="text-xs text-muted-foreground">
             {isManual
-              ? "Name the manual trigger that starts the workflow."
+              ? "No automatic trigger — runs only when you fire it."
               : "Pick the repositories and label that start the workflow."}
           </p>
         </div>
@@ -59,17 +59,18 @@ export function TriggerEditor({
         <>
           <div className="space-y-1.5">
             <label htmlFor="manual-trigger-name" className="text-sm font-medium">
-              Trigger name
+              Button label{" "}
+              <span className="font-normal text-muted-foreground">(optional)</span>
             </label>
             <Input
               id="manual-trigger-name"
               value={value.manual_name}
               onChange={(e) => onChange({ ...value, manual_name: e.target.value })}
-              placeholder="e.g. Run nightly batch"
+              placeholder="Defaults to the workflow name"
             />
             <p className="text-xs text-muted-foreground">
-              The button label; fire it from the dashboard or{" "}
-              <code>onsager trigger fire</code>. No repo required.
+              Labels the run button; fire it from the dashboard or{" "}
+              <code>onsager trigger fire</code>. Defaults to the workflow name.
             </p>
           </div>
 

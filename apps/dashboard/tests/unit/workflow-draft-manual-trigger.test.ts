@@ -9,10 +9,12 @@ import {
   type WorkflowTriggerDraft,
 } from "@/components/workflows/workflow-draft"
 
-// Manual repo-less trigger kind in the workflow builder (spec #561).
-// The backend is unchanged — these exercise the dashboard's draft-side
-// branch on `kind_tag`: Manual needs only a name; GitHub keeps requiring
-// install + repo + label (#545 — no regression).
+// Manual repo-less trigger kind in the workflow builder (spec #561, amended
+// by #572). The backend is unchanged — these exercise the dashboard's
+// draft-side branch on `kind_tag`: Manual is the "no automatic trigger"
+// default and is always ready (the button label is optional, falling back to
+// the workflow name); GitHub keeps requiring install + repo + label
+// (#545 — no regression).
 
 function githubTrigger(
   over: Partial<WorkflowTriggerDraft> = {},
@@ -53,17 +55,27 @@ const INSTALLATIONS: GitHubAppInstallation[] = [
   },
 ]
 
-describe("isTriggerReady — per-kind branch (#561)", () => {
-  it("Manual is ready with only a non-empty name", () => {
-    expect(isTriggerReady(manualTrigger())).toBe(true)
+describe("emptyDocument default trigger (#572)", () => {
+  it("defaults a fresh workflow to Manual — no automatic trigger presumed", () => {
+    const doc = emptyDocument()
+    expect(doc.trigger.kind_tag).toBe("manual")
+    // …and that default is immediately ready, so the only thing left to make
+    // it saveable is a name + at least one stage.
+    expect(isTriggerReady(doc.trigger)).toBe(true)
   })
+})
 
-  it("Manual with a blank name is not ready", () => {
-    expect(isTriggerReady(manualTrigger({ manual_name: "   " }))).toBe(false)
+describe("isTriggerReady — per-kind branch (#561, amended #572)", () => {
+  it("Manual is always ready, even with a blank button label (#572)", () => {
+    // The "no automatic trigger" default: nothing to configure. The button
+    // label is optional and falls back to the workflow name at create time.
+    expect(isTriggerReady(manualTrigger())).toBe(true)
+    expect(isTriggerReady(manualTrigger({ manual_name: "" }))).toBe(true)
+    expect(isTriggerReady(manualTrigger({ manual_name: "   " }))).toBe(true)
   })
 
   it("Manual ignores install/repo/label entirely", () => {
-    // No install, no repo, no label — still ready as long as it has a name.
+    // No install, no repo, no label — still ready; Manual needs nothing.
     expect(
       isTriggerReady(
         manualTrigger({
@@ -102,13 +114,13 @@ describe("isTriggerReady — per-kind branch (#561)", () => {
   })
 })
 
-describe("documentToCreateRequest — Manual variant (#561)", () => {
+describe("documentToCreateRequest — Manual variant (#561, amended #572)", () => {
   function manualDoc(): WorkflowDocument {
     return {
       ...emptyDocument(),
       name: "Nightly batch",
       trigger: manualTrigger(),
-      stages: [makeStage("agent-session", "Issue", "Agent session")],
+      stages: [makeStage("agent-session", "Agent session")],
     }
   }
 
@@ -137,10 +149,13 @@ describe("documentToCreateRequest — Manual variant (#561)", () => {
     expect(body.trigger).toEqual({ kind: "manual", name: "spaced" })
   })
 
-  it("throws when the Manual name is blank", () => {
+  it("falls back to the workflow name when the button label is blank (#572)", () => {
+    // No automatic trigger needs no button label; the wire `name` derives
+    // from the workflow name so the run button is still meaningfully labeled.
     const doc = manualDoc()
     doc.trigger = manualTrigger({ manual_name: "" })
-    expect(() => documentToCreateRequest(doc, [], "ws_1", false)).toThrow()
+    const body = documentToCreateRequest(doc, [], "ws_1", false)
+    expect(body.trigger).toEqual({ kind: "manual", name: "Nightly batch" })
   })
 })
 
@@ -150,7 +165,7 @@ describe("documentToCreateRequest — GitHub variant unchanged (#561)", () => {
       ...emptyDocument(),
       name: "Issue to PR",
       trigger: githubTrigger(),
-      stages: [makeStage("agent-session", "Issue", "Agent session")],
+      stages: [makeStage("agent-session", "Agent session")],
     }
   }
 

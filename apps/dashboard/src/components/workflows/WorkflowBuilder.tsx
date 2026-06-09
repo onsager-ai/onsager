@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { FlowEditor } from "./FlowEditor"
+import { TriggerEditor } from "./TriggerEditor"
 import { PresetPicker } from "./PresetPicker"
 import {
   documentToCreateRequest,
@@ -75,12 +76,22 @@ export function WorkflowBuilder({
 
       <PresetPicker draft={draft} onApply={setDraft} />
 
-      <FlowEditor
-        workspaceId={workspaceId}
-        installations={installations}
-        draft={draft}
-        onChange={setDraft}
-      />
+      {/* The trigger is how the workflow is invoked — a different kind of
+          object than its stages — so it gets its own always-visible section
+          rather than living as a node in the stage rail (#572). */}
+      <div className="rounded-lg border p-4">
+        <TriggerEditor
+          workspaceId={workspaceId}
+          installations={installations}
+          value={draft.trigger}
+          onChange={(trigger) => setDraft({ ...draft, trigger })}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <span className="text-sm font-medium">Steps</span>
+        <FlowEditor draft={draft} onChange={setDraft} />
+      </div>
 
       {create.isError && (
         <p className="text-sm text-destructive">

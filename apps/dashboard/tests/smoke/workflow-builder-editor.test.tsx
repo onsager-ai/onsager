@@ -21,9 +21,11 @@ function mount(node: ReactNode) {
   )
 }
 
-// The master-detail builder (#569) renders the node editor inline in the
-// right pane — no card→sheet click. These assertions mirror the old
-// card-editor smoke checks against the new StageEditor / TriggerEditor.
+// The master-detail builder (#569) renders the StageEditor inline in the
+// right pane — no card→sheet click. The TriggerEditor is its own
+// always-visible section above the stage rail, not a rail node (#572).
+// These assertions mirror the old card-editor smoke checks against the new
+// StageEditor / TriggerEditor.
 describe("Stage editor (master-detail right pane)", () => {
   const base: WorkflowStage = {
     id: "s1",
@@ -52,7 +54,7 @@ describe("Stage editor (master-detail right pane)", () => {
   })
 })
 
-describe("Trigger editor (master-detail right pane)", () => {
+describe("Trigger editor (always-visible section)", () => {
   const empty: WorkflowTriggerDraft = {
     kind_tag: "github_issue_webhook",
     install_id: "",

@@ -42,8 +42,8 @@ export interface WorkflowTriggerDraft {
    * Snake-case registry `kind_tag` for the selected trigger kind (e.g.
    * `'github_issue_webhook'`, `'manual'`). Drives `isTriggerReady`'s
    * per-kind readiness branch and which `TriggerKind` variant
-   * `documentToCreateRequest` emits. Defaults to `'github_issue_webhook'`
-   * (the original, GitHub-webhook-only behavior — see `emptyDocument`).
+   * `documentToCreateRequest` emits. Defaults to `'manual'` — the "no
+   * automatic trigger, run it yourself" baseline (#572); see `emptyDocument`.
    */
   kind_tag: string;
   /**
@@ -180,8 +180,13 @@ export function defaultStageName(gate: WorkflowGateKind): string {
 export function emptyDocument(): WorkflowDocument {
   return {
     name: "",
+    // A fresh workflow presumes nothing about *how* it's invoked: it defaults
+    // to Manual — the "no automatic trigger, run it yourself" baseline (#572).
+    // There is no untriggered-workflow concept in the substrate, so "no
+    // trigger" is the repo-less, workspace-scoped Manual kind. Picking GitHub
+    // webhook is a deliberate upgrade that reveals the repo + label pickers.
     trigger: {
-      kind_tag: "github_issue_webhook",
+      kind_tag: "manual",
       install_id: "",
       repo_owner: "",
       repo_name: "",
@@ -282,11 +287,13 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
 ];
 
 export function isTriggerReady(t: WorkflowTriggerDraft): boolean {
-  // Manual triggers (#561) are repo-less: a non-empty button name is the
-  // only requirement — no install, repo, or label. The GitHub webhook leg
-  // stays exactly as it was (#545: webhook repo is required, no regression).
+  // Manual triggers (#561) are repo-less and need nothing configured: as the
+  // "no automatic trigger" default (#572) a Manual workflow is always ready —
+  // the button label falls back to the workflow name at create time, so even
+  // `manual_name` is optional. The GitHub webhook leg stays exactly as it was
+  // (#545: webhook install + repo + label are required, no regression).
   if (t.kind_tag === "manual") {
-    return t.manual_name.trim() !== "";
+    return true;
   }
   return (
     t.install_id.trim() !== "" &&
@@ -332,9 +339,7 @@ export function documentToCreateRequest(
   }
   if (!isTriggerReady(doc.trigger)) {
     throw new ApiError(
-      doc.trigger.kind_tag === "manual"
-        ? "name the manual trigger before activating"
-        : "pick an install, repo, and label before activating",
+      "pick an install, repo, and label before activating",
       400,
     );
   }
@@ -342,14 +347,19 @@ export function documentToCreateRequest(
   // Manual triggers (#561) are repo-less: emit the `manual` variant with
   // just its button name — no `repo`, no install token-mint hint. The
   // backend's `trigger.repo` is optional (#545) and a Manual workflow
-  // resolves repos workspace-scoped at runtime (#546/#556).
+  // resolves repos workspace-scoped at runtime (#546/#556). The button label
+  // is an optional override (#572); when blank it falls back to the workflow
+  // name (the caller's `canSave` and the backend both require a non-empty
+  // workflow name), so a "no automatic trigger" workflow saves with nothing
+  // presumed about invocation.
   if (doc.trigger.kind_tag === "manual") {
+    const manualName = doc.trigger.manual_name.trim() || doc.name.trim();
     return {
       workspace_id: workspaceId,
       name: doc.name.trim(),
       trigger: {
         kind: "manual",
-        name: doc.trigger.manual_name.trim(),
+        name: manualName,
       },
       stages: doc.stages.map(stageToCreateStage),
       active: activate,

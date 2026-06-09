@@ -93,8 +93,24 @@ describe("documentToCreateRequest", () => {
     );
   });
 
-  it("throws when the trigger isn't ready (missing label)", () => {
-    const d = emptyDocument();
+  it("throws when a GitHub trigger isn't ready (missing label)", () => {
+    // `emptyDocument()` now defaults to Manual (always ready, #572), so build
+    // an explicit half-filled GitHub-webhook trigger to exercise the gate.
+    const d: WorkflowDocument = {
+      ...emptyDocument(),
+      name: "Issue → PR",
+      trigger: {
+        kind_tag: "github_issue_webhook",
+        install_id: "inst_abc",
+        repo_owner: "onsager-ai",
+        repo_name: "onsager",
+        label: "",
+        manual_name: "",
+      },
+      stages: [
+        { id: "s1", name: "Spec → PR", gate_kind: "agent-session", config: {} },
+      ],
+    };
     expect(() =>
       documentToCreateRequest(d, [installation], "t_1", true),
     ).toThrow(/install, repo, and label/);
