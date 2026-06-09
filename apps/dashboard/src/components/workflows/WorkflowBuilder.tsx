@@ -6,7 +6,7 @@ import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import { CardStackEditor } from "./CardStackEditor"
+import { FlowEditor } from "./FlowEditor"
 import { PresetPicker } from "./PresetPicker"
 import {
   documentToCreateRequest,
@@ -75,7 +75,7 @@ export function WorkflowBuilder({
 
       <PresetPicker draft={draft} onApply={setDraft} />
 
-      <CardStackEditor
+      <FlowEditor
         workspaceId={workspaceId}
         installations={installations}
         draft={draft}

@@ -25,6 +25,19 @@ export interface WorkflowDocument {
   stages: WorkflowStage[];
 }
 
+/**
+ * One GitHub repository selected as a trigger source. Owner + name identify
+ * the repo; `install_id` is the dashboard installation *record id*
+ * (`GitHubAppInstallation.id`) the repo was discovered under — kept per-repo
+ * because a workspace can have several installs and the token-mint hint is
+ * resolved per install.
+ */
+export interface RepoRef {
+  install_id: string;
+  repo_owner: string;
+  repo_name: string;
+}
+
 export interface WorkflowTriggerDraft {
   /**
    * Snake-case registry `kind_tag` for the selected trigger kind (e.g.
@@ -34,15 +47,69 @@ export interface WorkflowTriggerDraft {
    * (the original, GitHub-webhook-only behavior — see `emptyDocument`).
    */
   kind_tag: string;
+  /**
+   * Canonical *primary* repo — the first of `repos`. Kept as flat fields
+   * (not just `repos[0]`) so persisted drafts (localStorage, YAML, presets,
+   * the create request) round-trip unchanged: the wire `TriggerKind` only
+   * carries one `repo` until backend #566 lands per-workflow multi-repo
+   * binding. Always mirror these from `repos[0]` via `setTriggerRepos`.
+   */
   install_id: string;
   repo_owner: string;
   repo_name: string;
+  /**
+   * Full multi-repo selection (#566). Optional for back-compat with drafts
+   * persisted before this field existed — read through `triggerRepos`, which
+   * falls back to the flat primary fields. The extra repos beyond `repos[0]`
+   * are frontend-ready but not yet honored by the backend; the create
+   * request emits only the primary repo and the trigger sheet surfaces a
+   * pending-#566 note when more than one is selected.
+   */
+  repos?: RepoRef[];
   label: string;
   /**
    * Manual-trigger button name; used only when `kind_tag === 'manual'`.
    * Empty for every other kind.
    */
   manual_name: string;
+}
+
+/**
+ * Normalized repo list for a trigger: prefers the explicit `repos` array,
+ * falling back to the flat primary fields for drafts saved before `repos`
+ * existed. Returns `[]` when no repo is set.
+ */
+export function triggerRepos(t: WorkflowTriggerDraft): RepoRef[] {
+  if (t.repos && t.repos.length > 0) return t.repos;
+  if (t.repo_owner && t.repo_name) {
+    return [
+      {
+        install_id: t.install_id,
+        repo_owner: t.repo_owner,
+        repo_name: t.repo_name,
+      },
+    ];
+  }
+  return [];
+}
+
+/**
+ * Set the repo selection and keep the canonical primary fields mirrored to
+ * `repos[0]`, so every consumer that still reads the flat fields (create
+ * request, presets, readiness, YAML) stays correct.
+ */
+export function setTriggerRepos(
+  t: WorkflowTriggerDraft,
+  repos: RepoRef[],
+): WorkflowTriggerDraft {
+  const primary = repos[0];
+  return {
+    ...t,
+    repos,
+    install_id: primary?.install_id ?? "",
+    repo_owner: primary?.repo_owner ?? "",
+    repo_name: primary?.repo_name ?? "",
+  };
 }
 
 /**
@@ -121,6 +188,7 @@ export function emptyDocument(): WorkflowDocument {
       install_id: "",
       repo_owner: "",
       repo_name: "",
+      repos: [],
       label: "",
       manual_name: "",
     },
@@ -146,7 +214,7 @@ export function githubIssueToPrPreset(
 
 // Preset catalog — drives the picker shown at the top of the workflow
 // builder. Each entry returns a fresh document; the trigger stays empty
-// and is filled in via the TriggerCard.
+// and is filled in via the TriggerEditor.
 export interface WorkflowPreset {
   id: string;
   label: string;
@@ -296,6 +364,18 @@ export function documentToCreateRequest(
     throw new ApiError(
       "selected GitHub install not found in this workspace",
       400,
+    );
+  }
+  // Multi-repo binding is authored in the UI (`trigger.repos`) but the wire
+  // `TriggerKind::github_issue_webhook` carries a single `repo` until backend
+  // #566 lands. Emit the primary repo (`repos[0]`, mirrored to the flat
+  // fields) and warn so extra repos never silently vanish. When #566 ships a
+  // repo array, widen the trigger shape here and drop this guard.
+  const repos = triggerRepos(doc.trigger);
+  if (repos.length > 1) {
+    console.warn(
+      `[workflow-draft] ${repos.length} repos selected but the backend ` +
+        `binds one per workflow (#566); creating with ${doc.trigger.repo_owner}/${doc.trigger.repo_name} only.`,
     );
   }
   return {
