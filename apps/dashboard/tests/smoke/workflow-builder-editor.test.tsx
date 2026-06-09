@@ -29,7 +29,6 @@ describe("Stage editor (master-detail right pane)", () => {
     id: "s1",
     name: "Agent session",
     gate_kind: "agent-session",
-    artifact_kind: "Issue",
     config: {},
   }
 

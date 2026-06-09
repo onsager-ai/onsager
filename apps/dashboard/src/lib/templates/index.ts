@@ -1,7 +1,4 @@
-import type {
-  WorkflowArtifactKind,
-  WorkflowGateKind,
-} from "@/lib/api/types"
+import type { WorkflowGateKind } from "@/lib/api/types"
 import type { WorkflowDocument } from "@/components/workflows/workflow-draft"
 import { makeStage } from "@/components/workflows/workflow-draft"
 import templatesData from "./v0.json"
@@ -9,7 +6,6 @@ import templatesData from "./v0.json"
 export interface FtueTemplateStage {
   name: string
   gate_kind: WorkflowGateKind
-  artifact_kind: WorkflowArtifactKind
 }
 
 export interface FtueTemplate {
@@ -20,7 +16,6 @@ export interface FtueTemplate {
   trigger_kind: string
   trigger_label: string
   stages: FtueTemplateStage[]
-  primary_artifact_kind: WorkflowArtifactKind
   factory_framing: string
   cloud_only_note?: string
 }
@@ -59,8 +54,6 @@ export function templateToDocument(template: FtueTemplate): WorkflowDocument {
       label: template.trigger_label,
       manual_name: "",
     },
-    stages: template.stages.map((s) =>
-      makeStage(s.gate_kind, s.artifact_kind, s.name),
-    ),
+    stages: template.stages.map((s) => makeStage(s.gate_kind, s.name)),
   }
 }

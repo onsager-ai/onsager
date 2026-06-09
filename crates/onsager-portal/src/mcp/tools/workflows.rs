@@ -188,9 +188,6 @@ pub struct DraftStageInput {
     pub id: String,
     pub name: String,
     pub gate_kind: GateKind,
-    /// Workspace-defined artifact-kind discriminator. The FTUE default
-    /// is `"Issue"`; non-FTUE flows may declare workspace-scoped kinds.
-    pub artifact_kind: String,
     /// Free-form gate config (`{"prompt": "…"}` for `agent-session`,
     /// etc.). Validated by the binding step when the draft is promoted.
     #[serde(default)]
@@ -241,11 +238,6 @@ pub async fn propose_workflow_draft(
         if stage.name.trim().is_empty() {
             return Err(ToolError::InvalidParams(format!(
                 "stage[{i}].name is required"
-            )));
-        }
-        if stage.artifact_kind.trim().is_empty() {
-            return Err(ToolError::InvalidParams(format!(
-                "stage[{i}].artifact_kind is required"
             )));
         }
     }
@@ -527,7 +519,6 @@ mod propose_workflow_draft_tests {
                     "id": "stage-0",
                     "name": "Triage agent",
                     "gate_kind": "agent-session",
-                    "artifact_kind": "Issue",
                     "config": { "prompt": "Classify this issue." }
                 }
             ]
@@ -542,7 +533,6 @@ mod propose_workflow_draft_tests {
         assert!(parsed.trigger.install_id.is_empty());
         assert_eq!(parsed.stages.len(), 1);
         assert_eq!(parsed.stages[0].gate_kind, GateKind::AgentSession);
-        assert_eq!(parsed.stages[0].artifact_kind, "Issue");
     }
 
     #[test]
@@ -551,7 +541,7 @@ mod propose_workflow_draft_tests {
             "name": "Schedule-only draft",
             "trigger": { "label": "0 9 * * 1" },
             "stages": [
-                { "id": "s0", "name": "Generate", "gate_kind": "agent-session", "artifact_kind": "PR" }
+                { "id": "s0", "name": "Generate", "gate_kind": "agent-session" }
             ]
         }))
         .unwrap();
@@ -567,7 +557,7 @@ mod propose_workflow_draft_tests {
             "name": "x",
             "trigger": { "label": "l" },
             "stages": [
-                { "id": "s0", "name": "x", "gate_kind": "not-a-gate", "artifact_kind": "Issue" }
+                { "id": "s0", "name": "x", "gate_kind": "not-a-gate" }
             ]
         });
         assert!(serde_json::from_value::<ProposeWorkflowDraftArgs>(bad).is_err());

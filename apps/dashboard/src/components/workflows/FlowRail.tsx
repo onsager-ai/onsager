@@ -1,4 +1,4 @@
-import { ArrowRight, Plus, Webhook, Zap } from "lucide-react"
+import { Plus, Webhook, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { WorkflowGateKind } from "@/lib/api"
 import {
@@ -7,8 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ArtifactBadge } from "./ArtifactBadge"
-import { GATE_KINDS, outputArtifactKind } from "./workflow-meta"
+import { GATE_KINDS } from "./workflow-meta"
 import {
   triggerRepos,
   type WorkflowDocument,
@@ -63,8 +62,6 @@ export function FlowRail({ draft, selection, onSelect, onAddStage }: FlowRailPro
 
       {draft.stages.map((stage, i) => {
         const Icon = GATE_ICON[stage.gate_kind]
-        const output = outputArtifactKind(stage.gate_kind, stage.artifact_kind)
-        const transforms = output !== stage.artifact_kind
         return (
           <RailRow
             key={stage.id}
@@ -74,17 +71,6 @@ export function FlowRail({ draft, selection, onSelect, onAddStage }: FlowRailPro
               <span className="flex min-w-0 items-center gap-1.5">
                 <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span className="truncate">{stage.name}</span>
-              </span>
-            }
-            subtitle={
-              <span className="flex items-center gap-1">
-                <ArtifactBadge kind={stage.artifact_kind} size="sm" />
-                {transforms && (
-                  <>
-                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                    <ArtifactBadge kind={output} size="sm" />
-                  </>
-                )}
               </span>
             }
             selected={selection.kind === "stage" && selection.id === stage.id}
@@ -150,7 +136,7 @@ function RailRow({
   marker: React.ReactNode
   tone: Tone
   title: React.ReactNode
-  subtitle: React.ReactNode
+  subtitle?: React.ReactNode
   selected?: boolean
   onClick: () => void
   isFirst?: boolean
@@ -173,9 +159,11 @@ function RailRow({
         )}
       >
         <span className="flex min-w-0 items-center text-sm font-medium">{title}</span>
-        <span className="flex min-w-0 items-center text-xs text-muted-foreground">
-          {subtitle}
-        </span>
+        {subtitle != null && (
+          <span className="flex min-w-0 items-center text-xs text-muted-foreground">
+            {subtitle}
+          </span>
+        )}
       </span>
     </button>
   )

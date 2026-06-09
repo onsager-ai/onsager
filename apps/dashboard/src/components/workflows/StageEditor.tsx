@@ -2,11 +2,9 @@ import { Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { WorkflowGateKind, WorkflowStage } from "@/lib/api"
-import { ArtifactBadge } from "./ArtifactBadge"
-import { ArtifactKindSelect } from "./ArtifactKindSelect"
 import { GateKindToggle } from "./GateKindToggle"
 import { defaultStageName } from "./workflow-draft"
-import { GATE_KINDS, outputArtifactKind } from "./workflow-meta"
+import { GATE_KINDS } from "./workflow-meta"
 
 const GATE_LABEL = Object.fromEntries(
   GATE_KINDS.map((g) => [g.value, g.label]),
@@ -27,9 +25,6 @@ export interface StageEditorProps {
  * their own name.
  */
 export function StageEditor({ stage, index, onChange, onRemove }: StageEditorProps) {
-  const output = outputArtifactKind(stage.gate_kind, stage.artifact_kind)
-  const transforms = output !== stage.artifact_kind
-
   // Keep the name in lock-step with the gate while it's still the default,
   // so the rail reads "Governance" the instant you switch a fresh stage to
   // Governance — but never clobber a name the user actually typed.
@@ -55,28 +50,6 @@ export function StageEditor({ stage, index, onChange, onRemove }: StageEditorPro
       <div className="space-y-1.5">
         <span className="text-sm font-medium">Gate kind</span>
         <GateKindToggle value={stage.gate_kind} onChange={changeGate} />
-      </div>
-
-      <div className="space-y-1.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-sm font-medium">Input artifact</span>
-          {transforms && (
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-              produces
-              <ArtifactBadge kind={output} size="sm" />
-            </span>
-          )}
-        </div>
-        <ArtifactKindSelect
-          id={`stage-kind-${stage.id}`}
-          value={stage.artifact_kind}
-          onChange={(artifact_kind) => onChange({ ...stage, artifact_kind })}
-        />
-        <p className="text-xs text-muted-foreground">
-          {transforms
-            ? "This stage reads the input artifact and produces a new one."
-            : "This stage inspects the artifact and passes it through."}
-        </p>
       </div>
 
       <div className="space-y-1.5">

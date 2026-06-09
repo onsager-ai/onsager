@@ -3,7 +3,6 @@ import {
   stageToCreateStage,
   type CreateWorkflowRequest,
   type GitHubAppInstallation,
-  type WorkflowArtifactKind,
   type WorkflowGateKind,
   type WorkflowStage,
   type WorkflowTrigger,
@@ -155,14 +154,12 @@ function newStageId(): string {
 
 export function makeStage(
   gate: WorkflowGateKind,
-  artifactKind: WorkflowArtifactKind = "Issue",
   name?: string,
 ): WorkflowStage {
   return {
     id: newStageId(),
     name: name ?? defaultStageName(gate),
     gate_kind: gate,
-    artifact_kind: artifactKind,
     config: {},
   };
 }
@@ -205,9 +202,9 @@ export function githubIssueToPrPreset(
     name: `${owner}/${name} — issue to PR`,
     trigger,
     stages: [
-      makeStage("agent-session", "Issue", "Spec → PR"),
-      makeStage("external-check", "PR", "CI check"),
-      makeStage("manual-approval", "PR", "Merge approval"),
+      makeStage("agent-session", "Spec → PR"),
+      makeStage("external-check", "CI check"),
+      makeStage("manual-approval", "Merge approval"),
     ],
   };
 }
@@ -237,7 +234,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     build: (trigger) => ({
       name: `${trigger.repo_owner || "agent"}/${trigger.repo_name || "session"} — agent only`,
       trigger,
-      stages: [makeStage("agent-session", "Issue", "Agent session")],
+      stages: [makeStage("agent-session", "Agent session")],
     }),
   },
   {
@@ -248,8 +245,8 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
       name: `${trigger.repo_owner || "repo"}/${trigger.repo_name || "pr"} — CI to merge`,
       trigger,
       stages: [
-        makeStage("external-check", "PR", "CI check"),
-        makeStage("manual-approval", "PR", "Merge approval"),
+        makeStage("external-check", "CI check"),
+        makeStage("manual-approval", "Merge approval"),
       ],
     }),
   },
@@ -261,10 +258,10 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
       name: `${trigger.repo_owner || "repo"}/${trigger.repo_name || "pipeline"} — governed`,
       trigger,
       stages: [
-        makeStage("agent-session", "Issue", "Spec → PR"),
-        makeStage("external-check", "PR", "CI check"),
-        makeStage("governance", "PR", "Synodic gate"),
-        makeStage("manual-approval", "PR", "Merge approval"),
+        makeStage("agent-session", "Spec → PR"),
+        makeStage("external-check", "CI check"),
+        makeStage("governance", "Synodic gate"),
+        makeStage("manual-approval", "Merge approval"),
       ],
     }),
   },
@@ -277,8 +274,8 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
       name: `${trigger.repo_owner || "repo"}/${trigger.repo_name || "deploy"} — merge to deploy`,
       trigger,
       stages: [
-        makeStage("external-check", "PR", "Merge wait"),
-        makeStage("agent-session", "Deployment", "Deploy to staging"),
+        makeStage("external-check", "Merge wait"),
+        makeStage("agent-session", "Deploy to staging"),
       ],
     }),
   },
@@ -322,8 +319,8 @@ export function draftToRequestTrigger(
 //    take. The workflow POST contract needs the numeric GitHub install id
 //    (`GitHubAppInstallation.install_id: i64`), so we resolve it by record
 //    id against the installations the page already has loaded.
-// 2. UI-only stage fields (name, artifact_kind) ride inside `params` so
-//    they survive the round-trip without forcing a backend schema change.
+// 2. The UI-only stage `name` rides inside `params` so it survives the
+//    round-trip without forcing a backend schema change.
 export function documentToCreateRequest(
   doc: WorkflowDocument,
   installations: GitHubAppInstallation[],

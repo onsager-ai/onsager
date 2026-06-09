@@ -13,21 +13,17 @@
       "stages": [
         {
           "name": "CI-wait",
-          "gate_kind": "external-check",
-          "artifact_kind": "PR"
+          "gate_kind": "external-check"
         },
         {
           "name": "Verify (tests-touch-diff)",
-          "gate_kind": "governance",
-          "artifact_kind": "PR"
+          "gate_kind": "governance"
         },
         {
           "name": "Merge",
-          "gate_kind": "external-check",
-          "artifact_kind": "PR"
+          "gate_kind": "external-check"
         }
       ],
-      "primary_artifact_kind": "PR",
       "factory_framing": "A QC checkpoint that lets clean PRs ship themselves."
     },
     {
@@ -40,21 +36,17 @@
       "stages": [
         {
           "name": "Parse PR body",
-          "gate_kind": "external-check",
-          "artifact_kind": "PR"
+          "gate_kind": "external-check"
         },
         {
           "name": "Verify spec-link",
-          "gate_kind": "governance",
-          "artifact_kind": "PR"
+          "gate_kind": "governance"
         },
         {
           "name": "Gate (deny | allow)",
-          "gate_kind": "manual-approval",
-          "artifact_kind": "PR"
+          "gate_kind": "manual-approval"
         }
       ],
-      "primary_artifact_kind": "PR",
       "factory_framing": "Refuses any product not tied to a blueprint."
     },
     {
@@ -67,21 +59,17 @@
       "stages": [
         {
           "name": "Agent session (Summarize)",
-          "gate_kind": "agent-session",
-          "artifact_kind": "Issue"
+          "gate_kind": "agent-session"
         },
         {
           "name": "Verify (sections present)",
-          "gate_kind": "governance",
-          "artifact_kind": "Issue"
+          "gate_kind": "governance"
         },
         {
           "name": "Comment",
-          "gate_kind": "agent-session",
-          "artifact_kind": "Issue"
+          "gate_kind": "agent-session"
         }
       ],
-      "primary_artifact_kind": "Issue",
       "factory_framing": "Sends incoming orders through an agent station for triage."
     },
     {
@@ -94,26 +82,21 @@
       "stages": [
         {
           "name": "List merged PRs",
-          "gate_kind": "external-check",
-          "artifact_kind": "PR"
+          "gate_kind": "external-check"
         },
         {
           "name": "Agent session (Draft notes)",
-          "gate_kind": "agent-session",
-          "artifact_kind": "PR"
+          "gate_kind": "agent-session"
         },
         {
           "name": "Verify (PRs exist and merged)",
-          "gate_kind": "governance",
-          "artifact_kind": "PR"
+          "gate_kind": "governance"
         },
         {
           "name": "Draft release",
-          "gate_kind": "agent-session",
-          "artifact_kind": "PR"
+          "gate_kind": "agent-session"
         }
       ],
-      "primary_artifact_kind": "PR",
       "factory_framing": "Weekly inventory report from the production line.",
       "cloud_only_note": "The 24/7 cron scheduler is Cloud-only; OSS can still preview this template's shape."
     },
@@ -127,26 +110,21 @@
       "stages": [
         {
           "name": "Path-glob filter",
-          "gate_kind": "external-check",
-          "artifact_kind": "PR"
+          "gate_kind": "external-check"
         },
         {
           "name": "Agent session (Security review)",
-          "gate_kind": "agent-session",
-          "artifact_kind": "Session"
+          "gate_kind": "agent-session"
         },
         {
           "name": "Human gate",
-          "gate_kind": "manual-approval",
-          "artifact_kind": "PR"
+          "gate_kind": "manual-approval"
         },
         {
           "name": "Annotate PR",
-          "gate_kind": "agent-session",
-          "artifact_kind": "PR"
+          "gate_kind": "agent-session"
         }
       ],
-      "primary_artifact_kind": "PR",
       "factory_framing": "Human inspection station for the sensitive line."
     },
     {
@@ -159,46 +137,37 @@
       "stages": [
         {
           "name": "Branch",
-          "gate_kind": "agent-session",
-          "artifact_kind": "Issue"
+          "gate_kind": "agent-session"
         },
         {
           "name": "Agent session (Implement per spec)",
-          "gate_kind": "agent-session",
-          "artifact_kind": "Issue"
+          "gate_kind": "agent-session"
         },
         {
           "name": "Verify (tests pass and touch new code)",
-          "gate_kind": "governance",
-          "artifact_kind": "PR"
+          "gate_kind": "governance"
         },
         {
           "name": "PR",
-          "gate_kind": "agent-session",
-          "artifact_kind": "PR"
+          "gate_kind": "agent-session"
         },
         {
           "name": "CI-wait",
-          "gate_kind": "external-check",
-          "artifact_kind": "PR"
+          "gate_kind": "external-check"
         },
         {
           "name": "Review gate",
-          "gate_kind": "manual-approval",
-          "artifact_kind": "PR"
+          "gate_kind": "manual-approval"
         },
         {
           "name": "Merge",
-          "gate_kind": "external-check",
-          "artifact_kind": "PR"
+          "gate_kind": "external-check"
         },
         {
           "name": "Close",
-          "gate_kind": "agent-session",
-          "artifact_kind": "Issue"
+          "gate_kind": "agent-session"
         }
       ],
-      "primary_artifact_kind": "PR",
       "factory_framing": "The production line that builds Onsager itself."
     }
   ]

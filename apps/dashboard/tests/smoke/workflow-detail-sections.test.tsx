@@ -72,7 +72,6 @@ const workflow = {
         id: "s_1",
         name: "Triage",
         gate_kind: "agent-session",
-        artifact_kind: "Issue",
         config: {},
       },
     ],

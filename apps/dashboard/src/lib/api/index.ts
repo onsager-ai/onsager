@@ -71,7 +71,7 @@ export type { StageRunStatus } from "./generated/StageRunStatus";
 export type { SessionSpend } from "./sessions";
 
 // Re-export workflow helpers
-export { normalizeWorkflowArtifactKind, stageToCreateStage } from "./workflows";
+export { stageToCreateStage } from "./workflows";
 export type {
   ReadinessFilter,
   AutofireFilter,

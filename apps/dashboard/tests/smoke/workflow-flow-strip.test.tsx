@@ -13,28 +13,24 @@ describe("ArtifactFlowOverview — gate-only strip (#104)", () => {
       id: "s1",
       name: "Spec → PR",
       gate_kind: "agent-session",
-      artifact_kind: "Issue",
       config: {},
     },
     {
       id: "s2",
       name: "CI check",
       gate_kind: "external-check",
-      artifact_kind: "PR",
       config: {},
     },
     {
       id: "s3",
       name: "Synodic gate",
       gate_kind: "governance",
-      artifact_kind: "PR",
       config: {},
     },
     {
       id: "s4",
       name: "Merge approval",
       gate_kind: "manual-approval",
-      artifact_kind: "PR",
       config: {},
     },
   ]
