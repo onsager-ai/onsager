@@ -77,9 +77,9 @@ export function WorkflowBuilderSheet({ open, onOpenChange }: WorkflowBuilderShee
               Chat out the idea, then tap cards to tune.
             </SheetDescription>
           </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
-            {body}
-          </div>
+          {/* The builder owns its own scroll + pinned create footer (#574),
+              so this just gives it the bounded flex region. */}
+          <div className="min-h-0 flex-1 px-4 pb-4">{body}</div>
         </SheetContent>
       </Sheet>
     )
@@ -94,9 +94,9 @@ export function WorkflowBuilderSheet({ open, onOpenChange }: WorkflowBuilderShee
             Chat out the idea, then tap cards to tune.
           </DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {body}
-        </div>
+        {/* The builder owns its own scroll + pinned create footer (#574),
+            so this just gives it the bounded flex region. */}
+        <div className="min-h-0 flex-1">{body}</div>
       </DialogContent>
     </Dialog>
   )

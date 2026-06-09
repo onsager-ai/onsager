@@ -1,8 +1,7 @@
 import { Link } from "react-router-dom"
-import { FolderGit2, GitBranch, Webhook, Zap } from "lucide-react"
+import { FolderGit2, GitBranch, Zap } from "lucide-react"
 import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import { type GitHubAppInstallation } from "@/lib/api"
-import { Input } from "@/components/ui/input"
 import { LabelCombobox } from "./LabelCombobox"
 import { RepoMultiCombobox } from "./RepoMultiCombobox"
 import { TriggerKindPicker } from "./TriggerKindPicker"
@@ -20,10 +19,15 @@ export interface TriggerEditorProps {
 }
 
 /**
- * Right-pane editor for the trigger node. Edits apply live to the draft via
- * `onChange` — there is no per-node "Done"; the persistent master-detail pane
- * replaces the old slide-out sheet. The form body is unchanged from the
- * previous `TriggerCard` sheet (manual vs github-webhook branches).
+ * The trigger section of the workflow builder — how a workflow is invoked.
+ * A compact kind selector (Tabs) over the kind-specific form (#574). Edits
+ * apply live to the draft via `onChange`; there is no per-section "Done".
+ *
+ * Manual is the "no automatic trigger, run it yourself" default (#572): it
+ * needs no config, so its body is just a note about workspace-scoped repos
+ * — no button-label input, since the run button derives its label from the
+ * workflow name at create time. The GitHub-webhook leg keeps the repo +
+ * label pickers.
  */
 export function TriggerEditor({
   workspaceId,
@@ -35,78 +39,45 @@ export function TriggerEditor({
   const workspace = useOptionalActiveWorkspace()
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-          {isManual ? <Zap className="h-4 w-4" /> : <Webhook className="h-4 w-4" />}
-        </div>
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold">Trigger</h3>
-          <p className="text-xs text-muted-foreground">
-            {isManual
-              ? "No automatic trigger — runs only when you fire it."
-              : "Pick the repositories and label that start the workflow."}
-          </p>
-        </div>
-      </header>
-
+    <div className="space-y-3">
       <TriggerKindPicker
         kindTag={value.kind_tag}
         onKindChange={(kind_tag) => onChange({ ...value, kind_tag })}
       />
 
       {isManual ? (
-        <>
-          <div className="space-y-1.5">
-            <label htmlFor="manual-trigger-name" className="text-sm font-medium">
-              Button label{" "}
-              <span className="font-normal text-muted-foreground">(optional)</span>
-            </label>
-            <Input
-              id="manual-trigger-name"
-              value={value.manual_name}
-              onChange={(e) => onChange({ ...value, manual_name: e.target.value })}
-              placeholder="Defaults to the workflow name"
-            />
-            <p className="text-xs text-muted-foreground">
-              Labels the run button; fire it from the dashboard or{" "}
-              <code>onsager trigger fire</code>. Defaults to the workflow name.
-            </p>
-          </div>
-
-          {/* Repo-less workflows are workspace-scoped (#553): the run is
-              handed every repo bound to the workspace and the agent clones
-              what it needs. Per-workflow repo pinning is a backend
-              follow-up (#566); for now this states the actual runtime
-              behavior rather than offering a choice we can't honor. */}
-          <div className="space-y-1.5">
-            <span className="text-sm font-medium">Repositories</span>
-            <div className="flex items-start gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              <FolderGit2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>
-                Runs against{" "}
-                <span className="font-medium text-foreground">
-                  any repository bound to this workspace
-                </span>{" "}
-                — the agent gets the whole set and clones what it needs.
-                {workspace ? (
-                  <>
-                    {" "}
-                    <Link
-                      to={`/workspaces/${workspace.slug}/settings`}
-                      className="underline underline-offset-2 hover:text-foreground"
-                    >
-                      Manage workspace repositories
-                    </Link>
-                    .
-                  </>
-                ) : null}
-              </span>
-            </div>
-          </div>
-        </>
+        // Repo-less workflows are workspace-scoped (#553): the run is handed
+        // every repo bound to the workspace and the agent clones what it
+        // needs. Per-workflow repo pinning is a backend follow-up (#566); for
+        // now this states the actual runtime behavior rather than offering a
+        // choice we can't honor.
+        <div className="space-y-1 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          <p className="flex items-center gap-1.5 font-medium text-foreground">
+            <Zap className="h-3.5 w-3.5 shrink-0" />
+            No automatic trigger
+          </p>
+          <p>
+            Run it yourself from the dashboard or <code>onsager trigger fire</code>.
+            Runs against{" "}
+            <span className="font-medium text-foreground">
+              any repository bound to this workspace
+            </span>
+            {workspace ? (
+              <>
+                {" — "}
+                <Link
+                  to={`/workspaces/${workspace.slug}/settings`}
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  manage repositories
+                </Link>
+              </>
+            ) : null}
+            .
+          </p>
+        </div>
       ) : (
-        <>
+        <div className="space-y-3">
           <div className="space-y-1.5">
             <span className="text-sm font-medium">Repositories</span>
             <RepoMultiCombobox
@@ -158,7 +129,7 @@ export function TriggerEditor({
               </p>
             )}
           </div>
-        </>
+        </div>
       )}
     </div>
   )

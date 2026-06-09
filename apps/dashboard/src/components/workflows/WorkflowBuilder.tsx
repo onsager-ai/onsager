@@ -61,60 +61,70 @@ export function WorkflowBuilder({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-1.5">
-        <label htmlFor="workflow-name" className="text-sm font-medium">
-          Workflow name
-        </label>
-        <Input
-          id="workflow-name"
-          value={draft.name}
-          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          placeholder="e.g. Issue → PR pipeline"
-        />
-      </div>
-
-      <PresetPicker draft={draft} onApply={setDraft} />
-
-      {/* The trigger is how the workflow is invoked — a different kind of
-          object than its stages — so it gets its own always-visible section
-          rather than living as a node in the stage rail (#572). */}
-      <div className="rounded-lg border p-4">
-        <TriggerEditor
-          workspaceId={workspaceId}
-          installations={installations}
-          value={draft.trigger}
-          onChange={(trigger) => setDraft({ ...draft, trigger })}
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <span className="text-sm font-medium">Steps</span>
-        <FlowEditor draft={draft} onChange={setDraft} />
-      </div>
-
-      {create.isError && (
-        <p className="text-sm text-destructive">
-          {create.error instanceof Error ? create.error.message : "Failed to save"}
-        </p>
-      )}
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <label
-          htmlFor="workflow-active"
-          className="flex items-center gap-2 text-sm font-medium"
-        >
-          <Switch
-            id="workflow-active"
-            checked={active}
-            onCheckedChange={setActive}
+    // Flex column so the action row pins to the bottom as a footer while the
+    // form scrolls (#574); the host (WorkflowBuilderSheet) gives this a
+    // bounded height.
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
+        <div className="space-y-1.5">
+          {/* Active is a property of the workflow as a whole, so it lives up
+              here with the name rather than in the create footer (#574). */}
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="workflow-name" className="text-sm font-medium">
+              Workflow name
+            </label>
+            <label
+              htmlFor="workflow-active"
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+            >
+              <Switch
+                id="workflow-active"
+                checked={active}
+                onCheckedChange={setActive}
+              />
+              Active
+            </label>
+          </div>
+          <Input
+            id="workflow-name"
+            value={draft.name}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            placeholder="e.g. Issue → PR pipeline"
           />
-          Active
-        </label>
+        </div>
+
+        <PresetPicker draft={draft} onApply={setDraft} />
+
+        {/* The trigger is how the workflow is invoked — a different kind of
+            object than its stages — so it gets its own always-visible section
+            rather than living as a node in the stage rail (#572). */}
+        <div className="space-y-1.5">
+          <span className="text-sm font-medium">Trigger</span>
+          <TriggerEditor
+            workspaceId={workspaceId}
+            installations={installations}
+            value={draft.trigger}
+            onChange={(trigger) => setDraft({ ...draft, trigger })}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <span className="text-sm font-medium">Steps</span>
+          <FlowEditor draft={draft} onChange={setDraft} />
+        </div>
+
+        {create.isError && (
+          <p className="text-sm text-destructive">
+            {create.error instanceof Error ? create.error.message : "Failed to save"}
+          </p>
+        )}
+      </div>
+
+      <div className="border-t pt-4">
         <Button
           type="button"
           size="lg"
-          className="w-full sm:w-auto"
+          className="w-full"
           disabled={!canSave || create.isPending}
           onClick={() => save(active)}
         >

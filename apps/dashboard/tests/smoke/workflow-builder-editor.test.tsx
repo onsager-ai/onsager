@@ -83,6 +83,29 @@ describe("Trigger editor (always-visible section)", () => {
     expect(screen.queryAllByRole("textbox").length).toBe(0)
   })
 
+  it("picks the trigger kind with tabs, not a value-showing select (#574)", () => {
+    mount(
+      <TriggerEditor workspaceId="t1" installations={[]} value={empty} onChange={() => {}} />,
+    )
+    // Tabs render the human labels directly — no Base-UI `Select.Value`
+    // showing the raw `kind_tag`, and no dropdown to open. Mutation guard:
+    // revert TriggerKindPicker to a Select and these tab queries fail.
+    expect(screen.getByRole("tab", { name: "Manual" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /GitHub issue/i })).toBeInTheDocument()
+    // The raw snake-case kind_tag must never be the visible label.
+    expect(screen.queryByText("github_issue_webhook")).not.toBeInTheDocument()
+  })
+
+  it("a Manual trigger has no button-label input — it derives from the workflow name (#574)", () => {
+    mount(
+      <TriggerEditor workspaceId="t1" installations={[]} value={manual} onChange={() => {}} />,
+    )
+    // The manual button label was useless busywork (it falls back to the
+    // workflow name at create time), so the input is gone. Mutation guard:
+    // re-add the button-label <Input> and this fails.
+    expect(screen.queryAllByRole("textbox").length).toBe(0)
+  })
+
   it("tells a repo-less (manual) trigger it runs workspace-scoped (#553)", () => {
     mount(
       <TriggerEditor workspaceId="t1" installations={[]} value={manual} onChange={() => {}} />,
