@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import type { ReactNode } from "react"
@@ -25,17 +25,37 @@ const installations: GitHubAppInstallation[] = [
   },
 ]
 
-// A fully-ready draft so `canSave` is true and the Create button is enabled.
+// A fully-ready GitHub-webhook draft so `canSave` is true and the Create
+// button is enabled.
 function readyDraft(): WorkflowDocument {
   return {
     name: "Issue → PR",
     trigger: {
+      kind_tag: "github_issue_webhook",
       install_id: "inst_one",
       repo_owner: "onsager-ai",
       repo_name: "onsager",
       label: "factory",
+      manual_name: "",
     },
-    stages: [makeStage("agent-session", "Issue", "Spec → PR")],
+    stages: [makeStage("agent-session", "Spec → PR")],
+  }
+}
+
+// A Manual ("no automatic trigger") draft with a blank button label — the
+// default shape (#572): ready with just a name + one stage.
+function manualReadyDraft(): WorkflowDocument {
+  return {
+    name: "Nightly batch",
+    trigger: {
+      kind_tag: "manual",
+      install_id: "",
+      repo_owner: "",
+      repo_name: "",
+      label: "",
+      manual_name: "",
+    },
+    stages: [makeStage("agent-session", "Run")],
   }
 }
 
@@ -136,5 +156,41 @@ describe("WorkflowBuilder create action", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create workflow" }))
     const body = await lastCreateBody()
     expect(body.active).toBe(true)
+  })
+
+  // The trigger is its own always-visible section, not a node in the stage
+  // rail (#572). Mutation guard: re-add a trigger row to FlowRail and the
+  // "not inside the rail" assertion fails.
+  it("renders the trigger as a section, not a node in the stage rail", () => {
+    mount(
+      <WorkflowBuilder
+        workspaceId="ws_1"
+        installations={installations}
+        initialDraft={manualReadyDraft()}
+      />,
+    )
+    // The trigger's framing copy is present at the top level…
+    const triggerNote = screen.getByText(/no automatic trigger/i)
+    expect(triggerNote).toBeTruthy()
+    // …but never inside the stage rail.
+    const rail = screen.getByRole("navigation", { name: /workflow steps/i })
+    expect(within(rail).queryByText(/no automatic trigger/i)).toBeNull()
+  })
+
+  // The "no automatic trigger" default (#572): a Manual workflow with a blank
+  // button label is saveable, and the wire `name` falls back to the workflow
+  // name so the run button is still labeled.
+  it("creates a Manual workflow whose button label falls back to the workflow name", async () => {
+    mount(
+      <WorkflowBuilder
+        workspaceId="ws_1"
+        installations={installations}
+        initialDraft={manualReadyDraft()}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Create workflow" }))
+    const body = await lastCreateBody()
+    expect(body.trigger).toEqual({ kind: "manual", name: "Nightly batch" })
+    expect(body.active).toBe(false)
   })
 })

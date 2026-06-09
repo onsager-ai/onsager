@@ -1,63 +1,46 @@
 import { useState } from "react"
-import { ChevronLeft } from "lucide-react"
+import { ChevronLeft, ListChecks } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
-import type { GitHubAppInstallation, WorkflowGateKind, WorkflowStage } from "@/lib/api"
+import type { WorkflowGateKind, WorkflowStage } from "@/lib/api"
 import { FlowRail } from "./FlowRail"
 import { StageEditor } from "./StageEditor"
-import { TriggerEditor } from "./TriggerEditor"
-import { isTriggerReady, makeStage, type WorkflowDocument } from "./workflow-draft"
-
-/** Which node the right-pane editor is bound to. Stages are addressed by id
- *  (not index) so the selection survives reorders and neighbour removals. */
-export type Selection = { kind: "trigger" } | { kind: "stage"; id: string }
+import { makeStage, type WorkflowDocument } from "./workflow-draft"
 
 export interface FlowEditorProps {
-  workspaceId: string
-  installations: GitHubAppInstallation[]
   draft: WorkflowDocument
   onChange: (next: WorkflowDocument) => void
 }
 
 /**
- * Master-detail workflow builder. The left {@link FlowRail} shows the whole
- * pipeline and stays visible while the right pane edits the selected node —
- * replacing the previous card-stack-plus-slide-out-sheet, which hid the flow
- * behind an overlay every time you tuned a node. On mobile the two panes
- * collapse to a list→detail push (one column, same model).
+ * Master-detail editor for a workflow's ordered stages. The left
+ * {@link FlowRail} shows the whole pipeline and stays visible while the right
+ * pane edits the selected stage. The trigger is no longer part of this
+ * surface — it's a different kind of object (how the workflow is invoked, not
+ * a step) and lives in its own always-visible section above the builder
+ * (#572). On mobile the two panes collapse to a list→detail push.
  */
-export function FlowEditor({
-  workspaceId,
-  installations,
-  draft,
-  onChange,
-}: FlowEditorProps) {
+export function FlowEditor({ draft, onChange }: FlowEditorProps) {
   const isMobile = useIsMobile()
-  const [selection, setSelection] = useState<Selection>(() => initialSelection(draft))
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => draft.stages[0]?.id ?? null,
+  )
   const [mobileDetail, setMobileDetail] = useState(false)
 
-  // Guard a stale stage selection (e.g. after a preset swap replaces every
-  // stage): fall back to the first stage, else the trigger.
-  const selectedStage =
-    selection.kind === "stage"
-      ? draft.stages.find((s) => s.id === selection.id)
-      : undefined
-  const effective: Selection =
-    selection.kind === "stage" && !selectedStage
-      ? draft.stages[0]
-        ? { kind: "stage", id: draft.stages[0].id }
-        : { kind: "trigger" }
-      : selection
+  // Guard a stale selection (e.g. after a preset swap replaces every stage):
+  // fall back to the first stage, else nothing.
+  const selectedStage = draft.stages.find((s) => s.id === selectedId)
+  const effectiveId = selectedStage ? selectedId : (draft.stages[0]?.id ?? null)
 
-  const select = (next: Selection) => {
-    setSelection(next)
+  const select = (stageId: string) => {
+    setSelectedId(stageId)
     setMobileDetail(true)
   }
 
   const addStage = (gate: WorkflowGateKind) => {
     const stage = makeStage(gate)
     onChange({ ...draft, stages: [...draft.stages, stage] })
-    select({ kind: "stage", id: stage.id })
+    select(stage.id)
   }
 
   const updateStage = (id: string, next: WorkflowStage) => {
@@ -71,41 +54,31 @@ export function FlowEditor({
     const idx = draft.stages.findIndex((s) => s.id === id)
     const stages = draft.stages.filter((s) => s.id !== id)
     onChange({ ...draft, stages })
-    if (selection.kind === "stage" && selection.id === id) {
+    if (selectedId === id) {
       const neighbour = stages[idx] ?? stages[idx - 1]
-      setSelection(neighbour ? { kind: "stage", id: neighbour.id } : { kind: "trigger" })
+      setSelectedId(neighbour?.id ?? null)
       setMobileDetail(false)
     }
   }
 
-  const editor =
-    effective.kind === "trigger" ? (
-      <TriggerEditor
-        workspaceId={workspaceId}
-        installations={installations}
-        value={draft.trigger}
-        onChange={(trigger) => onChange({ ...draft, trigger })}
-      />
-    ) : (
-      (() => {
-        const index = draft.stages.findIndex((s) => s.id === effective.id)
-        const stage = draft.stages[index]
-        if (!stage) return null
-        return (
-          <StageEditor
-            stage={stage}
-            index={index}
-            onChange={(next) => updateStage(stage.id, next)}
-            onRemove={() => removeStage(stage.id)}
-          />
-        )
-      })()
-    )
+  const index = draft.stages.findIndex((s) => s.id === effectiveId)
+  const stage = index >= 0 ? draft.stages[index] : undefined
+
+  const editor = stage ? (
+    <StageEditor
+      stage={stage}
+      index={index}
+      onChange={(next) => updateStage(stage.id, next)}
+      onRemove={() => removeStage(stage.id)}
+    />
+  ) : (
+    <EmptyDetail />
+  )
 
   const rail = (
     <FlowRail
       draft={draft}
-      selection={effective}
+      selectedStageId={effectiveId}
       onSelect={select}
       onAddStage={addStage}
     />
@@ -114,7 +87,7 @@ export function FlowEditor({
   if (isMobile) {
     return (
       <div className="rounded-lg border p-2">
-        {mobileDetail ? (
+        {mobileDetail && stage ? (
           <div className="space-y-3 p-2">
             <Button
               type="button"
@@ -136,7 +109,7 @@ export function FlowEditor({
   }
 
   return (
-    <div className="flex min-h-[22rem] overflow-hidden rounded-lg border">
+    <div className="flex min-h-[18rem] overflow-hidden rounded-lg border">
       <div className="w-64 shrink-0 overflow-y-auto border-r bg-muted/20 p-2">
         {rail}
       </div>
@@ -145,10 +118,11 @@ export function FlowEditor({
   )
 }
 
-function initialSelection(draft: WorkflowDocument): Selection {
-  // Land where setup is needed: an unconfigured trigger first, otherwise the
-  // first stage, otherwise the trigger.
-  if (!isTriggerReady(draft.trigger)) return { kind: "trigger" }
-  if (draft.stages[0]) return { kind: "stage", id: draft.stages[0].id }
-  return { kind: "trigger" }
+function EmptyDetail() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 py-8 text-center text-muted-foreground">
+      <ListChecks className="h-6 w-6" />
+      <p className="text-sm">Add a step to start building the pipeline.</p>
+    </div>
+  )
 }

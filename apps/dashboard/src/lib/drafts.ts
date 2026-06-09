@@ -14,6 +14,7 @@ import type {
   WorkflowDocument,
   WorkflowDraftSource,
 } from "@/components/workflows/workflow-draft"
+import { emptyDocument } from "@/components/workflows/workflow-draft"
 import { trackActivation } from "@/lib/activation"
 
 /** Soft cap on stored drafts per user. Oldest by `updated_at` evicted. */
@@ -31,21 +32,6 @@ function newId(): string {
     return crypto.randomUUID()
   }
   return `draft_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`
-}
-
-function emptyDocument(): WorkflowDocument {
-  return {
-    name: "",
-    trigger: {
-      kind_tag: "github_issue_webhook",
-      install_id: "",
-      repo_owner: "",
-      repo_name: "",
-      label: "",
-      manual_name: "",
-    },
-    stages: [],
-  }
 }
 
 /** Build a fresh draft record. */
