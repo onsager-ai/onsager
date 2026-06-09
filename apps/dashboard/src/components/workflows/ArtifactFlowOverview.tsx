@@ -14,9 +14,9 @@ export interface ArtifactFlowOverviewProps {
 //
 // Before #104 this component rendered one pill per stage's input + output
 // artifact kind, which duplicated the same artifact multiple times in a row
-// ("Governed pipeline" showed Issue → PR → PR → PR → PR). Artifact state now
-// lives in a separate `DeliverablePanel`; this strip is strictly "where are
-// we in the process?" One pill per gate, no artifact duplication.
+// ("Governed pipeline" showed Issue → PR → PR → PR → PR). This strip is now
+// strictly "where are we in the process?" — one pill per gate, no artifact
+// duplication.
 export function ArtifactFlowOverview({
   triggerLabel,
   stages,

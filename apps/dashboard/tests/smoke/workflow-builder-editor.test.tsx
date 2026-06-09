@@ -3,8 +3,8 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import type { ReactNode } from "react"
-import { StageCard } from "@/components/workflows/StageCard"
-import { TriggerCard } from "@/components/workflows/TriggerCard"
+import { StageEditor } from "@/components/workflows/StageEditor"
+import { TriggerEditor } from "@/components/workflows/TriggerEditor"
 import type { WorkflowStage } from "@/lib/api"
 import type { WorkflowTriggerDraft } from "@/components/workflows/workflow-draft"
 import {
@@ -21,19 +21,21 @@ function mount(node: ReactNode) {
   )
 }
 
-describe("Stage card editor", () => {
+// The master-detail builder (#569) renders the node editor inline in the
+// right pane — no card→sheet click. These assertions mirror the old
+// card-editor smoke checks against the new StageEditor / TriggerEditor.
+describe("Stage editor (master-detail right pane)", () => {
   const base: WorkflowStage = {
     id: "s1",
     name: "Agent session",
     gate_kind: "agent-session",
-    artifact_kind: "github-issue",
+    artifact_kind: "Issue",
     config: {},
   }
 
   it("emits a structured gate_kind when a toggle is selected", () => {
     const onChange = vi.fn()
-    mount(<StageCard stage={base} index={0} onChange={onChange} onRemove={() => {}} />)
-    fireEvent.click(screen.getByRole("button", { name: /Edit stage/i }))
+    mount(<StageEditor stage={base} index={0} onChange={onChange} onRemove={() => {}} />)
     fireEvent.click(screen.getByRole("button", { name: /External check/i }))
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ gate_kind: "external-check" }),
@@ -41,12 +43,9 @@ describe("Stage card editor", () => {
   })
 
   it("does not expose a free-text input for the gate kind", () => {
-    mount(
-      <StageCard stage={base} index={0} onChange={() => {}} onRemove={() => {}} />,
-    )
-    fireEvent.click(screen.getByRole("button", { name: /Edit stage/i }))
-    // There are no <input type="text"> fields that accept arbitrary gate
-    // strings; the only text input is the stage name (a display label).
+    mount(<StageEditor stage={base} index={0} onChange={() => {}} onRemove={() => {}} />)
+    // The only text input is the (optional) stage name — a display label.
+    // Gate kind is a discrete toggle, not a free-text field.
     const textInputs = screen
       .getAllByRole("textbox")
       .filter((el) => el.getAttribute("id")?.startsWith("stage-name-"))
@@ -54,7 +53,7 @@ describe("Stage card editor", () => {
   })
 })
 
-describe("Trigger card editor", () => {
+describe("Trigger editor (master-detail right pane)", () => {
   const empty: WorkflowTriggerDraft = {
     kind_tag: "github_issue_webhook",
     install_id: "",
@@ -75,33 +74,20 @@ describe("Trigger card editor", () => {
 
   it("has no free-text inputs for the linkable fields (install/repo/label)", () => {
     mount(
-      <TriggerCard
-        workspaceId="t1"
-        installations={[]}
-        value={empty}
-        onChange={() => {}}
-      />,
+      <TriggerEditor workspaceId="t1" installations={[]} value={empty} onChange={() => {}} />,
     )
-    fireEvent.click(screen.getByRole("button", { name: /Edit trigger/i }))
-    // The trigger sheet exposes only discrete pickers — Sheet content
-    // should contain zero native `<input type="text">` fields.
-    const textboxes = screen.queryAllByRole("textbox")
-    expect(textboxes.length).toBe(0)
+    // A GitHub-webhook trigger exposes only discrete pickers — the repo
+    // multi-combobox is a closed popover button (role combobox), not a
+    // text field; zero native `<input type="text">` are rendered.
+    expect(screen.queryAllByRole("textbox").length).toBe(0)
   })
 
   it("tells a repo-less (manual) trigger it runs workspace-scoped (#553)", () => {
     mount(
-      <TriggerCard
-        workspaceId="t1"
-        installations={[]}
-        value={manual}
-        onChange={() => {}}
-      />,
+      <TriggerEditor workspaceId="t1" installations={[]} value={manual} onChange={() => {}} />,
     )
-    fireEvent.click(screen.getByRole("button", { name: /Edit trigger/i }))
-    // A repo-less workflow defaults to "any bound repo" — the form states
-    // that runtime behavior rather than pinning a repo. Mutation guard:
-    // delete the Repositories note from the manual branch and this fails.
+    // Mutation guard: delete the Repositories note from the manual branch
+    // and this fails.
     expect(
       screen.getByText(/any repository bound to this workspace/i),
     ).toBeInTheDocument()
@@ -109,16 +95,10 @@ describe("Trigger card editor", () => {
 
   it("does not show the workspace-scoped note for a GitHub webhook trigger", () => {
     mount(
-      <TriggerCard
-        workspaceId="t1"
-        installations={[]}
-        value={empty}
-        onChange={() => {}}
-      />,
+      <TriggerEditor workspaceId="t1" installations={[]} value={empty} onChange={() => {}} />,
     )
-    fireEvent.click(screen.getByRole("button", { name: /Edit trigger/i }))
-    // GitHub webhook triggers pin exactly one repo via the webhook itself,
-    // so the workspace-scoped note must not appear (no regression).
+    // GitHub webhook triggers pin repos via the webhook itself, so the
+    // workspace-scoped note must not appear (no regression).
     expect(
       screen.queryByText(/any repository bound to this workspace/i),
     ).not.toBeInTheDocument()
