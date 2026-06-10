@@ -1,8 +1,35 @@
-# Onsager dev infrastructure.
+# Onsager dev infrastructure — full containerized stack, one compose
+# project per checkout/worktree (COMPOSE_PROJECT_NAME + DEV_HOST come
+# from .envrc via direnv).
+#
+# Reuses the dev-overlay images from deploy/dev/ (spec #194). Unlike the
+# per-slot flow, nothing publishes a host port: the caddy `edge` service
+# joins the shared `devproxy` network and Traefik (in ~/dev-proxy)
+# routes Host(`$DEV_HOST`) → edge. Browser/agent access:
+#   http://<worktree>.onsager.localhost:8000
+#
 # Usage:
 #   just dev-infra          # start Postgres + run migrations
 #   just dev-down           # tear down
-#   docker compose up db -d # Postgres only (manual migration)
+#   docker compose up -d    # full stack (what `wt new` runs)
+
+x-rust-dev: &rust-dev
+  build:
+    context: .
+    dockerfile: deploy/dev/rust.Dockerfile
+  image: onsager-rust-dev:local
+  # Bind mount the repo read-write; target + sccache volumes shadow the
+  # host paths so cargo never writes to ./target on the host.
+  volumes:
+    - .:/work:cached
+    - cargo-target:/work/target
+    - onsager-sccache:/sccache
+  working_dir: /work
+  cap_add:
+    - SYS_PTRACE
+  security_opt:
+    - seccomp=unconfined
+  init: true
 
 services:
   db:
@@ -11,15 +38,13 @@ services:
       POSTGRES_USER: onsager
       POSTGRES_PASSWORD: onsager
       POSTGRES_DB: onsager
-    ports:
-      - "5432:5432"
     volumes:
-      - onsager-db:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U onsager"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
 
   migrate:
     image: postgres:16-alpine
@@ -30,14 +55,138 @@ services:
       - ./crates/onsager-spine/migrations:/migrations:ro
     environment:
       PGPASSWORD: onsager
+    # `sort -V` orders 001 < 002 < ... < 010+; a bare glob's order
+    # isn't guaranteed.
     entrypoint: >
       sh -c "
         set -e;
-        for f in /migrations/*.sql; do
+        for f in $$(ls /migrations/*.sql | sort -V); do
           echo \"==> applying $$f\";
           psql -X -v ON_ERROR_STOP=1 -h db -U onsager -d onsager -f \"$$f\";
         done
       "
+    restart: "no"
+
+  stiglab:
+    <<: *rust-dev
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      STIGLAB_HOST: 0.0.0.0
+      STIGLAB_PORT: "3000"
+      ONSAGER_DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
+      DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
+      RUST_LOG: ${RUST_LOG:-info}
+    command: >
+      cargo watch -q -w crates/stiglab -w crates/onsager-spine -w crates/onsager-artifact
+      -x 'run -p stiglab -- server'
+
+  synodic:
+    <<: *rust-dev
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: "3001"
+      DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
+      RUST_LOG: ${RUST_LOG:-info}
+    command: >
+      cargo watch -q -w crates/synodic -w crates/onsager-spine -w crates/onsager-artifact
+      -x 'run -p synodic -- serve'
+
+  scheduler:
+    <<: *rust-dev
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
+      SCHEDULER_ACTOR: substrate-scheduler-dev
+      ONSAGER_CREDENTIAL_KEY: ${ONSAGER_CREDENTIAL_KEY:-${STIGLAB_CREDENTIAL_KEY:-}}
+      RUST_LOG: ${RUST_LOG:-info}
+    command: >
+      cargo watch -q -w crates/onsager-scheduler -w crates/onsager-nodes
+      -w crates/onsager-substrate -w crates/onsager-spine
+      -x 'run -p onsager-scheduler -- serve'
+
+  portal:
+    <<: *rust-dev
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PORTAL_BIND: 0.0.0.0:3002
+      DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
+      ONSAGER_DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
+      SYNODIC_URL: http://synodic:3001
+      STIGLAB_INTERNAL_WS_URL: ws://stiglab:3000/agent/ws-internal
+      RUST_LOG: ${RUST_LOG:-info}
+    command: >
+      cargo watch -q -w crates/onsager-portal -w crates/onsager-spine -w crates/onsager-artifact
+      -x 'run -p onsager-portal -- serve'
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: deploy/dev/dashboard.Dockerfile
+    image: onsager-dashboard-dev:local
+    volumes:
+      - .:/work:cached
+      # node_modules in per-container volumes so native modules
+      # (esbuild, rollup) match the container's libc.
+      - dashboard-node-modules:/work/node_modules
+      - dashboard-app-node-modules:/work/apps/dashboard/node_modules
+    working_dir: /work
+    environment:
+      # Browser-side HMR WebSocket goes through Traefik on :8000.
+      VITE_HMR_CLIENT_PORT: "8000"
+      VITE_HOST: 0.0.0.0
+    init: true
+    command: >
+      sh -c "pnpm install --filter dashboard --frozen-lockfile &&
+             pnpm --filter dashboard exec vite --host 0.0.0.0 --port 5173"
+
+  # Same-origin edge (deploy/dev/Caddyfile): /api/synodic/* → synodic,
+  # /api/* + /mcp/* + /agent/ws → portal, /* → dashboard. Listens on
+  # :9000 inside the compose network only; Traefik forwards by Host
+  # header — no host port published.
+  edge:
+    image: caddy:2-alpine
+    depends_on:
+      - stiglab
+      - synodic
+      - portal
+      - dashboard
+    volumes:
+      - ./deploy/dev/Caddyfile:/etc/caddy/Caddyfile:ro
+    environment:
+      SLOT_EDGE_PORT: "9000"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}.rule=Host(`${DEV_HOST}`)
+      - traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=9000
+    networks: [default, devproxy]
 
 volumes:
-  onsager-db:
+  # Unprefixed aliases — compose namespaces them per COMPOSE_PROJECT_NAME,
+  # so two checkouts/worktrees never share a database or a cargo target.
+  postgres-data:
+  cargo-target:
+  dashboard-node-modules:
+  dashboard-app-node-modules:
+  # Shared across checkouts — sccache hits compound.
+  onsager-sccache:
+    name: onsager-sccache
+
+networks:
+  devproxy:
+    external: true

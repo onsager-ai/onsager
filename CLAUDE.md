@@ -346,3 +346,23 @@ Skip this for branches that don't start with `claude/` (local/manual work).
 ## Per-crate context
 
 Several crates carry their own CLAUDE.md or `.claude/` directory with crate-specific instructions: `onsager-spine`, `onsager-portal`, `onsager-registry`, `stiglab` (+ `.claude/`), `synodic` (+ `.claude/`).
+
+## Worktree dev stack (Traefik / devproxy)
+
+In addition to the slot system above, each git worktree can run the full
+containerized stack via the root `docker-compose.yml` (direnv/.envrc set
+`COMPOSE_PROJECT_NAME` + `DEV_HOST`). No host ports are published — the
+caddy `edge` service joins the shared `devproxy` network and Traefik
+routes by Host header. The instance is reachable at
+`http://$DEV_HOST:8000` (e.g. `http://feat-x.onsager.localhost:8000`).
+Agents can verify changes themselves with:
+
+```sh
+curl -s -H "Host: $DEV_HOST" localhost:8000
+```
+
+Manage worktrees with `wt new <branch>` / `wt rm <branch>` / `wt ls`
+(see `~/bin/wt`). Note: the root compose no longer publishes Postgres
+on host :5432; for host-run `cargo` against a containerized db, either
+use the slot system or add a local (gitignored) `compose.override.yml`
+re-adding the port.

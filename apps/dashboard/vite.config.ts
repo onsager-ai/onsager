@@ -20,6 +20,9 @@ export default defineConfig({
   },
   server: {
     host: process.env.VITE_HOST ?? 'localhost',
+    // The worktree dev stack reaches Vite through Caddy/Traefik with
+    // Host headers like <worktree>.onsager.localhost — let them through.
+    allowedHosts: ['.localhost'],
     hmr: hmrClientPort
       ? { clientPort: hmrClientPort }
       : undefined,
