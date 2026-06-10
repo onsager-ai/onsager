@@ -196,7 +196,7 @@ dev: dev-infra
         cargo run -p stiglab -- server &
 
     echo "==> Starting synodic on :3001..."
-    PORT=3001 cargo run -p synodic -- serve &
+    PORT=3001 cargo run -p synodic --features postgres -- serve &
 
     echo "==> Starting onsager-scheduler (substrate scheduler)..."
     DATABASE_URL="postgres://onsager:onsager@localhost:5432/onsager" \
@@ -248,7 +248,7 @@ dev-stiglab:
     cargo run -p stiglab -- server
 
 dev-synodic port="3001":
-    PORT={{port}} cargo run -p synodic -- serve
+    PORT={{port}} cargo run -p synodic --features postgres -- serve
 
 # ── DB ───────────────────────────────────────────────────────────────
 db-migrate:
