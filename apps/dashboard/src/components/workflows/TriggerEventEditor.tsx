@@ -1,5 +1,6 @@
-import { GitBranch, Zap } from "lucide-react"
+import { Clock, GitBranch, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { LabelCombobox } from "./LabelCombobox"
 import { TriggerKindToggle } from "./TriggerKindToggle"
 import { type WorkflowTriggerDraft } from "./workflow-draft"
@@ -26,6 +27,7 @@ export function TriggerEventEditor({
   onGoToRepos,
 }: TriggerEventEditorProps) {
   const isManual = value.kind_tag === "manual"
+  const isCron = value.kind_tag === "cron"
   const hasPrimaryRepo = Boolean(
     value.install_id && value.repo_owner && value.repo_name,
   )
@@ -45,6 +47,46 @@ export function TriggerEventEditor({
             <code>onsager trigger fire</code> — no label or repo required. The
             run button uses the workflow name.
           </span>
+        </div>
+      ) : isCron ? (
+        <div className="flex flex-col gap-3">
+          <div className="space-y-1.5">
+            <label htmlFor="cron-expression" className="text-sm font-medium">
+              Schedule
+            </label>
+            <Input
+              id="cron-expression"
+              value={value.expression ?? ""}
+              onChange={(e) => onChange({ ...value, expression: e.target.value })}
+              placeholder="0 9 * * 1-5"
+              autoComplete="off"
+              spellCheck={false}
+              className="font-mono"
+            />
+            <p className="text-xs text-muted-foreground">
+              A 5- or 6-field cron expression (e.g. <code>0 9 * * 1-5</code> ={" "}
+              weekdays at 09:00). No repository required.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="cron-timezone" className="text-sm font-medium">
+              Timezone <span className="text-muted-foreground">(optional)</span>
+            </label>
+            <Input
+              id="cron-timezone"
+              value={value.timezone ?? ""}
+              onChange={(e) =>
+                onChange({ ...value, timezone: e.target.value || null })
+              }
+              placeholder="UTC"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Clock className="h-3.5 w-3.5 shrink-0" />
+              IANA timezone (e.g. <code>America/New_York</code>). Defaults to UTC.
+            </p>
+          </div>
         </div>
       ) : (
         <div className="space-y-1.5">

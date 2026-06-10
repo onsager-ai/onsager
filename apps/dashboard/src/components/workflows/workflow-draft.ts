@@ -39,10 +39,12 @@ export interface RepoRef {
 export interface WorkflowTriggerDraft {
   /**
    * Snake-case registry `kind_tag` for the selected trigger kind (e.g.
-   * `'github_issue_webhook'`, `'manual'`). Drives `isTriggerReady`'s
-   * per-kind readiness branch and which `TriggerKind` variant
-   * `documentToCreateRequest` emits. Defaults to `'github_issue_webhook'`
-   * (the original, GitHub-webhook-only behavior — see `emptyDocument`).
+   * `'manual'`, `'cron'`). Drives `isTriggerReady`'s per-kind readiness
+   * branch and which `TriggerKind` variant `documentToCreateRequest`
+   * emits. Defaults to `'manual'` — the repo-less, always-ready kind (see
+   * `emptyDocument`). `'github_issue_webhook'` is still a valid value
+   * (existing drafts, the wire) but is hidden from the builder's kind
+   * toggle for now.
    */
   kind_tag: string;
   /**
@@ -65,6 +67,17 @@ export interface WorkflowTriggerDraft {
    */
   repos?: RepoRef[];
   label: string;
+  /**
+   * Cron schedule when `kind_tag === 'cron'` — a 5- or 6-field cron
+   * expression. Empty for every other kind. Optional for back-compat with
+   * drafts persisted before cron was authorable.
+   */
+  expression?: string;
+  /**
+   * Optional IANA timezone for the cron schedule (e.g. `'America/New_York'`).
+   * `null`/absent = the scheduler's default (UTC).
+   */
+  timezone?: string | null;
 }
 
 /**
@@ -175,12 +188,14 @@ export function emptyDocument(): WorkflowDocument {
   return {
     name: "",
     trigger: {
-      kind_tag: "github_issue_webhook",
+      kind_tag: "manual",
       install_id: "",
       repo_owner: "",
       repo_name: "",
       repos: [],
       label: "",
+      expression: "",
+      timezone: null,
     },
     stages: [],
   };
@@ -277,11 +292,18 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
 export function isTriggerReady(t: WorkflowTriggerDraft): boolean {
   // Manual triggers (#561) are repo-less and carry no separate name — the
   // fire button derives its label from the workflow name — so a manual
-  // trigger is always ready. The GitHub webhook leg stays exactly as it was
-  // (#545: webhook repo is required, no regression).
+  // trigger is always ready.
   if (t.kind_tag === "manual") {
     return true;
   }
+  // Cron triggers need a schedule expression but no repo — runs resolve
+  // repos workspace-scoped at fire time, same as manual.
+  if (t.kind_tag === "cron") {
+    return (t.expression ?? "").trim() !== "";
+  }
+  // The GitHub webhook leg stays exactly as it was (#545: webhook repo is
+  // required, no regression) — hidden from the builder toggle for now, but
+  // still honored for existing drafts.
   return (
     t.install_id.trim() !== "" &&
     t.repo_owner.trim() !== "" &&
@@ -329,6 +351,26 @@ export function documentToCreateRequest(
       trigger: {
         kind: "manual",
         name: doc.name.trim(),
+      },
+      stages: doc.stages.map(stageToCreateStage),
+      active: activate,
+    };
+  }
+
+  // Cron triggers (#238) are repo-less and time-based: emit the `cron`
+  // variant with the schedule expression and optional timezone. Like manual,
+  // they resolve repos workspace-scoped at fire time — no `repo`, no install
+  // token-mint hint.
+  if (doc.trigger.kind_tag === "cron") {
+    const expression = (doc.trigger.expression ?? "").trim();
+    const timezone = doc.trigger.timezone?.trim() || null;
+    return {
+      workspace_id: workspaceId,
+      name: doc.name.trim(),
+      trigger: {
+        kind: "cron",
+        expression,
+        timezone,
       },
       stages: doc.stages.map(stageToCreateStage),
       active: activate,
