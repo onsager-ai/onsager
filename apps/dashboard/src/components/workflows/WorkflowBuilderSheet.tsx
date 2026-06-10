@@ -70,16 +70,14 @@ export function WorkflowBuilderSheet({ open, onOpenChange }: WorkflowBuilderShee
   if (isMobile) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-[90dvh] rounded-t-xl">
+        <SheetContent side="bottom" className="flex h-[90dvh] flex-col rounded-t-xl">
           <SheetHeader>
             <SheetTitle>Create workflow</SheetTitle>
             <SheetDescription>
-              Chat out the idea, then tap cards to tune.
+              Pick a template, then tune the trigger, steps, and repositories.
             </SheetDescription>
           </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
-            {body}
-          </div>
+          <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">{body}</div>
         </SheetContent>
       </Sheet>
     )
@@ -91,12 +89,10 @@ export function WorkflowBuilderSheet({ open, onOpenChange }: WorkflowBuilderShee
         <DialogHeader>
           <DialogTitle>Create workflow</DialogTitle>
           <DialogDescription>
-            Chat out the idea, then tap cards to tune.
+            Pick a template, then tune the trigger, steps, and repositories.
           </DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {body}
-        </div>
+        <div className="flex min-h-0 flex-1 flex-col">{body}</div>
       </DialogContent>
     </Dialog>
   )

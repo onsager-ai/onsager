@@ -31,7 +31,6 @@ export function workflowDocumentToYaml(doc: WorkflowDocument): string {
         repo_owner: doc.trigger.repo_owner,
         repo_name: doc.trigger.repo_name,
         label: doc.trigger.label,
-        manual_name: doc.trigger.manual_name,
       },
       stages: doc.stages.map((s) => ({
         id: s.id,
@@ -80,16 +79,15 @@ function parseTrigger(raw: unknown): WorkflowTriggerDraft {
   if (!isObject(raw)) {
     throw new WorkflowYamlError("`trigger` must be a mapping")
   }
-  // `kind_tag` / `manual_name` are read optionally so YAML authored before
-  // the Manual trigger kind (#561) still round-trips: an absent `kind_tag`
-  // defaults to the original `github_issue_webhook` behavior.
+  // `kind_tag` is read optionally so YAML authored before the Manual trigger
+  // kind (#561) still round-trips: an absent `kind_tag` defaults to the
+  // original `github_issue_webhook` behavior.
   return {
     kind_tag: optionalString(raw, "kind_tag", "trigger") || "github_issue_webhook",
     install_id: requireString(raw, "install_id", "trigger"),
     repo_owner: requireString(raw, "repo_owner", "trigger"),
     repo_name: requireString(raw, "repo_name", "trigger"),
     label: requireString(raw, "label", "trigger"),
-    manual_name: optionalString(raw, "manual_name", "trigger"),
   }
 }
 
@@ -127,7 +125,7 @@ function isObject(v: unknown): v is Record<string, unknown> {
 
 // Like `requireString` but a missing key yields `""` rather than throwing.
 // Used for fields added after the original YAML shape (e.g. the Manual
-// trigger's `kind_tag` / `manual_name`, #561) so older drafts still parse.
+// trigger's `kind_tag`, #561) so older drafts still parse.
 function optionalString(
   obj: Record<string, unknown>,
   key: string,

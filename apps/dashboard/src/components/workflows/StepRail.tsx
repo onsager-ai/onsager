@@ -1,6 +1,6 @@
-import { Plus, Webhook, Zap } from "lucide-react"
+import { Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { WorkflowGateKind } from "@/lib/api"
+import type { WorkflowGateKind, WorkflowStage } from "@/lib/api"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,73 +8,48 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { GATE_KINDS } from "./workflow-meta"
-import {
-  triggerRepos,
-  type WorkflowDocument,
-  type WorkflowTriggerDraft,
-} from "./workflow-draft"
-import type { Selection } from "./FlowEditor"
 
 const GATE_ICON = Object.fromEntries(
   GATE_KINDS.map((g) => [g.value, g.icon]),
 ) as Record<WorkflowGateKind, (typeof GATE_KINDS)[number]["icon"]>
 
-export interface FlowRailProps {
-  draft: WorkflowDocument
-  selection: Selection
-  onSelect: (selection: Selection) => void
+export interface StepRailProps {
+  stages: WorkflowStage[]
+  selectedId: string | null
+  onSelect: (id: string) => void
   onAddStage: (gate: WorkflowGateKind) => void
 }
 
 /**
- * The left rail of the master-detail builder: a vertical pipeline "spine"
- * with the trigger node on top, one row per stage, and a typed "add step"
- * dropdown at the bottom. Selecting a row drives the right-pane editor; the
- * rail stays visible while you edit so the whole flow is never hidden behind
- * an overlay (the old card→sheet pattern it replaces).
+ * Left rail of the Steps master-detail: a vertical pipeline "spine", one row
+ * per stage, with a typed "add step" dropdown at the bottom. Selecting a row
+ * drives the right-pane {@link StageEditor}; the rail stays visible while you
+ * edit. The trigger node no longer lives here — it moved to the Trigger tab —
+ * so the rail is steps-only.
  */
-export function FlowRail({ draft, selection, onSelect, onAddStage }: FlowRailProps) {
-  const trigger = summarizeTrigger(draft.trigger)
-  const stageCount = draft.stages.length
-
+export function StepRail({
+  stages,
+  selectedId,
+  onSelect,
+  onAddStage,
+}: StepRailProps) {
   return (
     <nav aria-label="Workflow steps" className="flex flex-col">
-      <RailRow
-        marker={
-          draft.trigger.kind_tag === "manual" ? (
-            <Zap className="h-3.5 w-3.5" />
-          ) : (
-            <Webhook className="h-3.5 w-3.5" />
-          )
-        }
-        tone="trigger"
-        title={trigger.kindLabel}
-        subtitle={
-          <span className="truncate">
-            {trigger.repoSummary}
-            {trigger.labelSummary ? ` · ${trigger.labelSummary}` : ""}
-          </span>
-        }
-        selected={selection.kind === "trigger"}
-        onClick={() => onSelect({ kind: "trigger" })}
-        isFirst
-      />
-
-      {draft.stages.map((stage, i) => {
+      {stages.map((stage, i) => {
         const Icon = GATE_ICON[stage.gate_kind]
         return (
           <RailRow
             key={stage.id}
             marker={i + 1}
-            tone="stage"
             title={
               <span className="flex min-w-0 items-center gap-1.5">
                 <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span className="truncate">{stage.name}</span>
               </span>
             }
-            selected={selection.kind === "stage" && selection.id === stage.id}
-            onClick={() => onSelect({ kind: "stage", id: stage.id })}
+            selected={selectedId === stage.id}
+            onClick={() => onSelect(stage.id)}
+            isFirst={i === 0}
           />
         )
       })}
@@ -88,7 +63,7 @@ export function FlowRail({ draft, selection, onSelect, onAddStage }: FlowRailPro
             />
           }
         >
-          <RailMarker tone="add" isLast>
+          <RailMarker tone="add" isFirst={stages.length === 0} isLast>
             <Plus className="h-3.5 w-3.5" />
           </RailMarker>
           <span className="flex-1 rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground transition group-hover:bg-muted/50">
@@ -112,35 +87,27 @@ export function FlowRail({ draft, selection, onSelect, onAddStage }: FlowRailPro
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {stageCount === 0 && (
+      {stages.length === 0 && (
         <p className="px-3 pt-1 text-xs text-muted-foreground">
-          Add at least one step to run this trigger.
+          Add at least one step to run this workflow.
         </p>
       )}
     </nav>
   )
 }
 
-type Tone = "trigger" | "stage" | "add"
-
 function RailRow({
   marker,
-  tone,
   title,
-  subtitle,
   selected,
   onClick,
   isFirst,
-  isLast,
 }: {
   marker: React.ReactNode
-  tone: Tone
   title: React.ReactNode
-  subtitle?: React.ReactNode
   selected?: boolean
   onClick: () => void
   isFirst?: boolean
-  isLast?: boolean
 }) {
   return (
     <button
@@ -149,7 +116,7 @@ function RailRow({
       onClick={onClick}
       className="group flex w-full items-stretch gap-2 text-left"
     >
-      <RailMarker tone={tone} selected={selected} isFirst={isFirst} isLast={isLast}>
+      <RailMarker tone="stage" selected={selected} isFirst={isFirst}>
         {marker}
       </RailMarker>
       <span
@@ -159,19 +126,14 @@ function RailRow({
         )}
       >
         <span className="flex min-w-0 items-center text-sm font-medium">{title}</span>
-        {subtitle != null && (
-          <span className="flex min-w-0 items-center text-xs text-muted-foreground">
-            {subtitle}
-          </span>
-        )}
       </span>
     </button>
   )
 }
 
 // The marker column draws the connecting spine line plus the node dot. The
-// line spans the full row height except at the two ends (trimmed to a half
-// so the spine starts/stops at the first/last dot).
+// line spans the full row height except at the two ends (trimmed to a half so
+// the spine starts/stops at the first/last dot).
 function RailMarker({
   tone,
   selected,
@@ -179,7 +141,7 @@ function RailMarker({
   isLast,
   children,
 }: {
-  tone: Tone
+  tone: "stage" | "add"
   selected?: boolean
   isFirst?: boolean
   isLast?: boolean
@@ -199,46 +161,13 @@ function RailMarker({
           "absolute left-[18px] top-1/2 z-10 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-[11px] font-semibold",
           selected
             ? "border-primary bg-primary text-primary-foreground"
-            : tone === "trigger"
-              ? "border-primary/40 bg-primary/10 text-primary"
-              : tone === "add"
-                ? "border-dashed bg-background text-muted-foreground group-hover:border-primary/40 group-hover:text-primary"
-                : "border-border bg-background text-muted-foreground",
+            : tone === "add"
+              ? "border-dashed bg-background text-muted-foreground group-hover:border-primary/40 group-hover:text-primary"
+              : "border-border bg-background text-muted-foreground",
         )}
       >
         {children}
       </span>
     </span>
   )
-}
-
-function summarizeTrigger(t: WorkflowTriggerDraft): {
-  kindLabel: string
-  repoSummary: string
-  labelSummary: string | null
-} {
-  if (t.kind_tag === "manual") {
-    return {
-      kindLabel: t.manual_name.trim()
-        ? `Manual · ${t.manual_name.trim()}`
-        : "Manual trigger",
-      repoSummary: "Any repository in this workspace",
-      labelSummary: null,
-    }
-  }
-  const repos = triggerRepos(t)
-  const labelSummary = t.label ? `Label: ${t.label}` : "Pick a trigger label"
-  if (repos.length === 0) {
-    return {
-      kindLabel: "GitHub issue label",
-      repoSummary: "Pick one or more repositories",
-      labelSummary,
-    }
-  }
-  const primary = repos[0]
-  const repoSummary =
-    repos.length === 1
-      ? `${primary.repo_owner}/${primary.repo_name}`
-      : `${primary.repo_owner}/${primary.repo_name} +${repos.length - 1} more`
-  return { kindLabel: "GitHub issue label", repoSummary, labelSummary }
 }

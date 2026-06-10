@@ -11,8 +11,10 @@ import {
 
 // Manual repo-less trigger kind in the workflow builder (spec #561).
 // The backend is unchanged — these exercise the dashboard's draft-side
-// branch on `kind_tag`: Manual needs only a name; GitHub keeps requiring
-// install + repo + label (#545 — no regression).
+// branch on `kind_tag`: Manual carries no config of its own (no install,
+// repo, label, or name — the fire button derives its label from the
+// workflow name), so it's always ready. GitHub keeps requiring install +
+// repo + label (#545 — no regression).
 
 function githubTrigger(
   over: Partial<WorkflowTriggerDraft> = {},
@@ -23,7 +25,6 @@ function githubTrigger(
     repo_owner: "acme",
     repo_name: "widgets",
     label: "ai",
-    manual_name: "",
     ...over,
   }
 }
@@ -37,7 +38,6 @@ function manualTrigger(
     repo_owner: "",
     repo_name: "",
     label: "",
-    manual_name: "Run nightly batch",
     ...over,
   }
 }
@@ -54,16 +54,13 @@ const INSTALLATIONS: GitHubAppInstallation[] = [
 ]
 
 describe("isTriggerReady — per-kind branch (#561)", () => {
-  it("Manual is ready with only a non-empty name", () => {
+  it("Manual is always ready — it carries no config of its own", () => {
     expect(isTriggerReady(manualTrigger())).toBe(true)
   })
 
-  it("Manual with a blank name is not ready", () => {
-    expect(isTriggerReady(manualTrigger({ manual_name: "   " }))).toBe(false)
-  })
-
   it("Manual ignores install/repo/label entirely", () => {
-    // No install, no repo, no label — still ready as long as it has a name.
+    // No install, no repo, no label — still ready; a manual trigger has no
+    // fields to fill (the fire button uses the workflow name).
     expect(
       isTriggerReady(
         manualTrigger({
@@ -84,9 +81,9 @@ describe("isTriggerReady — per-kind branch (#561)", () => {
     expect(isTriggerReady(githubTrigger({ label: "" }))).toBe(false)
   })
 
-  it("a GitHub trigger with a name set is NOT treated as ready (kind decides)", () => {
-    // Mutation guard: if the Manual branch keyed off `manual_name` instead
-    // of `kind_tag`, this github trigger (missing repo/label) would falsely
+  it("a GitHub trigger missing repo/label is NOT ready (kind decides)", () => {
+    // Mutation guard: if the Manual branch keyed off something other than
+    // `kind_tag`, this github trigger (missing repo/label) would falsely
     // pass. It must stay false because the kind is github_issue_webhook.
     expect(
       isTriggerReady(
@@ -95,7 +92,6 @@ describe("isTriggerReady — per-kind branch (#561)", () => {
           repo_owner: "",
           repo_name: "",
           label: "",
-          manual_name: "Run nightly batch",
         }),
       ),
     ).toBe(false)
@@ -112,9 +108,11 @@ describe("documentToCreateRequest — Manual variant (#561)", () => {
     }
   }
 
-  it("emits a repo-less manual trigger with no install_id hint", () => {
+  it("emits a repo-less manual trigger named after the workflow", () => {
     const body = documentToCreateRequest(manualDoc(), [], "ws_1", false)
-    expect(body.trigger).toEqual({ kind: "manual", name: "Run nightly batch" })
+    // The manual fire label is derived from the workflow name — there is no
+    // separate trigger name to author (#581).
+    expect(body.trigger).toEqual({ kind: "manual", name: "Nightly batch" })
     // Repo-less: no install token-mint hint, no repo on the trigger.
     expect(body.install_id).toBeUndefined()
     expect("repo" in body.trigger).toBe(false)
@@ -130,17 +128,11 @@ describe("documentToCreateRequest — Manual variant (#561)", () => {
     ).not.toThrow()
   })
 
-  it("trims the manual name on the wire", () => {
+  it("trims the workflow name when deriving the manual fire label", () => {
     const doc = manualDoc()
-    doc.trigger = manualTrigger({ manual_name: "  spaced  " })
+    doc.name = "  spaced  "
     const body = documentToCreateRequest(doc, [], "ws_1", false)
     expect(body.trigger).toEqual({ kind: "manual", name: "spaced" })
-  })
-
-  it("throws when the Manual name is blank", () => {
-    const doc = manualDoc()
-    doc.trigger = manualTrigger({ manual_name: "" })
-    expect(() => documentToCreateRequest(doc, [], "ws_1", false)).toThrow()
   })
 })
 

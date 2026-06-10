@@ -5,7 +5,6 @@ import {
   type GitHubAppInstallation,
   type WorkflowGateKind,
   type WorkflowStage,
-  type WorkflowTrigger,
 } from "@/lib/api";
 
 // The in-memory shape the chat/card editor manipulates. Everything here is
@@ -66,11 +65,6 @@ export interface WorkflowTriggerDraft {
    */
   repos?: RepoRef[];
   label: string;
-  /**
-   * Manual-trigger button name; used only when `kind_tag === 'manual'`.
-   * Empty for every other kind.
-   */
-  manual_name: string;
 }
 
 /**
@@ -187,7 +181,6 @@ export function emptyDocument(): WorkflowDocument {
       repo_name: "",
       repos: [],
       label: "",
-      manual_name: "",
     },
     stages: [],
   };
@@ -282,11 +275,12 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
 ];
 
 export function isTriggerReady(t: WorkflowTriggerDraft): boolean {
-  // Manual triggers (#561) are repo-less: a non-empty button name is the
-  // only requirement — no install, repo, or label. The GitHub webhook leg
-  // stays exactly as it was (#545: webhook repo is required, no regression).
+  // Manual triggers (#561) are repo-less and carry no separate name — the
+  // fire button derives its label from the workflow name — so a manual
+  // trigger is always ready. The GitHub webhook leg stays exactly as it was
+  // (#545: webhook repo is required, no regression).
   if (t.kind_tag === "manual") {
-    return t.manual_name.trim() !== "";
+    return true;
   }
   return (
     t.install_id.trim() !== "" &&
@@ -294,20 +288,6 @@ export function isTriggerReady(t: WorkflowTriggerDraft): boolean {
     t.repo_name.trim() !== "" &&
     t.label.trim() !== ""
   );
-}
-
-export function draftToRequestTrigger(
-  t: WorkflowTriggerDraft,
-): WorkflowTrigger {
-  return {
-    kind: "github-label",
-    install_id: t.install_id,
-    repo_owner: t.repo_owner,
-    repo_name: t.repo_name,
-    label: t.label,
-    kind_tag: t.kind_tag,
-    manual_name: t.kind_tag === "manual" ? t.manual_name : "",
-  };
 }
 
 // Build the stiglab-shaped create-workflow request from the UI draft. The
@@ -332,24 +312,23 @@ export function documentToCreateRequest(
   }
   if (!isTriggerReady(doc.trigger)) {
     throw new ApiError(
-      doc.trigger.kind_tag === "manual"
-        ? "name the manual trigger before activating"
-        : "pick an install, repo, and label before activating",
+      "pick an install, repo, and label before activating",
       400,
     );
   }
 
-  // Manual triggers (#561) are repo-less: emit the `manual` variant with
-  // just its button name — no `repo`, no install token-mint hint. The
-  // backend's `trigger.repo` is optional (#545) and a Manual workflow
-  // resolves repos workspace-scoped at runtime (#546/#556).
+  // Manual triggers (#561) are repo-less and carry no separate name: emit the
+  // `manual` variant with the workflow name as its fire-button label — no
+  // `repo`, no install token-mint hint. The backend's `trigger.repo` is
+  // optional (#545) and a Manual workflow resolves repos workspace-scoped at
+  // runtime (#546/#556).
   if (doc.trigger.kind_tag === "manual") {
     return {
       workspace_id: workspaceId,
       name: doc.name.trim(),
       trigger: {
         kind: "manual",
-        name: doc.trigger.manual_name.trim(),
+        name: doc.name.trim(),
       },
       stages: doc.stages.map(stageToCreateStage),
       active: activate,

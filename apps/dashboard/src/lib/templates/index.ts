@@ -52,7 +52,6 @@ export function templateToDocument(template: FtueTemplate): WorkflowDocument {
       repo_owner: "",
       repo_name: "",
       label: template.trigger_label,
-      manual_name: "",
     },
     stages: template.stages.map((s) => makeStage(s.gate_kind, s.name)),
   }

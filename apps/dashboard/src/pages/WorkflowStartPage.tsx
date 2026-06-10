@@ -212,7 +212,6 @@ function RepoRow({
       repo_owner: repo.owner,
       repo_name: repo.name,
       label,
-      manual_name: "",
     });
     create.mutate({
       workspace_id: workspaceId,
