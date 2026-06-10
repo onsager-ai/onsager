@@ -4,13 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import type { ReactNode } from "react"
 import { StageEditor } from "@/components/workflows/StageEditor"
-import { TriggerEditor } from "@/components/workflows/TriggerEditor"
+import { TriggerEventEditor } from "@/components/workflows/TriggerEventEditor"
+import { TriggerReposEditor } from "@/components/workflows/TriggerReposEditor"
 import type { WorkflowStage } from "@/lib/api"
 import type { WorkflowTriggerDraft } from "@/components/workflows/workflow-draft"
-import {
-  draftToRequestTrigger,
-  isTriggerReady,
-} from "@/components/workflows/workflow-draft"
 
 function mount(node: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -21,10 +18,27 @@ function mount(node: ReactNode) {
   )
 }
 
-// The master-detail builder (#569) renders the node editor inline in the
-// right pane — no card→sheet click. These assertions mirror the old
-// card-editor smoke checks against the new StageEditor / TriggerEditor.
-describe("Stage editor (master-detail right pane)", () => {
+const githubTrigger: WorkflowTriggerDraft = {
+  kind_tag: "github_issue_webhook",
+  install_id: "",
+  repo_owner: "",
+  repo_name: "",
+  label: "",
+}
+
+const manualTrigger: WorkflowTriggerDraft = {
+  kind_tag: "manual",
+  install_id: "",
+  repo_owner: "",
+  repo_name: "",
+  label: "",
+}
+
+// The tabbed builder (#570/#581) splits the trigger node across a Trigger tab
+// (kind + event) and a Repositories tab. These assertions mirror the old
+// card-editor smoke checks against the new StageEditor / TriggerEventEditor /
+// TriggerReposEditor.
+describe("Stage editor (Steps tab right pane)", () => {
   const base: WorkflowStage = {
     id: "s1",
     name: "Agent session",
@@ -52,40 +66,48 @@ describe("Stage editor (master-detail right pane)", () => {
   })
 })
 
-describe("Trigger editor (master-detail right pane)", () => {
-  const empty: WorkflowTriggerDraft = {
-    kind_tag: "github_issue_webhook",
-    install_id: "",
-    repo_owner: "",
-    repo_name: "",
-    label: "",
-    manual_name: "",
-  }
-
-  const manual: WorkflowTriggerDraft = {
-    kind_tag: "manual",
-    install_id: "",
-    repo_owner: "",
-    repo_name: "",
-    label: "",
-    manual_name: "Run nightly batch",
-  }
-
-  it("has no free-text inputs for the linkable fields (install/repo/label)", () => {
+describe("Trigger event editor (Trigger tab)", () => {
+  it("exposes no free-text input for a GitHub webhook trigger", () => {
     mount(
-      <TriggerEditor workspaceId="t1" installations={[]} value={empty} onChange={() => {}} />,
+      <TriggerEventEditor
+        workspaceId="t1"
+        value={githubTrigger}
+        onChange={() => {}}
+        onGoToRepos={() => {}}
+      />,
     )
-    // A GitHub-webhook trigger exposes only discrete pickers — the repo
-    // multi-combobox is a closed popover button (role combobox), not a
-    // text field; zero native `<input type="text">` are rendered.
+    // Kind is a segmented toggle (buttons) and the label is a closed picker;
+    // with no repo chosen the label collapses to a "pick a repository first"
+    // hint — zero native text inputs either way.
     expect(screen.queryAllByRole("textbox").length).toBe(0)
   })
 
+  it("exposes no free-text input for a Manual trigger (#581 — no trigger name)", () => {
+    mount(
+      <TriggerEventEditor
+        workspaceId="t1"
+        value={manualTrigger}
+        onChange={() => {}}
+        onGoToRepos={() => {}}
+      />,
+    )
+    // Mutation guard for #581: the manual branch must not render a trigger
+    // name input — the fire button derives its label from the workflow name.
+    expect(screen.queryAllByRole("textbox").length).toBe(0)
+  })
+})
+
+describe("Trigger repos editor (Repositories tab)", () => {
   it("tells a repo-less (manual) trigger it runs workspace-scoped (#553)", () => {
     mount(
-      <TriggerEditor workspaceId="t1" installations={[]} value={manual} onChange={() => {}} />,
+      <TriggerReposEditor
+        workspaceId="t1"
+        installations={[]}
+        value={manualTrigger}
+        onChange={() => {}}
+      />,
     )
-    // Mutation guard: delete the Repositories note from the manual branch
+    // Mutation guard: delete the workspace-scoped note from the manual branch
     // and this fails.
     expect(
       screen.getByText(/any repository bound to this workspace/i),
@@ -94,59 +116,17 @@ describe("Trigger editor (master-detail right pane)", () => {
 
   it("does not show the workspace-scoped note for a GitHub webhook trigger", () => {
     mount(
-      <TriggerEditor workspaceId="t1" installations={[]} value={empty} onChange={() => {}} />,
+      <TriggerReposEditor
+        workspaceId="t1"
+        installations={[]}
+        value={githubTrigger}
+        onChange={() => {}}
+      />,
     )
-    // GitHub webhook triggers pin repos via the webhook itself, so the
+    // GitHub webhook triggers pin repos via the repo multi-combobox, so the
     // workspace-scoped note must not appear (no regression).
     expect(
       screen.queryByText(/any repository bound to this workspace/i),
     ).not.toBeInTheDocument()
-  })
-})
-
-describe("workflow-draft serialization", () => {
-  it("only produces structured trigger values on the wire", () => {
-    const t: WorkflowTriggerDraft = {
-      kind_tag: "github_issue_webhook",
-      install_id: "inst_1",
-      repo_owner: "onsager-ai",
-      repo_name: "onsager",
-      label: "factory",
-      manual_name: "",
-    }
-    expect(isTriggerReady(t)).toBe(true)
-    const wire = draftToRequestTrigger(t)
-    expect(wire).toEqual({
-      kind: "github-label",
-      install_id: "inst_1",
-      repo_owner: "onsager-ai",
-      repo_name: "onsager",
-      label: "factory",
-      kind_tag: "github_issue_webhook",
-      manual_name: "",
-    })
-  })
-
-  it("rejects drafts with empty linkable fields", () => {
-    expect(
-      isTriggerReady({
-        kind_tag: "github_issue_webhook",
-        install_id: "inst_1",
-        repo_owner: "onsager-ai",
-        repo_name: "onsager",
-        label: "",
-        manual_name: "",
-      }),
-    ).toBe(false)
-    expect(
-      isTriggerReady({
-        kind_tag: "github_issue_webhook",
-        install_id: "",
-        repo_owner: "a",
-        repo_name: "b",
-        label: "c",
-        manual_name: "",
-      }),
-    ).toBe(false)
   })
 })

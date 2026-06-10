@@ -1,17 +1,22 @@
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
+import { ArrowRight, ChevronLeft } from "lucide-react"
 import { api, type CreateWorkflowRequest, type GitHubAppInstallation } from "@/lib/api"
 import { useOptionalActiveWorkspace } from "@/lib/workspace"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import { FlowEditor } from "./FlowEditor"
-import { PresetPicker } from "./PresetPicker"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { StepsEditor } from "./StepsEditor"
+import { TemplateGallery } from "./TemplateGallery"
+import { TriggerEventEditor } from "./TriggerEventEditor"
+import { TriggerReposEditor } from "./TriggerReposEditor"
 import {
   documentToCreateRequest,
   emptyDocument,
   isTriggerReady,
+  triggerRepos,
   type WorkflowDocument,
 } from "./workflow-draft"
 
@@ -22,13 +27,21 @@ export interface WorkflowBuilderProps {
   onCreated?: (id: string) => void
 }
 
+type TabId = "overview" | "trigger" | "steps" | "repos"
+
 export function WorkflowBuilder({
   workspaceId,
   installations,
   initialDraft,
   onCreated,
 }: WorkflowBuilderProps) {
-  const [draft, setDraft] = useState<WorkflowDocument>(initialDraft ?? emptyDocument())
+  const [draft, setDraft] = useState<WorkflowDocument>(
+    initialDraft ?? emptyDocument(),
+  )
+  // Template-first: an explicit draft (e.g. handed in from chat) skips the
+  // gallery and lands straight in the tabbed editor.
+  const [started, setStarted] = useState(initialDraft !== undefined)
+  const [tab, setTab] = useState<TabId>("overview")
   // Creation and activation are distinct acts; default OFF preserves today's
   // draft-by-default behavior (the old "Save as draft" path).
   const [active, setActive] = useState(false)
@@ -36,10 +49,27 @@ export function WorkflowBuilder({
   const navigate = useNavigate()
   const activeWorkspace = useOptionalActiveWorkspace()
 
+  const isManual = draft.trigger.kind_tag === "manual"
+  // Per-tab completion drives the dots on the tab strip and the footer hint.
+  const overviewDone = draft.name.trim() !== ""
+  // Manual triggers carry no config of their own (no label, no repo) — the
+  // fire button derives its label from the workflow name — so the Trigger tab
+  // is always complete for them.
+  const triggerDone = isManual || draft.trigger.label.trim() !== ""
+  const reposDone = isManual || triggerRepos(draft.trigger).length > 0
+  const stepsDone = draft.stages.length > 0
+
   const canSave =
-    draft.name.trim() !== "" &&
-    isTriggerReady(draft.trigger) &&
-    draft.stages.length > 0
+    overviewDone && isTriggerReady(draft.trigger) && stepsDone
+  const hint = !overviewDone
+    ? "Name your workflow"
+    : !reposDone
+      ? "Pick at least one repository"
+      : !triggerDone
+        ? "Pick a trigger label"
+        : !stepsDone
+          ? "Add at least one step"
+          : ""
 
   const create = useMutation({
     mutationFn: (body: CreateWorkflowRequest) => api.createWorkflow(body),
@@ -54,62 +84,214 @@ export function WorkflowBuilder({
     },
   })
 
-  const save = (active: boolean) => {
+  const save = () => {
     if (!canSave) return
-    create.mutate(documentToCreateRequest(draft, installations, workspaceId, active))
+    create.mutate(
+      documentToCreateRequest(draft, installations, workspaceId, active),
+    )
+  }
+
+  if (!started) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <TemplateGallery
+            onChoose={(doc) => {
+              setDraft(doc)
+              setTab("overview")
+              setStarted(true)
+            }}
+          />
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-1.5">
-        <label htmlFor="workflow-name" className="text-sm font-medium">
-          Workflow name
-        </label>
-        <Input
-          id="workflow-name"
-          value={draft.name}
-          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          placeholder="e.g. Issue → PR pipeline"
-        />
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as TabId)}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <TabsList className="w-full">
+          <TabsTrigger value="overview">
+            Overview {!overviewDone && <Dot />}
+          </TabsTrigger>
+          <TabsTrigger value="trigger">
+            Trigger {!triggerDone && <Dot />}
+          </TabsTrigger>
+          <TabsTrigger value="steps">Steps {!stepsDone && <Dot />}</TabsTrigger>
+          <TabsTrigger value="repos">
+            Repositories {!reposDone && <Dot />}
+          </TabsTrigger>
+        </TabsList>
 
-      <PresetPicker draft={draft} onApply={setDraft} />
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pt-4">
+          <TabsContent value="overview" className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="workflow-name" className="text-sm font-medium">
+                Workflow name
+              </label>
+              <Input
+                id="workflow-name"
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="e.g. Issue → PR pipeline"
+              />
+            </div>
 
-      <FlowEditor
-        workspaceId={workspaceId}
-        installations={installations}
-        draft={draft}
-        onChange={setDraft}
-      />
+            <label
+              htmlFor="workflow-active"
+              className="flex items-start gap-3 rounded-lg border p-3"
+            >
+              <Switch
+                id="workflow-active"
+                checked={active}
+                onCheckedChange={setActive}
+              />
+              <span className="space-y-0.5">
+                <span className="block text-sm font-medium">
+                  Activate on create
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Off = saved as a draft you can activate later.
+                </span>
+              </span>
+            </label>
+
+            <PipelineSummary draft={draft} onJump={setTab} />
+          </TabsContent>
+
+          <TabsContent value="trigger">
+            <TriggerEventEditor
+              workspaceId={workspaceId}
+              value={draft.trigger}
+              onChange={(trigger) => setDraft({ ...draft, trigger })}
+              onGoToRepos={() => setTab("repos")}
+            />
+          </TabsContent>
+
+          <TabsContent value="steps">
+            <StepsEditor draft={draft} onChange={setDraft} />
+          </TabsContent>
+
+          <TabsContent value="repos">
+            <TriggerReposEditor
+              workspaceId={workspaceId}
+              installations={installations}
+              value={draft.trigger}
+              onChange={(trigger) => setDraft({ ...draft, trigger })}
+            />
+          </TabsContent>
+        </div>
+      </Tabs>
 
       {create.isError && (
-        <p className="text-sm text-destructive">
+        <p className="pt-2 text-sm text-destructive">
           {create.error instanceof Error ? create.error.message : "Failed to save"}
         </p>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <label
-          htmlFor="workflow-active"
-          className="flex items-center gap-2 text-sm font-medium"
-        >
-          <Switch
-            id="workflow-active"
-            checked={active}
-            onCheckedChange={setActive}
-          />
-          Active
-        </label>
+      <div className="mt-4 flex shrink-0 items-center justify-between gap-3 border-t pt-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="-ml-2 shrink-0 text-muted-foreground"
+            onClick={() => setStarted(false)}
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Templates
+          </Button>
+          {hint && (
+            <span className="truncate text-xs text-muted-foreground">{hint}</span>
+          )}
+        </div>
         <Button
           type="button"
           size="lg"
-          className="w-full sm:w-auto"
+          className="shrink-0"
           disabled={!canSave || create.isPending}
-          onClick={() => save(active)}
+          onClick={save}
         >
           {create.isPending ? "Creating…" : "Create workflow"}
         </Button>
       </div>
     </div>
+  )
+}
+
+/** Amber "needs config" marker on an incomplete tab. */
+function Dot() {
+  return (
+    <span
+      aria-hidden
+      className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-500"
+    />
+  )
+}
+
+/** Read-only `Trigger → Step → Step…` overview; chips jump to their tab. */
+function PipelineSummary({
+  draft,
+  onJump,
+}: {
+  draft: WorkflowDocument
+  onJump: (tab: TabId) => void
+}) {
+  const triggerLabel =
+    draft.trigger.kind_tag === "manual"
+      ? "Manual trigger"
+      : draft.trigger.label.trim()
+        ? `Label: ${draft.trigger.label}`
+        : "GitHub trigger"
+
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <div className="mb-2 text-xs font-medium text-foreground">Pipeline</div>
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        <Chip onClick={() => onJump("trigger")}>{triggerLabel}</Chip>
+        {draft.stages.map((stage) => (
+          <Fragment key={stage.id}>
+            <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <Chip onClick={() => onJump("steps")}>{stage.name}</Chip>
+          </Fragment>
+        ))}
+        {draft.stages.length === 0 && (
+          <>
+            <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <Chip onClick={() => onJump("steps")} muted>
+              No steps yet
+            </Chip>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Chip({
+  children,
+  onClick,
+  muted,
+}: {
+  children: React.ReactNode
+  onClick: () => void
+  muted?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        muted
+          ? "rounded-md border border-dashed px-2 py-1 text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+          : "rounded-md border bg-background px-2 py-1 font-medium transition hover:border-primary/40"
+      }
+    >
+      {children}
+    </button>
   )
 }

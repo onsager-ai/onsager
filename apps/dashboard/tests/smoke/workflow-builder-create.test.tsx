@@ -105,7 +105,7 @@ describe("WorkflowBuilder create action", () => {
       />,
     )
     expect(screen.getByRole("button", { name: "Create workflow" })).toBeTruthy()
-    expect(screen.getByRole("switch", { name: "Active" })).toBeTruthy()
+    expect(screen.getByRole("switch", { name: /Activate on create/i })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /Save as draft/i })).toBeNull()
     expect(screen.queryByRole("button", { name: /Activate workflow/i })).toBeNull()
   })
@@ -132,7 +132,7 @@ describe("WorkflowBuilder create action", () => {
       />,
     )
     // Flip the toggle on, then create.
-    fireEvent.click(screen.getByRole("switch", { name: "Active" }))
+    fireEvent.click(screen.getByRole("switch", { name: /Activate on create/i }))
     fireEvent.click(screen.getByRole("button", { name: "Create workflow" }))
     const body = await lastCreateBody()
     expect(body.active).toBe(true)

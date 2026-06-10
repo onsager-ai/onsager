@@ -235,8 +235,6 @@ function extractWorkflowDocument(
         repo_owner: typeof trigger.repo_owner === "string" ? trigger.repo_owner : "",
         repo_name: typeof trigger.repo_name === "string" ? trigger.repo_name : "",
         label: typeof trigger.label === "string" ? trigger.label : "",
-        manual_name:
-          typeof trigger.manual_name === "string" ? trigger.manual_name : "",
       },
       stages,
     }

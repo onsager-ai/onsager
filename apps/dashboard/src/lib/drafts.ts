@@ -42,7 +42,6 @@ function emptyDocument(): WorkflowDocument {
       repo_owner: "",
       repo_name: "",
       label: "",
-      manual_name: "",
     },
     stages: [],
   }
