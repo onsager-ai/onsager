@@ -1,8 +1,8 @@
 //! Stateless GitHub-webhook → spine-event routing.
 //!
-//! Lives on the spine because both **portal** (the live webhook ingress at
-//! `POST /webhooks/github`) and **stiglab** (the dashboard-driven manual
-//! replay route) translate webhook payloads into the same
+//! Lives on the spine because both of portal's paths — the live webhook
+//! ingress at `POST /webhooks/github` and the dashboard-driven manual
+//! replay route — translate webhook payloads into the same
 //! [`FactoryEventKind`] variants. Hosting the routing rules here keeps a
 //! single source of truth so the two paths can't drift in subtle shape
 //! differences — only in the `source` field of `TriggerFired`.
@@ -86,9 +86,9 @@ pub struct IssueTriggerContext<'a> {
 }
 
 /// Minimal portable view of a workflow that the routing functions need —
-/// just enough to build a `TriggerFired` payload. Both portal and stiglab
-/// project their richer `Workflow` types into this shape so the routing
-/// stays subsystem-agnostic.
+/// just enough to build a `TriggerFired` payload. Callers project their
+/// richer `Workflow` types into this shape so the routing stays
+/// subsystem-agnostic.
 #[derive(Debug, Clone)]
 pub struct WorkflowMatch {
     pub id: String,
@@ -449,14 +449,14 @@ pub fn route_pull_request_closed(payload: &Value) -> Option<RoutedEvent> {
 }
 
 /// Namespace partition for webhook-sourced spine events. Both the live
-/// webhook handler (portal) and the manual-replay route (stiglab) write
+/// webhook handler and the manual-replay route (both portal-owned) write
 /// events through this so consumer streams stay unified.
 pub fn spine_namespace(kind: &FactoryEventKind) -> &'static str {
     match kind {
         FactoryEventKind::TriggerFired { .. } => "workflow",
         FactoryEventKind::GateCheckUpdated { .. }
         | FactoryEventKind::GateManualApprovalSignal { .. } => "gate",
-        _ => "stiglab",
+        _ => "portal",
     }
 }
 

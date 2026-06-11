@@ -6,7 +6,7 @@
 -- pr_gate_verdicts — per-(pr_artifact_id, head_sha) gate evaluation record,
 --   used for idempotency so replayed webhooks don't double-evaluate.
 -- pr_branch_links — per-session branch hint, used to attach vertical_lineage
---   when the PR webhook arrives. Also created by stiglab's startup path;
+--   when the PR webhook arrives. Historically also created by stiglab;
 --   both sides use CREATE TABLE IF NOT EXISTS so whoever runs first wins.
 
 CREATE TABLE IF NOT EXISTS factory_tasks (

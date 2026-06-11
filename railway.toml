@@ -1,22 +1,22 @@
 # Onsager — Railway config-as-code.
 #
-# Unified single-container deployment. All subsystems run in one service:
+# Unified single-container deployment (two processes + edge, ADR 0027):
 #
 #   Process            | Description                                       | Port
 #   ------------------ | ------------------------------------------------- | -----------------
-#   stiglab            | Sessions, agents, dashboard, API                  | 3000 (exposed)
-#   onsager-portal     | GitHub webhook ingress (internal)                 | 3002 (proxied)
+#   caddy              | Edge dispatcher — the only exposed process        | $PORT (exposed)
+#   onsager-portal     | Dashboard API, webhooks, MCP, session runner      | 3002 (proxied)
 #   onsager-scheduler  | Substrate scheduler — trigger.fired → ExecPlan    | — (spine listener)
 #   PostgreSQL         | Shared event spine (Railway plugin)               | 5432
 #
-# Stiglab is the front door — it serves the dashboard, owns /api/health
-# and /agent/ws, and reverse-proxies all other /api/* traffic to portal
-# on localhost:3002. Portal runs its own migrations at startup.
+# Portal is the front door behind Caddy — it serves the dashboard API,
+# owns /api/health, and runs agent sessions in-process (#583). Portal
+# runs its own migrations at startup.
 #
 # Quick start:
 #   1. Create a Railway project and connect this repo
 #   2. Add a PostgreSQL plugin (auto-provides DATABASE_URL)
-#   3. Default service uses this config (builds stiglab + portal)
+#   3. Default service uses this config (builds portal + scheduler)
 #   4. Set required variables (see [deploy] section below)
 #   5. Point your GitHub App webhook at
 #      https://<app>.up.railway.app/webhooks/github
@@ -27,16 +27,16 @@
 #   tables when it boots.
 
 # =============================================================================
-# Stiglab — primary service (sessions + dashboard + agent runner)
+# Onsager — primary service (portal + scheduler behind Caddy)
 # =============================================================================
 
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "crates/stiglab/deploy/Dockerfile"
+dockerfilePath = "deploy/onsager.Dockerfile"
 watchPatterns = [
     # All crates — every workspace member is linked into at least one of
-    # the binaries shipped in this unified container (stiglab,
-    # onsager-portal), so any change can affect the deploy.
+    # the binaries shipped in this unified container (onsager-portal,
+    # onsager-scheduler), so any change can affect the deploy.
     "crates/**",
     "apps/dashboard/**",
     "Cargo.toml",
@@ -55,21 +55,18 @@ numReplicas = 1
 #
 #   DATABASE_URL              — auto-injected by Railway Postgres plugin
 #   ONSAGER_DATABASE_URL      — set to ${{Postgres.DATABASE_URL}} (spine migrations + event bus)
-#   STIGLAB_CREDENTIAL_KEY    — 32-byte hex AES-256-GCM key (openssl rand -hex 32)
-#   ONSAGER_CREDENTIAL_KEY    — same hex key; portal decrypts webhook secrets
-#                               and the substrate scheduler decrypts the
-#                               plan-scoped session token (#536) to inject
-#                               ONSAGER_SESSION_TOKEN into agent nodes. Set
-#                               it to the same value as STIGLAB_CREDENTIAL_KEY.
-#   PORT                      — auto-injected by Railway (stiglab reads STIGLAB_PORT)
+#   ONSAGER_CREDENTIAL_KEY    — 32-byte hex AES-256-GCM key (openssl rand
+#                               -hex 32); portal decrypts webhook secrets +
+#                               credentials, and the substrate scheduler
+#                               decrypts the plan-scoped session token (#536).
+#   PORT                      — auto-injected by Railway (Caddy binds it)
 #
 # Optional:
 #
-#   STIGLAB_NODE_NAME         — runner node identifier (default: main)
-#   STIGLAB_MAX_SESSIONS      — max concurrent agent sessions (default: 4)
-#   STIGLAB_AGENT_COMMAND     — CLI binary for agents (default: claude)
-#   STIGLAB_PUBLIC_URL        — public URL for OAuth callbacks (e.g. https://<app>.up.railway.app)
-#   STIGLAB_WEBHOOK_BASE_URL  — override for the stiglab webhook base URL.
+#   PORTAL_MAX_SESSIONS       — max concurrent agent sessions (default: 4)
+#   PORTAL_AGENT_COMMAND      — CLI binary for agents (default: claude)
+#   PORTAL_PUBLIC_URL         — public URL for OAuth callbacks (e.g. https://<app>.up.railway.app)
+#   PORTAL_WEBHOOK_BASE_URL   — override for the webhook base URL.
 #                               Takes precedence over RAILWAY_PUBLIC_DOMAIN
 #                               and forwarded headers. Set this when the
 #                               public origin differs from the Railway-
@@ -102,16 +99,16 @@ numReplicas = 1
 #                               check runs / comments when installation-token
 #                               signing isn't wired up yet
 #
-# Webhook base URL resolution (stiglab decides where github.com should
+# Webhook base URL resolution (portal decides where github.com should
 # deliver repo webhooks). First non-empty layer wins:
-#   1. STIGLAB_WEBHOOK_BASE_URL / STIGLAB_PUBLIC_BASE_URL
+#   1. PORTAL_WEBHOOK_BASE_URL / PORTAL_PUBLIC_BASE_URL
 #   2. RAILWAY_PUBLIC_DOMAIN (Railway auto-injects this — no action needed
 #      on standard single-service deploys)
 #   3. X-Forwarded-Proto + X-Forwarded-Host from the activation request,
-#      gated on STIGLAB_TRUST_FORWARDED_HEADERS=1
+#      gated on PORTAL_TRUST_FORWARDED_HEADERS=1
 # An unresolved chain fails workflow activation loudly (503) — there is
 # no silent localhost default. Production typically relies on layer 2 and
-# does NOT set STIGLAB_TRUST_FORWARDED_HEADERS (defense in depth: if the
+# does NOT set PORTAL_TRUST_FORWARDED_HEADERS (defense in depth: if the
 # public origin ever changes unexpectedly, fail rather than trust the
 # request).
 
@@ -139,7 +136,7 @@ numReplicas = 1
 #
 # Preview-specific overrides: smaller footprint, faster failure, no restart
 # storms. The preview entrypoint still auto-runs migrations on the fresh DB
-# (see crates/stiglab/deploy/entrypoint.sh) so no additional bootstrap is
+# (see deploy/entrypoint.sh) so no additional bootstrap is
 # required.
 
 [environments.preview.deploy]
@@ -159,15 +156,14 @@ numReplicas = 1
 # resolves `${{...}}` references at deploy time, not TOML parse time — the
 # GitHub Actions `github.*` context is NOT available here.
 [environments.preview.variables]
-STIGLAB_NODE_NAME = "${{RAILWAY_ENVIRONMENT_NAME}}"
-STIGLAB_MAX_SESSIONS = "2"
+PORTAL_MAX_SESSIONS = "2"
 ONSAGER_PREVIEW = "true"
 # Preview deploys run behind Railway's edge proxy, which rewrites the
 # X-Forwarded-* headers authoritatively. Trusting them here lets the
 # dashboard drive workflow activation without the operator having to set
-# STIGLAB_WEBHOOK_BASE_URL per-PR. Production deliberately leaves this
+# PORTAL_WEBHOOK_BASE_URL per-PR. Production deliberately leaves this
 # unset — see the webhook resolution notes above.
-STIGLAB_TRUST_FORWARDED_HEADERS = "1"
+PORTAL_TRUST_FORWARDED_HEADERS = "1"
 
 # Cross-environment SSO (relying side).
 #

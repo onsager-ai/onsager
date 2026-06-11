@@ -1,6 +1,6 @@
 # Dev-overlay image for the dashboard (Vite dev server with HMR).
 # Used only by docker-compose.slot.yml. Production dashboard is built
-# into stiglab's runtime image; this exists for the per-slot dev loop.
+# into the production runtime image; this exists for the per-slot dev loop.
 #
 # Source lives on a bind mount; node_modules is a per-container layer
 # (re-installed on first up) so OS-level mismatches between the host

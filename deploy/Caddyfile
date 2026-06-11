@@ -3,7 +3,6 @@
 # on loopback.
 #
 # Routing model (peer of deploy/dev/Caddyfile, with loopback upstreams):
-#   /agent/ws*  → 127.0.0.1:3002  (portal — proxies to stiglab on loopback per ADR 0008)
 #   /api/*      → 127.0.0.1:3002  (portal — ADR 0006)
 #   /mcp/*      → 127.0.0.1:3002  (portal — MCP server for AI clients per ADR 0007)
 #   /assets/*   → /app/static/assets (content-hashed, year-long immutable cache)
@@ -21,13 +20,6 @@
 		output stdout
 		format console
 		level INFO
-	}
-
-	# Agent control plane WebSocket. Portal terminates the upgrade and
-	# transparently forwards bytes to stiglab on loopback
-	# (ws://127.0.0.1:3000/agent/ws-internal). See ADR 0008.
-	handle /agent/ws* {
-		reverse_proxy 127.0.0.1:3002
 	}
 
 	# Portal owns every dashboard-facing /api/* route (ADR 0006).

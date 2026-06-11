@@ -5,9 +5,9 @@
 //!
 //! - **Per-session** (`session:<id>`, chat path) — minted by
 //!   `session_token::mint_for_session`; revoked on the terminal session
-//!   events (`stiglab.session_completed` / `_failed` / `_aborted`). Those
-//!   events key the `session_id` as their `events_ext` `stream_id`, so
-//!   the id is read straight off the notification with no row fetch.
+//!   events (`session.completed` / `session.failed`). Those events key
+//!   the `session_id` as their `events_ext` `stream_id`, so the id is
+//!   read straight off the notification with no row fetch.
 //! - **Per-plan** (`plan:<plan_id>`, scheduler path) — minted by
 //!   `session_token::mint_for_plan`; revoked on the plan-terminal events
 //!   (`plan.run_completed` / `plan.run_failed`). Those carry the run's
@@ -30,11 +30,7 @@ use sqlx::postgres::PgPool;
 use crate::session_token;
 
 /// Terminal session event types whose arrival revokes the session token.
-const SESSION_TERMINAL_EVENTS: &[&str] = &[
-    "stiglab.session_completed",
-    "stiglab.session_failed",
-    "stiglab.session_aborted",
-];
+const SESSION_TERMINAL_EVENTS: &[&str] = &["session.completed", "session.failed"];
 
 /// Terminal plan-run event types whose arrival revokes the plan token
 /// (#536).
@@ -107,9 +103,9 @@ impl EventHandler for Revoker {
             return Ok(());
         }
 
-        // Per-session grain (#531). Session lifecycle events are
-        // stiglab-namespaced rows keyed by session_id as the stream, so
-        // the id is read straight off the notification.
+        // Per-session grain (#531). Session lifecycle events are keyed
+        // by session_id as the stream, so the id is read straight off
+        // the notification.
         if SESSION_TERMINAL_EVENTS.contains(&event.event_type.as_str()) {
             self.revoke_session(&event.stream_id).await;
             return Ok(());

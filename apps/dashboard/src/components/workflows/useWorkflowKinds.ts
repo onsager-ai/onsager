@@ -69,7 +69,7 @@ export interface UseWorkflowKindsResult {
 
 // Registry-backed workflow artifact kinds (issue #102). Poll-on-load +
 // cache for the session; falls back to the static list in `workflow-meta.ts`
-// if the fetch fails (offline / dev without stiglab).
+// if the fetch fails (offline / dev without the backend).
 export function useWorkflowKinds(): UseWorkflowKindsResult {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["workflow-kinds"],

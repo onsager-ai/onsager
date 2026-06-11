@@ -3,7 +3,6 @@ export { ApiError } from "./client";
 
 // Re-export all types
 export type {
-  Node,
   Session,
   TaskRequest,
   MeUser,

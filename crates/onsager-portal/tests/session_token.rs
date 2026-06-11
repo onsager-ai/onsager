@@ -1,12 +1,14 @@
 //! Integration test for spec #531 — per-session workspace-scoped tokens.
 //!
-//! Exercises the full mint → encrypt → decrypt → verify → revoke
-//! round-trip against `user_pats`:
+//! Exercises the full mint → verify → revoke round-trip against
+//! `user_pats`:
 //!
-//! - `mint_for_session` returns the raw token **encrypted** with the
-//!   credential key and persists only the hash.
-//! - The ciphertext decrypts to a live `ons_pat_` token that `verify_pat`
-//!   accepts, pinned to the session's workspace.
+//! - `mint_for_session` returns the **raw** token (per #583 it is handed
+//!   straight to the in-process session runner — no encrypt→decrypt
+//!   round-trip) and persists only the hash.
+//! - The token is a live `ons_pat_` PAT that `verify_pat` accepts,
+//!   pinned to the session's workspace. The plan-scoped grain
+//!   (`mint_for_plan`) still encrypts, because it crosses the spine.
 //! - `revoke_for_session` flips the row to revoked so `verify_pat` then
 //!   reports `Revoked` — the revoke-on-end path the session-lifecycle
 //!   listener drives.
@@ -43,32 +45,25 @@ async fn cleanup_plan(pool: &PgPool, plan_id: &str) {
 }
 
 #[tokio::test]
-async fn mint_encrypts_a_verifiable_token_then_revoke_invalidates_it() {
+async fn mint_returns_a_verifiable_raw_token_then_revoke_invalidates_it() {
     let Some(pool) = try_pool().await else {
         eprintln!("skipping: DATABASE_URL not set");
         return;
     };
 
-    let key = generate_credential_key();
     let user_id = format!("u_{}", ulid::Ulid::new());
     let workspace_id = format!("ws_{}", ulid::Ulid::new());
     let session_id = ulid::Ulid::new().to_string();
     cleanup(&pool, &session_id).await;
 
-    // Mint: returns the raw token encrypted with the credential key.
-    let encrypted = mint_for_session(&pool, &key, &user_id, &workspace_id, &session_id)
+    // Mint: returns the raw token (in-process hand-off per #583); only
+    // the hash is persisted.
+    let raw = mint_for_session(&pool, &user_id, &workspace_id, &session_id)
         .await
         .expect("mint");
+    assert!(raw.starts_with("ons_pat_"), "mint returns the raw PAT");
 
-    // The ciphertext is not the token itself, but decrypts to a real PAT.
-    assert!(
-        !encrypted.starts_with("ons_pat_"),
-        "token must travel encrypted"
-    );
-    let raw = decrypt_credential(&key, &encrypted).expect("decrypt");
-    assert!(raw.starts_with("ons_pat_"), "decrypts to a PAT");
-
-    // The decrypted token verifies and is pinned to the session workspace.
+    // The token verifies and is pinned to the session workspace.
     match verify_pat(&pool, &raw).await.expect("verify") {
         PatVerifyOutcome::Ok(pat) => {
             assert_eq!(pat.workspace_id, workspace_id);

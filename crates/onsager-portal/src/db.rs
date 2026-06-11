@@ -1,14 +1,14 @@
 //! Postgres connectivity and queries shared between the webhook server,
 //! migration runner, and backfill CLI.
 //!
-//! The portal speaks Postgres directly (not the cross-backend `AnyPool`
-//! stiglab uses) because it co-locates with the spine, which is Postgres-only,
-//! and the only tables the portal authors itself (`factory_tasks`,
-//! `pr_branch_links`) live in the same database.
+//! The portal speaks Postgres directly because it co-locates with the
+//! spine, which is Postgres-only, and the tables the portal authors
+//! itself (`factory_tasks`, `pr_branch_links`, `sessions`,
+//! `session_logs`, …) live in the same database.
 //!
-//! Tables not owned by the portal (tenants, github_app_installations,
-//! projects, sessions, artifacts, vertical_lineage) are created by stiglab
-//! and onsager-spine; the portal is a read-or-append-only consumer.
+//! Tables not owned by the portal (workspaces, projects, artifacts,
+//! vertical_lineage) are created by onsager-spine's migrations; the
+//! portal is a read-or-append-only consumer of those.
 
 use sqlx::postgres::{PgPool, PgPoolOptions};
 
@@ -469,7 +469,7 @@ pub async fn record_session_branch(
     branch: &str,
     pr_number: Option<u64>,
 ) -> anyhow::Result<()> {
-    // `recorded_at` is TEXT in the shared schema (stiglab's AnyPool writer
+    // `recorded_at` is TEXT in the shared schema (the legacy AnyPool writer
     // needs SQLite compatibility); explicit RFC-3339 here so lexicographic
     // ordering in `find_session_for_branch` gives us chronological order.
     let now = chrono::Utc::now().to_rfc3339();

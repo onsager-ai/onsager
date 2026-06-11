@@ -282,7 +282,7 @@ pub async fn github_callback(
     tracing::info!("user logged in: {} ({})", user.github_login, user_id);
 
     let session_cookie = format!(
-        "stiglab_session={session_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000{sec}"
+        "onsager_session={session_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000{sec}"
     );
 
     Response::builder()
@@ -493,7 +493,7 @@ pub async fn sso_finish(
 
     let sec = secure_attr(config);
     let session_cookie = format!(
-        "stiglab_session={session_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000{sec}"
+        "onsager_session={session_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000{sec}"
     );
 
     Response::builder()
@@ -584,12 +584,12 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> impl I
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    if let Some(session_id) = auth::parse_cookie(cookie_header, "stiglab_session") {
+    if let Some(session_id) = auth::parse_cookie(cookie_header, "onsager_session") {
         let _ = auth_db::delete_auth_session(&state.pool, session_id).await;
     }
 
     let sec = secure_attr(&state.config);
-    let clear_cookie = format!("stiglab_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}");
+    let clear_cookie = format!("onsager_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}");
 
     (
         [(header::SET_COOKIE, clear_cookie)],

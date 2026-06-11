@@ -2,7 +2,7 @@
 //
 // Copy this into <worktree>/.devcontainer/devcontainer.json (the
 // `just worktree-new` recipe does this automatically) so VS Code /
-// Cursor Remote-Containers can attach into the slot's stiglab container.
+// Cursor Remote-Containers can attach into the slot's portal container.
 // rust-analyzer then runs against the slot's exact toolchain + the
 // per-slot incremental cargo cache, so type resolution and hover info
 // match the running build.
@@ -15,7 +15,7 @@
   "dockerComposeFile": [
     "../deploy/dev/docker-compose.slot.yml"
   ],
-  "service": "stiglab",
+  "service": "portal",
   "workspaceFolder": "/work",
   "shutdownAction": "none",
   "remoteEnv": {

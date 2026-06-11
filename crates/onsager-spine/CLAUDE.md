@@ -23,7 +23,6 @@ The library does **not** manage schema. The SQL contract lives in `migrations/00
 All subsystems live under `crates/` in the workspace root:
 
 - `forge` — production line (artifact lifecycle, scheduling kernel)
-- `stiglab` — AI agent session orchestration
 - `ising` — continuous improvement engine (factory observation)
 
 Each depends on `onsager-spine` via `path = "../onsager-spine"`.
@@ -35,7 +34,7 @@ Subsystems must NOT import each other.
 > - **User-facing endpoints** called by the dashboard.
 > - **Webhooks** called by external services (GitHub, etc.).
 >
-> Subsystems (`forge`, `stiglab`, `ising`) coordinate
+> Subsystems (`forge`, `ising`) coordinate
 > **exclusively** via the spine: events on the bus + reads against
 > shared spine tables. No subsystem makes HTTP calls to another
 > subsystem. No subsystem imports another subsystem's crate.
@@ -52,7 +51,7 @@ What this means for the spine specifically:
   test). A producer with no consumer is the drift pattern from PR #127;
   Lever E will make this CI-enforceable via a registry manifest.
 - **Don't grow a sync RPC API on the spine.** If a question feels like
-  "stiglab needs an answer from another subsystem *now*", it is an event +
+  "a subsystem needs an answer from another subsystem *now*", it is an event +
   listener pair, not a request/response surface. ADR 0001 documents
   why; spec #131 is closing the last place this is still violated.
 - **Spine tables are the single source of truth.** Subsystem-private

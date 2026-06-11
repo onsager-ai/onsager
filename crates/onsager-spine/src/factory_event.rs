@@ -42,7 +42,7 @@ pub struct FactoryEvent {
 ///
 /// ## Forge events (authoritative per forge-v0.1 §9)
 ///
-/// ## Stiglab events (session lifecycle upgrades)
+/// ## Session events (chat-session lifecycle — portal's in-process runner)
 ///
 /// ## Ising events (insight records)
 ///
@@ -96,25 +96,9 @@ pub enum FactoryEventKind {
     },
 
     // -- Forge process events -----------------------------------------------
-    /// ShapingRequest sent to Stiglab.
-    ForgeShapingDispatched {
-        request_id: String,
-        artifact_id: ArtifactId,
-        target_version: u32,
-        /// Full shaping payload — the same shape Stiglab previously
-        /// consumed as the `POST /api/shaping` request body. `None` on
-        /// events written before this field was added (spec #131 / ADR
-        /// 0004 Lever C phase 3). When `None`, Stiglab's listener cannot
-        /// spawn a session and must skip the request.
-        ///
-        /// Top-level `request_id`, `artifact_id`, and `target_version`
-        /// are kept for stream indexing and dashboard filtering; the
-        /// duplication with `request` is intentional.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        request: Option<crate::protocol::ShapingRequest>,
-    },
-
-    /// ShapingResult received from Stiglab.
+    /// Legacy 0.1 shaping-result record. Kept for historical spine rows
+    /// and the deprecated observers runtime (`shape_retry`, retiring
+    /// with #584); nothing emits it post-ADR 0027.
     ForgeShapingReturned {
         request_id: String,
         artifact_id: ArtifactId,
@@ -143,11 +127,12 @@ pub enum FactoryEventKind {
         priority: i32,
     },
 
-    // -- Stiglab events (session lifecycle) ---------------------------------
-    /// A session finished successfully.
-    StiglabSessionCompleted {
+    // -- Chat-session lifecycle (portal's in-process runner, ADR 0027) ------
+    /// A chat agent session finished successfully. Emitted by portal's
+    /// in-process session runner (spec #583; formerly
+    /// `stiglab.session_completed`).
+    SessionCompleted {
         session_id: String,
-        request_id: String,
         duration_ms: u64,
         /// Artifact this session was shaping (issue #14 phase 2). Optional so
         /// non-shaping sessions (e.g. direct task POSTs) don't emit a
@@ -171,50 +156,23 @@ pub enum FactoryEventKind {
         pr_number: Option<u64>,
     },
 
-    /// Full `ShapingResult` produced by a Stiglab session, ready for
-    /// Forge to act on. Replaces the legacy synchronous
-    /// `forge → stiglab POST /api/shaping` HTTP response per spec #131
-    /// / ADR 0004 Lever C.
-    ///
-    /// Emitted in addition to (not instead of) `stiglab.session_completed`:
-    /// the lifecycle event signals "this session finished" (used by the
-    /// dashboard and node telemetry); this event signals "the artifact
-    /// outputs are ready for the next pipeline stage" (used by Forge's
-    /// state machine to advance / seal). Stiglab emits it only for
-    /// sessions that were dispatched as shaping requests — direct task
-    /// POSTs that produce no `ShapingResult` skip it.
-    StiglabSessionResultReady {
-        /// Artifact this session was for. Hoisted so `stream_id()` can
-        /// route the event without parsing the embedded result.
-        artifact_id: ArtifactId,
-        /// Full result payload — the same shape Forge previously
-        /// consumed as the `POST /api/shaping` response body.
-        /// `request_id` inside this struct correlates back to the
-        /// originating `forge.shaping_dispatched`.
-        result: crate::protocol::ShapingResult,
-    },
-
-    /// A session terminated with an error.
-    StiglabSessionFailed {
+    /// A chat agent session terminated with an error. Emitted by portal's
+    /// in-process session runner (spec #583; formerly
+    /// `stiglab.session_failed`).
+    SessionFailed {
         session_id: String,
-        request_id: String,
         error: String,
         /// Artifact this session was shaping (issue #156). Optional so
         /// non-shaping sessions (direct task POSTs) don't emit a
-        /// meaningless id. When present, forge's workflow signal
-        /// listener writes a `Failure` outcome to the agent-session
-        /// signal cache so the gate fails loudly instead of stalling.
+        /// meaningless id.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         artifact_id: Option<String>,
     },
 
-    /// A session was aborted (e.g. node lost, deadline exceeded).
-    StiglabSessionAborted { session_id: String, reason: String },
-
-    // -- Portal intents (dashboard → agent dispatch) -------------------------
-    /// Dashboard task request from portal. Stiglab's
-    /// `session_requested_listener` dispatches the session to the correct
-    /// agent node (spec #222 Follow-up 3).
+    // -- Portal intents (dashboard → session runner) -------------------------
+    /// Dashboard task request from portal. Diagnostic timeline record —
+    /// dispatch is in-process post-ADR 0027 (spec #583); portal's
+    /// `SessionRunner` spawns the session directly.
     PortalSessionRequested { session_id: String },
 
     /// Portal failed to open a GitHub PR for a completed session (spec #273).
@@ -236,11 +194,10 @@ pub enum FactoryEventKind {
         reason: String,
     },
 
-    /// Dashboard cancel-session request from portal (spec #303). Stiglab's
-    /// `session_cancel_requested_listener` looks up the session's node and
-    /// forwards a `ServerMessage::CancelSession` to the agent. Best-effort:
-    /// if the node is offline or the session is already terminal, the
-    /// cancel is a no-op.
+    /// Dashboard cancel-session request from portal (spec #303). Diagnostic
+    /// timeline record — the cancel itself is applied in-process by
+    /// portal's `SessionRunner` (spec #583). Best-effort: a terminal
+    /// session makes the cancel a no-op.
     PortalSessionCancelRequested {
         session_id: String,
         /// Actor identifier captured for audit / debugging.
@@ -319,7 +276,7 @@ pub enum FactoryEventKind {
     // -- Workflow runtime events (issue #80) --------------------------------
     /// A trigger (e.g. a GitHub issue webhook) fired and produced a payload
     /// the trigger subscriber will translate into an artifact registration.
-    /// Emitted by the stiglab webhook receiver; consumed by forge.
+    /// Emitted by the portal webhook receiver; consumed by the scheduler.
     TriggerFired {
         /// Workflow whose trigger fired.
         workflow_id: String,
@@ -410,8 +367,8 @@ pub enum FactoryEventKind {
     // longer publish a spine event. Add a variant back here when there is
     // a real consumer.
 
-    // -- Workflow events (issue #81 — stiglab workflow CRUD + webhook) ------
-    // `TriggerFired` is defined above in the issue #80 block; the stiglab
+    // -- Workflow events (issue #81 — workflow CRUD + webhook) --------------
+    // `TriggerFired` is defined above in the issue #80 block; the
     // webhook router emits the same variant so forge's trigger subscriber can
     // consume it with no translation.
     /// A GitHub `check_suite`, `check_run`, or `status` event arrived for a
@@ -570,15 +527,12 @@ impl FactoryEventKind {
             Self::GitCiCompleted { .. } => "git.ci_completed",
             Self::GitPrMerged { .. } => "git.pr_merged",
             Self::GitPrClosed { .. } => "git.pr_closed",
-            Self::ForgeShapingDispatched { .. } => "forge.shaping_dispatched",
             Self::ForgeShapingReturned { .. } => "forge.shaping_returned",
             Self::ForgeGateVerdict { .. } => "forge.gate_verdict",
             Self::ForgeInsightObserved { .. } => "forge.insight_observed",
             Self::ForgeDecisionMade { .. } => "forge.decision_made",
-            Self::StiglabSessionCompleted { .. } => "stiglab.session_completed",
-            Self::StiglabSessionResultReady { .. } => "stiglab.session_result_ready",
-            Self::StiglabSessionFailed { .. } => "stiglab.session_failed",
-            Self::StiglabSessionAborted { .. } => "stiglab.session_aborted",
+            Self::SessionCompleted { .. } => "session.completed",
+            Self::SessionFailed { .. } => "session.failed",
             Self::PortalSessionRequested { .. } => "portal.session_requested",
             Self::PortalSessionCancelRequested { .. } => "portal.session_cancel_requested",
             Self::PortalPrOpenFailed { .. } => "portal.pr_open_failed",
@@ -620,15 +574,11 @@ impl FactoryEventKind {
             | Self::GitCiCompleted { .. }
             | Self::GitPrMerged { .. }
             | Self::GitPrClosed { .. } => "git",
-            Self::ForgeShapingDispatched { .. }
-            | Self::ForgeShapingReturned { .. }
+            Self::ForgeShapingReturned { .. }
             | Self::ForgeGateVerdict { .. }
             | Self::ForgeInsightObserved { .. }
             | Self::ForgeDecisionMade { .. } => "forge",
-            Self::StiglabSessionCompleted { .. }
-            | Self::StiglabSessionResultReady { .. }
-            | Self::StiglabSessionFailed { .. }
-            | Self::StiglabSessionAborted { .. } => "stiglab",
+            Self::SessionCompleted { .. } | Self::SessionFailed { .. } => "session",
             Self::PortalSessionRequested { .. }
             | Self::PortalSessionCancelRequested { .. }
             | Self::PortalPrOpenFailed { .. } => "portal",
@@ -680,15 +630,13 @@ impl FactoryEventKind {
             | Self::GitCiCompleted { artifact_id, .. }
             | Self::GitPrMerged { artifact_id, .. }
             | Self::GitPrClosed { artifact_id, .. } => artifact_id.to_string(),
-            Self::ForgeShapingDispatched { request_id, .. } => request_id.clone(),
             Self::ForgeShapingReturned { request_id, .. } => request_id.clone(),
             Self::ForgeGateVerdict { artifact_id, .. } => artifact_id.to_string(),
             Self::ForgeInsightObserved { insight_id, .. } => insight_id.clone(),
             Self::ForgeDecisionMade { artifact_id, .. } => artifact_id.to_string(),
-            Self::StiglabSessionCompleted { session_id, .. }
-            | Self::StiglabSessionFailed { session_id, .. }
-            | Self::StiglabSessionAborted { session_id, .. } => session_id.clone(),
-            Self::StiglabSessionResultReady { artifact_id, .. } => artifact_id.to_string(),
+            Self::SessionCompleted { session_id, .. } | Self::SessionFailed { session_id, .. } => {
+                session_id.clone()
+            }
             Self::PortalSessionRequested { session_id, .. }
             | Self::PortalSessionCancelRequested { session_id, .. } => session_id.clone(),
             Self::PortalPrOpenFailed {
@@ -856,7 +804,7 @@ pub struct EventRef {
     pub event_type: String,
 }
 
-/// LLM token usage carried on [`FactoryEventKind::StiglabSessionCompleted`]
+/// LLM token usage carried on [`FactoryEventKind::SessionCompleted`]
 /// (issue #39). Accounting primitives only — USD cost is resolved downstream
 /// by the budget consumer, not on the event, so we don't have to version the
 /// pricing table every time a model changes.

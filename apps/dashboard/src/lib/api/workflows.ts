@@ -209,7 +209,7 @@ export const workflows = {
       counts: raw.counts ?? EMPTY_AXIS_COUNTS,
     };
   },
-  // Fan-out across every workspace the user belongs to. Stiglab's list
+  // Fan-out across every workspace the user belongs to. The backend's list
   // endpoint is workspace-scoped; cross-workspace "do I have any workflows
   // yet?" queries (empty-state gates, first-run redirect) need this shape.
   // We hit `/workspaces` once and one `/workflows?workspace_id=…` per
@@ -354,7 +354,7 @@ export const workflows = {
   // Registry-backed workflow artifact kinds (issue #102). Poll-on-load; the
   // dashboard caches the result for the session. Falls back to the static
   // list in `workflow-meta.ts` if the fetch fails (offline / dev without
-  // stiglab).
+  // the backend).
   listWorkflowKinds: () =>
     request<{ kinds: import("./types").WorkflowKindInfo[] }>("/workflow/kinds"),
 };

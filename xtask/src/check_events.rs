@@ -14,7 +14,7 @@
 //!    `reason`).
 //! 3. **Emit call sites match producers**: every `append_ext(_, _,
 //!    "<event_type>", ...)` literal under
-//!    `crates/{stiglab,ising}/src/` references an event
+//!    `crates/ising/src/` references an event
 //!    whose manifest `producers` list includes that subsystem.
 //! 4. **Listener call sites match consumers**: every
 //!    `notification.event_type [!=|==] "<event_type>"` filter under the
@@ -562,15 +562,15 @@ mod tests {
     /// producer membership check directly.
     #[test]
     fn emit_outside_manifest_producers_is_flagged() {
-        let kind = "forge.shaping_dispatched";
+        let kind = "trigger.fired";
         let line = format!("spine.append_ext(stream, \"substrate\", \"{kind}\", data, &m, None)");
         let hits = find_event_type_literals(&line);
         assert_eq!(hits, vec![kind.to_string()]);
         let def = def_for(kind).unwrap();
-        // Pretending stiglab emits forge.shaping_dispatched: must NOT be
-        // in producers (real producer is the substrate scheduler after
-        // spec #363; forge crate deleted).
-        assert!(!def.producers.contains(&Subsystem::Stiglab));
+        // Pretending ising emits trigger.fired: must NOT be in
+        // producers (real producers are the substrate scheduler and
+        // portal per the manifest).
+        assert!(!def.producers.contains(&Subsystem::Ising));
     }
 
     /// Synthetic: a `Listener` filter whose subsystem is not in the
@@ -578,7 +578,7 @@ mod tests {
     /// consumer membership.
     #[test]
     fn listener_outside_manifest_consumers_is_flagged() {
-        let kind = "stiglab.session_completed";
+        let kind = "trigger.fired";
         let line = format!("if notification.event_type != \"{kind}\" {{ return Ok(()); }}");
         let parsed = parse_event_type_filter(&line).expect("filter parses");
         assert_eq!(parsed, kind);

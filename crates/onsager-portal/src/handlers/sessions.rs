@@ -10,7 +10,6 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use futures_util::stream;
 use onsager_spine::EventMetadata;
-use serde::Deserialize;
 use std::convert::Infallible;
 use std::time::Duration;
 
@@ -19,22 +18,6 @@ use crate::core::SessionState;
 use crate::handlers::workspaces::require_workspace_access;
 use crate::session_db;
 use crate::state::AppState;
-
-#[derive(Debug, Deserialize)]
-pub struct WorkspaceQuery {
-    pub workspace: String,
-}
-
-pub(super) fn missing_workspace() -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({
-            "error": "workspace query parameter is required",
-            "detail": "every workspace-scoped list endpoint requires ?workspace=<id>",
-        })),
-    )
-        .into_response()
-}
 
 fn not_found() -> Response {
     (
@@ -128,10 +111,12 @@ pub async fn get_session(
     }
 }
 
-/// POST /api/sessions/:id/cancel — emit `portal.session_cancel_requested`
-/// onto the spine. Stiglab's listener forwards a `CancelSession` to the
-/// session's agent (spec #303). Best-effort: terminal sessions / offline
-/// nodes log + drop the cancel.
+/// POST /api/sessions/:id/cancel — cancel an in-flight session via the
+/// in-process [`SessionRunner`](crate::session_runner::SessionRunner)
+/// (spec #303, runner folded in-process per #583). Best-effort: a
+/// terminal / unknown session logs + drops the cancel. The
+/// `portal.session_cancel_requested` event stays as a secret-free
+/// diagnostic timeline marker (nothing consumes it anymore).
 pub async fn cancel_session(
     State(state): State<AppState>,
     auth_user: AuthUser,
@@ -142,11 +127,18 @@ pub async fn cancel_session(
         Err(r) => return r,
     };
 
-    // Resolve workspace for the spine emit; legacy personal sessions
-    // (no workspace) fall back to `"default"` to match the tasks
-    // handler's convention.
-    let ws_for_emit = workspace_id.as_deref().unwrap_or("default").to_string();
+    let cancelled = state.session_runner.cancel(&session_id);
+    if !cancelled {
+        tracing::info!(
+            session_id = %session_id,
+            "cancel requested for a session with no live runner handle (already terminal?)"
+        );
+    }
 
+    // Diagnostic timeline marker; legacy personal sessions (no
+    // workspace) fall back to `"default"` per the tasks handler's
+    // convention. The payload carries identity only — no secrets.
+    let ws_for_emit = workspace_id.as_deref().unwrap_or("default").to_string();
     let metadata = EventMetadata {
         correlation_id: None,
         causation_id: None,
@@ -156,7 +148,6 @@ pub async fn cancel_session(
         "session_id": session_id,
         "actor": auth_user.user_id,
     });
-
     if let Err(e) = state
         .spine
         .append_ext(
@@ -170,15 +161,11 @@ pub async fn cancel_session(
         )
         .await
     {
+        // Non-fatal: the cancel already reached the runner.
         tracing::error!(
             session_id = %session_id,
             "failed to emit portal.session_cancel_requested: {e}"
         );
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "failed to enqueue cancel" })),
-        )
-            .into_response();
     }
 
     (

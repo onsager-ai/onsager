@@ -46,8 +46,8 @@ direct calls.
                               │
         ┌─────────┬───────────┼──────────┐
         │         │           │          │
-     portal    forge       stiglab    ising
-     (edge)
+     portal   scheduler    trigger    ising
+     (edge)   (substrate hosts)
 ```
 
 Spec Plans reach the factory through two ingress paths: the dashboard
@@ -64,11 +64,11 @@ The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md
 1. **External boundary.** HTTP routes exist only at external boundaries —
    the dashboard API and external webhooks (GitHub, etc.). The 2026-04-30
    amendment names `portal` (the edge subsystem) as clause 1's owner;
-   stiglab still hosts the bulk of the public HTTP today, and the
-   migration is staged under [#220](https://github.com/onsager-ai/onsager/issues/220) /
-   [#222](https://github.com/onsager-ai/onsager/issues/222).
-2. **Internal coordination.** Factory subsystems (`forge`, `stiglab`,
-   `ising`) coordinate **exclusively** via the spine —
+   the route migration landed under [#220](https://github.com/onsager-ai/onsager/issues/220) /
+   [#222](https://github.com/onsager-ai/onsager/issues/222), and portal owns
+   100% of the external HTTP surface today.
+2. **Internal coordination.** Factory processes coordinate
+   **exclusively** via the spine —
    no sibling-subsystem HTTP, no cross-subsystem Cargo deps. The `onsager`
    dispatcher has zero business deps and discovers subsystem binaries on
    `PATH`.
@@ -90,7 +90,6 @@ and the ADRs under [`docs/adr/`](docs/adr/).
 | `onsager`        | Unified CLI dispatcher (`onsager <subsystem> ...`)                               |
 | `onsager-portal` | Edge subsystem — public HTTP, GitHub webhooks, OAuth, credentials                |
 | `forge`          | Production line — drives artifacts through their lifecycle                       |
-| `stiglab`        | Distributed AI agent session orchestration                                       |
 | `ising`          | Continuous improvement — observes the spine and surfaces insights                |
 
 Spec Plans (the factory's input contract) are authored externally —
@@ -134,7 +133,6 @@ as env vars).
 
 Services:
 - **Dashboard** — <http://localhost:5173> (Vite dev server with HMR)
-- **Stiglab API** — <http://localhost:3000> (sessions, nodes, WebSocket)
 - **Postgres** — `postgres://onsager:onsager@localhost:5432/onsager`
 
 To stop: `Ctrl+C` for services, `just dev-down` for Postgres.
@@ -192,8 +190,8 @@ just install         # installs onsager dispatcher + subsystem binaries
 After install, both forms work:
 
 ```bash
-onsager stiglab serve
-stiglab serve
+onsager scheduler serve
+onsager-scheduler serve
 ```
 
 ## Conventions
@@ -228,7 +226,6 @@ subsystem-specific instructions:
 - `crates/onsager-spine/CLAUDE.md`
 - `crates/onsager-portal/CLAUDE.md`
 - `crates/onsager-registry/CLAUDE.md`
-- `crates/stiglab/.claude/`
 
 ## License
 

@@ -7,10 +7,9 @@ use axum::routing::{delete, get, post, put};
 
 use crate::config::Config;
 use crate::handlers::{
-    activation as activation_handlers, agent_ws, auth as auth_handlers,
-    build_info as build_info_handlers, chat as chat_handlers, credentials as credential_handlers,
-    github_app as github_app_handlers, installations as installation_handlers,
-    live_data as live_data_handlers, nodes as node_handlers, pats as pat_handlers,
+    activation as activation_handlers, auth as auth_handlers, build_info as build_info_handlers,
+    chat as chat_handlers, credentials as credential_handlers, github_app as github_app_handlers,
+    installations as installation_handlers, live_data as live_data_handlers, pats as pat_handlers,
     projects as project_handlers, push as push_handlers,
     registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
     runs as run_handlers, session_liveness as session_liveness_handlers,
@@ -40,11 +39,10 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 
     // Seed the dev user / workspace when dev-login is active (always in
     // debug builds, or release builds with DEV_LOGIN_ENABLED=true).
-    // Stiglab's `workspaces` / `workspace_members` tables must already
-    // exist; in `just dev` the boot order is portal→stiglab so portal
-    // doesn't see them on a cold start. Best-effort: if the tables
-    // aren't there yet, log and continue — stiglab's first migration run
-    // will create them, and the next portal start will seed.
+    // The `workspaces` / `workspace_members` tables come from the spine
+    // migrations (004_workflows.sql). Best-effort: if the tables aren't
+    // there yet (spine migrations pending), log and continue — the next
+    // portal start will seed.
     if (cfg!(debug_assertions) || config.dev_login_enabled)
         && let Err(e) = crate::dev_auth::seed_dev_user_and_workspace(&pool).await
     {
@@ -70,15 +68,15 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         pool,
         spine,
         config: Arc::new(config.clone()),
+        session_runner: Arc::new(crate::session_runner::SessionRunner::from_env()),
         proxy_cache: Arc::new(ProxyCache::from_env()),
         push: PushState::new(push_vapid),
     };
 
-    // The stiglab reverse proxy preserves the request path, so portal
-    // accepts every URL the GitHub App might post to. `/webhooks/github`
-    // is canonical; `/api/webhooks/github` and `/api/github-app/webhook`
-    // are backward-compat aliases for older App configurations
-    // (#222 Slice 1).
+    // Portal accepts every URL the GitHub App might post to.
+    // `/webhooks/github` is canonical; `/api/webhooks/github` and
+    // `/api/github-app/webhook` are backward-compat aliases for older
+    // App configurations (#222 Slice 1).
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/health", get(api_health))
@@ -87,11 +85,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         // dashboard reads this before user state loads to decide whether
         // to render the OSS banner.
         .route("/api/build-info", get(build_info_handlers::build_info))
-        // Agent control-plane WebSocket (ADR 0008). Portal terminates
-        // the upgrade and forwards bytes bidirectionally to stiglab
-        // on loopback (`ws://127.0.0.1:3000/agent/ws-internal`).
-        // Caddy in both dev and production routes `/agent/ws` here.
-        .route("/agent/ws", get(agent_ws::proxy_handler))
         .route("/webhooks/github", post(webhook::handle))
         .route("/api/webhooks/github", post(webhook::handle))
         // `/api/github-app/webhook` is the misconfigured path the
@@ -104,8 +97,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/github-app/webhook",
             post(webhook::handle_alias_github_app),
         )
-        // Auth routes (#222 Slice 5). Stiglab proxies `/api/auth/*`
-        // here so dashboard fetches keep working pre–API_BASE cutover.
+        // Auth routes (#222 Slice 5).
         .route("/api/auth/github", get(auth_handlers::github_login))
         .route(
             "/api/auth/github/callback",
@@ -116,21 +108,18 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route("/api/auth/logout", post(auth_handlers::logout))
         .route("/api/auth/sso/redeem", post(auth_handlers::sso_redeem))
         .route("/api/auth/sso/finish", get(auth_handlers::sso_finish))
-        // Personal Access Tokens (#222 Slice 2b). Stiglab proxies
-        // `/api/pats*` here so dashboard fetches keep working pre–API_BASE
-        // cutover. Auth (cookie or PAT bearer) is enforced by the
-        // `AuthUser` extractor in each handler.
+        // Personal Access Tokens (#222 Slice 2b). Auth (cookie or PAT
+        // bearer) is enforced by the `AuthUser` extractor in each
+        // handler.
         .route(
             "/api/pats",
             get(pat_handlers::list_pats).post(pat_handlers::create_pat),
         )
         .route("/api/pats/{id}", delete(pat_handlers::delete_pat))
-        // Per-workspace credential CRUD (#222 Slice 2a). Stiglab proxies
-        // `/api/workspaces/{id}/credentials*` here so dashboard fetches
-        // keep working pre–API_BASE cutover. Auth (cookie or PAT bearer
-        // — PATs are gated by the `pat_destructive_blocked` guardrail
-        // for overwrites/deletes) is enforced by the `AuthUser`
-        // extractor in each handler.
+        // Per-workspace credential CRUD (#222 Slice 2a). Auth (cookie or
+        // PAT bearer — PATs are gated by the `pat_destructive_blocked`
+        // guardrail for overwrites/deletes) is enforced by the
+        // `AuthUser` extractor in each handler.
         .route(
             "/api/workspaces/{workspace_id}/credentials",
             get(credential_handlers::list_credentials),
@@ -139,9 +128,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/workspaces/{workspace_id}/credentials/{name}",
             put(credential_handlers::set_credential).delete(credential_handlers::delete_credential),
         )
-        // Workspace + member + project CRUD (#222 Slice 3a). Stiglab
-        // proxies these URLs through `routes::portal::proxy` so the
-        // dashboard's API_BASE cutover (Slice 6) can land independently.
+        // Workspace + member + project CRUD (#222 Slice 3a).
         // Auth (cookie or PAT bearer) is enforced by the `AuthUser`
         // extractor; PAT-pinned principals are 403'd against
         // mismatched workspace IDs by `require_workspace_access`.
@@ -210,9 +197,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/github-app/callback",
             get(github_app_handlers::install_callback),
         )
-        // Workflow CRUD + GitHub side-effects (#222 Slice 4). Stiglab
-        // proxies these URLs through `routes::portal::proxy` so the
-        // dashboard's API_BASE cutover (Slice 6) can land independently.
+        // Workflow CRUD + GitHub side-effects (#222 Slice 4).
         // Auth (cookie or PAT bearer) is enforced by the `AuthUser`
         // extractor; PAT-pinned principals are 403'd against
         // mismatched workspace IDs by `require_workspace_access`.
@@ -250,9 +235,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         )
         // Event-type registry manifest (#222 follow-up #257). Static,
         // human-reviewed manifest of every `FactoryEventKind` variant —
-        // which subsystems produce/consume it. Stiglab proxies the URL
-        // through `routes::portal::proxy` so the dashboard's API_BASE
-        // cutover (#222 Slice 6) can land independently.
+        // which subsystems produce/consume it.
         .route(
             "/api/registry/events",
             get(registry_event_handlers::list_events),
@@ -267,10 +250,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         )
         // Spine API (#222 follow-up #259). Reads `events_ext` and
         // `artifacts` directly; writes either insert into `artifacts`
-        // or emit a single event via `EventStore::append_ext`. Stiglab
-        // proxies the URLs through `routes::portal::proxy` so the
-        // dashboard's API_BASE cutover (#222 Slice 6) can land
-        // independently.
+        // or emit a single event via `EventStore::append_ext`.
         .route("/api/spine/events", get(spine_handlers::list_events))
         // Activity tab path-scoped alias (ADR 0019 / spec #465). Wraps
         // `list_events` with the workspace from the path and
@@ -294,7 +274,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             post(spine_handlers::abort_artifact),
         )
         // Live-data hydration for reference-only artifacts (#222 follow-up 2).
-        // Moved from stiglab → portal. The dashboard joins skeleton rows from
+        // The dashboard joins skeleton rows from
         // `/api/spine/artifacts` with the hydrated payloads here on `external_ref`.
         // Auth + workspace-membership enforced by `require_project_for_user`
         // inside each handler; the per-install GitHub token is minted fresh
@@ -315,11 +295,9 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/projects/{id}/issues/{number}/replay-trigger",
             post(live_data_handlers::replay_issue_trigger),
         )
-        // Sessions / nodes / tasks (spec #222 Follow-up 3 + Slice 6). Portal
-        // creates sessions and emits `portal.session_requested`; stiglab's
-        // `session_requested_listener` dispatches to the agent WebSocket.
-        // Post-Slice 6 the edge proxy (Caddy / vite) routes `/api/*` here
-        // directly — no stiglab proxy layer.
+        // Sessions / tasks (spec #222 Follow-up 3; in-process runner per
+        // ADR 0027 / spec #583). Portal creates the session row and the
+        // `SessionRunner` spawns the agent CLI directly.
         .route(
             "/api/sessions/{id}",
             get(session_handlers::get_session),
@@ -346,7 +324,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/workspaces/{workspace_id}/runs",
             get(run_handlers::list_workspace_runs),
         )
-        .route("/api/nodes", get(node_handlers::list_nodes))
         .route("/api/tasks", post(task_handlers::create_task))
         // Manual / replay trigger endpoints (#241 — Category 4 of the
         // trigger taxonomy umbrella #236). UI button click and

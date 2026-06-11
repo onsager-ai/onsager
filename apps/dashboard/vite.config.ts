@@ -15,7 +15,6 @@ const hmrClientPort = process.env.VITE_HMR_CLIENT_PORT
 // the canonical ones are busy (parallel worktrees, #579); it exports the
 // chosen ports so the dev proxy follows. Defaults match the fixed ports.
 const portalPort = process.env.PORTAL_PORT ?? '3002'
-const stiglabPort = process.env.STIGLAB_PORT ?? '3000'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -33,8 +32,8 @@ export default defineConfig({
       ? { clientPort: hmrClientPort }
       : undefined,
     proxy: {
-      // After #222 Slice 6, portal (3002) owns all /api/* routes;
-      // stiglab (3000) keeps only /agent/ws for agent binary connections.
+      // Portal (3002) owns all /api/* routes (#222 Slice 6; the agent
+      // control plane folded in per ADR 0027 / #583).
       '/api': `http://localhost:${portalPort}`,
       // Portal also hosts the MCP server at POST /mcp/messages (ADR 0007 /
       // spec #288). The dashboard chat and the Spec Plans page are
@@ -42,10 +41,6 @@ export default defineConfig({
       // `/mcp/*` block gives production — without it `/mcp/messages` hits
       // the Vite dev server and 404s (breaking Plans + chat).
       '/mcp': `http://localhost:${portalPort}`,
-      '/agent': {
-        target: `ws://localhost:${stiglabPort}`,
-        ws: true,
-      },
     },
   },
   build: {

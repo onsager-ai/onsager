@@ -3,10 +3,10 @@
 --
 -- Spec #222 Slice 2b — moved from stiglab's inline `CREATE TABLE` block to
 -- portal. Portal mints, lists, and revokes PATs through `/api/pats*`; the
--- AuthUser extractor on portal verifies presented tokens. Stiglab still
+-- AuthUser extractor on portal verifies presented tokens. Stiglab also
 -- reads this table from its `AnyPool` for its own `AuthUser` extractor —
 -- credentials/workspaces/projects/workflows still live behind the seam on
--- stiglab and accept PAT bearer auth — until Slices 2a, 3, and 4 finish
+-- stiglab and accepted PAT bearer auth — until Slices 2a, 3, and 4 finished
 -- moving those routes. Same database, separate connection pool; portal is
 -- the only writer.
 --
@@ -18,7 +18,7 @@
 --
 -- `workspace_id` is intentionally TEXT without a foreign key to `workspaces`
 -- for the same reason `portal_webhook_secrets` skips the FK: the
--- `workspaces` table currently lives in stiglab's runtime migrations
+-- `workspaces` table then lived in stiglab's runtime migrations
 -- (target: spine, per spec #222 Slice 3). Once workspaces move into the
 -- spine, the FK can be added in a follow-up migration.
 

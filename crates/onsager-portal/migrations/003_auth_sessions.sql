@@ -1,5 +1,5 @@
 -- Portal-owned schema: server-side cookie sessions minted by portal's
--- OAuth callback / dev-login / SSO-finish routes. The `stiglab_session`
+-- OAuth callback / dev-login / SSO-finish routes. The `onsager_session`
 -- cookie value is the row PK; `expires_at` is checked on every read.
 --
 -- Spec #222 Slice 5. Stiglab still reads this table on every authenticated

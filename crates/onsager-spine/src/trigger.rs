@@ -551,7 +551,7 @@ mod tests {
         let mut equals = BTreeMap::new();
         equals.insert("workspace_id".into(), json!("ws_x"));
         let t = TriggerKind::SpineEvent {
-            event_kind: "forge.shaping_dispatched".into(),
+            event_kind: "git.pr_merged".into(),
             filter: Some(JsonFilter { equals }),
         };
         let (kind, cfg) = t.to_storage();

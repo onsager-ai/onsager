@@ -101,7 +101,7 @@ export class Browser {
 
 /**
  * Create a Browser instance pointed at the running stack.
- * Defaults to ONSAGER_TEST_URL or http://localhost:3000 (the stiglab image).
+ * Defaults to ONSAGER_TEST_URL or http://localhost:3002 (the portal service).
  */
 export function createBrowser(baseUrl?: string): Browser {
   const url =

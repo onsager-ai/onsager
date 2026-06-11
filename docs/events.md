@@ -37,7 +37,7 @@ Persisted in two tables (see `crates/onsager-spine/migrations/001_initial.sql`):
   that doesn't (yet) belong on the typed bus. Carries `(namespace, event_type)`
   and a free-form JSON payload. Validated by
   [`Namespace`](../crates/onsager-spine/src/namespace.rs) against the
-  well-known set: `forge`, `stiglab`, `ising`, `telegramable`,
+  well-known set: `forge`, `session`, `ising`, `telegramable`,
   `workflow`.
 
 ## Versioning
@@ -54,11 +54,11 @@ that requires a coordinated rollout.
 |---|---|---|
 | `artifact` | substrate scheduler (onsager-substrate) | 3 |
 | `git` | onsager-portal (GitHub webhooks) | 4 |
-| `forge` | substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363 | 5 |
-| `stiglab` | stiglab | 4 |
+| `forge` | substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363 | 4 |
+| `session` | onsager-portal (in-process session runner, #583) | 2 |
 | `portal` | (unknown — update `stream_producer` in xtask) | 3 |
 | `ising` | ising | 6 |
-| `workflow` | stiglab (trigger) / substrate scheduler (stage) | 3 |
+| `workflow` | onsager-portal (trigger) / substrate scheduler (stage) | 3 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
 | `plan` | (unknown — update `stream_producer` in xtask) | 3 |
 | `gate` | onsager-portal (GitHub) / substrate scheduler (manual) | 2 |
@@ -162,26 +162,12 @@ Producer subsystem: **onsager-portal (GitHub webhooks)**.
 
 Producer subsystem: **substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363**.
 
-### `forge.shaping_dispatched`
-
-- Variant: `FactoryEventKind::ForgeShapingDispatched`
-- Stream: `forge`
-
-ShapingRequest sent to Stiglab.
-
-| Field | Type | Description |
-|---|---|---|
-| `request_id` | `String` |  |
-| `artifact_id` | `ArtifactId` |  |
-| `target_version` | `u32` |  |
-| `request` | `Option<crate::protocol::ShapingRequest>` | Full shaping payload — the same shape Stiglab previously consumed as the `POST /api/shaping` request body. `None` on events written before this field was added (spec #131 / ADR 0004 Lever C phase 3). When `None`, Stiglab's listener cannot spawn a session and must skip the request.  Top-level `request_id`, `artifact_id`, and `target_version` are kept for stream indexing and dashboard filtering; the duplication with `request` is intentional. _(optional)_ |
-
 ### `forge.shaping_returned`
 
 - Variant: `FactoryEventKind::ForgeShapingReturned`
 - Stream: `forge`
 
-ShapingResult received from Stiglab.
+Legacy 0.1 shaping-result record. Kept for historical spine rows and the deprecated observers runtime (`shape_retry`, retiring with #584); nothing emits it post-ADR 0027.
 
 | Field | Type | Description |
 |---|---|---|
@@ -228,66 +214,38 @@ Scheduling kernel produced a ShapingDecision.
 | `target_version` | `u32` |  |
 | `priority` | `i32` |  |
 
-## `stiglab` events
+## `session` events
 
-Producer subsystem: **stiglab**.
+Producer subsystem: **onsager-portal (in-process session runner, #583)**.
 
-### `stiglab.session_completed`
+### `session.completed`
 
-- Variant: `FactoryEventKind::StiglabSessionCompleted`
-- Stream: `stiglab`
+- Variant: `FactoryEventKind::SessionCompleted`
+- Stream: `session`
 
-A session finished successfully.
+A chat agent session finished successfully. Emitted by portal's in-process session runner (spec #583; formerly `stiglab.session_completed`).
 
 | Field | Type | Description |
 |---|---|---|
 | `session_id` | `String` |  |
-| `request_id` | `String` |  |
 | `duration_ms` | `u64` |  |
 | `artifact_id` | `Option<String>` | Artifact this session was shaping (issue #14 phase 2). Optional so non-shaping sessions (e.g. direct task POSTs) don't emit a meaningless id. _(optional)_ |
 | `token_usage` | `Option<TokenUsage>` | LLM token usage for this session (issue #39). Optional so pre-accounting sessions and mock dispatchers don't fabricate a zero bill — `None` means "not reported", not "cost nothing". _(optional)_ |
 | `branch` | `Option<String>` | Working-tree branch the agent pushed at session completion (issue #60). Used by `onsager-portal` to attach `vertical_lineage` when the matching PR webhook arrives. Optional — sessions that don't touch a git working dir leave it `None`. _(optional)_ |
 | `pr_number` | `Option<u64>` | PR number the agent opened, when known at completion time. Optional for the same reasons as `branch`. _(optional)_ |
 
-### `stiglab.session_result_ready`
+### `session.failed`
 
-- Variant: `FactoryEventKind::StiglabSessionResultReady`
-- Stream: `stiglab`
+- Variant: `FactoryEventKind::SessionFailed`
+- Stream: `session`
 
-Full `ShapingResult` produced by a Stiglab session, ready for Forge to act on. Replaces the legacy synchronous `forge → stiglab POST /api/shaping` HTTP response per spec #131 / ADR 0004 Lever C.
-
-Emitted in addition to (not instead of) `stiglab.session_completed`: the lifecycle event signals "this session finished" (used by the dashboard and node telemetry); this event signals "the artifact outputs are ready for the next pipeline stage" (used by Forge's state machine to advance / seal). Stiglab emits it only for sessions that were dispatched as shaping requests — direct task POSTs that produce no `ShapingResult` skip it.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` | Artifact this session was for. Hoisted so `stream_id()` can route the event without parsing the embedded result. |
-| `result` | `crate::protocol::ShapingResult` | Full result payload — the same shape Forge previously consumed as the `POST /api/shaping` response body. `request_id` inside this struct correlates back to the originating `forge.shaping_dispatched`. |
-
-### `stiglab.session_failed`
-
-- Variant: `FactoryEventKind::StiglabSessionFailed`
-- Stream: `stiglab`
-
-A session terminated with an error.
+A chat agent session terminated with an error. Emitted by portal's in-process session runner (spec #583; formerly `stiglab.session_failed`).
 
 | Field | Type | Description |
 |---|---|---|
 | `session_id` | `String` |  |
-| `request_id` | `String` |  |
 | `error` | `String` |  |
-| `artifact_id` | `Option<String>` | Artifact this session was shaping (issue #156). Optional so non-shaping sessions (direct task POSTs) don't emit a meaningless id. When present, forge's workflow signal listener writes a `Failure` outcome to the agent-session signal cache so the gate fails loudly instead of stalling. _(optional)_ |
-
-### `stiglab.session_aborted`
-
-- Variant: `FactoryEventKind::StiglabSessionAborted`
-- Stream: `stiglab`
-
-A session was aborted (e.g. node lost, deadline exceeded).
-
-| Field | Type | Description |
-|---|---|---|
-| `session_id` | `String` |  |
-| `reason` | `String` |  |
+| `artifact_id` | `Option<String>` | Artifact this session was shaping (issue #156). Optional so non-shaping sessions (direct task POSTs) don't emit a meaningless id. _(optional)_ |
 
 ## `portal` events
 
@@ -298,7 +256,7 @@ Producer subsystem: **(unknown — update `stream_producer` in xtask)**.
 - Variant: `FactoryEventKind::PortalSessionRequested`
 - Stream: `portal`
 
-Dashboard task request from portal. Stiglab's `session_requested_listener` dispatches the session to the correct agent node (spec #222 Follow-up 3).
+Dashboard task request from portal. Diagnostic timeline record — dispatch is in-process post-ADR 0027 (spec #583); portal's `SessionRunner` spawns the session directly.
 
 | Field | Type | Description |
 |---|---|---|
@@ -323,7 +281,7 @@ Portal failed to open a GitHub PR for a completed session (spec #273). Emitted a
 - Variant: `FactoryEventKind::PortalSessionCancelRequested`
 - Stream: `portal`
 
-Dashboard cancel-session request from portal (spec #303). Stiglab's `session_cancel_requested_listener` looks up the session's node and forwards a `ServerMessage::CancelSession` to the agent. Best-effort: if the node is offline or the session is already terminal, the cancel is a no-op.
+Dashboard cancel-session request from portal (spec #303). Diagnostic timeline record — the cancel itself is applied in-process by portal's `SessionRunner` (spec #583). Best-effort: a terminal session makes the cancel a no-op.
 
 | Field | Type | Description |
 |---|---|---|
@@ -417,14 +375,14 @@ Ising finished catching up from a lag position.
 
 ## `workflow` events
 
-Producer subsystem: **stiglab (trigger) / substrate scheduler (stage)**.
+Producer subsystem: **onsager-portal (trigger) / substrate scheduler (stage)**.
 
 ### `trigger.fired`
 
 - Variant: `FactoryEventKind::TriggerFired`
 - Stream: `workflow`
 
-A trigger (e.g. a GitHub issue webhook) fired and produced a payload the trigger subscriber will translate into an artifact registration. Emitted by the stiglab webhook receiver; consumed by forge.
+A trigger (e.g. a GitHub issue webhook) fired and produced a payload the trigger subscriber will translate into an artifact registration. Emitted by the portal webhook receiver; consumed by the scheduler.
 
 | Field | Type | Description |
 |---|---|---|

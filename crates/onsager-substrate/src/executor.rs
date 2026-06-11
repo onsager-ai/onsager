@@ -103,7 +103,7 @@ pub trait Executor: std::fmt::Debug + Send + Sync {
 /// agent node's state the runtime needs to dispatch a session with the
 /// *node's* parameters rather than the registered singleton's.
 ///
-/// Mirrors the fields stiglab's `Task` carries (`model`,
+/// Mirrors the fields portal's chat `Task` carries (`model`,
 /// `system_prompt`, allowed `tools`, a credential bundle reference);
 /// the runtime wiring (the session runner) stays on the singleton and
 /// is deliberately *not* part of this serializable shape. Lives in the

@@ -5,7 +5,7 @@
 //! `pg_notify` notifications carry `stream_id` but **not** the namespace
 //! column. As a v0.1 contract, producers are expected to prefix their
 //! `stream_id` values with the namespace followed by a colon — e.g.
-//! `"stiglab:session:abc"`. The [`Listener`] filters incoming notifications by
+//! `"session:chat:abc"`. The [`Listener`] filters incoming notifications by
 //! splitting `stream_id` on the first `':'` and comparing the prefix against
 //! its subscribed namespaces. If the prefix does not match any subscribed
 //! namespace the notification is dropped.
@@ -228,8 +228,8 @@ mod tests {
 
     #[test]
     fn matches_single_namespace() {
-        let namespaces = ns_set(&["stiglab"]);
-        assert!(matches_any_namespace("stiglab:session:abc", &namespaces));
+        let namespaces = ns_set(&["session"]);
+        assert!(matches_any_namespace("session:chat:abc", &namespaces));
         assert!(!matches_any_namespace(
             "telegramable:session:abc",
             &namespaces
@@ -238,16 +238,16 @@ mod tests {
 
     #[test]
     fn matches_multiple_namespaces() {
-        let namespaces = ns_set(&["stiglab", "ising"]);
-        assert!(matches_any_namespace("stiglab:session:1", &namespaces));
+        let namespaces = ns_set(&["session", "ising"]);
+        assert!(matches_any_namespace("session:chat:1", &namespaces));
         assert!(matches_any_namespace("ising:run:42", &namespaces));
         assert!(!matches_any_namespace("telegramable:policy:x", &namespaces));
     }
 
     #[test]
     fn no_colon_never_matches() {
-        let namespaces = ns_set(&["stiglab"]);
-        assert!(!matches_any_namespace("stiglab", &namespaces));
+        let namespaces = ns_set(&["session"]);
+        assert!(!matches_any_namespace("session", &namespaces));
         assert!(!matches_any_namespace("no-colon-here", &namespaces));
     }
 
@@ -257,17 +257,17 @@ mod tests {
         // entirely. This test just documents that matches_any_namespace returns
         // false for an empty set — the caller decides what that means.
         let namespaces = ns_set(&[]);
-        assert!(!matches_any_namespace("stiglab:session:1", &namespaces));
+        assert!(!matches_any_namespace("session:chat:1", &namespaces));
     }
 
     #[test]
     fn prefix_only_up_to_first_colon() {
-        let namespaces = ns_set(&["stiglab"]);
-        // "stiglab:session:abc" — prefix is "stiglab", not "stiglab:session"
-        assert!(matches_any_namespace("stiglab:session:abc", &namespaces));
+        let namespaces = ns_set(&["session"]);
+        // "session:chat:abc" — prefix is "session", not "session:chat"
+        assert!(matches_any_namespace("session:chat:abc", &namespaces));
         // Make sure a namespace with colon in it doesn't partially match
-        let namespaces = ns_set(&["stiglab:session"]);
-        assert!(!matches_any_namespace("stiglab:session:abc", &namespaces));
+        let namespaces = ns_set(&["session:chat"]);
+        assert!(!matches_any_namespace("session:chat:abc", &namespaces));
     }
 
     /// Integration test: backfill on startup + live events via pg_notify.

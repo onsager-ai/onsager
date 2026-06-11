@@ -324,7 +324,7 @@ fn build_registry() -> Vec<ToolDescriptor> {
         // --- Session output manifest (spec #520 §4a / #521) ---
         ToolDescriptor {
             name: "emit_artifact",
-            description: "Record an addressable deliverable on the session output manifest. Persists `content` to addressable storage (inline base64 + sha256 checksum for the first cut) and appends an `artifact.emitted` row to `events_ext` on the `session:<session_id>` stream under the `stiglab` namespace. Returns the minted `artifact_id` and the `content_ref { uri, checksum }`. Provenance is never recorded here — `AgentExecutor` stamps `Uncertain { source: Agent }` when it reads the manifest back. Call once per deliverable a session produces.",
+            description: "Record an addressable deliverable on the session output manifest. Persists `content` to addressable storage (inline base64 + sha256 checksum for the first cut) and appends an `artifact.emitted` row to `events_ext` on the `session:<session_id>` stream under the `session` namespace. Returns the minted `artifact_id` and the `content_ref { uri, checksum }`. Provenance is never recorded here — `AgentExecutor` stamps `Uncertain { source: Agent }` when it reads the manifest back. Call once per deliverable a session produces.",
             category: ToolCategory::Constructive,
             input_schema: super::input_schema::<tools::session_manifest::EmitArtifactArgs>(),
             invoke: |state, user, args| {

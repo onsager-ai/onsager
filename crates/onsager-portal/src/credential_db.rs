@@ -2,10 +2,9 @@
 //! `user_credentials` table (portal migration 006).
 //!
 //! Spec #222 Slice 2a moved the routes from stiglab → portal; the
-//! supporting DB functions move with them. Stiglab still reads
-//! encrypted values from the same Postgres table at session-launch
-//! time (decrypted in-process and handed to the agent as env vars),
-//! but portal is the only writer.
+//! supporting DB functions moved with them. Portal is the only reader
+//! and writer — the in-process session runner (#583) decrypts values at
+//! session-launch time and hands them to the agent as env vars.
 
 use chrono::Utc;
 use serde::Serialize;
@@ -130,6 +129,29 @@ pub async fn delete_user_credential(
     Ok(())
 }
 
+/// Read every credential row for `(workspace_id, user_id)` as
+/// `(name, encrypted_value)` pairs. Used by the in-process session
+/// runner to build the env-var map handed to the agent process (port of
+/// stiglab's `db/credentials.rs` helper, folded per #583). Sessions
+/// resolve `workspace_id` from `sessions.workspace_id`; legacy
+/// NULL-workspace sessions get an empty map (no credentials → loud
+/// failure via `session.failed`, never the wrong-workspace token).
+pub async fn get_all_user_credential_values(
+    pool: &PgPool,
+    workspace_id: &str,
+    user_id: &str,
+) -> anyhow::Result<Vec<(String, String)>> {
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT name, encrypted_value FROM user_credentials \
+         WHERE workspace_id = $1 AND user_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// Fetch the AES-256-GCM ciphertext for a named credential. Returns
 /// `None` when the credential does not exist. The caller is responsible
 /// for decrypting via `auth::decrypt_credential`.
@@ -152,9 +174,8 @@ pub async fn get_user_credential_encrypted(
 }
 
 /// Membership check — used by the credentials route's
-/// `require_workspace_access` helper. Reads from the spine-shared
-/// `workspace_members` table (still owned by stiglab's runtime
-/// migrations until #222 Slice 3).
+/// `require_workspace_access` helper. Reads the spine-owned
+/// `workspace_members` table (004_workflows.sql).
 pub async fn is_workspace_member(
     pool: &PgPool,
     workspace_id: &str,

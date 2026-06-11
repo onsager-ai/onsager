@@ -4,11 +4,11 @@
 #
 # Usage:
 #   just smoke-test                         # defaults
-#   STIGLAB_URL=http://host:3000 bash scripts/smoke-test.sh
+#   PORTAL_URL=http://host:3002 bash scripts/smoke-test.sh
 
 set -euo pipefail
 
-STIGLAB_URL="${STIGLAB_URL:-http://localhost:3000}"
+PORTAL_URL="${PORTAL_URL:-http://localhost:3002}"
 DASHBOARD_URL="${DASHBOARD_URL:-http://localhost:5173}"
 SPINE_URL="${SPINE_URL:-postgres://onsager:onsager@localhost:5432/onsager}"
 
@@ -29,10 +29,9 @@ check() {
 echo "=== Onsager Smoke Test ==="
 echo ""
 
-echo "-- Stiglab --"
-check "health"   "$STIGLAB_URL/api/health"   '"status"'
-check "nodes"    "$STIGLAB_URL/api/nodes"     'nodes'
-check "sessions" "$STIGLAB_URL/api/sessions"  'sessions'
+echo "-- Portal --"
+check "health"   "$PORTAL_URL/api/health"   '"status"'
+check "sessions" "$PORTAL_URL/api/sessions"  'sessions'
 
 echo ""
 echo "-- Dashboard --"

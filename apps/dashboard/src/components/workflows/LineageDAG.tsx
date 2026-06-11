@@ -69,10 +69,10 @@ export function LineageDAG({ artifact }: LineageDAGProps) {
           )
           const gateData = (gateEvent?.data ?? {}) as GateEventData
           const failed = lane?.some(
-            (e) => e.event_type === "stiglab.session_failed",
+            (e) => e.event_type === "session.failed",
           )
           const completed = lane?.some(
-            (e) => e.event_type === "stiglab.session_completed",
+            (e) => e.event_type === "session.completed",
           )
           const retried = lane?.some(
             (e) => e.event_type === "forge.retry_requested",

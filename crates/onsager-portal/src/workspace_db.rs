@@ -182,9 +182,8 @@ pub async fn list_workspace_members_with_users(
 
 /// Read shape the workspace route handlers need to validate that an
 /// installation belongs to a workspace and to mint an installation
-/// token. Slice 3b moves the `github_app_installations` table into
-/// portal's migrations directory; until then portal reads the same
-/// table stiglab's runtime migrations created.
+/// token. The `github_app_installations` table lives in portal's
+/// migrations directory (007).
 pub struct InstallationLookup {
     pub workspace_id: String,
     pub install_id: i64,
@@ -279,9 +278,8 @@ pub async fn delete_project(pool: &PgPool, project_id: &str) -> anyhow::Result<(
 
 /// Count sessions attached to a project that are not in a terminal
 /// state. Used to block project deletion while live sessions reference
-/// it (no cascade, no soft-delete in v1). Reads stiglab's `sessions`
-/// table from the same Postgres instance — the table is stiglab-owned
-/// but the column is shared.
+/// it (no cascade, no soft-delete in v1). Reads the portal-owned
+/// `sessions` table (migration 015).
 pub async fn count_live_sessions_for_project(
     pool: &PgPool,
     project_id: &str,

@@ -20,10 +20,9 @@
 //! `session_kind: dev`, which is what drives the dashboard's persistent
 //! dev-mode banner. No extra column on `auth_sessions` required.
 //!
-//! `workspaces` and `workspace_members` are still owned by stiglab's
-//! runtime migrations until Slice 3 of spec #222 moves them into the
-//! spine. Portal writes to those tables via raw SQL — same DB, same
-//! shape, no shared crate needed.
+//! `workspaces` and `workspace_members` are spine-owned tables
+//! (004_workflows.sql). Portal writes to them via raw SQL — same DB,
+//! same shape, no shared crate needed.
 
 use axum::Json;
 use axum::extract::State;
@@ -93,7 +92,7 @@ pub async fn seed_dev_user_and_workspace(pool: &PgPool) -> anyhow::Result<()> {
 
     // Resolve-or-create the workspace. Stiglab owns the `workspaces` /
     // `workspace_members` schema until Slice 3, so this writes raw SQL
-    // matching stiglab's CREATE TABLE shape.
+    // matching the spine's CREATE TABLE shape.
     let existing_ws_id: Option<(String,)> =
         sqlx::query_as("SELECT id FROM workspaces WHERE slug = $1")
             .bind(DEV_WORKSPACE_SLUG)
@@ -199,7 +198,7 @@ pub async fn dev_login(State(state): State<AppState>) -> Response {
         .is_some_and(|u| u.starts_with("https://"));
     let secure_attr = if secure { "; Secure" } else { "" };
     let cookie = format!(
-        "stiglab_session={session_token}; Path=/; HttpOnly; SameSite=Lax; \
+        "onsager_session={session_token}; Path=/; HttpOnly; SameSite=Lax; \
          Max-Age=2592000{secure_attr}"
     );
 

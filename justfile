@@ -3,7 +3,7 @@
 
 # Load .env into every recipe's environment. Lets `just dev` (which runs
 # cargo directly, not via docker-compose) pick up credential keys and other
-# config from .env — e.g. ONSAGER_CREDENTIAL_KEY / STIGLAB_CREDENTIAL_KEY.
+# config from .env — e.g. ONSAGER_CREDENTIAL_KEY.
 set dotenv-load := true
 
 default:
@@ -101,15 +101,15 @@ lint-ui:
 # `run:` step in .github/workflows/rust.yml (`check` job) and
 # frontend.yml (`build` job). When a CI step is added in either file,
 # mirror it here (or in the recipe it composes — `lint-rust`). The
-# Postgres-gated spine/stiglab integration tests are left to CI /
+# Postgres-gated spine integration tests are left to CI /
 # `just test-spine`; `ci-local-full` adds them when Postgres is up.
 ci-local: ci-local-rust ci-local-ui
 
 # Rust half — mirrors rust.yml's `check` job. `lint-rust` already runs
 # fmt + workspace clippy + every xtask lint CI runs (incl. check-events);
 # this adds the explicit workspace build + test. The DB-gated spine
-# /stiglab tests skip without DATABASE_URL, exactly as in the "Test
-# remaining crates" CI step — see `ci-local-full` to include them.
+# tests skip without DATABASE_URL, exactly as in the "Test remaining
+# crates" CI step — see `ci-local-full` to include them.
 ci-local-rust: lint-rust
     cargo build --workspace
     cargo test --workspace
@@ -125,18 +125,17 @@ ci-local-ui:
     pnpm --filter dashboard build
     pnpm --filter dashboard test
 
-# Full parity including the Postgres-gated spine/stiglab integration
-# tests. Requires a running Postgres (`just dev-infra`) with DATABASE_URL
-# set; otherwise use plain `ci-local` (DB-free). Mirrors CI's three-way
-# test split exactly — spine and stiglab run serial (`--test-threads=1`)
-# because they share one DB schema — rather than `cargo test --workspace`,
-# which would race them. `lint-rust` (fmt + clippy + xtask lints) runs
-# first as a dependency.
+# Full parity including the Postgres-gated spine integration tests.
+# Requires a running Postgres (`just dev-infra`) with DATABASE_URL
+# set; otherwise use plain `ci-local` (DB-free). Mirrors CI's test
+# split exactly — spine runs serial (`--test-threads=1`) because its
+# integration tests share one DB schema — rather than `cargo test
+# --workspace`, which would race them. `lint-rust` (fmt + clippy +
+# xtask lints) runs first as a dependency.
 ci-local-full: lint-rust
     cargo build --workspace
     cargo test -p onsager-spine -- --test-threads=1
-    cargo test -p stiglab -- --test-threads=1
-    cargo test --workspace --exclude onsager-spine --exclude stiglab
+    cargo test --workspace --exclude onsager-spine
     just ci-local-ui
 
 # ── Docs ─────────────────────────────────────────────────────────────
@@ -211,9 +210,8 @@ dev: dev-infra
         echo "$p"
     }
     PORTAL_PORT=$(pick_port 3002)
-    STIGLAB_PORT=$(pick_port 3000)
     DASHBOARD_PORT=$(pick_port 5173)
-    export PORTAL_PORT STIGLAB_PORT  # vite.config.ts proxy targets
+    export PORTAL_PORT  # vite.config.ts proxy target
 
     # Self-register with the machine Traefik (worktree devproxy) when its
     # file-provider dir exists: Host($DEV_HOST) → host-run Vite. Vite
@@ -245,13 +243,7 @@ dev: dev-infra
     echo "==> Starting portal on :${PORTAL_PORT}..."
     DATABASE_URL="$DATABASE_URL" \
     PORTAL_BIND="0.0.0.0:${PORTAL_PORT}" \
-    STIGLAB_INTERNAL_WS_URL="ws://localhost:${STIGLAB_PORT}/agent/ws-internal" \
         cargo run -p onsager-portal -- serve &
-
-    echo "==> Starting stiglab on :${STIGLAB_PORT}..."
-    ONSAGER_DATABASE_URL="$DATABASE_URL" \
-    STIGLAB_PORT="$STIGLAB_PORT" \
-        cargo run -p stiglab -- server &
 
     echo "==> Starting onsager-scheduler (substrate scheduler)..."
     DATABASE_URL="$DATABASE_URL" \
@@ -264,7 +256,6 @@ dev: dev-infra
     echo "=== Onsager dev stack running ==="
     [ -n "$route_file" ] && echo "  Devproxy:   http://${DEV_HOST}:8000"
     echo "  Dashboard:  http://localhost:${DASHBOARD_PORT}"
-    echo "  Stiglab:    http://localhost:${STIGLAB_PORT}"
     echo "  Portal:     http://localhost:${PORTAL_PORT}"
     echo "  Scheduler:  spine listener (no HTTP port)"
     echo "  Postgres:   postgres://onsager:onsager@localhost:${DB_PORT}/onsager"
@@ -298,9 +289,6 @@ dev-portal port="3002":
 dev-scheduler:
     DATABASE_URL="${DATABASE_URL:-postgres://onsager:onsager@localhost:5432/onsager}" \
         cargo run -p onsager-scheduler -- serve
-
-dev-stiglab:
-    cargo run -p stiglab -- server
 
 # ── DB ───────────────────────────────────────────────────────────────
 db-migrate:
@@ -362,8 +350,8 @@ deploy: deploy-build deploy-up
     #!/usr/bin/env bash
     echo ""
     echo "=== Onsager production stack running ==="
-    echo "  Dashboard:  http://localhost:${STIGLAB_PORT:-3000}"
-    echo "  Stiglab:    http://localhost:${STIGLAB_PORT:-3000}/api/health"
+    echo "  Dashboard:  http://localhost:${EDGE_PORT:-8080}"
+    echo "  API:        http://localhost:${EDGE_PORT:-8080}/api/health"
     echo ""
     echo "Logs:  just deploy-logs"
     echo "Stop:  just deploy-down"
@@ -372,7 +360,7 @@ deploy: deploy-build deploy-up
 install:
     cargo install --path crates/onsager
     cargo install --path crates/onsager-scheduler
-    cargo install --path crates/stiglab
+    cargo install --path crates/onsager-portal
 
 # ── Per-worktree dev slots (spec #194) ───────────────────────────────
 #
@@ -385,7 +373,7 @@ install:
 # Typical flow on the VM:
 #   just worktree-new feat-a            # branch from main, allocate slot, bring up
 #   just worktree-list                  # see slots, ports, project names
-#   just slot-exec feat-a cargo test -p stiglab
+#   just slot-exec feat-a cargo test -p onsager-portal
 #   just worktree-tunnel feat-a         # print SSH `-L` flags for the laptop
 #   just worktree-rm feat-a             # tear down slot + volumes + worktree dir
 #   just worktree-rm feat-a --with-branch  # also delete the branch
@@ -498,9 +486,9 @@ worktree-rm name *flags:
 worktree-tunnel name host="vm":
     cargo run -p xtask --quiet -- slot tunnel "{{name}}" --host "{{host}}"
 
-# Run a one-off command inside a slot's stiglab container — same shell,
+# Run a one-off command inside a slot's portal container — same shell,
 # same target dir, same toolchain as the live cargo-watch loop.
-#   just slot-exec feat-a cargo test -p stiglab
+#   just slot-exec feat-a cargo test -p onsager-portal
 #   just slot-exec feat-a bash
 slot-exec name *cmd:
     #!/usr/bin/env bash
@@ -509,7 +497,7 @@ slot-exec name *cmd:
     project=$(cargo run -p xtask --quiet -- slot project "$name")
     cd "worktrees/$name"
     if [ -z "{{cmd}}" ]; then
-      docker compose -f deploy/dev/docker-compose.slot.yml -p "$project" exec stiglab bash
+      docker compose -f deploy/dev/docker-compose.slot.yml -p "$project" exec portal bash
     else
-      docker compose -f deploy/dev/docker-compose.slot.yml -p "$project" exec stiglab {{cmd}}
+      docker compose -f deploy/dev/docker-compose.slot.yml -p "$project" exec portal {{cmd}}
     fi

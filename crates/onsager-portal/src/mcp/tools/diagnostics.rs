@@ -126,7 +126,7 @@ pub async fn inspect_run(state: &AppState, auth_user: &AuthUser, args: Value) ->
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetStageLogsArgs {
     /// Session id for the agent-session stage. `inspect_run` surfaces
-    /// these via `stiglab.session_*` events on the artifact stream.
+    /// these via `session.*` lifecycle events linked to the artifact.
     pub session_id: String,
     /// Skip chunks with seq <= `since_seq`. Defaults to 0 (return
     /// everything).
@@ -267,7 +267,8 @@ pub async fn propose_remediation(
     let pointers = sqlx::query_as::<_, SessionPointer>(
         "SELECT data->>'session_id' AS session_id, event_type, created_at \
          FROM events_ext \
-         WHERE stream_id = $1 AND namespace = 'stiglab' \
+         WHERE event_type IN ('session.completed', 'session.failed') \
+           AND data->>'artifact_id' = $1 \
          ORDER BY id DESC LIMIT 20",
     )
     .bind(&args.artifact_id)
@@ -487,7 +488,7 @@ fn build_user_prompt(
 }
 
 /// Pull the most recent log tails for up to three distinct sessions
-/// surfaced in the artifact's `stiglab.*` events. We pull only the
+/// surfaced in the artifact's `session.*` events. We pull only the
 /// last N chunks per session at the SQL layer (failure messages live
 /// at the end of the log), then trim the joined text to a char
 /// budget. Bounded SQL + bounded post-processing keeps tool latency

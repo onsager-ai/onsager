@@ -73,9 +73,8 @@ services:
     environment:
       PGPASSWORD: onsager
     # `sort -V` orders 001 < 002 < ... < 010 (the same scheme
-    # crates/stiglab/deploy/entrypoint.sh uses); a bare glob's order
-    # isn't guaranteed and would silently misorder migrations as the
-    # set crosses 010+.
+    # deploy/entrypoint.sh uses); a bare glob's order isn't guaranteed
+    # and would silently misorder migrations as the set crosses 010+.
     entrypoint: >
       sh -c "
         set -e;
@@ -85,23 +84,6 @@ services:
         done
       "
     restart: "no"
-
-  stiglab:
-    <<: *rust-dev
-    depends_on:
-      db:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    environment:
-      STIGLAB_HOST: 0.0.0.0
-      STIGLAB_PORT: "3000"
-      ONSAGER_DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
-      DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
-      RUST_LOG: ${RUST_LOG:-info}
-    command: >
-      cargo watch -q -w crates/stiglab -w crates/onsager-spine -w crates/onsager-artifact
-      -x 'run -p stiglab -- server'
 
   # Substrate scheduler (RUN-03, #386). Listens on the spine for
   # `trigger.fired` events, compiles each into an `ExecutionPlan`,
@@ -118,18 +100,17 @@ services:
     environment:
       DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
       SCHEDULER_ACTOR: substrate-scheduler-slot
-      # Plan-scoped session token decrypt (#536) — same key portal/stiglab
-      # use. Unset → scheduler-dispatched agents run without MCP auth.
-      ONSAGER_CREDENTIAL_KEY: ${ONSAGER_CREDENTIAL_KEY:-${STIGLAB_CREDENTIAL_KEY:-}}
+      # Plan-scoped session token decrypt (#536) — same key portal
+      # uses. Unset → scheduler-dispatched agents run without MCP auth.
+      ONSAGER_CREDENTIAL_KEY: ${ONSAGER_CREDENTIAL_KEY:-}
       RUST_LOG: ${RUST_LOG:-info}
     command: >
       cargo watch -q -w crates/onsager-scheduler -w crates/onsager-nodes
       -w crates/onsager-substrate -w crates/onsager-spine
       -x 'run -p onsager-scheduler -- serve'
 
-  # Edge subsystem (ADR 0006 / ADR 0008). Owns every external /api/*
-  # route and is the route owner for /agent/ws — terminates the
-  # WebSocket and proxies bytes to stiglab over the dev network.
+  # Edge subsystem (ADR 0006). Owns every external /api/* route and
+  # runs agent sessions in-process (ADR 0027 / #583).
   portal:
     <<: *rust-dev
     depends_on:
@@ -141,7 +122,6 @@ services:
       PORTAL_BIND: 0.0.0.0:3002
       DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
       ONSAGER_DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
-      STIGLAB_INTERNAL_WS_URL: ws://stiglab:3000/agent/ws-internal
       RUST_LOG: ${RUST_LOG:-info}
     command: >
       cargo watch -q -w crates/onsager-portal -w crates/onsager-spine -w crates/onsager-artifact
@@ -173,7 +153,6 @@ services:
   edge:
     image: caddy:2-alpine
     depends_on:
-      - stiglab
       - portal
       - dashboard
     volumes:

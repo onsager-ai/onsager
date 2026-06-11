@@ -54,7 +54,7 @@ describe("Spine Events", () => {
 
     // Query spine for events related to this session
     const events = await client.getSpineEvents({
-      stream_type: "stiglab",
+      stream_type: "session",
       limit: 100,
     });
 
@@ -73,18 +73,18 @@ describe("Spine Events", () => {
     if (!spineAvailable) skip();
 
     // Query different event types — they should all return valid responses
-    const [stiglabEvents, allEvents] = await Promise.all([
-      client.getSpineEvents({ stream_type: "stiglab", limit: 10 }),
+    const [sessionEvents, allEvents] = await Promise.all([
+      client.getSpineEvents({ stream_type: "session", limit: 10 }),
       client.getSpineEvents({ limit: 10 }),
     ]);
 
     // Both queries should succeed (even if empty)
-    expect(Array.isArray(stiglabEvents)).toBe(true);
+    expect(Array.isArray(sessionEvents)).toBe(true);
     expect(Array.isArray(allEvents)).toBe(true);
 
-    // All stiglab events should have the correct stream_type
-    for (const event of stiglabEvents) {
-      expect(event.stream_type).toBe("stiglab");
+    // All session events should have the correct stream_type
+    for (const event of sessionEvents) {
+      expect(event.stream_type).toBe("session");
     }
 
     // Events should have valid structure

@@ -11,10 +11,9 @@
 //! 2. Every backend path the dashboard calls (from
 //!    `apps/dashboard/src/lib/api/*.ts` and `apps/dashboard/src/lib/sse.ts`)
 //!    matches a route registered on a backend subsystem.
-//! 3. Stiglab (and any other factory subsystem) registers only
-//!    loopback-only routes — every non-allowlisted entry is a hard
-//!    failure (ADR 0008: portal owns every external route, no
-//!    sibling-subsystem carve-outs).
+//! 3. Portal owns every external route (ADR 0006). The ADR 0008
+//!    stiglab loopback-route guard retired with the subsystem itself
+//!    (ADR 0027 / #583) — no factory subsystem hosts HTTP anymore.
 //!
 //! Backed by static parsing — `syn` for the Rust route chains, a small
 //! hand-rolled scanner for the TS string literals. No server boot, no
@@ -35,7 +34,7 @@ use syn::{Expr, ExprLit, Lit};
 pub struct BackendRoute {
     /// The literal axum path, e.g. `"/api/workspaces/{id}/members"`.
     pub path: String,
-    /// e.g. `"portal"` or `"stiglab"`.
+    /// e.g. `"portal"`.
     pub subsystem: &'static str,
 }
 
@@ -404,11 +403,6 @@ pub fn matches_route(dashboard: &str, backend: &str) -> bool {
 /// `mod.rs`.
 pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
     (
-        "/agent/ws",
-        "agent worker WebSocket — agent binaries connect, not the dashboard \
-         (portal terminates the upgrade and proxies to stiglab on loopback per ADR 0008)",
-    ),
-    (
         "/healthz",
         "portal internal liveness probe — ops-only, not a dashboard surface",
     ),
@@ -498,17 +492,6 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
     ),
 ];
 
-/// Routes registered by stiglab (or any other factory subsystem) that
-/// are bound to loopback and never externally addressable. The only
-/// caller is portal's `/agent/ws` proxy on the same host. ADR 0008
-/// makes "portal owns every external route" mechanical — any stiglab
-/// route not on this list is a hard failure.
-pub const LOOPBACK_ONLY_ROUTES: &[(&str, &str)] = &[(
-    "/agent/ws-internal",
-    "stiglab loopback agent-protocol WebSocket — portal terminates \
-     `/agent/ws` from outside and proxies bytes here (ADR 0008)",
-)];
-
 // ---------------------------------------------------------------------------
 // Comparison
 // ---------------------------------------------------------------------------
@@ -529,7 +512,7 @@ pub struct Violation {
     /// The raw path as written at the offending site, before
     /// normalization — picked so a reviewer can grep for it directly.
     pub raw_path: String,
-    /// Subsystem for backend violations (e.g. `portal`/`stiglab`).
+    /// Subsystem for backend violations (e.g. `portal`).
     pub subsystem: Option<&'static str>,
     /// Source file for dashboard violations.
     pub file: Option<PathBuf>,
@@ -604,37 +587,12 @@ pub fn analyse(backend: &[BackendRoute], dashboard: &[DashboardCall]) -> Analysi
 // run()
 // ---------------------------------------------------------------------------
 
-const STIGLAB_SRC: &str = "crates/stiglab/src/server/mod.rs";
 const PORTAL_SRC: &str = "crates/onsager-portal/src/server.rs";
 const DASHBOARD_API_DIR: &str = "apps/dashboard/src/lib/api";
 const DASHBOARD_SSE_SRC: &str = "apps/dashboard/src/lib/sse.ts";
 
 pub fn run() -> Result<()> {
     let root = workspace_root()?;
-
-    // Stiglab is loopback-only post-ADR 0008. Every route it registers
-    // must be on `LOOPBACK_ONLY_ROUTES`; anything else is a hard
-    // failure regardless of whether it has a dashboard caller.
-    let stiglab_routes = parse_rust_routes(&root.join(STIGLAB_SRC), "stiglab")?;
-    let mut loopback_violations: Vec<String> = Vec::new();
-    for r in &stiglab_routes {
-        if !LOOPBACK_ONLY_ROUTES.iter().any(|(p, _)| *p == r.path) {
-            loopback_violations.push(r.path.clone());
-        }
-    }
-    if !loopback_violations.is_empty() {
-        eprintln!(
-            "api-contract: stiglab registered external route(s) — portal owns \
-             every external route (ADR 0008):"
-        );
-        for path in &loopback_violations {
-            eprintln!("  {path}");
-        }
-        bail!(
-            "api-contract: {} stiglab route(s) outside the loopback-only allowlist",
-            loopback_violations.len()
-        );
-    }
 
     let mut backend = Vec::new();
     backend.extend(parse_rust_routes(&root.join(PORTAL_SRC), "portal")?);
@@ -644,14 +602,6 @@ pub fn run() -> Result<()> {
     dashboard.extend(parse_ts_calls(&root.join(DASHBOARD_SSE_SRC))?);
 
     let report = analyse(&backend, &dashboard);
-
-    if !LOOPBACK_ONLY_ROUTES.is_empty() {
-        eprintln!("api-contract: stiglab loopback-only routes:");
-        for (path, reason) in LOOPBACK_ONLY_ROUTES {
-            eprintln!("  {path} — {reason}");
-        }
-        eprintln!();
-    }
 
     if !report.allowed.is_empty() {
         eprintln!("api-contract: external-only allowances:");
@@ -743,10 +693,10 @@ mod tests {
             }
         "#;
         let f = write_tmp(".rs", src);
-        let routes = parse_rust_routes(f.path(), "stiglab").unwrap();
+        let routes = parse_rust_routes(f.path(), "portal").unwrap();
         let paths: Vec<_> = routes.iter().map(|r| r.path.as_str()).collect();
         assert_eq!(paths, vec!["/api/health", "/api/workspaces/{id}"]);
-        assert!(routes.iter().all(|r| r.subsystem == "stiglab"));
+        assert!(routes.iter().all(|r| r.subsystem == "portal"));
     }
 
     #[test]
@@ -758,7 +708,7 @@ mod tests {
             }
         "#;
         let f = write_tmp(".rs", src);
-        assert!(parse_rust_routes(f.path(), "stiglab").unwrap().is_empty());
+        assert!(parse_rust_routes(f.path(), "portal").unwrap().is_empty());
     }
 
     #[test]
@@ -767,14 +717,6 @@ mod tests {
         // counts (those churn on every PR) — only that we extract
         // *something* and that the well-known anchors are present.
         let root = workspace_root();
-        let stiglab =
-            parse_rust_routes(&root.join("crates/stiglab/src/server/mod.rs"), "stiglab").unwrap();
-        // Post-ADR 0008 stiglab is loopback-only; its sole route is
-        // `/agent/ws-internal` which portal's `/agent/ws` proxies to.
-        assert!(!stiglab.is_empty(), "stiglab routes: {}", stiglab.len());
-        let stiglab_paths: Vec<_> = stiglab.iter().map(|r| r.path.as_str()).collect();
-        assert!(stiglab_paths.contains(&"/agent/ws-internal"));
-
         let portal =
             parse_rust_routes(&root.join("crates/onsager-portal/src/server.rs"), "portal").unwrap();
         assert!(portal.len() > 20, "portal routes: {}", portal.len());
@@ -802,7 +744,7 @@ mod tests {
             }
         "#;
         let f = write_tmp(".rs", src);
-        let routes = parse_rust_routes(f.path(), "stiglab").unwrap();
+        let routes = parse_rust_routes(f.path(), "portal").unwrap();
         let paths: Vec<_> = routes.iter().map(|r| r.path.as_str()).collect();
         assert_eq!(paths, vec!["/api/static"]);
     }
@@ -895,20 +837,16 @@ mod tests {
 
     #[test]
     fn normalize_backend_strips_api_prefix_and_rewrites_params() {
-        assert_eq!(normalize_backend("/api/health", "stiglab"), "health");
+        assert_eq!(normalize_backend("/api/health", "portal"), "health");
+        assert_eq!(normalize_backend("/api/workspaces", "portal"), "workspaces");
         assert_eq!(
-            normalize_backend("/api/workspaces", "stiglab"),
-            "workspaces"
-        );
-        assert_eq!(
-            normalize_backend("/api/workspaces/{id}/members", "stiglab"),
+            normalize_backend("/api/workspaces/{id}/members", "portal"),
             "workspaces/{x}/members"
         );
         assert_eq!(
-            normalize_backend("/api/governance/{*path}", "stiglab"),
+            normalize_backend("/api/governance/{*path}", "portal"),
             "governance/{*x}"
         );
-        assert_eq!(normalize_backend("/agent/ws", "portal"), "agent/ws");
     }
 
     #[test]
@@ -989,8 +927,8 @@ mod tests {
     #[test]
     fn analyse_passes_when_every_route_has_a_caller() {
         let backend = vec![
-            route("/api/health", "stiglab"),
-            route("/api/workspaces/{id}", "stiglab"),
+            route("/api/health", "portal"),
+            route("/api/workspaces/{id}", "portal"),
         ];
         let dashboard = vec![call("/health"), call("/workspaces/${id}")];
         let r = analyse(&backend, &dashboard);
@@ -999,7 +937,7 @@ mod tests {
 
     #[test]
     fn analyse_flags_backend_route_without_caller() {
-        let backend = vec![route("/api/orphan", "stiglab")];
+        let backend = vec![route("/api/orphan", "portal")];
         let dashboard: Vec<DashboardCall> = vec![];
         let r = analyse(&backend, &dashboard);
         assert_eq!(r.violations.len(), 1);
@@ -1008,12 +946,12 @@ mod tests {
             ViolationKind::BackendRouteWithoutCaller
         );
         assert_eq!(r.violations[0].raw_path, "/api/orphan");
-        assert_eq!(r.violations[0].subsystem, Some("stiglab"));
+        assert_eq!(r.violations[0].subsystem, Some("portal"));
     }
 
     #[test]
     fn analyse_flags_dashboard_call_without_route() {
-        let backend = vec![route("/api/health", "stiglab")];
+        let backend = vec![route("/api/health", "portal")];
         // First call satisfies the backend route; the second has no
         // matching backend and should be the only flagged item.
         let dashboard = vec![call("/health"), call("/missing-on-backend")];
@@ -1029,8 +967,8 @@ mod tests {
     #[test]
     fn analyse_exempts_allowlisted_routes() {
         let backend = vec![
-            route("/api/auth/github", "stiglab"),
-            route("/webhooks/github", "stiglab"),
+            route("/api/auth/github", "portal"),
+            route("/webhooks/github", "portal"),
         ];
         let dashboard: Vec<DashboardCall> = vec![];
         let r = analyse(&backend, &dashboard);
@@ -1046,9 +984,6 @@ mod tests {
         // This test is the canary: if this fails, either the lint has
         // regressed or somebody added a half-wired surface.
         //
-        // Stiglab is loopback-only post-ADR 0008 — its routes are
-        // checked separately by the loopback-only guard in `run()`,
-        // not by the dashboard contract check below.
         let root = workspace_root();
         let mut backend = Vec::new();
         backend.extend(

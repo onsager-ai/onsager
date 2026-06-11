@@ -1,9 +1,9 @@
-//! Spine listener for `stiglab.session_completed` → GitHub PR (spec #273).
+//! Spine listener for `session.completed` → GitHub PR (spec #273).
 //!
 //! Portal is the only subsystem that holds GitHub App credentials, so it
 //! owns the outbound GitHub API call. The happy-path sequence:
 //!
-//! 1. Consume `stiglab.session_completed`; extract `branch` + `artifact_id`.
+//! 1. Consume `session.completed`; extract `branch` + `artifact_id`.
 //! 2. Look up the originating issue artifact to get project, repo, issue number.
 //! 3. Mint an installation token via the GitHub App.
 //! 4. Open a PR (`Closes #N`); materialize a `Kind::PullRequest` artifact in
@@ -61,7 +61,7 @@ impl SessionPrOpener {
             _ => return Ok(()),
         };
 
-        let FactoryEventKind::StiglabSessionCompleted {
+        let FactoryEventKind::SessionCompleted {
             session_id,
             artifact_id: event_artifact_id,
             branch,
@@ -480,7 +480,7 @@ impl SessionPrOpener {
 #[async_trait]
 impl EventHandler for SessionPrOpener {
     async fn handle(&self, notification: EventNotification) -> anyhow::Result<()> {
-        if notification.event_type != "stiglab.session_completed" {
+        if notification.event_type != "session.completed" {
             return Ok(());
         }
         if let Err(e) = self.handle_session_completed(&notification).await {

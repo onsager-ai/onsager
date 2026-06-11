@@ -1,6 +1,6 @@
 //! Workflow activation and deactivation hooks (issue #81).
 //!
-//! Spec #222 Slice 4 moved this module from stiglab to portal — portal
+//! Spec #222 Slice 4 moved this module to portal — portal
 //! owns the GitHub side-effects of activation (label create / webhook
 //! register) since it owns the credentials and the `/api/webhooks/github`
 //! receiver. The workflow row's `active` flag is flipped through portal's
@@ -58,7 +58,7 @@ pub enum ActivationError {
     #[error("webhook URL {url} is not reachable from GitHub")]
     WebhookUrlNotReachable { url: String },
     /// The configured webhook URL isn't a valid absolute URL with a host —
-    /// usually a typo in `STIGLAB_WEBHOOK_BASE_URL`. Distinct from
+    /// usually a typo in `PORTAL_WEBHOOK_BASE_URL`. Distinct from
     /// `WebhookUrlNotReachable` so the dashboard can point the operator at
     /// the real problem (fix the URL) vs. the other real problem (use a
     /// public host).
@@ -124,24 +124,24 @@ pub const REQUIRED_WEBHOOK_EVENTS: &[&str] = &[
 
 /// Stable path for the webhook receiver. Used for URL construction and,
 /// more importantly, for path-suffix matching in `deregister_webhook` so
-/// we can find and clean up hooks stiglab registered regardless of what
+/// we can find and clean up hooks earlier deployments registered regardless of what
 /// origin they were registered under (matters for PR-preview URL drift).
 pub const WEBHOOK_PATH: &str = "/api/webhooks/github";
 
 /// Resolve the webhook base URL (scheme + host[:port], no trailing slash)
 /// from the first layer of the chain that yields a value:
 ///
-/// 1. Explicit operator override — `STIGLAB_WEBHOOK_BASE_URL` or
-///    `STIGLAB_PUBLIC_BASE_URL`. Always wins; use for tunnels and any
+/// 1. Explicit operator override — `PORTAL_WEBHOOK_BASE_URL` or
+///    `PORTAL_PUBLIC_BASE_URL`. Always wins; use for tunnels and any
 ///    setup where auto-detect is wrong.
 /// 2. Platform-injected public domain — `RAILWAY_PUBLIC_DOMAIN`
 ///    (Railway sets this to the hostname without a scheme;
 ///    we assume `https://`).
-/// 3. Request-derived origin — when `STIGLAB_TRUST_FORWARDED_HEADERS=1`,
+/// 3. Request-derived origin — when `PORTAL_TRUST_FORWARDED_HEADERS=1`,
 ///    take `X-Forwarded-Proto` + `X-Forwarded-Host` from the incoming
 ///    activation request, falling back to `Host`. The gate exists
 ///    because these headers are spoofable by any client that can hit
-///    stiglab directly without a proxy in front; trusting them in a
+///    the service directly without a proxy in front; trusting them in a
 ///    non-proxied deploy lets a hostile client redirect the workspace's
 ///    webhook deliveries to an attacker-controlled URL.
 ///
@@ -150,8 +150,8 @@ pub const WEBHOOK_PATH: &str = "/api/webhooks/github";
 /// purpose: a workflow without a real webhook is silently broken, so we
 /// fail loudly instead.
 fn resolve_webhook_base(headers: &axum::http::HeaderMap) -> Option<String> {
-    if let Ok(explicit) = std::env::var("STIGLAB_WEBHOOK_BASE_URL")
-        .or_else(|_| std::env::var("STIGLAB_PUBLIC_BASE_URL"))
+    if let Ok(explicit) = std::env::var("PORTAL_WEBHOOK_BASE_URL")
+        .or_else(|_| std::env::var("PORTAL_PUBLIC_BASE_URL"))
     {
         let trimmed = explicit.trim().trim_end_matches('/');
         if !trimmed.is_empty() {
@@ -180,12 +180,12 @@ fn resolve_webhook_url(headers: &axum::http::HeaderMap) -> Option<String> {
     resolve_webhook_base(headers).map(|base| format!("{base}{WEBHOOK_PATH}"))
 }
 
-/// Whether `STIGLAB_TRUST_FORWARDED_HEADERS` is set to a truthy value.
+/// Whether `PORTAL_TRUST_FORWARDED_HEADERS` is set to a truthy value.
 /// Accepts the common conventions — `1`, `true`, `yes`, `on` — all
 /// case-insensitive. Anything else (including `0`, `false`, `no`, `off`,
 /// and typos like `True1`) is false.
 fn trust_forwarded_headers() -> bool {
-    match std::env::var("STIGLAB_TRUST_FORWARDED_HEADERS")
+    match std::env::var("PORTAL_TRUST_FORWARDED_HEADERS")
         .ok()
         .as_deref()
     {
@@ -338,7 +338,7 @@ pub async fn ensure_label_exists(
         .get(url)
         .bearer_auth(&token.token)
         .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "onsager-stiglab/0.1")
+        .header("User-Agent", "onsager-portal/0.1")
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -364,7 +364,7 @@ pub async fn ensure_label_exists(
         .post(&create_url)
         .bearer_auth(&token.token)
         .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "onsager-stiglab/0.1")
+        .header("User-Agent", "onsager-portal/0.1")
         .timeout(Duration::from_secs(10))
         .json(&body)
         .send()
@@ -434,7 +434,7 @@ pub async fn ensure_webhook_registered(
         .get(&list_url)
         .bearer_auth(&token.token)
         .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "onsager-stiglab/0.1")
+        .header("User-Agent", "onsager-portal/0.1")
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -489,7 +489,7 @@ pub async fn ensure_webhook_registered(
             .patch(&patch_url)
             .bearer_auth(&token.token)
             .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "onsager-stiglab/0.1")
+            .header("User-Agent", "onsager-portal/0.1")
             .timeout(Duration::from_secs(10))
             .json(&patch_body)
             .send()
@@ -523,7 +523,7 @@ pub async fn ensure_webhook_registered(
         .post(&list_url)
         .bearer_auth(&token.token)
         .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "onsager-stiglab/0.1")
+        .header("User-Agent", "onsager-portal/0.1")
         .timeout(Duration::from_secs(10))
         .json(&body)
         .send()
@@ -549,7 +549,7 @@ pub async fn ensure_webhook_registered(
         .ok_or_else(|| ActivationError::GitHub("created hook missing numeric id".into()))
 }
 
-/// Remove any repository webhook that stiglab could have registered.
+/// Remove any repository webhook that this service could have registered.
 ///
 /// Matches by path-suffix on `config.url` (`.../api/webhooks/github`)
 /// rather than by exact URL. This survives origin drift — a workflow
@@ -557,8 +557,8 @@ pub async fn ensure_webhook_registered(
 /// env rename, prod cutover) still gets cleaned up instead of leaving a
 /// ghost webhook delivering into the void.
 ///
-/// The path is stable across deploys and stiglab-specific enough that
-/// accidentally sweeping a non-stiglab hook with the same path is not a
+/// The path is stable across deploys and onsager-specific enough that
+/// accidentally sweeping an unrelated hook with the same path is not a
 /// realistic risk. No-op when nothing matches, the repo is gone, or the
 /// token is rejected — this function is best-effort cleanup.
 pub async fn deregister_webhook(
@@ -571,7 +571,7 @@ pub async fn deregister_webhook(
         .get(&list_url)
         .bearer_auth(&token.token)
         .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "onsager-stiglab/0.1")
+        .header("User-Agent", "onsager-portal/0.1")
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -598,7 +598,7 @@ pub async fn deregister_webhook(
             .delete(&del_url)
             .bearer_auth(&token.token)
             .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "onsager-stiglab/0.1")
+            .header("User-Agent", "onsager-portal/0.1")
             .timeout(Duration::from_secs(10))
             .send()
             .await;
@@ -606,16 +606,16 @@ pub async fn deregister_webhook(
     Ok(())
 }
 
-/// Whether a hook's `config.url` looks like one stiglab registered —
+/// Whether a hook's `config.url` looks like one we registered —
 /// i.e. its path ends with [`WEBHOOK_PATH`]. Parses through
 /// `reqwest::Url` so we compare the path structurally (ignoring query
 /// strings and fragments). True suffix check rather than exact equality
-/// so stiglab running under a base path prefix (reverse proxy mounting
-/// it at `/stiglab/…`) still matches its own hooks.
+/// so a deployment under a base path prefix (reverse proxy mounting
+/// it at a sub-path) still matches its own hooks.
 ///
 /// The `/api/webhooks/github` prefix is specific enough that the only
 /// realistic false positive would be another service deliberately using
-/// the same path, which we don't guard against — stiglab owns this path
+/// the same path, which we don't guard against — portal owns this path
 /// by convention.
 fn webhook_url_matches_ours(url: &str) -> bool {
     reqwest::Url::parse(url)
@@ -627,7 +627,7 @@ fn gh_client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .user_agent("onsager-stiglab/0.1")
+            .user_agent("onsager-portal/0.1")
             .build()
             .expect("failed to build activation client")
     })
@@ -688,10 +688,10 @@ mod tests {
     /// vars it cares about on top.
     fn clear_resolver_env() -> [ScopedEnvVar; 4] {
         [
-            ScopedEnvVar::unset("STIGLAB_WEBHOOK_BASE_URL"),
-            ScopedEnvVar::unset("STIGLAB_PUBLIC_BASE_URL"),
+            ScopedEnvVar::unset("PORTAL_WEBHOOK_BASE_URL"),
+            ScopedEnvVar::unset("PORTAL_PUBLIC_BASE_URL"),
             ScopedEnvVar::unset("RAILWAY_PUBLIC_DOMAIN"),
-            ScopedEnvVar::unset("STIGLAB_TRUST_FORWARDED_HEADERS"),
+            ScopedEnvVar::unset("PORTAL_TRUST_FORWARDED_HEADERS"),
         ]
     }
 
@@ -711,9 +711,9 @@ mod tests {
         let _env_guard = env_lock().lock().expect("env lock poisoned");
         let _clear = clear_resolver_env();
         // Set every layer; layer 1 must win.
-        let _base = ScopedEnvVar::set("STIGLAB_WEBHOOK_BASE_URL", "https://stig.example.com/");
+        let _base = ScopedEnvVar::set("PORTAL_WEBHOOK_BASE_URL", "https://stig.example.com/");
         let _railway = ScopedEnvVar::set("RAILWAY_PUBLIC_DOMAIN", "ignored.up.railway.app");
-        let _trust = ScopedEnvVar::set("STIGLAB_TRUST_FORWARDED_HEADERS", "1");
+        let _trust = ScopedEnvVar::set("PORTAL_TRUST_FORWARDED_HEADERS", "1");
         let headers = header_map(&[
             ("x-forwarded-proto", "https"),
             ("x-forwarded-host", "header.example.com"),
@@ -728,7 +728,7 @@ mod tests {
     fn resolve_webhook_url_layer1_public_base_url_alias() {
         let _env_guard = env_lock().lock().expect("env lock poisoned");
         let _clear = clear_resolver_env();
-        let _base = ScopedEnvVar::set("STIGLAB_PUBLIC_BASE_URL", "https://pub.example.com");
+        let _base = ScopedEnvVar::set("PORTAL_PUBLIC_BASE_URL", "https://pub.example.com");
         assert_eq!(
             resolve_webhook_url(&axum::http::HeaderMap::new()),
             Some("https://pub.example.com/api/webhooks/github".to_string())
@@ -750,7 +750,7 @@ mod tests {
     fn resolve_webhook_url_layer3_forwarded_headers_when_trusted() {
         let _env_guard = env_lock().lock().expect("env lock poisoned");
         let _clear = clear_resolver_env();
-        let _trust = ScopedEnvVar::set("STIGLAB_TRUST_FORWARDED_HEADERS", "1");
+        let _trust = ScopedEnvVar::set("PORTAL_TRUST_FORWARDED_HEADERS", "1");
         let headers = header_map(&[
             ("x-forwarded-proto", "https"),
             ("x-forwarded-host", "stig.example.com"),
@@ -765,7 +765,7 @@ mod tests {
     fn resolve_webhook_url_layer3_falls_back_to_host_header() {
         let _env_guard = env_lock().lock().expect("env lock poisoned");
         let _clear = clear_resolver_env();
-        let _trust = ScopedEnvVar::set("STIGLAB_TRUST_FORWARDED_HEADERS", "1");
+        let _trust = ScopedEnvVar::set("PORTAL_TRUST_FORWARDED_HEADERS", "1");
         let headers = header_map(&[("host", "stig.internal:3000")]);
         // Falls back to `https` scheme when X-Forwarded-Proto missing —
         // a trusted proxy should set it, but HTTP fallback would mean
@@ -793,7 +793,7 @@ mod tests {
         let _env_guard = env_lock().lock().expect("env lock poisoned");
         let _clear = clear_resolver_env();
         // Even with trust enabled, an empty header map yields nothing.
-        let _trust = ScopedEnvVar::set("STIGLAB_TRUST_FORWARDED_HEADERS", "1");
+        let _trust = ScopedEnvVar::set("PORTAL_TRUST_FORWARDED_HEADERS", "1");
         assert_eq!(resolve_webhook_url(&axum::http::HeaderMap::new()), None);
     }
 
@@ -823,14 +823,14 @@ mod tests {
             ("True1", false),
             ("y", false),
         ] {
-            let _flag = ScopedEnvVar::set("STIGLAB_TRUST_FORWARDED_HEADERS", val);
+            let _flag = ScopedEnvVar::set("PORTAL_TRUST_FORWARDED_HEADERS", val);
             assert_eq!(trust_forwarded_headers(), expected, "value {val:?}");
         }
     }
 
     #[test]
     fn origin_from_headers_rejects_non_http_proto() {
-        // A misbehaving proxy (or an attacker who can reach stiglab
+        // A misbehaving proxy (or an attacker who can reach the service
         // directly) mustn't be able to smuggle a non-HTTP scheme into
         // the registered webhook URL.
         let headers = header_map(&[
@@ -897,11 +897,11 @@ mod tests {
         assert!(webhook_url_matches_ours(
             "https://stig.example.com/api/webhooks/github/"
         ));
-        // Base-path prefix (stiglab mounted under a reverse proxy path)
+        // Base-path prefix (portal mounted under a reverse proxy path)
         // → still match. This is the case that motivates true
         // `ends_with` over exact equality.
         assert!(webhook_url_matches_ours(
-            "https://proxy.example.com/stiglab/api/webhooks/github"
+            "https://proxy.example.com/onsager/api/webhooks/github"
         ));
         // Query / fragment are stripped by URL parsing before comparison.
         assert!(webhook_url_matches_ours(
@@ -1109,7 +1109,7 @@ mod tests {
     async fn ensure_webhook_registered_rejects_explicit_localhost_base_url() {
         let _env_guard = env_lock().lock().expect("env lock poisoned");
         let _clear = clear_resolver_env();
-        let _base = ScopedEnvVar::set("STIGLAB_WEBHOOK_BASE_URL", "http://localhost:3000");
+        let _base = ScopedEnvVar::set("PORTAL_WEBHOOK_BASE_URL", "http://localhost:3000");
         let token = InstallationToken {
             token: "t".into(),
             expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),
@@ -1136,7 +1136,7 @@ mod tests {
     async fn ensure_webhook_registered_rejects_invalid_base_url() {
         let _env_guard = env_lock().lock().expect("env lock poisoned");
         let _clear = clear_resolver_env();
-        let _base = ScopedEnvVar::set("STIGLAB_WEBHOOK_BASE_URL", "not a url");
+        let _base = ScopedEnvVar::set("PORTAL_WEBHOOK_BASE_URL", "not a url");
         let token = InstallationToken {
             token: "t".into(),
             expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),

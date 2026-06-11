@@ -202,7 +202,7 @@ function RepoRow({
   const ready = !!label && !!workspaceId && githubInstallId > 0;
   const run = () => {
     if (!ready || !label) return;
-    // Preset path: stiglab expands the stage chain server-side, so we
+    // Preset path: portal expands the stage chain server-side, so we
     // send only `preset_id` (sending both `preset_id` and `stages` is an
     // explicit 400 on the backend). The draft here is only used to
     // compute a nice default name.
