@@ -26,3 +26,7 @@
 # Codegraph local code-index (SQLite knowledge graph). Per-machine dev
 # state built by `codegraph init/index`; never committed.
 /.codegraph/
+
+# Local host-port override for host-run cargo dev (machine-specific)
+docker-compose.override.yml
+compose.override.yml
