@@ -137,7 +137,7 @@ The pieces (landed in stages under #288; ADR 0007 has the full history):
 >
 > The external HTTP boundary is owned by `portal` (the edge subsystem). Factory processes coordinate **exclusively** via the spine: events on the bus + reads against shared spine tables. No subsystem makes HTTP calls to another subsystem. No subsystem imports another subsystem's crate. (Substrate library crates — `onsager-substrate`, `onsager-nodes` — and the `onsager-agent-spawn` utility sit below the seam and may be shared by any side.)
 
-This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md) made it machine-checkable via a six-lever plan (spec #131, all landed and CI-enforced via `lint-seams`, `check-api-contract`, `check-events`); the seam rule is now mechanical, not review-time discipline. [ADR 0018](docs/adr/0018-five-kernel-invariants.md) partially supersedes ADR 0004: the six code-level seam levers remain in force for cross-subsystem discipline, but the substrate's *internal* correctness contract is now the five kernel invariants (above). Note `lint-seams`' cross-subsystem scan set is empty post-#584 (machinery kept until the #587 lint diet re-scopes it to the portal/engine boundary); portal is the edge and the substrate hosts (`scheduler`, `trigger`) sit below the seam.
+This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md) made it machine-checkable via a six-lever plan (spec #131, all landed and CI-enforced via `lint-seams`, `check-api-contract`, `check-events`); the seam rule is now mechanical, not review-time discipline. [ADR 0018](docs/adr/0018-five-kernel-invariants.md) partially supersedes ADR 0004: the six code-level seam levers remain in force for cross-subsystem discipline, but the substrate's *internal* correctness contract is now the five kernel invariants (above). `lint-seams` is re-scoped (#587) to the surviving boundary: the two processes (`onsager-portal`, `onsager-engine`) must not depend on, env-reference, or dial each other — the spine is the only coupling.
 
 [ADR 0006](docs/adr/0006-edge-dispatcher-as-the-public-boundary.md) closes the process-level half of clause 1 (Caddy as edge dispatcher; portal owns 100% of the external HTTP surface). ADR 0008's loopback agent control plane retired with stiglab (ADR 0027 / #583).
 
@@ -212,15 +212,13 @@ Loose runtime coupling is correct and stays — but the seams it creates are inf
 
 ### Occam's-razor checklist (spec #275)
 
-The patterns above share one shape: a wire connected at one end. The seam levers caught seam-level instances; spec #275 adds xtask lints for the **interior** ones — speculative abstractions and untracked defers inside a single subsystem (same warn-then-ratchet rollout as `check-file-budget`). Each escapes with `// occam-allow: <reason>`.
+The patterns above share one shape: a wire connected at one end. The seam levers caught seam-level instances; spec #275 added xtask lints for the **interior** ones. The #587 lint diet (ADR 0027) retired `check-orphan-crates` and `check-single-impl-traits` — for a one-person-plus-agents team their upkeep exceeded their catch rate, and the ADR 0027 deletion wave was itself the orphan sweep. What remains:
 
-- **`xtask check-orphan-crates`** — flags library crates (non-`[[bin]]`) with zero in-tree reverse deps. Catches dead skeleton crates on day one.
-- **`xtask check-single-impl-traits`** — flags `pub trait` defs with exactly one implementor in the workspace (counting test impls so a mock doesn't false-trigger). A one-impl trait is a speculative seam; inline it or wait for the second impl.
-- **`xtask check-deferred-todos`** — flags `TODO` / `FIXME` / `#[allow(dead_code)]` / `// phase N` / `// vN.M` without a same-line `#NNN` issue reference. Every "for later" must point at a real spec.
+- **`xtask check-deferred-todos`** — flags `TODO` / `FIXME` / `#[allow(dead_code)]` / `// phase N` / `// vN.M` without a same-line `#NNN` issue reference. Every "for later" must point at a real spec. Escapes with `// occam-allow: <reason>`.
 - **`xtask check-events`** also surfaces diagnostic-only event rows without a `tracking_issue` (warn-mode), so dangling skeletons in the manifest get re-examined.
-- **`xtask check-adr-adoption`** (ADR 0024 / 0025, spec #506) — flags `Accepted` ADRs whose `## Adoption checklist` still has unchecked `- [ ]` items. Mark the ADR `Adoption: ongoing` while implementation is in flight, then flip to `enforced` and tick the boxes as work lands.
+- **`xtask check-adr-adoption`** (ADR 0024 / 0025, spec #506) — flags `Accepted` ADRs whose `## Adoption checklist` still has unchecked `- [ ]` items. Mark the ADR `Adoption: ongoing` while implementation is in flight, then flip to `enforced` and tick the boxes as work lands. Kept through the ADR 0027 wave (0027's own checklist relies on it); retire-vs-keep is revisited once 0027 flips to `enforced`.
 
-All five land in warn mode initially; a follow-up spec ratchets them to fail once the floor is clean.
+These land in warn mode; a follow-up spec ratchets them to fail once the floor is clean.
 
 ## Workspace layout
 

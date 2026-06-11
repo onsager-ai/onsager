@@ -1,8 +1,8 @@
 //! Architecture + bridge-pattern lints for the seam rule (ADR 0004 / spec #131
 //! Lever B).
 //!
-//! What it checks (the scanned subsystem set is empty post-#584; the
-//! #587 lint diet re-scopes this to the portal/engine boundary):
+//! What it checks (re-scoped to the portal/engine boundary by the
+//! #587 lint diet — the two processes of ADR 0027):
 //!
 //! 1. **Arch-deps** — subsystem A's `Cargo.toml` must not declare another
 //!    subsystem as a path / git / version dep.
@@ -33,25 +33,43 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
-// Post-ADR 0027 / #584 no factory subsystem remains behind the seam
-// (synodic retired #582, stiglab folded into portal #583, ising +
-// observers retired #584). The cross-subsystem machinery stays (empty)
-// until the #587 lint diet re-scopes this lint to the portal/engine
-// boundary.
-const SUBSYSTEMS: &[&str] = &[];
+/// One side of the surviving seam (ADR 0027 / #587): the two factory
+/// processes. `env_prefix` derives the `<PREFIX>_URL` / `<PREFIX>_PORT`
+/// env names a sibling must not reference; `host` is the compose
+/// service name a sibling must not dial.
+struct Seam {
+    krate: &'static str,
+    env_prefix: &'static str,
+    host: &'static str,
+}
 
-/// Well-known **default** ports each subsystem listens on (i.e. what
-/// `cargo run -p <subsys> -- serve` binds without env overrides). Empty
-/// post-ADR 0027 — no factory subsystem hosts an HTTP server anymore
-/// (no subsystem remains); the machinery stays until the #587 lint
-/// diet re-scopes it.
-const SUBSYSTEM_PORTS: &[(&str, &str)] = &[];
+// Post-ADR 0027 the seam rule's cross-process scope is exactly the
+// portal/engine boundary: the two processes may not import each other,
+// reference each other's env vars, or dial each other — the Postgres
+// spine is the only coupling.
+const SUBSYSTEMS: &[Seam] = &[
+    Seam {
+        krate: "onsager-portal",
+        env_prefix: "PORTAL",
+        host: "portal",
+    },
+    Seam {
+        krate: "onsager-engine",
+        env_prefix: "ENGINE",
+        host: "engine",
+    },
+];
+
+/// Well-known **default** ports each process listens on (what `cargo
+/// run` binds without env overrides). The engine has no HTTP surface.
+const SUBSYSTEM_PORTS: &[(&str, &str)] = &[("onsager-portal", "3002")];
 
 pub fn run() -> Result<()> {
     let root = workspace_root()?;
     let mut violations: Vec<Violation> = Vec::new();
 
-    for subsys in SUBSYSTEMS {
+    for seam in SUBSYSTEMS {
+        let subsys = seam.krate;
         check_arch_deps(&root, subsys, &mut violations)?;
         let src = root.join("crates").join(subsys).join("src");
         if !src.is_dir() {
@@ -120,7 +138,11 @@ pub fn run() -> Result<()> {
 
     println!(
         "seam-rule lint: clean (subsystems: {}; {} allowed exemption(s))",
-        SUBSYSTEMS.join(", "),
+        SUBSYSTEMS
+            .iter()
+            .map(|s| s.krate)
+            .collect::<Vec<_>>()
+            .join(", "),
         allowed.len()
     );
     Ok(())
@@ -237,7 +259,7 @@ fn check_arch_dep_entry(
     if name == subsys {
         return;
     }
-    if !SUBSYSTEMS.contains(&name) {
+    if !SUBSYSTEMS.iter().any(|seam| seam.krate == name) {
         return;
     }
     let line = find_dep_line(text, table_key, name, cfg);
@@ -315,29 +337,28 @@ fn check_sibling_url(
 }
 
 /// Inner form taking the sibling set explicitly so the detection logic
-/// stays unit-testable while the production `SUBSYSTEMS` list is empty
-/// (post-ADR 0027; re-scoped by the #587 lint diet).
+/// stays unit-testable independent of the production `SUBSYSTEMS` list.
 fn check_sibling_url_against(
     root: &Path,
     subsys: &str,
     path: &Path,
     line_no: usize,
     line: &str,
-    siblings: &[&str],
+    siblings: &[Seam],
     out: &mut Vec<Violation>,
 ) {
     // Strip a trailing line comment so a `// seam-allow:` (or any other
     // textual mention of the env var inside a comment) doesn't itself trip.
     let code = strip_line_comment(line);
 
-    for sibling in siblings {
-        if *sibling == subsys {
+    for seam in siblings {
+        let sibling = seam.krate;
+        if sibling == subsys {
             continue;
         }
-        let upper = sibling.to_uppercase();
-        let url_var = format!("{upper}_URL");
-        let port_var = format!("{upper}_PORT");
-        let host = format!("{sibling}:");
+        let url_var = format!("{}_URL", seam.env_prefix);
+        let port_var = format!("{}_PORT", seam.env_prefix);
+        let host = format!("{}:", seam.host);
         if code.contains(&url_var) || code.contains(&port_var) {
             out.push(Violation {
                 path: rel(root, path),
@@ -720,7 +741,11 @@ mod tests {
             fake_path(),
             10,
             r#"std::env::var("ISING_URL")"#,
-            &["ising"],
+            &[Seam {
+                krate: "ising",
+                env_prefix: "ISING",
+                host: "ising",
+            }],
             &mut v,
         );
         assert_eq!(v.len(), 1);
@@ -736,7 +761,11 @@ mod tests {
             fake_path(),
             10,
             r#"let url = "http://ising:3003/api/x";"#,
-            &["ising"],
+            &[Seam {
+                krate: "ising",
+                env_prefix: "ISING",
+                host: "ising",
+            }],
             &mut v,
         );
         assert_eq!(v.len(), 1);

@@ -45,8 +45,6 @@ mod check_file_budget;
 mod check_generated_types;
 mod check_hitl_coverage;
 mod check_metaphor_leakage;
-mod check_orphan_crates;
-mod check_single_impl_traits;
 mod check_tools_and_skills;
 mod check_triggers;
 mod lint_api_contract;
@@ -135,14 +133,12 @@ fn main() -> ExitCode {
         }
         Some("check-adr-adoption") => check_adr_adoption::run(args.collect()),
         Some("check-file-budget") => check_file_budget::run(args.collect()),
-        Some("check-orphan-crates") => check_orphan_crates::run(args.collect()),
-        Some("check-single-impl-traits") => check_single_impl_traits::run(args.collect()),
         Some("check-deferred-todos") => check_deferred_todos::run(args.collect()),
         Some("count-tokens") => check_file_budget::run_count(args.collect()),
         Some("slot") => slot::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- check-tools-and-skills\n  cargo run -p xtask -- check-hitl-coverage\n  cargo run -p xtask -- check-metaphor-leakage\n  cargo run -p xtask -- check-detail-page-tabs\n  cargo run -p xtask -- check-generated-types\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- check-orphan-crates [--mode=warn|fail]\n  cargo run -p xtask -- check-single-impl-traits [--mode=warn|fail]\n  cargo run -p xtask -- check-deferred-todos [--mode=warn|fail]\n  cargo run -p xtask -- check-adr-adoption [--mode=warn|fail]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
+            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- check-tools-and-skills\n  cargo run -p xtask -- check-hitl-coverage\n  cargo run -p xtask -- check-metaphor-leakage\n  cargo run -p xtask -- check-detail-page-tabs\n  cargo run -p xtask -- check-generated-types\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- check-deferred-todos [--mode=warn|fail]\n  cargo run -p xtask -- check-adr-adoption [--mode=warn|fail]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
         )),
     };
 
