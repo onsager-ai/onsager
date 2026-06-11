@@ -94,20 +94,6 @@ pub enum FactoryEventKind {
     },
 
     // -- Forge process events -----------------------------------------------
-    /// Insight forwarded to the scheduling kernel.
-    ForgeInsightObserved {
-        insight_id: String,
-        insight_kind: InsightKind,
-        scope: InsightScope,
-    },
-
-    /// Scheduling kernel produced a ShapingDecision.
-    ForgeDecisionMade {
-        artifact_id: ArtifactId,
-        target_version: u32,
-        priority: i32,
-    },
-
     // -- Chat-session lifecycle (portal's in-process runner, ADR 0027) ------
     /// A chat agent session finished successfully. Emitted by portal's
     /// in-process session runner (spec #583; formerly
@@ -215,14 +201,6 @@ pub enum FactoryEventKind {
         detail: serde_json::Value,
     },
 
-    /// A workflow-tagged artifact entered a new stage.
-    StageEntered {
-        artifact_id: ArtifactId,
-        workflow_id: String,
-        stage_index: u32,
-        stage_name: String,
-    },
-
     /// All gates on a stage resolved and the artifact advanced to the next
     /// stage (or reached terminal state when this was the last stage).
     ///
@@ -322,7 +300,7 @@ pub enum FactoryEventKind {
         plan_id: String,
         node_id: NodeId,
         /// Executor catalog key (`"script"`, `"agent"`, `"verify"`,
-        /// `"human"`, `"sub_workflow"`, `"noop"`).
+        /// `"noop"`; the Human / SubWorkflow impls retired with #585).
         executor_kind: String,
     },
 
@@ -352,36 +330,16 @@ pub enum FactoryEventKind {
         error: String,
     },
 
-    /// A Human executor is parked waiting on an out-of-band approval
-    /// decision. The dashboard's HITL inbox renders this; the
-    /// substrate's own Human executor (#357) resolves it inline by
-    /// observing the matching `node.human_approved` /
-    /// `node.human_rejected`.
+    /// A node is parked waiting on an out-of-band human decision.
+    /// Emitted by the Agent executor's authoritative gate (#520 §4c)
+    /// when a session delivers no output; surfaces in the operator
+    /// activity feed. (The Human executor that resolved these inline
+    /// retired with #585.)
     NodeAwaitingHuman {
         plan_id: String,
         node_id: NodeId,
         /// Free-text prompt shown to the human reviewer.
         prompt: String,
-    },
-
-    /// A pending Human executor node received an approval decision.
-    NodeHumanApproved {
-        plan_id: String,
-        node_id: NodeId,
-        /// Actor identifier — `"human:<id>"` for a dashboard user,
-        /// `"supervisor"` for a delegate agent.
-        approved_by: String,
-    },
-
-    /// A pending Human executor node received a rejection decision.
-    NodeHumanRejected {
-        plan_id: String,
-        node_id: NodeId,
-        /// Actor identifier — same shape as `approved_by` above.
-        rejected_by: String,
-        /// Free-text justification carried into the audit trail.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
     },
 
     /// Verify executor produced a verdict — pass / fail outcome with
@@ -440,8 +398,6 @@ impl FactoryEventKind {
             Self::GitCiCompleted { .. } => "git.ci_completed",
             Self::GitPrMerged { .. } => "git.pr_merged",
             Self::GitPrClosed { .. } => "git.pr_closed",
-            Self::ForgeInsightObserved { .. } => "forge.insight_observed",
-            Self::ForgeDecisionMade { .. } => "forge.decision_made",
             Self::SessionCompleted { .. } => "session.completed",
             Self::SessionFailed { .. } => "session.failed",
             Self::PortalSessionRequested { .. } => "portal.session_requested",
@@ -449,7 +405,6 @@ impl FactoryEventKind {
             Self::PortalPrOpenFailed { .. } => "portal.pr_open_failed",
             Self::TriggerFired { .. } => "trigger.fired",
             Self::WorkflowManualTriggered { .. } => "workflow.manual_triggered",
-            Self::StageEntered { .. } => "stage.entered",
             Self::StageAdvanced { .. } => "stage.advanced",
             Self::SpecPlanRunRequested { .. } => "plan.run_requested",
             Self::PlanRunCompleted { .. } => "plan.run_completed",
@@ -460,8 +415,6 @@ impl FactoryEventKind {
             Self::NodeCompleted { .. } => "node.completed",
             Self::NodeFailed { .. } => "node.failed",
             Self::NodeAwaitingHuman { .. } => "node.awaiting_human",
-            Self::NodeHumanApproved { .. } => "node.human_approved",
-            Self::NodeHumanRejected { .. } => "node.human_rejected",
             Self::VerifyVerdict { .. } => "verify.verdict",
             Self::AgentSessionStarted { .. } => "agent.session_started",
             Self::AgentSessionCompleted { .. } => "agent.session_completed",
@@ -479,14 +432,11 @@ impl FactoryEventKind {
             | Self::GitCiCompleted { .. }
             | Self::GitPrMerged { .. }
             | Self::GitPrClosed { .. } => "git",
-            Self::ForgeInsightObserved { .. } | Self::ForgeDecisionMade { .. } => "forge",
             Self::SessionCompleted { .. } | Self::SessionFailed { .. } => "session",
             Self::PortalSessionRequested { .. }
             | Self::PortalSessionCancelRequested { .. }
             | Self::PortalPrOpenFailed { .. } => "portal",
-            Self::TriggerFired { .. } | Self::StageEntered { .. } | Self::StageAdvanced { .. } => {
-                "workflow"
-            }
+            Self::TriggerFired { .. } | Self::StageAdvanced { .. } => "workflow",
             // Plan-run intent (portal → scheduler host) and the
             // plan-terminal signals (scheduler → portal, #536). Their
             // own namespace so the dashboard can scope plan-run
@@ -507,8 +457,6 @@ impl FactoryEventKind {
             | Self::NodeCompleted { .. }
             | Self::NodeFailed { .. }
             | Self::NodeAwaitingHuman { .. }
-            | Self::NodeHumanApproved { .. }
-            | Self::NodeHumanRejected { .. }
             | Self::VerifyVerdict { .. }
             | Self::AgentSessionStarted { .. }
             | Self::AgentSessionCompleted { .. }
@@ -526,8 +474,6 @@ impl FactoryEventKind {
             | Self::GitCiCompleted { artifact_id, .. }
             | Self::GitPrMerged { artifact_id, .. }
             | Self::GitPrClosed { artifact_id, .. } => artifact_id.to_string(),
-            Self::ForgeInsightObserved { insight_id, .. } => insight_id.clone(),
-            Self::ForgeDecisionMade { artifact_id, .. } => artifact_id.to_string(),
             Self::SessionCompleted { session_id, .. } | Self::SessionFailed { session_id, .. } => {
                 session_id.clone()
             }
@@ -545,7 +491,7 @@ impl FactoryEventKind {
             Self::WorkflowManualTriggered { workflow_id, .. } => {
                 format!("audit:workflow:{workflow_id}")
             }
-            Self::StageEntered { artifact_id, .. } | Self::StageAdvanced { artifact_id, .. } => {
+            Self::StageAdvanced { artifact_id, .. } => {
                 format!("workflow:{artifact_id}")
             }
             Self::SpecPlanRunRequested {
@@ -584,12 +530,6 @@ impl FactoryEventKind {
             | Self::NodeAwaitingHuman {
                 plan_id, node_id, ..
             }
-            | Self::NodeHumanApproved {
-                plan_id, node_id, ..
-            }
-            | Self::NodeHumanRejected {
-                plan_id, node_id, ..
-            }
             | Self::VerifyVerdict {
                 plan_id, node_id, ..
             }
@@ -626,37 +566,6 @@ pub enum GatePoint {
     /// after the verdict is `Allow`. The pinned repo (named in the
     /// trigger) is pre-approved and never reaches this point.
     RepoWrite,
-}
-
-/// Forge process states. Used by forge's internal state machine; no longer
-/// carried on a `FactoryEventKind` variant after spec #272 retired
-/// `ForgeStateChanged`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ForgeProcessState {
-    Running,
-    Paused,
-    Draining,
-    Stopped,
-}
-
-/// Insight categories (legacy observation taxonomy).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum InsightKind {
-    Failure,
-    Waste,
-    Win,
-    Anomaly,
-}
-
-/// Scope of an insight.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum InsightScope {
-    ArtifactKind(String),
-    SpecificArtifact(ArtifactId),
-    Global,
 }
 
 /// LLM token usage carried on [`FactoryEventKind::SessionCompleted`]

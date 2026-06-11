@@ -46,17 +46,6 @@ mod tests {
     }
 
     #[test]
-    fn insight_scope_variants() {
-        let global = InsightScope::Global;
-        let json = serde_json::to_string(&global).unwrap();
-        assert!(json.contains("global"));
-
-        let specific = InsightScope::SpecificArtifact(ArtifactId::new("art_12345678"));
-        let json = serde_json::to_string(&specific).unwrap();
-        assert!(json.contains("art_12345678"));
-    }
-
-    #[test]
     fn token_usage_on_session_completed_is_optional() {
         // Without token_usage (legacy shape)
         let without = FactoryEventKind::SessionCompleted {

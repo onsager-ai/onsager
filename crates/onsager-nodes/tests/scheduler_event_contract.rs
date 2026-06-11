@@ -23,7 +23,7 @@
 //!   `agent.session_completed` / `agent.session_failed`.
 //! - Verify node only: one `verify.verdict` (pass or fail).
 //!
-//! `node.awaiting_human` / `node.human_approved` / `node.human_rejected`
+//! `node.awaiting_human`
 //! are the Human executor's contract (#357); not exercised here.
 
 use std::sync::{Arc, Mutex};
