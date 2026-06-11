@@ -6,7 +6,7 @@
 # per-slot flow, nothing publishes a host port: the caddy `edge` service
 # joins the shared `devproxy` network and Traefik (in ~/dev-proxy)
 # routes Host(`$DEV_HOST`) → edge. Browser/agent access:
-#   http://<worktree>.onsager.localhost:8000
+#   http://<worktree>.onsager.localhost:8000  (main checkout: http://onsager.localhost:8000)
 #
 # Usage:
 #   just dev-infra          # start Postgres + run migrations
