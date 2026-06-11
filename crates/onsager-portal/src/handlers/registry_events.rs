@@ -57,7 +57,7 @@ mod tests {
             .filter_map(|e| e["kind"].as_str())
             .collect();
         assert!(kinds.contains(&"forge.shaping_dispatched"));
-        assert!(kinds.contains(&"synodic.gate_verdict"));
+        assert!(kinds.contains(&"verify.verdict"));
         assert!(kinds.contains(&"ising.insight_emitted"));
     }
 }

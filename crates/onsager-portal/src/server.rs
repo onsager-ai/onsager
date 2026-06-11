@@ -3,21 +3,19 @@
 use std::sync::Arc;
 
 use axum::Router;
-use axum::routing::{any, delete, get, post, put};
+use axum::routing::{delete, get, post, put};
 
 use crate::config::Config;
-use crate::gate::GateClient;
 use crate::handlers::{
     activation as activation_handlers, agent_ws, auth as auth_handlers,
     build_info as build_info_handlers, chat as chat_handlers, credentials as credential_handlers,
-    github_app as github_app_handlers, governance as governance_handlers,
-    installations as installation_handlers, live_data as live_data_handlers,
-    nodes as node_handlers, pats as pat_handlers, projects as project_handlers,
-    push as push_handlers, registry_events as registry_event_handlers,
-    registry_triggers as registry_trigger_handlers, runs as run_handlers,
-    session_liveness as session_liveness_handlers, sessions as session_handlers,
-    showcase as showcase_handlers, spine as spine_handlers, tasks as task_handlers,
-    telegram_webhook, triggers as trigger_handlers, webhook,
+    github_app as github_app_handlers, installations as installation_handlers,
+    live_data as live_data_handlers, nodes as node_handlers, pats as pat_handlers,
+    projects as project_handlers, push as push_handlers,
+    registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
+    runs as run_handlers, session_liveness as session_liveness_handlers,
+    sessions as session_handlers, showcase as showcase_handlers, spine as spine_handlers,
+    tasks as task_handlers, telegram_webhook, triggers as trigger_handlers, webhook,
     webhook_health as webhook_health_handlers, workflow_kinds as workflow_kind_handlers,
     workflow_views as workflow_view_handlers, workflows as workflow_handlers,
     workspaces as workspace_handlers,
@@ -53,8 +51,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         tracing::warn!(error = %e, "portal dev-login seeder skipped (workspaces table missing?)");
     }
 
-    let gate = Arc::new(GateClient::new(config.synodic_url.clone()));
-
     // VAPID config for Web Push (ADR 0020 / spec #472). Optional —
     // when the env triple is unset the push endpoints surface
     // `service unavailable` and the dashboard hides the subscription
@@ -74,7 +70,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         pool,
         spine,
         config: Arc::new(config.clone()),
-        gate,
         proxy_cache: Arc::new(ProxyCache::from_env()),
         push: PushState::new(push_vapid),
     };
@@ -238,18 +233,13 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             "/api/workflows/{id}/runs",
             get(workflow_handlers::list_workflow_runs),
         )
-        // Workflow-scoped artifacts + verdicts (spec #302 — #289 PR 2b).
-        // Dedicated routes replace the dashboard's per-run artifact
-        // fan-out fetch and the workspace-wide governance-events
-        // filter. Same workspace-access gating as the rest of
+        // Workflow-scoped artifacts (spec #302 — #289 PR 2b). The
+        // dedicated route replaces the dashboard's per-run artifact
+        // fan-out fetch. Same workspace-access gating as the rest of
         // `/api/workflows/*`.
         .route(
             "/api/workflows/{id}/artifacts",
             get(workflow_view_handlers::list_workflow_artifacts),
-        )
-        .route(
-            "/api/workflows/{id}/verdicts",
-            get(workflow_view_handlers::list_workflow_verdicts),
         )
         // Workflow artifact-kind catalog (issue #102 / #222 Slice 4) —
         // public registry pass-through; the dashboard fetches this
@@ -302,21 +292,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .route(
             "/api/spine/artifacts/{id}/abort",
             post(spine_handlers::abort_artifact),
-        )
-        .route(
-            "/api/spine/artifacts/{id}/override-gate",
-            post(spine_handlers::override_gate),
-        )
-        // Governance API proxy (#222 follow-up — governance → portal).
-        // Portal forwards `/api/governance/{*path}` to synodic's `/api/{path}`
-        // so synodic's dashboard-facing endpoints (events, rules, rule-proposals,
-        // stats) are reachable through the single external boundary portal owns.
-        // Stiglab proxied these via a `seam-allow` exemption on `SYNODIC_URL` /
-        // `SYNODIC_PORT`; those exemptions are stripped now that portal is the
-        // correct place for the pass-through.
-        .route(
-            "/api/governance/{*path}",
-            any(governance_handlers::proxy),
         )
         // Live-data hydration for reference-only artifacts (#222 follow-up 2).
         // Moved from stiglab → portal. The dashboard joins skeleton rows from

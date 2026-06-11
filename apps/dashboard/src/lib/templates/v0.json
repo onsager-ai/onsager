@@ -17,7 +17,7 @@
         },
         {
           "name": "Verify (tests-touch-diff)",
-          "gate_kind": "governance"
+          "gate_kind": "external-check"
         },
         {
           "name": "Merge",
@@ -40,7 +40,7 @@
         },
         {
           "name": "Verify spec-link",
-          "gate_kind": "governance"
+          "gate_kind": "external-check"
         },
         {
           "name": "Gate (deny | allow)",
@@ -63,7 +63,7 @@
         },
         {
           "name": "Verify (sections present)",
-          "gate_kind": "governance"
+          "gate_kind": "external-check"
         },
         {
           "name": "Comment",
@@ -90,7 +90,7 @@
         },
         {
           "name": "Verify (PRs exist and merged)",
-          "gate_kind": "governance"
+          "gate_kind": "external-check"
         },
         {
           "name": "Draft release",
@@ -145,7 +145,7 @@
         },
         {
           "name": "Verify (tests pass and touch new code)",
-          "gate_kind": "governance"
+          "gate_kind": "external-check"
         },
         {
           "name": "PR",

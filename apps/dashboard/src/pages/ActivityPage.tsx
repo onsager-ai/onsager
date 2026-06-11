@@ -37,7 +37,7 @@ const SOURCE_CHIPS: SourceTypeChip[] = [
   {
     key: "verdict",
     label: "Verdict",
-    match: (e) => e.event_type.startsWith("synodic."),
+    match: (e) => e.event_type === "verify.verdict",
   },
   {
     key: "trigger",

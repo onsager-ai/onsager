@@ -2,7 +2,7 @@
 
 Client library for the Onsager event spine — shared PostgreSQL event stream coordination for the [onsager-ai](https://github.com/onsager-ai) polyrepo.
 
-Onsager is a **library**, not a service. It publishes a single Rust crate that subsystem repos (`stiglab`, `synodic`, `ising`) and adapter repos (`telegramable`, and future consumers) depend on to coordinate via a shared PostgreSQL `events` / `events_ext` table and the `onsager_events` pg_notify channel.
+Onsager is a **library**, not a service. It publishes a single Rust crate that subsystem repos (`stiglab`, `ising`) and adapter repos (`telegramable`, and future consumers) depend on to coordinate via a shared PostgreSQL `events` / `events_ext` table and the `onsager_events` pg_notify channel.
 
 ## Installation
 
@@ -30,7 +30,7 @@ Schema changes are coordinated by adding a new `00X_*.sql` file and bumping the 
 ### Why two tables?
 
 - **`events`** — strong-schema core spine. Every event has a `stream_id`, `stream_type`, `event_type`, typed `data` JSONB, `sequence` number, and `metadata`. This is the append-only event log that all components share.
-- **`events_ext`** — wide JSON extension table namespaced by component. Each component owns a `namespace` (e.g. `"stiglab"`, `"synodic"`) and can publish arbitrary extension events without changing the core schema.
+- **`events_ext`** — wide JSON extension table namespaced by component. Each component owns a `namespace` (e.g. `"stiglab"`) and can publish arbitrary extension events without changing the core schema.
 
 Both tables fire `pg_notify` on insert via the `onsager_events` channel, enabling real-time subscription.
 

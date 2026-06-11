@@ -28,7 +28,7 @@ pub struct ExtensionEventRecord {
 }
 
 impl ExtensionEventRecord {
-    /// Returns the fully qualified event type (e.g., "synodic.policy.denied").
+    /// Returns the fully qualified event type (e.g., "stiglab.session.completed").
     pub fn full_type(&self) -> String {
         format!("{}.{}", self.namespace, self.event_type)
     }

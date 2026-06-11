@@ -212,7 +212,6 @@ dev: dev-infra
     }
     PORTAL_PORT=$(pick_port 3002)
     STIGLAB_PORT=$(pick_port 3000)
-    SYNODIC_PORT=$(pick_port 3001)
     DASHBOARD_PORT=$(pick_port 5173)
     export PORTAL_PORT STIGLAB_PORT  # vite.config.ts proxy targets
 
@@ -246,7 +245,6 @@ dev: dev-infra
     echo "==> Starting portal on :${PORTAL_PORT}..."
     DATABASE_URL="$DATABASE_URL" \
     PORTAL_BIND="0.0.0.0:${PORTAL_PORT}" \
-    SYNODIC_URL="http://localhost:${SYNODIC_PORT}" \
     STIGLAB_INTERNAL_WS_URL="ws://localhost:${STIGLAB_PORT}/agent/ws-internal" \
         cargo run -p onsager-portal -- serve &
 
@@ -254,10 +252,6 @@ dev: dev-infra
     ONSAGER_DATABASE_URL="$DATABASE_URL" \
     STIGLAB_PORT="$STIGLAB_PORT" \
         cargo run -p stiglab -- server &
-
-    echo "==> Starting synodic on :${SYNODIC_PORT}..."
-    DATABASE_URL="$DATABASE_URL" \
-    PORT=$SYNODIC_PORT cargo run -p synodic --features postgres -- serve &
 
     echo "==> Starting onsager-scheduler (substrate scheduler)..."
     DATABASE_URL="$DATABASE_URL" \
@@ -271,7 +265,6 @@ dev: dev-infra
     [ -n "$route_file" ] && echo "  Devproxy:   http://${DEV_HOST}:8000"
     echo "  Dashboard:  http://localhost:${DASHBOARD_PORT}"
     echo "  Stiglab:    http://localhost:${STIGLAB_PORT}"
-    echo "  Synodic:    http://localhost:${SYNODIC_PORT}"
     echo "  Portal:     http://localhost:${PORTAL_PORT}"
     echo "  Scheduler:  spine listener (no HTTP port)"
     echo "  Postgres:   postgres://onsager:onsager@localhost:${DB_PORT}/onsager"
@@ -308,9 +301,6 @@ dev-scheduler:
 
 dev-stiglab:
     cargo run -p stiglab -- server
-
-dev-synodic port="3001":
-    PORT={{port}} cargo run -p synodic --features postgres -- serve
 
 # ── DB ───────────────────────────────────────────────────────────────
 db-migrate:
@@ -355,7 +345,7 @@ test-e2e-remote url:
 deploy-build:
     docker compose -f deploy/docker-compose.yml build
 
-# Start the production stack (Postgres + migrations + stiglab + synodic)
+# Start the production stack (Postgres + migrations + services)
 deploy-up:
     docker compose -f deploy/docker-compose.yml up -d
 
@@ -374,7 +364,6 @@ deploy: deploy-build deploy-up
     echo "=== Onsager production stack running ==="
     echo "  Dashboard:  http://localhost:${STIGLAB_PORT:-3000}"
     echo "  Stiglab:    http://localhost:${STIGLAB_PORT:-3000}/api/health"
-    echo "  Synodic:    http://localhost:${SYNODIC_PORT:-3001}/api/health"
     echo ""
     echo "Logs:  just deploy-logs"
     echo "Stop:  just deploy-down"
@@ -384,7 +373,6 @@ install:
     cargo install --path crates/onsager
     cargo install --path crates/onsager-scheduler
     cargo install --path crates/stiglab
-    cargo install --path crates/synodic
 
 # ── Per-worktree dev slots (spec #194) ───────────────────────────────
 #

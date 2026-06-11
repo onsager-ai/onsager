@@ -40,7 +40,7 @@
 //! | `node.awaiting_human`        | [`NodeAwaitingHuman`]                   |
 //! | `node.human_approved`        | [`NodeHumanApproved`]                   |
 //! | `node.human_rejected`        | [`NodeHumanRejected`]                   |
-//! | `synodic.verdict`            | [`SynodicVerdict`]                      |
+//! | `verify.verdict`             | [`VerifyVerdict`]                       |
 //! | `agent.session_started`      | [`AgentSessionStarted`]                 |
 //! | `agent.session_completed`    | [`AgentSessionCompleted`]               |
 //! | `agent.session_failed`       | [`AgentSessionFailed`]                  |
@@ -73,7 +73,7 @@ pub const KIND_NODE_FAILED: &str = "node.failed";
 pub const KIND_NODE_AWAITING_HUMAN: &str = "node.awaiting_human";
 pub const KIND_NODE_HUMAN_APPROVED: &str = "node.human_approved";
 pub const KIND_NODE_HUMAN_REJECTED: &str = "node.human_rejected";
-pub const KIND_SYNODIC_VERDICT: &str = "synodic.verdict";
+pub const KIND_VERIFY_VERDICT: &str = "verify.verdict";
 pub const KIND_AGENT_SESSION_STARTED: &str = "agent.session_started";
 pub const KIND_AGENT_SESSION_COMPLETED: &str = "agent.session_completed";
 pub const KIND_AGENT_SESSION_FAILED: &str = "agent.session_failed";
@@ -211,7 +211,7 @@ impl NodeHumanRejected {
 /// Verify executor produced a verdict — pass / fail outcome with
 /// per-check details.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SynodicVerdict {
+pub struct VerifyVerdict {
     pub plan_id: String,
     pub node_id: NodeId,
     /// True when every check the executor ran passed.
@@ -222,13 +222,13 @@ pub struct SynodicVerdict {
     pub check_results: Vec<VerifyCheckResult>,
 }
 
-impl SynodicVerdict {
+impl VerifyVerdict {
     pub fn kind(&self) -> &'static str {
-        KIND_SYNODIC_VERDICT
+        KIND_VERIFY_VERDICT
     }
 }
 
-/// One check's outcome carried on [`SynodicVerdict`].
+/// One check's outcome carried on [`VerifyVerdict`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifyCheckResult {
     /// Check name (e.g. `"cargo_test"`, `"clippy"`, `"schema_lint"`).
@@ -332,7 +332,7 @@ mod tests {
         assert_eq!(KIND_NODE_AWAITING_HUMAN, "node.awaiting_human");
         assert_eq!(KIND_NODE_HUMAN_APPROVED, "node.human_approved");
         assert_eq!(KIND_NODE_HUMAN_REJECTED, "node.human_rejected");
-        assert_eq!(KIND_SYNODIC_VERDICT, "synodic.verdict");
+        assert_eq!(KIND_VERIFY_VERDICT, "verify.verdict");
         assert_eq!(KIND_AGENT_SESSION_STARTED, "agent.session_started");
         assert_eq!(KIND_AGENT_SESSION_COMPLETED, "agent.session_completed");
         assert_eq!(KIND_AGENT_SESSION_FAILED, "agent.session_failed");
@@ -400,8 +400,8 @@ mod tests {
     }
 
     #[test]
-    fn synodic_verdict_roundtrip() {
-        let ev = SynodicVerdict {
+    fn verify_verdict_roundtrip() {
+        let ev = VerifyVerdict {
             plan_id: pid(),
             node_id: nid(),
             passed: false,
@@ -419,7 +419,7 @@ mod tests {
         let json = serde_json::to_value(&ev).unwrap();
         assert_eq!(json["check_results"][1]["name"], "clippy");
         assert_eq!(json["check_results"][1]["passed"], false);
-        let back: SynodicVerdict = serde_json::from_value(json).unwrap();
+        let back: VerifyVerdict = serde_json::from_value(json).unwrap();
         assert_eq!(back, ev);
     }
 

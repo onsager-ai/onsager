@@ -8,11 +8,6 @@ pub struct Config {
     /// `webhook_secret_cipher` (signature verification skipped) are accepted.
     /// Production deployments must always configure this.
     pub credential_key: Option<String>,
-    /// Synodic gate URL (`http://host:port`). When `None`, the portal
-    /// short-circuits gate calls to a synthetic `Allow` verdict — useful for
-    /// local development without synodic running, but means real gates never
-    /// evaluate.
-    pub synodic_url: Option<String>,
     /// Optional fallback GitHub token for posting check runs / comments.
     /// Per-installation tokens (Phase 2 follow-up) are preferred.
     pub github_token: Option<String>,
@@ -171,7 +166,6 @@ mod tests {
             bind: "0.0.0.0:3002".to_string(),
             database_url: "postgres://test".to_string(),
             credential_key: None,
-            synodic_url: None,
             github_token: None,
             public_url: None,
             github_client_id: None,

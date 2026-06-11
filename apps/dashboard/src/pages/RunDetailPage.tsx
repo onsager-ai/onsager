@@ -81,6 +81,32 @@ function ownerStageIndex(event: SpineEvent, stageCount: number): number {
   return Math.max(stageCount - 1, 0)
 }
 
+// Payload of a substrate `verify.verdict` event (ADR 0027 / #582):
+// `{ type: "verify_verdict", plan_id, node_id, passed, check_results }`.
+// Defensive parse — render the pass/fail strip only when the shape holds.
+interface VerifyVerdict {
+  passed: boolean
+  check_results: { name: string; passed: boolean }[]
+}
+
+function parseVerifyVerdict(event: SpineEvent): VerifyVerdict | null {
+  const data = (event.data ?? {}) as Record<string, unknown>
+  if (typeof data.passed !== "boolean") return null
+  const raw = Array.isArray(data.check_results) ? data.check_results : []
+  const check_results = raw.flatMap((c) => {
+    if (
+      c !== null &&
+      typeof c === "object" &&
+      typeof (c as Record<string, unknown>).name === "string" &&
+      typeof (c as Record<string, unknown>).passed === "boolean"
+    ) {
+      return [c as { name: string; passed: boolean }]
+    }
+    return []
+  })
+  return { passed: data.passed, check_results }
+}
+
 export function RunDetailPage() {
   const { runId = "" } = useParams<{ runId: string }>()
   const workspace = useActiveWorkspace()
@@ -110,7 +136,7 @@ export function RunDetailPage() {
     queryFn: () =>
       api.getSpineEvents(workspace.id, {
         run_id: runId,
-        event_type: "synodic.gate_verdict",
+        event_type: "verify.verdict",
         limit: 100,
       }),
     enabled: !!runId,
@@ -325,9 +351,7 @@ function StagePanel({
   const Icon = STATUS_ICON[status]
   const name = stage?.name ?? `Stage ${index}`
   const gateKind = stage?.gate_kind ?? ""
-  const verdicts = events.filter(
-    (e) => e.event_type === "synodic.gate_verdict",
-  )
+  const verdicts = events.filter((e) => e.event_type === "verify.verdict")
   return (
     <div className="rounded-md border">
       <button
@@ -389,37 +413,66 @@ function StagePanel({
             )}
           </div>
 
-          {/* Verdicts (former Verdicts tab). */}
+          {/* Verdicts (former Verdicts tab) — substrate Verify verdicts
+              (ADR 0027 / #582): `{ passed, check_results }`. */}
           {verdicts.length > 0 && (
             <div className="space-y-1">
               <FieldLabel>Verdicts</FieldLabel>
               <div className="space-y-2">
-                {verdicts.map((e) => (
-                  <div
-                    key={`${e.id}`}
-                    className="space-y-2 rounded-md border bg-background p-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      {/* SourceTag (#488) */}
-                      <Badge
-                        variant="outline"
-                        className="shrink-0 font-mono text-[10px]"
-                      >
-                        {e.event_type}
-                      </Badge>
-                      <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                        {new Date(e.created_at).toLocaleString()}
-                      </span>
+                {verdicts.map((e) => {
+                  const verdict = parseVerifyVerdict(e)
+                  return (
+                    <div
+                      key={`${e.id}`}
+                      className="space-y-2 rounded-md border bg-background p-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        {/* SourceTag (#488) */}
+                        <Badge
+                          variant="outline"
+                          className="shrink-0 font-mono text-[10px]"
+                        >
+                          {e.event_type}
+                        </Badge>
+                        {verdict && (
+                          <Badge
+                            variant={verdict.passed ? "default" : "destructive"}
+                            className="shrink-0 text-[10px]"
+                          >
+                            {verdict.passed ? "passed" : "failed"}
+                          </Badge>
+                        )}
+                        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                          {new Date(e.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      {verdict && verdict.check_results.length > 0 && (
+                        <ul className="space-y-1">
+                          {verdict.check_results.map((c, i) => (
+                            <li
+                              key={`${c.name}-${i}`}
+                              className="flex items-center gap-1.5 text-xs"
+                            >
+                              {c.passed ? (
+                                <CircleCheck className="h-3.5 w-3.5 shrink-0 text-green-500" />
+                              ) : (
+                                <CircleX className="h-3.5 w-3.5 shrink-0 text-destructive" />
+                              )}
+                              <span className="truncate">{c.name}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="flex justify-end">
+                        <ChatAskButton
+                          scope={{ type: "verdict", id: e.stream_id }}
+                          label="Ask about this verdict"
+                          variant="ghost"
+                        />
+                      </div>
                     </div>
-                    <div className="flex justify-end">
-                      <ChatAskButton
-                        scope={{ type: "verdict", id: e.stream_id }}
-                        label="Ask about this verdict"
-                        variant="ghost"
-                      />
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}

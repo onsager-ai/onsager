@@ -170,8 +170,8 @@ fn node_human_rejected_payload_matches_variant_with_and_without_reason() {
 }
 
 #[test]
-fn synodic_verdict_payload_matches_variant() {
-    let s = se::SynodicVerdict {
+fn verify_verdict_payload_matches_variant() {
+    let s = se::VerifyVerdict {
         plan_id: pid(),
         node_id: nid(),
         passed: false,
@@ -186,7 +186,7 @@ fn synodic_verdict_payload_matches_variant() {
             },
         ],
     };
-    let v = FactoryEventKind::SynodicVerdict {
+    let v = FactoryEventKind::VerifyVerdict {
         plan_id: s.plan_id.clone(),
         node_id: s.node_id,
         passed: s.passed,
@@ -353,8 +353,8 @@ fn wire_kind_constants_agree_with_factory_event_kind() {
             },
         ),
         (
-            se::KIND_SYNODIC_VERDICT,
-            F::SynodicVerdict {
+            se::KIND_VERIFY_VERDICT,
+            F::VerifyVerdict {
                 plan_id: pid(),
                 node_id: nid(),
                 passed: true,

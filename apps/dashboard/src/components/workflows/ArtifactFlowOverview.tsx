@@ -10,13 +10,13 @@ export interface ArtifactFlowOverviewProps {
   currentStageIndex?: number
 }
 
-// Linear sequence of gate pills: Trigger → Agent → CI → Synodic → Human → …
+// Linear sequence of gate pills: Trigger → Agent → CI → Human → …
 //
 // Before #104 this component rendered one pill per stage's input + output
 // artifact kind, which duplicated the same artifact multiple times in a row
-// ("Governed pipeline" showed Issue → PR → PR → PR → PR). This strip is now
-// strictly "where are we in the process?" — one pill per gate, no artifact
-// duplication.
+// (a four-stage pipeline showed Issue → PR → PR → PR → PR). This strip is
+// now strictly "where are we in the process?" — one pill per gate, no
+// artifact duplication.
 export function ArtifactFlowOverview({
   triggerLabel,
   stages,

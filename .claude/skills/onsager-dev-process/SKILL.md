@@ -81,7 +81,7 @@ Implement the spec's Plan items in order. Keep commits small and focused.
 Commit messages should be imperative and under 72 chars.
 
 Respect the architectural invariant: subsystems (`forge`, `stiglab`,
-`synodic`, `ising`) do not import each other. The seam rule (canonical
+`ising`) do not import each other. The seam rule (canonical
 form, also persisted in root `CLAUDE.md` and each subsystem's
 `CLAUDE.md`) makes this concrete:
 
@@ -89,7 +89,7 @@ form, also persisted in root `CLAUDE.md` and each subsystem's
 > - **User-facing endpoints** called by the dashboard.
 > - **Webhooks** called by external services (GitHub, etc.).
 >
-> Subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
+> Subsystems (`forge`, `stiglab`, `ising`) coordinate
 > **exclusively** via the spine: events on the bus + reads against
 > shared spine tables. No subsystem makes HTTP calls to another
 > subsystem. No subsystem imports another subsystem's crate.

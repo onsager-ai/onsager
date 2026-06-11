@@ -16,7 +16,6 @@ import type { WorkflowGateKind, WorkflowStage } from "@/lib/api"
 const GATE_KINDS: WorkflowGateKind[] = [
   "agent-session",
   "external-check",
-  "governance",
   "manual-approval",
 ]
 

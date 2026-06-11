@@ -5,7 +5,7 @@ import type { WorkflowStage } from "@/lib/api"
 
 // Issue #100/#104 regression: the pre-#104 flow strip rendered input +
 // output artifact badges per stage, which duplicated "PR" four times on
-// the Governed pipeline preset (`Issue → PR → PR → PR → PR`). Post-#104
+// a four-stage pipeline (`Issue → PR → PR → PR → PR`). Post-#104
 // the strip renders one pill per gate — no artifact duplication.
 describe("ArtifactFlowOverview — gate-only strip (#104)", () => {
   const stages: WorkflowStage[] = [
@@ -23,8 +23,8 @@ describe("ArtifactFlowOverview — gate-only strip (#104)", () => {
     },
     {
       id: "s3",
-      name: "Synodic gate",
-      gate_kind: "governance",
+      name: "Merge wait",
+      gate_kind: "external-check",
       config: {},
     },
     {

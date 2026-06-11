@@ -44,9 +44,9 @@ direct calls.
 ```
                        onsager-spine  (event bus library)
                               │
-        ┌─────────┬───────────┼───────────┬──────────┐
-        │         │           │           │          │
-     portal    forge       stiglab     synodic     ising
+        ┌─────────┬───────────┼──────────┐
+        │         │           │          │
+     portal    forge       stiglab    ising
      (edge)
 ```
 
@@ -68,7 +68,7 @@ The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md
    migration is staged under [#220](https://github.com/onsager-ai/onsager/issues/220) /
    [#222](https://github.com/onsager-ai/onsager/issues/222).
 2. **Internal coordination.** Factory subsystems (`forge`, `stiglab`,
-   `synodic`, `ising`) coordinate **exclusively** via the spine —
+   `ising`) coordinate **exclusively** via the spine —
    no sibling-subsystem HTTP, no cross-subsystem Cargo deps. The `onsager`
    dispatcher has zero business deps and discovers subsystem binaries on
    `PATH`.
@@ -91,7 +91,6 @@ and the ADRs under [`docs/adr/`](docs/adr/).
 | `onsager-portal` | Edge subsystem — public HTTP, GitHub webhooks, OAuth, credentials                |
 | `forge`          | Production line — drives artifacts through their lifecycle                       |
 | `stiglab`        | Distributed AI agent session orchestration                                       |
-| `synodic`        | AI agent governance — gates, verdicts, escalations                               |
 | `ising`          | Continuous improvement — observes the spine and surfaces insights                |
 
 Spec Plans (the factory's input contract) are authored externally —
@@ -136,7 +135,6 @@ as env vars).
 Services:
 - **Dashboard** — <http://localhost:5173> (Vite dev server with HMR)
 - **Stiglab API** — <http://localhost:3000> (sessions, nodes, WebSocket)
-- **Synodic API** — <http://localhost:3001> (governance)
 - **Postgres** — `postgres://onsager:onsager@localhost:5432/onsager`
 
 To stop: `Ctrl+C` for services, `just dev-down` for Postgres.
@@ -231,7 +229,6 @@ subsystem-specific instructions:
 - `crates/onsager-portal/CLAUDE.md`
 - `crates/onsager-registry/CLAUDE.md`
 - `crates/stiglab/.claude/`
-- `crates/synodic/.claude/`
 
 ## License
 

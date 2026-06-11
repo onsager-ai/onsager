@@ -190,9 +190,9 @@ pub async fn mint_read_token_for_repos(
 ///
 /// The write counterpart of [`mint_read_token_for_repos`]: least-
 /// privilege `contents:write` + `pull_requests:write` (+ `metadata:read`),
-/// scoped to `repo_names` only. It is minted *on demand* and only after a
-/// Synodic gate (`GatePoint::RepoWrite`) approves the target repo for the
-/// run — so the token for a repo exists only once that repo is approved.
+/// scoped to `repo_names` only. It is minted *on demand* and only for a
+/// repo bound to the requesting workspace — binding is the write-consent
+/// boundary (ADR 0027 retired the gate protocol).
 /// `metadata:read` rides along because GitHub requires it for the
 /// `contents` / `pull_requests` scopes to resolve.
 ///

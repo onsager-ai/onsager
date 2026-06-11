@@ -15,7 +15,6 @@ members = [
     "crates/onsager-trigger",
     "crates/ising",
     "crates/stiglab",
-    "crates/synodic",
     "xtask",
 ]
 

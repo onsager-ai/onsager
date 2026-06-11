@@ -4,7 +4,6 @@
 #   SLOT_EDGE_PORT     — port Caddy listens on (also the SSH-forward target)
 #
 # Routing model — same-origin for everything the browser hits:
-#   /api/synodic/*  → synodic:3001  (strip prefix)
 #   /api/*          → portal:3002   (ADR 0006 — portal owns all /api/*)
 #   /mcp/*          → portal:3002   (ADR 0007 — MCP server for AI clients)
 #   /agent/ws*      → portal:3002   (ADR 0008 — portal proxies to stiglab loopback)
@@ -28,12 +27,6 @@
 		output stdout
 		format console
 		level INFO
-	}
-
-	# Synodic is on /api/synodic/<route>; strip the prefix so its routes
-	# mounted under /api/<route> see the path they expect.
-	handle_path /api/synodic/* {
-		reverse_proxy synodic:3001
 	}
 
 	# Portal owns all /api/* routes (ADR 0006) and is the route owner

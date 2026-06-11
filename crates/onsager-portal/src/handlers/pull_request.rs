@@ -5,17 +5,13 @@
 //! - PR-artifact upserts under `Kind::PullRequest`
 //! - `git.pr_*` rows on `events_ext` keyed by `git:{project_id}:pr:{number}`
 //! - vertical lineage when the PR's `head.ref` matches a recent session
-//! - synodic gate evaluation per `(pr_artifact_id, head_sha)` (Phase 2)
 
 use onsager_artifact::ArtifactId;
 use onsager_spine::EventMetadata;
 use onsager_spine::factory_event::FactoryEventKind;
 use serde_json::Value;
 
-use onsager_github::api::pulls::CheckConclusion;
-
 use crate::db::{self, InstallationRecord, PrLifecycleState};
-use crate::gate::{GateInput, Verdict};
 use crate::state::AppState;
 
 const GIT_NAMESPACE: &str = "git";
@@ -86,12 +82,6 @@ pub async fn handle(
     let url = pr
         .get("html_url")
         .and_then(|u| u.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let head_sha = pr
-        .get("head")
-        .and_then(|h| h.get("sha"))
-        .and_then(|s| s.as_str())
         .unwrap_or_default()
         .to_string();
     let head_ref = pr
@@ -192,143 +182,11 @@ pub async fn handle(
         .await?;
     }
 
-    // Phase 2: gate the commit and post a check run.
-    let mut gate_outcome: Option<Verdict> = None;
-    if matches!(act, PrAction::Opened | PrAction::Synchronize) && !head_sha.is_empty() {
-        let existing =
-            db::find_existing_verdict(&state.pool, &artifact.artifact_id, &head_sha).await?;
-        let verdict = if let Some(prior) = existing {
-            // Idempotent dedup: same SHA, same verdict — nothing new to emit.
-            tracing::debug!(verdict = %prior, sha = %head_sha, "skipping duplicate gate");
-            None
-        } else {
-            let v = state
-                .gate
-                .evaluate(&GateInput {
-                    artifact_id: artifact.artifact_id.clone(),
-                    artifact_kind: "pull_request".into(),
-                    current_state: "in_progress".into(),
-                    head_sha: head_sha.clone(),
-                })
-                .await;
-            db::record_verdict(
-                &state.pool,
-                &artifact.artifact_id,
-                &head_sha,
-                v.as_summary(),
-            )
-            .await?;
-            Some(v)
-        };
-
-        if let Some(v) = verdict {
-            // Emit `forge.gate_verdict` mirroring forge's emission shape so
-            // ising and `/governance` see a uniform stream.
-            let verdict_summary = v.as_summary();
-            let gate_event = serde_json::json!({
-                "artifact_id": artifact.artifact_id,
-                "gate_point": "state_transition",
-                "verdict": verdict_summary,
-                "head_sha": head_sha,
-                "project_id": project.id,
-            });
-            state
-                .spine
-                .append_ext(
-                    &artifact.workspace_id,
-                    &artifact.artifact_id,
-                    "forge",
-                    "forge.gate_verdict",
-                    gate_event,
-                    &metadata,
-                    event_id,
-                )
-                .await?;
-
-            // Best-effort GitHub check run. Only attempted when a token is
-            // configured — installation-token signing is a Phase 2 follow-up.
-            if let Some(tok) = state.config.github_token.as_deref() {
-                let (conclusion, summary) = match &v {
-                    Verdict::Allow => (
-                        CheckConclusion::Success,
-                        "synodic/gate: no rules apply (allow)".to_string(),
-                    ),
-                    Verdict::Deny { reason } => {
-                        // Post the rationale as a review comment so the
-                        // contributor sees why the gate failed.
-                        if let Err(e) = onsager_github::api::issues::post_issue_comment(
-                            Some(tok),
-                            owner,
-                            name,
-                            pr_number,
-                            &format!("**synodic/gate denied**: {reason}"),
-                        )
-                        .await
-                        {
-                            tracing::warn!(error = %e, "Deny comment post failed");
-                        }
-                        (
-                            CheckConclusion::Failure,
-                            format!("synodic/gate: deny — {reason}"),
-                        )
-                    }
-                    Verdict::Modify => (
-                        CheckConclusion::Neutral,
-                        "synodic/gate: modify (informational)".to_string(),
-                    ),
-                    Verdict::Escalate { reason } => (
-                        CheckConclusion::ActionRequired,
-                        format!("synodic/gate: escalate — {reason}"),
-                    ),
-                };
-                if let Err(e) = onsager_github::api::pulls::create_check_run(
-                    Some(tok),
-                    owner,
-                    name,
-                    &head_sha,
-                    "synodic/gate",
-                    conclusion,
-                    &summary,
-                )
-                .await
-                {
-                    tracing::warn!(error = %e, "check-run post failed");
-                }
-            }
-
-            // Escalate produces a synodic governance event so the dashboard
-            // can show the parked decision.
-            if let Verdict::Escalate { reason } = &v {
-                let escalation_payload = serde_json::json!({
-                    "escalation_id": format!("esc_pr_{}_{}", artifact.artifact_id, head_sha),
-                    "artifact_id": artifact.artifact_id,
-                    "reason": reason,
-                    "source": "onsager-portal",
-                });
-                state
-                    .spine
-                    .append_ext(
-                        &artifact.workspace_id,
-                        &artifact.artifact_id,
-                        "synodic",
-                        "synodic.escalation_started",
-                        escalation_payload,
-                        &metadata,
-                        event_id,
-                    )
-                    .await?;
-            }
-
-            gate_outcome = Some(v);
-        }
-    }
-
     Ok(serde_json::json!({
         "project_id": project.id,
         "artifact_id": artifact.artifact_id,
         "pr_number": pr_number,
         "event_id": event_id,
-        "gate": gate_outcome.map(|v| v.as_summary().to_string()),
     }))
 }
 

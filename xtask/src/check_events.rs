@@ -14,7 +14,7 @@
 //!    `reason`).
 //! 3. **Emit call sites match producers**: every `append_ext(_, _,
 //!    "<event_type>", ...)` literal under
-//!    `crates/{stiglab,synodic,ising}/src/` references an event
+//!    `crates/{stiglab,ising}/src/` references an event
 //!    whose manifest `producers` list includes that subsystem.
 //! 4. **Listener call sites match consumers**: every
 //!    `notification.event_type [!=|==] "<event_type>"` filter under the
@@ -578,13 +578,13 @@ mod tests {
     /// consumer membership.
     #[test]
     fn listener_outside_manifest_consumers_is_flagged() {
-        let kind = "synodic.gate_verdict";
+        let kind = "stiglab.session_completed";
         let line = format!("if notification.event_type != \"{kind}\" {{ return Ok(()); }}");
         let parsed = parse_event_type_filter(&line).expect("filter parses");
         assert_eq!(parsed, kind);
         let def = def_for(kind).unwrap();
-        // Real consumer is the substrate scheduler — synodic must not appear.
-        assert!(!def.consumers.contains(&Subsystem::Synodic));
+        // Real consumer is the substrate scheduler — ising must not appear.
+        assert!(!def.consumers.contains(&Subsystem::Ising));
         assert!(def.consumers.contains(&Subsystem::Substrate));
     }
 

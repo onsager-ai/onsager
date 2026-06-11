@@ -1,8 +1,8 @@
 # Onsager Dashboard
 
 React + TypeScript + Vite UI for the Onsager factory stack. Surfaces
-sessions and nodes (stiglab), governance (synodic), and factory events
-(onsager-spine) in a single app.
+sessions and nodes (stiglab) and factory events (onsager-spine) in a
+single app.
 
 ## Run
 
@@ -14,7 +14,7 @@ just dev-dashboard   # dashboard only
 ```
 
 The dev server runs on http://localhost:5173 with HMR. It proxies API
-calls to the stiglab service on `:3000` and synodic on `:3001`.
+calls to the stiglab service on `:3000`.
 
 ## Build & Test
 

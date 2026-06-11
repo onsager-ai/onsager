@@ -2,7 +2,7 @@
 //!
 //! Dedicated list endpoints that replace the dashboard's derived
 //! client-side filters: a workflow's artifacts (formerly a per-run
-//! artifact fan-out from `GET /api/spine/artifacts/:id`) and verdicts
+//! artifact fan-out from `GET /api/spine/artifacts/:id`)
 //! (formerly the workspace-wide `GET /api/governance/events` filtered
 //! on the client). One round-trip per tab, server-side workspace
 //! gating, and `check-api-contract`-clean.
@@ -103,81 +103,6 @@ pub async fn list_workflow_artifacts(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": "failed to load artifacts" })),
-            )
-                .into_response()
-        }
-    }
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow)]
-struct WorkflowVerdictRow {
-    id: String,
-    event_type: String,
-    title: String,
-    severity: String,
-    source: String,
-    metadata: serde_json::Value,
-    resolved: bool,
-    resolution_notes: Option<String>,
-    created_at: chrono::DateTime<chrono::Utc>,
-    resolved_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-/// GET /api/workflows/:id/verdicts — governance verdicts on this
-/// workflow's runs. Filters `governance_events` by
-/// `metadata->>'artifact_id'` against the artifacts owned by this
-/// workflow.
-///
-/// `?limit=` (default 50, clamped to 500) bounds the polled response;
-/// the dashboard hits this every 5s when a governance stage exists.
-///
-/// Synodic and portal share the spine Postgres in production
-/// (`deploy/docker-compose.yml`) and via the `migrate` service in
-/// `just dev`, so this is a direct SQL read — same pattern as
-/// portal's other shared-table reads (`artifacts`, `events_ext`,
-/// `sessions`).
-pub async fn list_workflow_verdicts(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(workflow_id): Path<String>,
-    Query(q): Query<LimitQuery>,
-) -> Response {
-    let spine = state.spine.pool();
-    let workflow = match workflow_db::get_workflow(spine, &workflow_id).await {
-        Ok(Some(w)) => w,
-        Ok(None) => return not_found("workflow not found"),
-        Err(e) => {
-            tracing::error!("failed to load workflow: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-        }
-    };
-    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workflow.workspace_id).await
-    {
-        return r;
-    }
-
-    let limit = clamp_limit(q.limit);
-    match sqlx::query_as::<_, WorkflowVerdictRow>(
-        "SELECT id, event_type, title, severity, source, metadata, resolved, \
-                resolution_notes, created_at, resolved_at \
-         FROM governance_events \
-         WHERE metadata->>'artifact_id' IN ( \
-             SELECT artifact_id FROM artifacts WHERE workflow_id = $1 \
-         ) \
-         ORDER BY created_at DESC \
-         LIMIT $2",
-    )
-    .bind(&workflow_id)
-    .bind(limit)
-    .fetch_all(spine)
-    .await
-    {
-        Ok(verdicts) => Json(serde_json::json!({ "verdicts": verdicts })).into_response(),
-        Err(e) => {
-            tracing::error!("failed to load workflow verdicts: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "failed to load verdicts" })),
             )
                 .into_response()
         }

@@ -8,10 +8,9 @@
 #   docker compose down            # stop
 #
 # The stack:
-#   db       — PostgreSQL 16 (shared event spine + stiglab + synodic)
-#   migrate  — runs spine + synodic Postgres migrations, then exits
+#   db       — PostgreSQL 16 (shared event spine + stiglab)
+#   migrate  — runs spine Postgres migrations, then exits
 #   stiglab  — sessions, agents, dashboard UI + Claude Code CLI (port 3000)
-#   synodic  — governance API (port 3001)
 #
 # Agent sessions:
 #   Stiglab's built-in runner spawns `claude` (Claude Code CLI) as a subprocess.
@@ -44,7 +43,6 @@ services:
         condition: service_healthy
     volumes:
       - ../crates/onsager-spine/migrations:/spine-migrations:ro
-      - ../crates/synodic/migrations/pg:/synodic-migrations:ro
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     entrypoint: >
@@ -56,19 +54,6 @@ services:
         psql -X -v ON_ERROR_STOP=1
           -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
           -f /spine-migrations/002_artifacts.sql &&
-        echo '==> Running synodic migrations...' &&
-        psql -X -v ON_ERROR_STOP=1
-          -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
-          -f /synodic-migrations/001_initial_schema.sql &&
-        psql -X -v ON_ERROR_STOP=1
-          -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
-          -f /synodic-migrations/002_seed_data.sql &&
-        psql -X -v ON_ERROR_STOP=1
-          -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
-          -f /synodic-migrations/003_pipeline_runs.sql &&
-        psql -X -v ON_ERROR_STOP=1
-          -h db -U ${POSTGRES_USER:-onsager} -d ${POSTGRES_DB:-onsager}
-          -f /synodic-migrations/004_governance_events.sql &&
         echo '==> Migrations complete.'
       "
 
@@ -104,26 +89,6 @@ services:
       STIGLAB_PUBLIC_URL: "${STIGLAB_PUBLIC_URL:-}"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  synodic:
-    build:
-      context: ..
-      dockerfile: deploy/synodic.Dockerfile
-    restart: unless-stopped
-    ports:
-      - "${SYNODIC_PORT:-3001}:3001"
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    environment:
-      PORT: "3001"
-      DATABASE_URL: "postgres://${POSTGRES_USER:-onsager}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onsager}"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3001/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

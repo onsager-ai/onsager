@@ -22,7 +22,7 @@
 //! with the live response on `external_ref`. Portal does not expose
 //! user-facing endpoints — webhook ingress only.
 //!
-//! Portal-owned tables (`factory_tasks`, `pr_gate_verdicts`, `pr_branch_links`)
+//! Portal-owned tables (`factory_tasks`, `pr_branch_links`)
 //! are migrated at startup; everything else (tenant / installation / project /
 //! events / artifacts / lineage) is owned by stiglab and the spine.
 
@@ -37,7 +37,6 @@ pub mod credential_db;
 pub mod db;
 pub mod dev_auth;
 pub mod feedback;
-pub mod gate;
 pub mod handlers;
 pub mod installation;
 pub mod installation_db;

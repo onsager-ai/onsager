@@ -4,7 +4,7 @@
 //! subsystem crate. Instead, it looks up subcommands on PATH:
 //!
 //!   $ onsager stiglab serve    ->  exec `stiglab serve` (or `onsager-stiglab serve`)
-//!   $ onsager synodic rules    ->  exec `synodic rules` (or `onsager-synodic rules`)
+//!   $ onsager trigger fire     ->  exec `trigger fire` (or `onsager-trigger fire`)
 //!
 //! This preserves the architectural loose coupling between subsystems —
 //! they are independent binaries that coordinate via the Onsager event spine,
@@ -27,14 +27,13 @@ or `<name>` (for known subsystems) is a valid subcommand.
 KNOWN SUBCOMMANDS:
     scheduler   Substrate scheduler — hosts trigger.fired → Plan Compiler → executor dispatch
     stiglab     Distributed AI agent session orchestration
-    synodic     AI agent governance
     trigger     Fire or replay workflow triggers (manual / replay)
 ";
 
 // `ising` was removed from the known dispatcher set in spec #362
 // (OBS-02): its analyzers moved to `onsager-observers` and the
 // remaining binary is a deprecation stub, not an active subsystem.
-const KNOWN: &[&str] = &["scheduler", "stiglab", "synodic", "trigger"];
+const KNOWN: &[&str] = &["scheduler", "stiglab", "trigger"];
 
 fn main() {
     let args: Vec<String> = env::args().collect();

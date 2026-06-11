@@ -33,7 +33,6 @@ const RESOURCE_SEGMENTS = new Set([
   "nodes",
   "artifacts",
   "workflows",
-  "governance",
   "spine",
   "issues",
   "settings",

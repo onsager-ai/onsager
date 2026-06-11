@@ -2,7 +2,6 @@ import { request } from './client';
 import type {
   ArtifactActionRequest,
   ArtifactActionResponse,
-  OverrideGateRequestBody,
 } from './types';
 import type { ArtifactDetail } from './generated/ArtifactDetail';
 
@@ -15,11 +14,6 @@ export const artifacts = {
     }),
   abortArtifact: (id: string, body: ArtifactActionRequest = {}) =>
     request<ArtifactActionResponse>(`/spine/artifacts/${id}/abort`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  overrideGate: (id: string, body: OverrideGateRequestBody = {}) =>
-    request<ArtifactActionResponse>(`/spine/artifacts/${id}/override-gate`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

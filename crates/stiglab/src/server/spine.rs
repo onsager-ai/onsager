@@ -217,15 +217,9 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::GitPrClosed { artifact_id, .. }
         | FactoryEventKind::ForgeShapingDispatched { artifact_id, .. }
         | FactoryEventKind::ForgeShapingReturned { artifact_id, .. }
-        | FactoryEventKind::ForgeGateRequested { artifact_id, .. }
         | FactoryEventKind::ForgeGateVerdict { artifact_id, .. }
         | FactoryEventKind::ForgeDecisionMade { artifact_id, .. }
         | FactoryEventKind::StiglabSessionResultReady { artifact_id, .. }
-        | FactoryEventKind::SynodicGateVerdict { artifact_id, .. }
-        | FactoryEventKind::SynodicEscalationStarted { artifact_id, .. }
-        | FactoryEventKind::SynodicEscalationResolved { artifact_id, .. }
-        | FactoryEventKind::SynodicEscalationTimedOut { artifact_id, .. }
-        | FactoryEventKind::SynodicGateResolutionProposed { artifact_id, .. }
         | FactoryEventKind::StageEntered { artifact_id, .. }
         | FactoryEventKind::StageAdvanced { artifact_id, .. } => Some(artifact_id.as_str()),
         FactoryEventKind::StiglabSessionCompleted { artifact_id, .. }
@@ -234,10 +228,6 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         // telemetry. Fall back to "default".
         FactoryEventKind::ForgeInsightObserved { .. }
         | FactoryEventKind::StiglabSessionAborted { .. }
-        | FactoryEventKind::SynodicRuleProposed { .. }
-        | FactoryEventKind::SynodicRuleApproved { .. }
-        | FactoryEventKind::SynodicRuleDisabled { .. }
-        | FactoryEventKind::SynodicRuleVersionCreated { .. }
         | FactoryEventKind::IsingInsightDetected { .. }
         | FactoryEventKind::IsingInsightEmitted { .. }
         | FactoryEventKind::IsingInsightSuppressed { .. }
@@ -264,7 +254,7 @@ fn artifact_id_for_workspace_lookup(event: &FactoryEventKind) -> Option<&str> {
         | FactoryEventKind::NodeAwaitingHuman { .. }
         | FactoryEventKind::NodeHumanApproved { .. }
         | FactoryEventKind::NodeHumanRejected { .. }
-        | FactoryEventKind::SynodicVerdict { .. }
+        | FactoryEventKind::VerifyVerdict { .. }
         | FactoryEventKind::AgentSessionStarted { .. }
         | FactoryEventKind::AgentSessionCompleted { .. }
         | FactoryEventKind::AgentSessionFailed { .. } => None,

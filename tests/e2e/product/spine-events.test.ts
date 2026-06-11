@@ -3,7 +3,7 @@
  *
  * Tests that session lifecycle events are correctly emitted to the
  * event spine and are queryable via the API. This validates the
- * stigmergy feedback loop — other subsystems (forge, ising, synodic)
+ * stigmergy feedback loop — other subsystems (forge, ising)
  * depend on these events for coordination.
  *
  * Prerequisites:

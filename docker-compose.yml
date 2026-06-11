@@ -89,21 +89,6 @@ services:
       cargo watch -q -w crates/stiglab -w crates/onsager-spine -w crates/onsager-artifact
       -x 'run -p stiglab -- server'
 
-  synodic:
-    <<: *rust-dev
-    depends_on:
-      db:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    environment:
-      PORT: "3001"
-      DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
-      RUST_LOG: ${RUST_LOG:-info}
-    command: >
-      cargo watch -q -w crates/synodic -w crates/onsager-spine -w crates/onsager-artifact
-      -x 'run -p synodic -- serve'
-
   scheduler:
     <<: *rust-dev
     depends_on:
@@ -132,7 +117,6 @@ services:
       PORTAL_BIND: 0.0.0.0:3002
       DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
       ONSAGER_DATABASE_URL: postgres://onsager:onsager@db:5432/onsager
-      SYNODIC_URL: http://synodic:3001
       STIGLAB_INTERNAL_WS_URL: ws://stiglab:3000/agent/ws-internal
       RUST_LOG: ${RUST_LOG:-info}
     command: >
@@ -160,15 +144,14 @@ services:
       sh -c "pnpm install --filter dashboard --frozen-lockfile &&
              pnpm --filter dashboard exec vite --host 0.0.0.0 --port 5173"
 
-  # Same-origin edge (deploy/dev/Caddyfile): /api/synodic/* → synodic,
-  # /api/* + /mcp/* + /agent/ws → portal, /* → dashboard. Listens on
+  # Same-origin edge (deploy/dev/Caddyfile): /api/* + /mcp/* +
+  # /agent/ws → portal, /* → dashboard. Listens on
   # :9000 inside the compose network only; Traefik forwards by Host
   # header — no host port published.
   edge:
     image: caddy:2-alpine
     depends_on:
       - stiglab
-      - synodic
       - portal
       - dashboard
     volumes:

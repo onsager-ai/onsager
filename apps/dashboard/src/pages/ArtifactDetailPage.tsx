@@ -1,7 +1,7 @@
 import { useParams, useSearchParams, Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
-import { api, ApiError, type OverrideGateRequestBody } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
 import type { ArtifactDetail } from "@/lib/api/generated/ArtifactDetail"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ArrowLeft, Ban, MoreHorizontal, RefreshCw, ShieldCheck } from "lucide-react"
+import { ArrowLeft, Ban, MoreHorizontal, RefreshCw } from "lucide-react"
 import { LineageDAG } from "@/components/workflows/LineageDAG"
 import { ArtifactContent } from "@/components/artifacts/ArtifactContent"
 import { ChatAskButton } from "@/components/chat/ChatAskButton"
@@ -110,18 +110,6 @@ export function ArtifactDetailPage() {
     onError: (err) => showError("Abort failed", err),
   })
 
-  const overrideMutation = useMutation({
-    mutationFn: (body: OverrideGateRequestBody) => api.overrideGate(id!, body),
-    onSuccess: (res) => {
-      setBanner({
-        kind: "ok",
-        message: `Gate override emitted (${res.verdict ?? "allow"}).`,
-      })
-      invalidate()
-    },
-    onError: (err) => showError("Override failed", err),
-  })
-
   const handleAbort = () => {
     const reason = window.prompt(
       "Reason for aborting this artifact?",
@@ -131,26 +119,10 @@ export function ArtifactDetailPage() {
     abortMutation.mutate(reason.trim() || "aborted via dashboard")
   }
 
-  const handleOverride = (verdict: "allow" | "deny") => {
-    const reason = window.prompt(
-      `Reason for gate ${verdict}?`,
-      `manual ${verdict} via dashboard`,
-    )
-    if (reason === null) return
-    overrideMutation.mutate({
-      verdict,
-      reason: reason.trim() || `manual ${verdict} via dashboard`,
-      actor: "dashboard",
-    })
-  }
-
   const isTerminal =
     artifact?.state === "archived" || artifact?.state === "released"
   const archived = artifact?.state === "archived"
-  const busy =
-    retryMutation.isPending ||
-    abortMutation.isPending ||
-    overrideMutation.isPending
+  const busy = retryMutation.isPending || abortMutation.isPending
 
   // Mobile chrome: back + artifact name + ⋯ overflow menu. Desktop
   // renders the same 4 actions as inline buttons below. Memoized per
@@ -178,20 +150,6 @@ export function ArtifactDetailPage() {
             >
               <RefreshCw className="mr-2 h-4 w-4" />
               Retry
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={busy || archived}
-              onClick={() => handleOverride("allow")}
-            >
-              <ShieldCheck className="mr-2 h-4 w-4" />
-              Override gate: Allow
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={busy || archived}
-              onClick={() => handleOverride("deny")}
-            >
-              <ShieldCheck className="mr-2 h-4 w-4" />
-              Override gate: Deny
             </DropdownMenuItem>
             <DropdownMenuItem
               variant="destructive"
@@ -289,25 +247,6 @@ export function ArtifactDetailPage() {
         >
           <RefreshCw className="mr-1 h-3.5 w-3.5" />
           Retry
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || archived}
-          onClick={() => handleOverride("allow")}
-          title="Manually allow an escalated gate"
-        >
-          <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-          Override gate: Allow
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || archived}
-          onClick={() => handleOverride("deny")}
-        >
-          <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-          Override: Deny
         </Button>
         <Button
           variant="destructive"

@@ -52,14 +52,6 @@ fn translate_stage(
             });
             (Some("under_review"), json!([gate]))
         }
-        GateKind::Governance => {
-            let gate_point = params.get("gate_point").and_then(|v| v.as_str());
-            let gate = match gate_point {
-                Some(p) => json!({"kind": "governance", "gate_point": p}),
-                None => json!({"kind": "governance"}),
-            };
-            (Some("under_review"), json!([gate]))
-        }
         GateKind::ManualApproval => {
             let signal_kind = params
                 .get("signal_kind")

@@ -316,7 +316,6 @@ function AppRoutes() {
                         <Route path="sessions/:id" element={<SessionIdRedirect />} />
                         <Route path="artifacts" element={<WorkspaceRedirect to="workflows" />} />
                         <Route path="spine" element={<WorkspaceRedirect to="workflows" />} />
-                        <Route path="governance" element={<WorkspaceRedirect to="settings#governance-audit" />} />
                         <Route path="issues" element={<WorkspaceRedirect to="workflows" />} />
                         {/* IssueDetailPage retired (#492): redirect to
                             the canonical artifact URL. */}

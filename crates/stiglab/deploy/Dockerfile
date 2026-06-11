@@ -28,7 +28,6 @@ COPY crates/onsager-trigger/Cargo.toml    crates/onsager-trigger/Cargo.toml
 COPY crates/onsager/Cargo.toml            crates/onsager/Cargo.toml
 COPY crates/ising/Cargo.toml              crates/ising/Cargo.toml
 COPY crates/stiglab/Cargo.toml            crates/stiglab/Cargo.toml
-COPY crates/synodic/Cargo.toml            crates/synodic/Cargo.toml
 COPY xtask/Cargo.toml                     xtask/Cargo.toml
 # Create dummy source files so Cargo can compile each crate stub.
 # Crates with [lib] need src/lib.rs; crates with [[bin]] need src/main.rs.
@@ -45,7 +44,6 @@ RUN mkdir -p \
       crates/onsager/src \
       crates/ising/src \
       crates/stiglab/src \
-      crates/synodic/src \
       xtask/src \
     && touch \
       crates/onsager-spine/src/lib.rs \
@@ -58,19 +56,16 @@ RUN mkdir -p \
       crates/onsager-scheduler/src/lib.rs \
       crates/ising/src/lib.rs \
       crates/stiglab/src/lib.rs \
-      crates/synodic/src/lib.rs \
     && echo "fn main() {}" | tee \
       crates/onsager/src/main.rs \
       crates/onsager-trigger/src/main.rs \
       crates/ising/src/main.rs \
       crates/stiglab/src/main.rs \
-      crates/synodic/src/main.rs \
       crates/onsager-portal/src/main.rs \
       crates/onsager-scheduler/src/main.rs \
       xtask/src/main.rs \
     && cargo build --release \
-         -p stiglab -p synodic -p onsager-portal -p onsager-scheduler \
-         --features synodic/postgres 2>/dev/null || true
+         -p stiglab -p onsager-portal -p onsager-scheduler 2>/dev/null || true
 # Copy actual source and rebuild.
 # Touch all .rs files so their mtime is newer than the dummy-build artifacts —
 # Docker's COPY preserves git timestamps which may predate the dummy build,
@@ -78,8 +73,7 @@ RUN mkdir -p \
 COPY crates/ crates/
 RUN find crates -name "*.rs" | xargs touch \
     && cargo build --release \
-         -p stiglab -p synodic -p onsager-portal -p onsager-scheduler \
-         --features synodic/postgres
+         -p stiglab -p onsager-portal -p onsager-scheduler
 
 # ---- Stage 3: Caddy binary ----
 # Pulled as a named build stage so older BuildKit / Docker frontends that
@@ -126,14 +120,11 @@ RUN useradd -m -s /bin/bash onsager
 
 WORKDIR /app
 COPY --from=rust-builder /app/target/release/stiglab           /app/stiglab
-COPY --from=rust-builder /app/target/release/synodic           /app/synodic
 COPY --from=rust-builder /app/target/release/onsager-portal    /app/onsager-portal
 COPY --from=rust-builder /app/target/release/onsager-scheduler /app/onsager-scheduler
 COPY --from=ui-builder /app/apps/dashboard/dist /app/static
 # Spine migrations — applied on startup when ONSAGER_DATABASE_URL is set
 COPY crates/onsager-spine/migrations/ /app/spine-migrations/
-# Synodic (governance) migrations
-COPY crates/synodic/migrations/pg/ /app/synodic-migrations/
 COPY crates/stiglab/deploy/entrypoint.sh /app/entrypoint.sh
 # Caddy serves /api/* and /agent/ws via reverse proxy and /* (the
 # dashboard) from /app/static. See ADR 0006.

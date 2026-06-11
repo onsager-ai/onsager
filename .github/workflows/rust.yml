@@ -16,7 +16,6 @@ jobs:
       onsager-spine: ${{ steps.filter.outputs.onsager-spine }}
       ising: ${{ steps.filter.outputs.ising }}
       stiglab: ${{ steps.filter.outputs.stiglab }}
-      synodic: ${{ steps.filter.outputs.synodic }}
       onsager: ${{ steps.filter.outputs.onsager }}
       workspace: ${{ steps.filter.outputs.workspace }}
       xtask: ${{ steps.filter.outputs.xtask }}
@@ -46,16 +45,13 @@ jobs:
             stiglab:
               - 'crates/stiglab/**'
               - 'crates/onsager-spine/**'
-            synodic:
-              - 'crates/synodic/**'
-              - 'crates/onsager-spine/**'
             onsager:
               - 'crates/onsager/**'
             xtask:
               - 'xtask/**'
               - 'docs/events.md'
               # Lever F (#151) — the api-contract lint reads these plus
-              # stiglab/synodic mod.rs, so changes on either side must
+              # portal server.rs, so changes on either side must
               # re-trigger the xtask job.
               - 'apps/dashboard/src/lib/api.ts'
               - 'apps/dashboard/src/lib/sse.ts'
@@ -83,7 +79,6 @@ jobs:
       needs.changes.outputs.onsager-spine == 'true' ||
       needs.changes.outputs.ising == 'true' ||
       needs.changes.outputs.stiglab == 'true' ||
-      needs.changes.outputs.synodic == 'true' ||
       needs.changes.outputs.onsager == 'true' ||
       needs.changes.outputs.xtask == 'true'
     runs-on: ubuntu-latest

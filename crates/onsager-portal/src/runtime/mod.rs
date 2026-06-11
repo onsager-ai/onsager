@@ -3,7 +3,7 @@
 //! A workflow surface (chat) and a workflow stage (gate execution)
 //! each have a *runtime*. Both were implicit and Claude-coupled
 //! before #337. This module names the abstraction and the
-//! ToS-aware provenance metadata that the Synodic admissibility
+//! ToS-aware provenance metadata that a future admissibility
 //! gate (Phase 3) will read.
 //!
 //! ## Two traits, two surfaces
@@ -15,7 +15,7 @@
 //!   support against a local Claude Code CLI session.
 //! - [`HarnessRuntime`] — stage gate execution. Concrete ACP
 //!   wrappers (`ClaudeCodeAcp`, `CodexAcp`, `CopilotAcp`) and the
-//!   ToS-aware Synodic admissibility gate are Phase 3 work; this
+//!   ToS-aware admissibility gate are Phase 3 work; this
 //!   trait is declared here so the substrate is in place when
 //!   those implementations land.
 //!
@@ -24,7 +24,7 @@
 //! Every runtime carries a [`RuntimeProvenance`] tag describing
 //! its auth source (portal-held API key vs end-user CLI auth) and
 //! its ToS posture (clean-commercial vs personal-use-only). The
-//! Synodic admissibility gate consumes this metadata to decide
+//! admissibility check consumes this metadata to decide
 //! which environments a runtime may execute against — personal-use
 //! runtimes are admitted only in `dev` / `personal` workspaces.
 
@@ -47,7 +47,7 @@ pub enum AuthSource {
     /// The end user's local CLI is the auth holder. Onsager never
     /// sees a token; the runtime drives the user's CLI process.
     /// Personal-use ToS — admissible only in personal / dev
-    /// workspaces (enforced by the Synodic admissibility gate, see
+    /// workspaces (enforced by the admissibility check, see
     /// Phase 3).
     UserCliSubscription,
     /// The end user supplied a workspace credential (e.g.

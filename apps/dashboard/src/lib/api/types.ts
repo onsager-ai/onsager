@@ -1,5 +1,5 @@
 // Wire-shape types for the dashboard API. Per spec #298, Rust serde structs
-// in `crates/onsager-portal/`, `crates/onsager-spine/`, and `crates/synodic/`
+// in `crates/onsager-portal/` and `crates/onsager-spine/`
 // are the single source of truth — `ts-rs` emits the canonical bindings into
 // `./generated/`. This file re-exports the generated types alongside the
 // residual hand-written types that haven't been derived yet (workflow CRUD
@@ -18,7 +18,6 @@ export type { CreatePatResponse } from "./generated/CreatePatResponse";
 export type { Credential } from "./generated/Credential";
 export type { GitHubAccountType } from "./generated/GitHubAccountType";
 export type { GitHubAppInstallation } from "./generated/GitHubAppInstallation";
-export type { GovernanceEvent } from "./generated/GovernanceEvent";
 export type { InstallationDeliveryHealth } from "./generated/InstallationDeliveryHealth";
 export type { MeResponse } from "./generated/MeResponse";
 export type { MeUser } from "./generated/MeUser";
@@ -120,7 +119,6 @@ export interface WorkflowKindInfo {
 export type EventSubsystem =
   | "forge"
   | "stiglab"
-  | "synodic"
   | "ising"
   | "portal"
   | "substrate";
@@ -265,14 +263,8 @@ export interface ArtifactActionRequest {
   actor?: string;
 }
 
-export interface OverrideGateRequestBody extends ArtifactActionRequest {
-  verdict?: "allow" | "deny";
-}
-
 export interface ArtifactActionResponse {
   artifact_id: string;
   action: string;
-  verdict?: string;
   reason?: string;
-  escalation_id?: string;
 }

@@ -3,7 +3,7 @@
 //! Asserts that the dashboard ↔ backend HTTP surface stays wired in both
 //! directions:
 //!
-//! 1. Every backend route registered in portal + synodic has at least one
+//! 1. Every backend route registered in portal has at least one
 //!    dashboard caller, **or** sits on the [`EXTERNAL_ONLY_ROUTES`]
 //!    allowlist with a reason — webhooks, OAuth callbacks, agent WS,
 //!    dev-login, the governance proxy catchall, and bridge-debt
@@ -35,7 +35,7 @@ use syn::{Expr, ExprLit, Lit};
 pub struct BackendRoute {
     /// The literal axum path, e.g. `"/api/workspaces/{id}/members"`.
     pub path: String,
-    /// `"stiglab"` or `"synodic"`.
+    /// e.g. `"portal"` or `"stiglab"`.
     pub subsystem: &'static str,
 }
 
@@ -298,20 +298,12 @@ fn read_next_string(source: &str, mut i: usize) -> Option<(String, usize, usize)
 /// - Strip the leading `/api/` (dashboard calls are written without it
 ///   since `API_BASE = '/api'`) or just the leading `/`.
 /// - Replace path params `{name}` → `{x}`, catchall `{*name}` → `{*x}`.
-/// - For synodic, prepend `governance/`. The dashboard reaches synodic
-///   only via stiglab's `/api/governance/{*path}` proxy, so a synodic
-///   route at `/foo` corresponds to the dashboard call `/governance/foo`.
-pub fn normalize_backend(path: &str, subsystem: &str) -> String {
+pub fn normalize_backend(path: &str, _subsystem: &str) -> String {
     let stripped = path
         .strip_prefix("/api/")
         .or_else(|| path.strip_prefix('/'))
         .unwrap_or(path);
-    let scoped = if subsystem == "synodic" {
-        format!("governance/{}", stripped)
-    } else {
-        stripped.to_string()
-    };
-    rewrite_path_params(&scoped)
+    rewrite_path_params(stripped)
 }
 
 /// Reduce a dashboard call path to the comparison namespace.
@@ -461,14 +453,6 @@ pub const EXTERNAL_ONLY_ROUTES: &[(&str, &str)] = &[
         "Telegram bot webhook receiver — called by Telegram, not the dashboard (#240)",
     ),
     (
-        "/api/governance/{*path}",
-        "catchall proxy that forwards to synodic; covered route-by-route via the synodic check",
-    ),
-    (
-        "/health",
-        "synodic internal health endpoint — ops-only, not a dashboard surface",
-    ),
-    (
         "/mcp/messages",
         "MCP server JSON-RPC entry (ADR 0007 / #288) — called by external AI runtimes (Claude Code, Cursor, etc.) and the dashboard chat via the bespoke `mcp-client.ts` (#311). Not a typed dashboard `request<T>` surface — the contract is JSON-RPC + schemars-derived schemas, not the REST shape this lint scans",
     ),
@@ -545,7 +529,7 @@ pub struct Violation {
     /// The raw path as written at the offending site, before
     /// normalization — picked so a reviewer can grep for it directly.
     pub raw_path: String,
-    /// Subsystem for backend violations (`stiglab`/`synodic`).
+    /// Subsystem for backend violations (e.g. `portal`/`stiglab`).
     pub subsystem: Option<&'static str>,
     /// Source file for dashboard violations.
     pub file: Option<PathBuf>,
@@ -622,7 +606,6 @@ pub fn analyse(backend: &[BackendRoute], dashboard: &[DashboardCall]) -> Analysi
 
 const STIGLAB_SRC: &str = "crates/stiglab/src/server/mod.rs";
 const PORTAL_SRC: &str = "crates/onsager-portal/src/server.rs";
-const SYNODIC_SRC: &str = "crates/synodic/src/cmd/serve.rs";
 const DASHBOARD_API_DIR: &str = "apps/dashboard/src/lib/api";
 const DASHBOARD_SSE_SRC: &str = "apps/dashboard/src/lib/sse.ts";
 
@@ -655,7 +638,6 @@ pub fn run() -> Result<()> {
 
     let mut backend = Vec::new();
     backend.extend(parse_rust_routes(&root.join(PORTAL_SRC), "portal")?);
-    backend.extend(parse_rust_routes(&root.join(SYNODIC_SRC), "synodic")?);
 
     let mut dashboard = Vec::new();
     dashboard.extend(parse_ts_calls_dir(&root.join(DASHBOARD_API_DIR))?);
@@ -800,13 +782,6 @@ mod tests {
         assert!(portal_paths.contains(&"/api/workspaces"));
         assert!(portal_paths.contains(&"/api/sessions/{id}"));
         assert!(portal_paths.contains(&"/api/tasks"));
-
-        let synodic =
-            parse_rust_routes(&root.join("crates/synodic/src/cmd/serve.rs"), "synodic").unwrap();
-        assert!(synodic.len() >= 3, "synodic routes: {}", synodic.len());
-        let synodic_paths: Vec<_> = synodic.iter().map(|r| r.path.as_str()).collect();
-        assert!(synodic_paths.contains(&"/health"));
-        assert!(synodic_paths.contains(&"/events"));
     }
 
     fn workspace_root() -> std::path::PathBuf {
@@ -937,20 +912,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_backend_scopes_synodic_under_governance() {
-        assert_eq!(normalize_backend("/health", "synodic"), "governance/health");
-        assert_eq!(normalize_backend("/events", "synodic"), "governance/events");
-        assert_eq!(
-            normalize_backend("/events/{id}/resolve", "synodic"),
-            "governance/events/{x}/resolve"
-        );
-        assert_eq!(
-            normalize_backend("/escalations/{id}/propose-resolution", "synodic"),
-            "governance/escalations/{x}/propose-resolution"
-        );
-    }
-
-    #[test]
     fn normalize_dashboard_collapses_interpolations() {
         assert_eq!(normalize_dashboard("/health"), "health");
         assert_eq!(normalize_dashboard("/sessions/${id}"), "sessions/{x}");
@@ -1030,13 +991,8 @@ mod tests {
         let backend = vec![
             route("/api/health", "stiglab"),
             route("/api/workspaces/{id}", "stiglab"),
-            route("/events", "synodic"),
         ];
-        let dashboard = vec![
-            call("/health"),
-            call("/workspaces/${id}"),
-            call("/governance/events${scoped(workspaceId)}"),
-        ];
+        let dashboard = vec![call("/health"), call("/workspaces/${id}")];
         let r = analyse(&backend, &dashboard);
         assert!(r.violations.is_empty(), "{:?}", r.violations);
     }
@@ -1075,12 +1031,11 @@ mod tests {
         let backend = vec![
             route("/api/auth/github", "stiglab"),
             route("/webhooks/github", "stiglab"),
-            route("/api/governance/{*path}", "stiglab"),
         ];
         let dashboard: Vec<DashboardCall> = vec![];
         let r = analyse(&backend, &dashboard);
         assert!(r.violations.is_empty(), "{:?}", r.violations);
-        assert_eq!(r.allowed.len(), 3);
+        assert_eq!(r.allowed.len(), 2);
         assert!(r.allowed.iter().all(|(_, why)| !why.is_empty()));
     }
 
@@ -1098,9 +1053,6 @@ mod tests {
         let mut backend = Vec::new();
         backend.extend(
             parse_rust_routes(&root.join("crates/onsager-portal/src/server.rs"), "portal").unwrap(),
-        );
-        backend.extend(
-            parse_rust_routes(&root.join("crates/synodic/src/cmd/serve.rs"), "synodic").unwrap(),
         );
         let mut dashboard = Vec::new();
         dashboard.extend(parse_ts_calls_dir(&root.join("apps/dashboard/src/lib/api")).unwrap());

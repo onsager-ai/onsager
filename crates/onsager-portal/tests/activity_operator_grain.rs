@@ -57,7 +57,7 @@ async fn seed_mixed_events(pool: &PgPool) -> String {
     let workspace_id = format!("ws-{}", Uuid::new_v4());
     // Operator-grain ✓
     insert_event(pool, &workspace_id, "stiglab.session_completed", "stiglab").await;
-    insert_event(pool, &workspace_id, "synodic.gate_verdict", "synodic").await;
+    insert_event(pool, &workspace_id, "verify.verdict", "substrate").await;
     insert_event(pool, &workspace_id, "trigger.fired", "substrate").await;
     insert_event(pool, &workspace_id, "stage.entered", "substrate").await;
     insert_event(pool, &workspace_id, "node.failed", "substrate").await;
@@ -73,7 +73,7 @@ async fn seed_mixed_events(pool: &PgPool) -> String {
     )
     .await;
     insert_event(pool, &workspace_id, "ising.insight_emitted", "ising").await;
-    insert_event(pool, &workspace_id, "synodic.rule_proposed", "synodic").await;
+    insert_event(pool, &workspace_id, "ising.rule_proposed", "ising").await;
     workspace_id
 }
 
@@ -126,7 +126,7 @@ async fn operator_grain_true_filters_to_registry_allowlist() {
         events.iter().map(|e| e.event_type.as_str()).collect();
     for kind in [
         "stiglab.session_completed",
-        "synodic.gate_verdict",
+        "verify.verdict",
         "trigger.fired",
         "stage.entered",
         "node.failed",
@@ -143,7 +143,7 @@ async fn operator_grain_true_filters_to_registry_allowlist() {
         "forge.shaping_returned",
         "stiglab.session_result_ready",
         "ising.insight_emitted",
-        "synodic.rule_proposed",
+        "ising.rule_proposed",
     ] {
         assert!(
             !got.contains(kind),
@@ -200,7 +200,7 @@ async fn operator_grain_and_event_type_compose() {
     let params = EventsQuery {
         workspace: workspace_id.clone(),
         stream_type: None,
-        event_type: Some("synodic.gate_verdict".into()),
+        event_type: Some("verify.verdict".into()),
         stream_id: None,
         run_id: None,
         operator_grain: Some(true),
@@ -211,10 +211,10 @@ async fn operator_grain_and_event_type_compose() {
         .expect("query");
     assert!(
         !events.is_empty(),
-        "expected at least one synodic.gate_verdict row"
+        "expected at least one verify.verdict row"
     );
     for e in &events {
-        assert_eq!(e.event_type, "synodic.gate_verdict");
+        assert_eq!(e.event_type, "verify.verdict");
     }
 
     cleanup_workspace(&pool, &workspace_id).await;

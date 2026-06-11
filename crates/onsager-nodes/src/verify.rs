@@ -24,9 +24,9 @@
 //!
 //! This issue lands the executor *surface*, not the check
 //! infrastructure. Each [`Check`] variant carries a precomputed
-//! `must_pass` flag; MIG-01 (#363) swaps in the live test-runner /
-//! lint / schema / governance evaluators when Synodic's gate logic is
-//! ported. The kernel contract — declared provenance, invariant-2
+//! `must_pass` flag; MIG-01 (#363, re-scoped by ADR 0027) swaps in
+//! live in-process test-runner / lint / schema / governance
+//! evaluators. The kernel contract — declared provenance, invariant-2
 //! exemption, fail-policy routing — is in place today.
 
 use async_trait::async_trait;
@@ -46,8 +46,7 @@ pub const VERIFY_KIND: &str = "verify";
 
 /// What to do when one or more of [`VerifyExecutor::checks`] fails.
 ///
-/// Mirrors the legacy `SYNODIC_FAIL_POLICY` env var (see root
-/// `CLAUDE.md` § Environment variables): forge invariant #5 made
+/// Mirrors the legacy 0.1 gate fail policy: forge invariant #5 made
 /// `Escalate` the default for missing-in-window verdicts, and the
 /// same three-way choice carries forward into the substrate's
 /// Verify executor.
@@ -72,9 +71,9 @@ pub enum FailPolicy {
 
 /// One deterministic check the Verify executor runs.
 ///
-/// The four variants preserve Synodic's gate taxonomy (test-run / lint
-/// / schema / governance) so MIG-01 can route ported rules into the
-/// right variant without re-encoding the wire form. v1 reads the same
+/// The four variants preserve the gate taxonomy (test-run / lint /
+/// schema / governance) so MIG-01 can route checks into the right
+/// variant without re-encoding the wire form. v1 reads the same
 /// `must_pass` flag from every variant; MIG-01 replaces this with the
 /// live evaluators per kind.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,7 +85,7 @@ pub enum Check {
     Lint { name: String, must_pass: bool },
     /// A schema check — analogous to "migration / typecheck passed".
     Schema { name: String, must_pass: bool },
-    /// A governance check — analogous to a Synodic policy verdict.
+    /// A governance / policy check.
     Governance { name: String, must_pass: bool },
 }
 
@@ -195,21 +194,21 @@ impl RuntimeExecutor for VerifyExecutor {
             .collect();
         let passed = check_results.iter().all(|c| c.passed);
 
-        // RUN-02 (#360): emit `synodic.verdict` for every verify
+        // RUN-02 (#360): emit `verify.verdict` for every verify
         // execution — pass or fail, escalate or deny. The dashboard
         // run timeline keys off this event, not the wrapped
         // `Err(ExecutorError)`. `plan_id` comes off the scheduler-
         // populated `ExecutorContext` so the spine envelope's
         // `stream_id` (`plan:<plan>:<node>`) correlates the verdict
         // back to a specific run.
-        let verdict = se::SynodicVerdict {
+        let verdict = se::VerifyVerdict {
             plan_id: ctx.plan_id.as_str().to_string(),
             node_id: ctx.node_id,
             passed,
             check_results,
         };
         let payload = serde_json::to_value(&verdict).expect("verdict must serialize");
-        if let Err(e) = ctx.spine.emit(se::KIND_SYNODIC_VERDICT, payload).await {
+        if let Err(e) = ctx.spine.emit(se::KIND_VERIFY_VERDICT, payload).await {
             // Best-effort: a dropped verdict must not stall the run
             // (the attestation artifact still materializes), but a
             // silent drop hides why the dashboard timeline is missing
@@ -217,7 +216,7 @@ impl RuntimeExecutor for VerifyExecutor {
             tracing::warn!(
                 plan = %ctx.plan_id,
                 node = %ctx.node_id,
-                kind = se::KIND_SYNODIC_VERDICT,
+                kind = se::KIND_VERIFY_VERDICT,
                 "verify executor spine emit failed: {e}",
             );
         }

@@ -39,7 +39,6 @@ const routes = [
   { path: "/sessions", unique: "All Sessions", urlEndsWith: "/sessions" },
   { path: "/nodes", unique: "Registered Nodes", urlEndsWith: "/nodes" },
   { path: "/artifacts", unique: "All Artifacts", urlEndsWith: "/artifacts" },
-  { path: "/governance", unique: "Governance", urlEndsWith: "/governance" },
   { path: "/settings", unique: "Credentials", urlEndsWith: "/settings" },
 ] as const;
 

@@ -2,7 +2,7 @@ name: deploy-ready
 
 # Catches dev/prod divergence before it reaches Railway.
 # These are lessons learned from deployment incidents — each check
-# maps to a real failure. When ising/synodic are online, these
+# maps to a real failure. When more services are online, these
 # checks become crystallized governance rules instead.
 
 on:
@@ -29,7 +29,7 @@ jobs:
         run: |
           set -euo pipefail
           status=0
-          for dockerfile in crates/stiglab/deploy/Dockerfile deploy/synodic.Dockerfile; do
+          for dockerfile in crates/stiglab/deploy/Dockerfile; do
             [ -f "$dockerfile" ] || continue
             # Extract local COPY sources (skip --from= stage references and directories)
             grep -P '^\s*COPY\s' "$dockerfile" \
@@ -55,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          for dir in crates/onsager-spine/migrations crates/synodic/migrations/pg; do
+          for dir in crates/onsager-spine/migrations; do
             [ -d "$dir" ] || continue
             prev=0
             for f in $(ls "$dir"/*.sql | sort -V); do

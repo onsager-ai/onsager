@@ -4,4 +4,4 @@
  * Gate kind attached to a workflow stage. These map to the four gate runtime
  * implementations forge ships.
  */
-export type WorkflowGateKind = "agent-session" | "external-check" | "governance" | "manual-approval";
+export type WorkflowGateKind = "agent-session" | "external-check" | "manual-approval";

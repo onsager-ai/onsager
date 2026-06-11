@@ -483,17 +483,14 @@ async fn compute_stats_7d(
     .await?
     .get::<i64, _>(0);
 
-    // Verify gates passed: `synodic.gate_verdict` events whose inner
-    // `GateVerdict` enum tag is `"allow"`. The enum lives at
-    // `data.verdict.verdict` (FactoryEventKind serializes as
-    // `{type, ..., verdict: <GateVerdict>}` and `GateVerdict` is
-    // `#[serde(tag = "verdict")]`). Same indexed-column scoping as
-    // above.
+    // Verify gates passed: `verify.verdict` events (the substrate-native
+    // Verify executor verdict, ADR 0027) whose payload `passed` flag is
+    // true. Same indexed-column scoping as above.
     let verify_passed: i64 = sqlx::query(
         "SELECT COUNT(*)::BIGINT FROM events_ext \
-          WHERE event_type = 'synodic.gate_verdict' \
+          WHERE event_type = 'verify.verdict' \
             AND workspace_id = $1 \
-            AND data->'verdict'->>'verdict' = 'allow' \
+            AND data->>'passed' = 'true' \
             AND created_at >= NOW() - INTERVAL '7 days'",
     )
     .bind(workspace_id)

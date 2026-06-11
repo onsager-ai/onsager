@@ -23,7 +23,6 @@ import { trackActivation } from "@/lib/activation"
 const GATE_META: Record<string, { label: string; color: string }> = {
   "agent-session": { label: "Agent session", color: "#3b82f6" },
   "external-check": { label: "CI check", color: "#a855f7" },
-  governance: { label: "Governance", color: "#f59e0b" },
   "manual-approval": { label: "Manual approval", color: "#10b981" },
 }
 

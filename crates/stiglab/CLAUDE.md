@@ -13,7 +13,7 @@ cross-subsystem coordination.
 > - **Webhooks** called by external services (GitHub, etc.).
 >
 > The external HTTP boundary is owned by `portal` (the edge subsystem).
-> Factory subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
+> Factory subsystems (`forge`, `stiglab`, `ising`) coordinate
 > **exclusively** via the spine: events on the bus + reads against
 > shared spine tables. No subsystem makes HTTP calls to another
 > subsystem. No subsystem imports another subsystem's crate.
@@ -28,7 +28,7 @@ What this means for stiglab specifically:
   `/api/*` route lives on portal; stiglab no longer carries any
   reverse proxies. `xtask check-api-contract` enforces this:
   adding a non-loopback-only route here is a hard CI failure.
-- **Coordinating with forge or synodic.** Listen on the spine for the
+- **Coordinating with other subsystems.** Listen on the spine for the
   event you care about, write your response as a new event. Concrete
   pattern in production today: stiglab's `shaping_listener` consumes
   `forge.shaping_dispatched`, spawns the agent session, and emits
@@ -43,7 +43,7 @@ What this means for stiglab specifically:
   the same tables via its own connection pool when the agent runtime
   needs them — same database, separate pool, never a write.
 - **Cargo deps.** `stiglab` may depend on `onsager-{artifact,
-  github, spine}`. It must NOT depend on `forge`, `synodic`, or
+  github, spine}`. It must NOT depend on `forge` or
   `ising`. CI hard-fails this via `lint-seams`.
 - **Spine as single source of truth.** Lever D (#149) is done. Stiglab
   no longer keeps a private `workspace_workflows` schema; the

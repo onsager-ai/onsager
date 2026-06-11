@@ -416,7 +416,7 @@ mod tests {
             EVENT_ARTIFACT_EMITTED,
             emit_data("inline:a", "code", "one"),
         );
-        foreign.namespace = "synodic".to_string();
+        foreign.namespace = "telegramable".to_string();
         let m = parse_manifest(&[foreign], "ws1");
         assert_eq!(m.emit_count(), 0, "foreign-namespace row must be ignored");
     }

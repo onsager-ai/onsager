@@ -8,7 +8,6 @@ pub mod build_info;
 pub mod chat;
 pub mod credentials;
 pub mod github_app;
-pub mod governance;
 pub mod installations;
 pub mod issues;
 pub mod live_data;

@@ -1,7 +1,7 @@
 //! Architecture + bridge-pattern lints for the seam rule (ADR 0004 / spec #131
 //! Lever B).
 //!
-//! What it checks (subsystem source = `crates/{stiglab,synodic,ising}/`):
+//! What it checks (subsystem source = `crates/{stiglab,ising}/`):
 //!
 //! 1. **Arch-deps** — subsystem A's `Cargo.toml` must not declare another
 //!    subsystem as a path / git / version dep.
@@ -9,7 +9,7 @@
 //!    `*_URL` / `*_PORT` env var, or a `localhost:<port>` literal whose port
 //!    matches another subsystem's well-known port, are flagged. Self-
 //!    references are fine. The legitimate `reqwest::Client` callers in
-//!    stiglab/synodic talk to GitHub / LLM APIs — those don't trip this lint.
+//!    stiglab talks to GitHub / LLM APIs — those don't trip this lint.
 //! 3. **`#[serde(alias = ...)]`** — bridges that ossify (PR #107 pattern).
 //! 4. **`*_mirror.rs`** — files that mirror a spine concept into a private
 //!    schema (PR #129 pattern, Lever D's removal target).
@@ -32,14 +32,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
-const SUBSYSTEMS: &[&str] = &["stiglab", "synodic", "ising"];
+const SUBSYSTEMS: &[&str] = &["stiglab", "ising"];
 
 /// Well-known **default** ports each subsystem listens on (i.e. what
 /// `cargo run -p <subsys> -- serve` binds without env overrides; verified
 /// against the `*_PORT` defaults in each subsystem's serve command). Hard-
 /// coded because they are part of the subsystem's external contract — see
 /// root `CLAUDE.md`.
-const SUBSYSTEM_PORTS: &[(&str, &str)] = &[("stiglab", "3000"), ("synodic", "3001")];
+const SUBSYSTEM_PORTS: &[(&str, &str)] = &[("stiglab", "3000")];
 
 pub fn run() -> Result<()> {
     let root = workspace_root()?;

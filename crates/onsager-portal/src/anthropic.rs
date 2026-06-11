@@ -12,8 +12,7 @@
 //!   `cache_read_input_tokens` (cost ledger). The shape is small
 //!   enough that the SDK's abstractions would obscure rather than help.
 //!
-//! Mirrors the pattern in `synodic/src/core/llm.rs` (also direct
-//! reqwest), kept independent because synodic is a sibling subsystem
+//! Direct reqwest (no SDK dependency), kept self-contained
 //! that the seam rule forbids portal from importing.
 //!
 //! ## Prompt caching
