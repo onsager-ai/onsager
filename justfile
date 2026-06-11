@@ -194,35 +194,87 @@ measure-tokens FILE:
 dev: dev-infra
     #!/usr/bin/env bash
     set -euo pipefail
-    trap 'pids=$(jobs -p); [ -n "$pids" ] && kill $pids 2>/dev/null || true' EXIT
 
-    echo "==> Starting portal on :3002..."
-    DATABASE_URL="postgres://onsager:onsager@localhost:5432/onsager" \
-    PORTAL_BIND="0.0.0.0:3002" \
+    # The committed compose publishes db on an OS-assigned loopback port
+    # (a local override may add a fixed one) — read back what we got.
+    DB_PORT=$(docker compose port db 5432 | head -1 | awk -F: '{print $NF}')
+    DATABASE_URL="postgres://onsager:onsager@localhost:${DB_PORT}/onsager"
+
+    # Canonical-first port picker (#579): keep muscle-memory ports when
+    # free; fall back to a random free port so parallel worktree stacks
+    # never collide.
+    pick_port() {
+        local p=$1
+        while (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; do
+            p=$(( (RANDOM % 20000) + 20000 ))
+        done
+        echo "$p"
+    }
+    PORTAL_PORT=$(pick_port 3002)
+    STIGLAB_PORT=$(pick_port 3000)
+    SYNODIC_PORT=$(pick_port 3001)
+    DASHBOARD_PORT=$(pick_port 5173)
+    export PORTAL_PORT STIGLAB_PORT  # vite.config.ts proxy targets
+
+    # Self-register with the machine Traefik (worktree devproxy) when its
+    # file-provider dir exists: Host($DEV_HOST) → host-run Vite. Vite
+    # fronts /api, /mcp and /agent same-origin, so one route suffices;
+    # HMR must aim at the proxy port when reached through it. (#579)
+    DEVPROXY_DYNAMIC_DIR="${DEVPROXY_DYNAMIC_DIR:-$HOME/dev-proxy/dynamic}"
+    route_file=""
+    if [ -n "${DEV_HOST:-}" ] && [ -d "$DEVPROXY_DYNAMIC_DIR" ]; then
+        route_file="$DEVPROXY_DYNAMIC_DIR/${COMPOSE_PROJECT_NAME:-onsager}.yml"
+        cat > "$route_file" <<ROUTE
+    http:
+      routers:
+        ${COMPOSE_PROJECT_NAME:-onsager}:
+          rule: Host(\`${DEV_HOST}\`)
+          service: ${COMPOSE_PROJECT_NAME:-onsager}
+      services:
+        ${COMPOSE_PROJECT_NAME:-onsager}:
+          loadBalancer:
+            servers:
+              - url: http://host.docker.internal:${DASHBOARD_PORT}
+    ROUTE
+        export VITE_HMR_CLIENT_PORT="${VITE_HMR_CLIENT_PORT:-8000}"
+    else
+        echo "==> devproxy registration skipped (need DEV_HOST + $DEVPROXY_DYNAMIC_DIR)"
+    fi
+
+    trap 'pids=$(jobs -p); [ -n "$pids" ] && kill $pids 2>/dev/null || true; [ -n "$route_file" ] && rm -f "$route_file"' EXIT
+
+    echo "==> Starting portal on :${PORTAL_PORT}..."
+    DATABASE_URL="$DATABASE_URL" \
+    PORTAL_BIND="0.0.0.0:${PORTAL_PORT}" \
+    SYNODIC_URL="http://localhost:${SYNODIC_PORT}" \
+    STIGLAB_INTERNAL_WS_URL="ws://localhost:${STIGLAB_PORT}/agent/ws-internal" \
         cargo run -p onsager-portal -- serve &
 
-    echo "==> Starting stiglab on :3000..."
-    ONSAGER_DATABASE_URL="postgres://onsager:onsager@localhost:5432/onsager" \
+    echo "==> Starting stiglab on :${STIGLAB_PORT}..."
+    ONSAGER_DATABASE_URL="$DATABASE_URL" \
+    STIGLAB_PORT="$STIGLAB_PORT" \
         cargo run -p stiglab -- server &
 
-    echo "==> Starting synodic on :3001..."
-    PORT=3001 cargo run -p synodic --features postgres -- serve &
+    echo "==> Starting synodic on :${SYNODIC_PORT}..."
+    DATABASE_URL="$DATABASE_URL" \
+    PORT=$SYNODIC_PORT cargo run -p synodic --features postgres -- serve &
 
     echo "==> Starting onsager-scheduler (substrate scheduler)..."
-    DATABASE_URL="postgres://onsager:onsager@localhost:5432/onsager" \
+    DATABASE_URL="$DATABASE_URL" \
         cargo run -p onsager-scheduler -- serve &
 
-    echo "==> Starting dashboard on :5173..."
-    pnpm --filter dashboard dev -- --strictPort &
+    echo "==> Starting dashboard on :${DASHBOARD_PORT}..."
+    pnpm --filter dashboard dev -- --port "$DASHBOARD_PORT" --strictPort &
 
     echo ""
     echo "=== Onsager dev stack running ==="
-    echo "  Dashboard:  http://localhost:5173"
-    echo "  Stiglab:    http://localhost:3000"
-    echo "  Synodic:    http://localhost:3001"
-    echo "  Portal:     http://localhost:3002"
+    [ -n "$route_file" ] && echo "  Devproxy:   http://${DEV_HOST}:8000"
+    echo "  Dashboard:  http://localhost:${DASHBOARD_PORT}"
+    echo "  Stiglab:    http://localhost:${STIGLAB_PORT}"
+    echo "  Synodic:    http://localhost:${SYNODIC_PORT}"
+    echo "  Portal:     http://localhost:${PORTAL_PORT}"
     echo "  Scheduler:  spine listener (no HTTP port)"
-    echo "  Postgres:   postgres://onsager:onsager@localhost:5432/onsager"
+    echo "  Postgres:   postgres://onsager:onsager@localhost:${DB_PORT}/onsager"
     echo ""
     echo "Press Ctrl+C to stop all services."
     wait

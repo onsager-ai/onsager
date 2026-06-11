@@ -362,7 +362,18 @@ curl -s -H "Host: $DEV_HOST" localhost:8000
 ```
 
 Manage worktrees with `wt new <branch>` / `wt rm <branch>` / `wt ls`
-(see `~/bin/wt`). Note: the root compose no longer publishes Postgres
-on host :5432; for host-run `cargo` against a containerized db, either
-use the slot system or add a local (gitignored) `compose.override.yml`
-re-adding the port.
+(see `~/bin/wt`).
+
+**Host-run mode (#579, the fast loop).** `just dev` is also a devproxy
+citizen: it allocates free ports per service (canonical 3000–3002/5173
+first, random fallback so parallel worktree stacks never collide),
+derives `DATABASE_URL` from the db's OS-assigned loopback port
+(`docker compose port db 5432` — the compose publishes `127.0.0.1::5432`,
+no override needed), and self-registers `Host($DEV_HOST)` with Traefik
+by writing `~/dev-proxy/dynamic/$COMPOSE_PROJECT_NAME.yml` (removed on
+exit). The host stack is then reachable at the same
+`http://$DEV_HOST:8000`, HMR included. One-time machine setup: the
+`~/dev-proxy` Traefik needs `--providers.file.directory=/dynamic
+--providers.file.watch=true`, a `./dynamic:/dynamic:ro` mount, and
+`extra_hosts: [host.docker.internal:host-gateway]`. Without that dir
+(or outside direnv) `just dev` skips registration and behaves as before.
