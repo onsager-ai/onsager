@@ -21,8 +21,8 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use onsager_agent_spawn::{
-    LIVENESS_HOOK_URL_ENV, MCP_URL_ENV, SESSION_TOKEN_ENV, mcp_config_json, repos_env_json,
-    stop_hook_settings_json, ClonableRepo, REPOS_ENV,
+    ClonableRepo, LIVENESS_HOOK_URL_ENV, MCP_URL_ENV, REPOS_ENV, SESSION_TOKEN_ENV,
+    mcp_config_json, repos_env_json, stop_hook_settings_json,
 };
 use onsager_spine::protocol::RepoAccess;
 use onsager_spine::{EventMetadata, EventStore};
@@ -518,10 +518,7 @@ impl SessionRunner {
             launch.workspace_id.as_deref(),
         ) {
             env.insert(SESSION_TOKEN_ENV.to_string(), token.to_string());
-            env.insert(
-                "ONSAGER_SESSION_ID".to_string(),
-                launch.session_id.clone(),
-            );
+            env.insert("ONSAGER_SESSION_ID".to_string(), launch.session_id.clone());
             env.insert("ONSAGER_WORKSPACE_ID".to_string(), ws.to_string());
         }
 
@@ -554,11 +551,10 @@ impl SessionRunner {
                 // Persist the final output only when nothing streamed —
                 // avoids duplicating the whole response in the log.
                 if !output.is_empty() {
-                    let already_streamed =
-                        session_db::get_session_logs(pool, &launch.session_id)
-                            .await
-                            .map(|logs| !logs.is_empty())
-                            .unwrap_or(false);
+                    let already_streamed = session_db::get_session_logs(pool, &launch.session_id)
+                        .await
+                        .map(|logs| !logs.is_empty())
+                        .unwrap_or(false);
                     if !already_streamed
                         && let Err(e) = session_db::append_session_log(
                             pool,
@@ -600,8 +596,7 @@ impl SessionRunner {
             }
             NdjsonResult::Error { error } => {
                 if let Err(e) =
-                    session_db::append_session_log(pool, &launch.session_id, &error, "stderr")
-                        .await
+                    session_db::append_session_log(pool, &launch.session_id, &error, "stderr").await
                 {
                     tracing::error!("failed to append session log: {e}");
                 }
@@ -632,7 +627,12 @@ async fn fail_session(pool: &PgPool, session_id: &str, error: &str) {
 }
 
 /// Emit `session.failed` for a session that never produced a result.
-async fn emit_session_failed(pool: &PgPool, spine: &EventStore, launch: &SessionLaunch, error: &str) {
+async fn emit_session_failed(
+    pool: &PgPool,
+    spine: &EventStore,
+    launch: &SessionLaunch,
+    error: &str,
+) {
     let artifact_id = artifact_id_for_session(pool, &launch.session_id).await;
     let event = onsager_spine::factory_event::FactoryEventKind::SessionFailed {
         session_id: launch.session_id.clone(),
@@ -686,15 +686,14 @@ async fn fetch_workspace_credentials(
     let Some(key) = config.credential_key.as_deref() else {
         return HashMap::new();
     };
-    let encrypted = match credential_db::get_all_user_credential_values(pool, workspace_id, user_id)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::error!("failed to load workspace credentials: {e}");
-            return HashMap::new();
-        }
-    };
+    let encrypted =
+        match credential_db::get_all_user_credential_values(pool, workspace_id, user_id).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("failed to load workspace credentials: {e}");
+                return HashMap::new();
+            }
+        };
     let mut out = HashMap::new();
     for (name, encrypted_value) in encrypted {
         match decrypt_credential(key, &encrypted_value) {
@@ -866,8 +865,10 @@ mod tests {
     #[test]
     fn result_error_without_message_names_the_subtype() {
         let mut acc = String::new();
-        let parsed =
-            parse_ndjson_line(r#"{"type":"result","subtype":"error_during_run"}"#, &mut acc);
+        let parsed = parse_ndjson_line(
+            r#"{"type":"result","subtype":"error_during_run"}"#,
+            &mut acc,
+        );
         assert_eq!(
             parsed.result,
             Some(NdjsonResult::Error {
