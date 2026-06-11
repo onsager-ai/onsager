@@ -73,11 +73,6 @@ impl Namespace {
         Self::new("session").unwrap()
     }
 
-    /// Namespace for the ising component.
-    pub fn ising() -> Self {
-        Self::new("ising").unwrap()
-    }
-
     /// Namespace for the telegramable component.
     pub fn telegramable() -> Self {
         Self::new("telegramable").unwrap()
@@ -158,7 +153,6 @@ mod tests {
     fn well_known_constants() {
         assert_eq!(Namespace::forge().as_str(), "forge");
         assert_eq!(Namespace::session().as_str(), "session");
-        assert_eq!(Namespace::ising().as_str(), "ising");
         assert_eq!(Namespace::telegramable().as_str(), "telegramable");
     }
 

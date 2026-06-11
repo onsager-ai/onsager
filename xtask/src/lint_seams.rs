@@ -1,8 +1,8 @@
 //! Architecture + bridge-pattern lints for the seam rule (ADR 0004 / spec #131
 //! Lever B).
 //!
-//! What it checks (subsystem source = `crates/ising/`, until #584
-//! retires it):
+//! What it checks (the scanned subsystem set is empty post-#584; the
+//! #587 lint diet re-scopes this to the portal/engine boundary):
 //!
 //! 1. **Arch-deps** — subsystem A's `Cargo.toml` must not declare another
 //!    subsystem as a path / git / version dep.
@@ -33,17 +33,18 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
-// Post-ADR 0027 only the deprecated `ising` stub remains behind the
-// seam (stiglab folded into portal per #583; it retires with #584).
-// Portal is the edge and the substrate hosts sit below the seam.
-const SUBSYSTEMS: &[&str] = &["ising"];
+// Post-ADR 0027 / #584 no factory subsystem remains behind the seam
+// (synodic retired #582, stiglab folded into portal #583, ising +
+// observers retired #584). The cross-subsystem machinery stays (empty)
+// until the #587 lint diet re-scopes this lint to the portal/engine
+// boundary.
+const SUBSYSTEMS: &[&str] = &[];
 
 /// Well-known **default** ports each subsystem listens on (i.e. what
 /// `cargo run -p <subsys> -- serve` binds without env overrides). Empty
 /// post-ADR 0027 — no factory subsystem hosts an HTTP server anymore
-/// (the deprecated `ising` stub has no port); the machinery stays until
-/// #584 retires the last subsystem and this lint\'s cross-subsystem
-/// checks with it.
+/// (no subsystem remains); the machinery stays until the #587 lint
+/// diet re-scopes it.
 const SUBSYSTEM_PORTS: &[(&str, &str)] = &[];
 
 pub fn run() -> Result<()> {
@@ -310,11 +311,26 @@ fn check_sibling_url(
     line: &str,
     out: &mut Vec<Violation>,
 ) {
+    check_sibling_url_against(root, subsys, path, line_no, line, SUBSYSTEMS, out)
+}
+
+/// Inner form taking the sibling set explicitly so the detection logic
+/// stays unit-testable while the production `SUBSYSTEMS` list is empty
+/// (post-ADR 0027; re-scoped by the #587 lint diet).
+fn check_sibling_url_against(
+    root: &Path,
+    subsys: &str,
+    path: &Path,
+    line_no: usize,
+    line: &str,
+    siblings: &[&str],
+    out: &mut Vec<Violation>,
+) {
     // Strip a trailing line comment so a `// seam-allow:` (or any other
     // textual mention of the env var inside a comment) doesn't itself trip.
     let code = strip_line_comment(line);
 
-    for sibling in SUBSYSTEMS {
+    for sibling in siblings {
         if *sibling == subsys {
             continue;
         }
@@ -688,7 +704,7 @@ mod tests {
     use super::*;
 
     fn fake_path() -> &'static Path {
-        Path::new("crates/ising/src/test.rs")
+        Path::new("crates/example-subsystem/src/test.rs")
     }
 
     fn fake_root() -> &'static Path {
@@ -698,12 +714,13 @@ mod tests {
     #[test]
     fn flags_sibling_env_var() {
         let mut v = Vec::new();
-        check_sibling_url(
+        check_sibling_url_against(
             fake_root(),
             "telegramable",
             fake_path(),
             10,
             r#"std::env::var("ISING_URL")"#,
+            &["ising"],
             &mut v,
         );
         assert_eq!(v.len(), 1);
@@ -713,12 +730,13 @@ mod tests {
     #[test]
     fn flags_sibling_url_in_string() {
         let mut v = Vec::new();
-        check_sibling_url(
+        check_sibling_url_against(
             fake_root(),
             "telegramable",
             fake_path(),
             10,
             r#"let url = "http://ising:3003/api/x";"#,
+            &["ising"],
             &mut v,
         );
         assert_eq!(v.len(), 1);

@@ -1793,10 +1793,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ising"
-version = "0.2.0-alpha.1"
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2235,24 +2231,6 @@ dependencies = [
  "tracing",
  "typetag",
  "uuid",
-]
-
-[[package]]
-name = "onsager-observers"
-version = "0.2.0-alpha.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "onsager-artifact",
- "onsager-spine",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "ulid",
 ]
 
 [[package]]

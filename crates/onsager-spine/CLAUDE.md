@@ -23,7 +23,6 @@ The library does **not** manage schema. The SQL contract lives in `migrations/00
 All subsystems live under `crates/` in the workspace root:
 
 - `forge` — production line (artifact lifecycle, scheduling kernel)
-- `ising` — continuous improvement engine (factory observation)
 
 Each depends on `onsager-spine` via `path = "../onsager-spine"`.
 Subsystems must NOT import each other.
@@ -34,7 +33,7 @@ Subsystems must NOT import each other.
 > - **User-facing endpoints** called by the dashboard.
 > - **Webhooks** called by external services (GitHub, etc.).
 >
-> Subsystems (`forge`, `ising`) coordinate
+> Factory processes coordinate
 > **exclusively** via the spine: events on the bus + reads against
 > shared spine tables. No subsystem makes HTTP calls to another
 > subsystem. No subsystem imports another subsystem's crate.

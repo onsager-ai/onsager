@@ -165,7 +165,7 @@ pub enum ToolGateVerdict {
 }
 
 // ===========================================================================
-// Ising → Forge: advisory insight payloads
+// Advisory insight payloads (legacy observation tier)
 // ===========================================================================
 
 /// A reference to a factory event used as evidence for an insight.
@@ -175,7 +175,7 @@ pub struct FactoryEventRef {
     pub event_type: String,
 }
 
-/// An optional action Ising suggests based on an insight.
+/// An optional action suggested alongside an insight.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuggestedAction {
     pub description: String,
@@ -184,9 +184,9 @@ pub struct SuggestedAction {
     pub payload: Option<serde_json::Value>,
 }
 
-/// Insight from Ising to Forge (forge-v0.1 §7.2).
+/// Advisory insight payload (forge-v0.1 §7.2; legacy).
 ///
-/// Advisory only — Forge may or may not act on it. Ising cannot block Forge.
+/// Advisory only — the consumer may or may not act on it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Insight {
     pub insight_id: String,

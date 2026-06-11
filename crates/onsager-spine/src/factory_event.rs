@@ -44,8 +44,6 @@ pub struct FactoryEvent {
 ///
 /// ## Session events (chat-session lifecycle — portal's in-process runner)
 ///
-/// ## Ising events (insight records)
-///
 /// `f64` fields (confidence) block `Eq`; only `PartialEq` is derived.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -96,23 +94,6 @@ pub enum FactoryEventKind {
     },
 
     // -- Forge process events -----------------------------------------------
-    /// Legacy 0.1 shaping-result record. Kept for historical spine rows
-    /// and the deprecated observers runtime (`shape_retry`, retiring
-    /// with #584); nothing emits it post-ADR 0027.
-    ForgeShapingReturned {
-        request_id: String,
-        artifact_id: ArtifactId,
-        outcome: ShapingOutcome,
-    },
-
-    /// GateVerdict observed by the legacy forge gate path. Kept for
-    /// historical spine rows; nothing emits it post-0.2.
-    ForgeGateVerdict {
-        artifact_id: ArtifactId,
-        gate_point: GatePoint,
-        verdict: VerdictSummary,
-    },
-
     /// Insight forwarded to the scheduling kernel.
     ForgeInsightObserved {
         insight_id: String,
@@ -204,74 +185,6 @@ pub enum FactoryEventKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<String>,
     },
-
-    // -- Ising events (observation) -----------------------------------------
-    /// An insight passed validation and was recorded on the spine.
-    IsingInsightDetected {
-        insight_id: String,
-        kind: InsightKind,
-        scope: InsightScope,
-        observation: String,
-        confidence: f64,
-    },
-
-    /// A structured signal Ising surfaces on the spine for other subsystems
-    /// to consume (issue #36 — close the feedback loop). Unlike
-    /// `IsingInsightDetected`, which carries a human-readable observation,
-    /// this variant is the machine-readable edge: each emission names the
-    /// signal kind, the subject it attaches to, and the events that evidence
-    /// it. Forge tailed these into `WorldState.insights`; no consumer
-    /// remains post-ADR 0027.
-    IsingInsightEmitted {
-        /// Stable signal identifier (e.g. `"repeated_gate_override"`,
-        /// `"shape_retry_spike"`). Consumers match on this string.
-        signal_kind: String,
-        /// What the signal is about — an artifact kind, artifact id, rule id,
-        /// or intent class — serialized as a free-form string so the event
-        /// contract doesn't need to know every possible subject type.
-        subject_ref: String,
-        /// Spine events that evidence this signal. Invariant: non-empty
-        /// (enforced by the producer).
-        evidence: Vec<EventRef>,
-        /// 0.0..=1.0; downstream consumers use this to route (advisory vs.
-        /// crystallization threshold).
-        confidence: f64,
-    },
-
-    /// An insight was deduplicated or fell below confidence threshold (audit trail).
-    IsingInsightSuppressed { insight_id: String, reason: String },
-
-    /// An insight was packaged as a rule proposal (issue #36 Step 2).
-    /// Unlike the legacy form, this variant carries enough structure
-    /// that a downstream consumer can route it without looking up
-    /// the original insight — `signal_kind` + `subject_ref` identify the
-    /// evidence, `proposed_action` names what rule change is being asked
-    /// for, and `class` decides whether the proposal auto-activates
-    /// (`safe_auto`) or enters the review queue (`review_required`).
-    IsingRuleProposed {
-        /// ID of the insight that motivated the proposal.
-        insight_id: String,
-        /// Copy of the producing analyzer's signal kind (e.g.
-        /// `"repeated_gate_override"`) so consumers can dedupe against the
-        /// `insight_emitted` stream.
-        signal_kind: String,
-        /// What the proposal is about (artifact kind, rule id, etc.).
-        subject_ref: String,
-        /// Kind of change being proposed.
-        proposed_action: RuleProposalAction,
-        /// How the proposal should be handled downstream.
-        class: RuleProposalClass,
-        /// Human-readable justification for the audit trail.
-        rationale: String,
-        /// Confidence copied from the backing insight (0.0..=1.0).
-        confidence: f64,
-    },
-
-    /// An analyzer encountered an error during its run.
-    IsingAnalyzerError { analyzer: String, error: String },
-
-    /// Ising finished catching up from a lag position.
-    IsingCatchupCompleted { events_processed: u64 },
 
     // -- Workflow runtime events (issue #80) --------------------------------
     /// A trigger (e.g. a GitHub issue webhook) fired and produced a payload
@@ -527,8 +440,6 @@ impl FactoryEventKind {
             Self::GitCiCompleted { .. } => "git.ci_completed",
             Self::GitPrMerged { .. } => "git.pr_merged",
             Self::GitPrClosed { .. } => "git.pr_closed",
-            Self::ForgeShapingReturned { .. } => "forge.shaping_returned",
-            Self::ForgeGateVerdict { .. } => "forge.gate_verdict",
             Self::ForgeInsightObserved { .. } => "forge.insight_observed",
             Self::ForgeDecisionMade { .. } => "forge.decision_made",
             Self::SessionCompleted { .. } => "session.completed",
@@ -536,12 +447,6 @@ impl FactoryEventKind {
             Self::PortalSessionRequested { .. } => "portal.session_requested",
             Self::PortalSessionCancelRequested { .. } => "portal.session_cancel_requested",
             Self::PortalPrOpenFailed { .. } => "portal.pr_open_failed",
-            Self::IsingInsightDetected { .. } => "ising.insight_detected",
-            Self::IsingInsightEmitted { .. } => "ising.insight_emitted",
-            Self::IsingInsightSuppressed { .. } => "ising.insight_suppressed",
-            Self::IsingRuleProposed { .. } => "ising.rule_proposed",
-            Self::IsingAnalyzerError { .. } => "ising.analyzer_error",
-            Self::IsingCatchupCompleted { .. } => "ising.catchup_completed",
             Self::TriggerFired { .. } => "trigger.fired",
             Self::WorkflowManualTriggered { .. } => "workflow.manual_triggered",
             Self::StageEntered { .. } => "stage.entered",
@@ -574,20 +479,11 @@ impl FactoryEventKind {
             | Self::GitCiCompleted { .. }
             | Self::GitPrMerged { .. }
             | Self::GitPrClosed { .. } => "git",
-            Self::ForgeShapingReturned { .. }
-            | Self::ForgeGateVerdict { .. }
-            | Self::ForgeInsightObserved { .. }
-            | Self::ForgeDecisionMade { .. } => "forge",
+            Self::ForgeInsightObserved { .. } | Self::ForgeDecisionMade { .. } => "forge",
             Self::SessionCompleted { .. } | Self::SessionFailed { .. } => "session",
             Self::PortalSessionRequested { .. }
             | Self::PortalSessionCancelRequested { .. }
             | Self::PortalPrOpenFailed { .. } => "portal",
-            Self::IsingInsightDetected { .. }
-            | Self::IsingInsightEmitted { .. }
-            | Self::IsingInsightSuppressed { .. }
-            | Self::IsingRuleProposed { .. }
-            | Self::IsingAnalyzerError { .. }
-            | Self::IsingCatchupCompleted { .. } => "ising",
             Self::TriggerFired { .. } | Self::StageEntered { .. } | Self::StageAdvanced { .. } => {
                 "workflow"
             }
@@ -630,8 +526,6 @@ impl FactoryEventKind {
             | Self::GitCiCompleted { artifact_id, .. }
             | Self::GitPrMerged { artifact_id, .. }
             | Self::GitPrClosed { artifact_id, .. } => artifact_id.to_string(),
-            Self::ForgeShapingReturned { request_id, .. } => request_id.clone(),
-            Self::ForgeGateVerdict { artifact_id, .. } => artifact_id.to_string(),
             Self::ForgeInsightObserved { insight_id, .. } => insight_id.clone(),
             Self::ForgeDecisionMade { artifact_id, .. } => artifact_id.to_string(),
             Self::SessionCompleted { session_id, .. } | Self::SessionFailed { session_id, .. } => {
@@ -647,12 +541,6 @@ impl FactoryEventKind {
                 .as_deref()
                 .map(|b| format!("portal:pr_open_failed:{b}"))
                 .unwrap_or_else(|| format!("portal:pr_open_failed:{workspace_id}")),
-            Self::IsingInsightDetected { insight_id, .. } => insight_id.clone(),
-            Self::IsingInsightEmitted { subject_ref, .. } => subject_ref.clone(),
-            Self::IsingInsightSuppressed { insight_id, .. } => insight_id.clone(),
-            Self::IsingRuleProposed { insight_id, .. } => insight_id.clone(),
-            Self::IsingAnalyzerError { analyzer, .. } => analyzer.clone(),
-            Self::IsingCatchupCompleted { .. } => "ising".to_string(),
             Self::TriggerFired { workflow_id, .. } => format!("workflow:{workflow_id}"),
             Self::WorkflowManualTriggered { workflow_id, .. } => {
                 format!("audit:workflow:{workflow_id}")
@@ -722,16 +610,6 @@ impl FactoryEventKind {
 // Supporting enums
 // ---------------------------------------------------------------------------
 
-/// Outcome of a shaping request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ShapingOutcome {
-    Completed,
-    Failed,
-    Partial,
-    Aborted,
-}
-
 /// Gate points in the legacy 0.1 gate protocol. Kept for historical
 /// spine rows; the governance subsystem retired with ADR 0027.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -750,16 +628,6 @@ pub enum GatePoint {
     RepoWrite,
 }
 
-/// Summary of a gate verdict (for event spine recording).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum VerdictSummary {
-    Allow,
-    Deny,
-    Modify,
-    Escalate,
-}
-
 /// Forge process states. Used by forge's internal state machine; no longer
 /// carried on a `FactoryEventKind` variant after spec #272 retired
 /// `ForgeStateChanged`.
@@ -772,7 +640,7 @@ pub enum ForgeProcessState {
     Stopped,
 }
 
-/// Insight categories from Ising.
+/// Insight categories (legacy observation taxonomy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InsightKind {
@@ -789,19 +657,6 @@ pub enum InsightScope {
     ArtifactKind(String),
     SpecificArtifact(ArtifactId),
     Global,
-}
-
-/// Reference to a spine event used as evidence for a signal (`insight.emitted`
-/// variant carries a `Vec<EventRef>`). This is the spine-native counterpart to
-/// `onsager_spine::protocol::FactoryEventRef` — kept in the spine crate so the event
-/// vocabulary has no protocol-crate dependency.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EventRef {
-    /// The `id` column in the `events` or `events_ext` table.
-    pub event_id: i64,
-    /// The `event_type` string (e.g. `"forge.gate_verdict"`), for quick
-    /// consumer-side filtering without a second lookup.
-    pub event_type: String,
 }
 
 /// LLM token usage carried on [`FactoryEventKind::SessionCompleted`]
@@ -830,27 +685,6 @@ pub struct TokenUsage {
     pub model: Option<String>,
 }
 
-/// What kind of rule change an [`FactoryEventKind::IsingRuleProposed`] is
-/// asking for.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub enum RuleProposalAction {
-    /// Disable or retire an existing rule — typically when override rate is
-    /// so high the rule is more friction than value.
-    Retire { rule_id: String },
-    /// Rewrite an existing rule's condition — typically when the rule is
-    /// tripping on false positives.
-    Rewrite {
-        rule_id: String,
-        suggested_condition: Option<String>,
-    },
-    /// Register a new rule for a subject that currently has none.
-    Introduce {
-        subject_ref: String,
-        suggested_condition: Option<String>,
-    },
-}
-
 /// One check's outcome carried on [`FactoryEventKind::VerifyVerdict`].
 /// The Verify executor's [`Check`](../../../crates/onsager-nodes/src/verify.rs)
 /// list maps 1:1 onto this struct list.
@@ -860,18 +694,6 @@ pub struct VerifyCheckResult {
     pub name: String,
     /// `true` when this check passed.
     pub passed: bool,
-}
-
-/// How a rule proposal should be handled downstream.
-///
-/// `SafeAuto` proposals carry a narrow, reversible change with enough
-/// confidence that blocking on a human is pure friction. `ReviewRequired`
-/// proposals land in the review queue on the dashboard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RuleProposalClass {
-    SafeAuto,
-    ReviewRequired,
 }
 
 // ---------------------------------------------------------------------------

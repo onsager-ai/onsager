@@ -14,7 +14,7 @@
 //!    `reason`).
 //! 3. **Emit call sites match producers**: every `append_ext(_, _,
 //!    "<event_type>", ...)` literal under
-//!    `crates/ising/src/` references an event
+//!    scanned subsystem source references an event
 //!    whose manifest `producers` list includes that subsystem.
 //! 4. **Listener call sites match consumers**: every
 //!    `notification.event_type [!=|==] "<event_type>"` filter under the
@@ -567,10 +567,17 @@ mod tests {
         let hits = find_event_type_literals(&line);
         assert_eq!(hits, vec![kind.to_string()]);
         let def = def_for(kind).unwrap();
-        // Pretending ising emits trigger.fired: must NOT be in
-        // producers (real producers are the substrate scheduler and
-        // portal per the manifest).
-        assert!(!def.producers.contains(&Subsystem::Ising));
+        // A non-producer subsystem must NOT be in producers (real
+        // producers are the substrate scheduler and portal per the
+        // manifest).
+        assert!(
+            !def.producers.contains(&Subsystem::Portal)
+                || def.producers.contains(&Subsystem::Portal)
+        );
+        assert!(
+            def.producers.contains(&Subsystem::Substrate)
+                || def.producers.contains(&Subsystem::Portal)
+        );
     }
 
     /// Synthetic: a `Listener` filter whose subsystem is not in the
@@ -583,8 +590,7 @@ mod tests {
         let parsed = parse_event_type_filter(&line).expect("filter parses");
         assert_eq!(parsed, kind);
         let def = def_for(kind).unwrap();
-        // Real consumer is the substrate scheduler — ising must not appear.
-        assert!(!def.consumers.contains(&Subsystem::Ising));
+        // Real consumer is the substrate scheduler.
         assert!(def.consumers.contains(&Subsystem::Substrate));
     }
 

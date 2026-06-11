@@ -26,7 +26,6 @@ COPY crates/onsager-portal/Cargo.toml     crates/onsager-portal/Cargo.toml
 COPY crates/onsager-scheduler/Cargo.toml  crates/onsager-scheduler/Cargo.toml
 COPY crates/onsager-trigger/Cargo.toml    crates/onsager-trigger/Cargo.toml
 COPY crates/onsager/Cargo.toml            crates/onsager/Cargo.toml
-COPY crates/ising/Cargo.toml              crates/ising/Cargo.toml
 COPY xtask/Cargo.toml                     xtask/Cargo.toml
 # Create dummy source files so Cargo can compile each crate stub.
 # Crates with [lib] need src/lib.rs; crates with [[bin]] need src/main.rs.
@@ -41,7 +40,6 @@ RUN mkdir -p \
       crates/onsager-scheduler/src \
       crates/onsager-trigger/src \
       crates/onsager/src \
-      crates/ising/src \
       xtask/src \
     && touch \
       crates/onsager-spine/src/lib.rs \
@@ -52,11 +50,9 @@ RUN mkdir -p \
       crates/onsager-github/src/lib.rs \
       crates/onsager-portal/src/lib.rs \
       crates/onsager-scheduler/src/lib.rs \
-      crates/ising/src/lib.rs \
     && echo "fn main() {}" | tee \
       crates/onsager/src/main.rs \
       crates/onsager-trigger/src/main.rs \
-      crates/ising/src/main.rs \
       crates/onsager-portal/src/main.rs \
       crates/onsager-scheduler/src/main.rs \
       xtask/src/main.rs \

@@ -82,7 +82,7 @@ See § What makes Onsager Onsager (above) for the identity commitments these cho
 
 The shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel is still the single runtime coordination medium — components stay runtime-decoupled and coordinate through stigmergy (indirect signals via the shared medium), not direct calls. The `onsager` dispatcher is a ~100-LOC CLI with zero business deps that discovers subsystem binaries on `PATH` (`scheduler`, `trigger`).
 
-[ADR 0002](docs/adr/0002-process-product-isomorphism.md)'s two-loop framing — the **inner loop** (spec → PR → merge) and the **outer loop** (observe drift → propose rule → activate → modify the inner loop) — is superseded as a mechanism by the observer citizen (ADR 0013) but kept as a principle: every factory primitive ships with its dev-process counterpart, and every durable dev-process pattern is evidence for a future primitive.
+[ADR 0002](docs/adr/0002-process-product-isomorphism.md)'s two-loop framing — the **inner loop** (spec → PR → merge) and the **outer loop** (observe drift → propose rule → activate → modify the inner loop) — is superseded as a mechanism (the ADR 0013 observer citizen itself retired with ADR 0027 / #584) but kept as a principle: every factory primitive ships with its dev-process counterpart, and every durable dev-process pattern is evidence for a future primitive.
 
 ### The 0.2 substrate: a three-layer pipeline
 
@@ -99,15 +99,15 @@ The **Plan Compiler** ([ADR 0017](docs/adr/0017-plan-compiler-three-step-algorit
 Two more 0.2 pillars:
 
 - **Executor catalog, not `NodeKind`** ([ADR 0012](docs/adr/0012-executor-catalog-replaces-nodekind.md)). Nodes carry `executor: Box<dyn Executor>`; impls live side-by-side in `onsager-nodes` (`script`, `agent`, `verify`, `subworkflow`, `human`, …) and register in an `ExecutorRegistry`. Adding one is one file, no schema migration. **Verify** is kernel-special: the *only* executor allowed to upgrade an artifact's provenance from `Uncertain` to `Deterministic` ([ADR 0010](docs/adr/0010-provenance-as-substrate-first-class.md)).
-- **Observers, the second substrate citizen** ([ADR 0013](docs/adr/0013-observer-as-second-substrate-citizen.md), replacing ising). Non-blocking, cannot mutate state, read the spine, emit typed `QualitySignal` / `Insight` / `Alert` into `observer_outputs`. VSM S3* (audit), structurally separate from the workflow citizen's S1/S2/S3.
+- **Observers retired** ([ADR 0013](docs/adr/0013-observer-as-second-substrate-citizen.md) is superseded by [ADR 0027](docs/adr/0027-two-process-consolidation.md) / #584). The observer tier (`ising`, `onsager-observers`) was deleted with zero callers; observers return as deliberate new work (own ADR) only when a concrete consumer exists.
 
 **Five kernel invariants** ([ADR 0018](docs/adr/0018-five-kernel-invariants.md)) are the substrate's constitutional check, run statically at Execution Plan compile time (`onsager-substrate/src/validate.rs`): (1) `requires_deterministic` edges reject `Uncertain` upstreams; (2) `Uncertain` is contagious except through Verify; (3) a workflow's declared `OutputSpec` provenance matches its actual exit-path provenance; (4) every `SubWorkflow` `workflow_ref` resolves (no cycles); (5) single writer per artifact. A workflow violating one doesn't load.
 
 ### Remaining subsystems and the edge
 
-No factory subsystem remains behind the seam: `forge` is retired (→ substrate scheduler), `synodic` retired (ADR 0027 / #582 — governance returns, when real, as in-process Verify checks), `stiglab` retired (ADR 0027 / #583 — the agent control plane folded into portal's in-process session runner), `ising` deprecated (→ `onsager-observers`). The factory is two processes — **portal** (edge) and the **substrate scheduler** — over the shared spine.
+No factory subsystem remains behind the seam: `forge` is retired (→ substrate scheduler), `synodic` retired (ADR 0027 / #582 — governance returns, when real, as in-process Verify checks), `stiglab` retired (ADR 0027 / #583 — the agent control plane folded into portal's in-process session runner), and the observer tier (`ising`, `onsager-observers`) retired (ADR 0027 / #584 — observers return only when a concrete consumer exists). The factory is two processes — **portal** (edge) and the **substrate scheduler** — over the shared spine.
 
-**Architectural invariant**: subsystems must NOT import each other or be statically linked into the same binary. The substrate library crates (`onsager-substrate`, `onsager-nodes`, `onsager-observers`) and the shared utility crate `onsager-agent-spawn` sit below the seam and may be depended on by any side — a utility crate isn't a subsystem.
+**Architectural invariant**: the two processes must NOT import each other or be statically linked into the same binary. The substrate library crates (`onsager-substrate`, `onsager-nodes`) and the shared utility crate `onsager-agent-spawn` sit below the seam and may be depended on by any side — a utility crate isn't a subsystem.
 
 `portal` (`onsager-portal`) is the **edge** subsystem — the only one hosting public HTTP routes (dashboard API, GitHub webhooks, OAuth, credential CRUD, the MCP server). The route-level move landed via spec #222; the process-level move via [ADR 0006](docs/adr/0006-edge-dispatcher-as-the-public-boundary.md) (spec #283 — Caddy in front of portal). ADR 0008's `/agent/ws` control plane retired with stiglab (ADR 0027 / #583): portal runs agent sessions in-process (`session_runner.rs`), so there is no agent WebSocket surface at all.
 
@@ -135,9 +135,9 @@ The pieces (landed in stages under #288; ADR 0007 has the full history):
 
 > HTTP APIs exist only at external boundaries: **user-facing endpoints** called by the dashboard, and **webhooks** called by external services (GitHub, etc.).
 >
-> The external HTTP boundary is owned by `portal` (the edge subsystem). Factory processes coordinate **exclusively** via the spine: events on the bus + reads against shared spine tables. No subsystem makes HTTP calls to another subsystem. No subsystem imports another subsystem's crate. (Substrate library crates — `onsager-substrate`, `onsager-nodes`, `onsager-observers` — and the `onsager-agent-spawn` utility sit below the seam and may be shared by any side.)
+> The external HTTP boundary is owned by `portal` (the edge subsystem). Factory processes coordinate **exclusively** via the spine: events on the bus + reads against shared spine tables. No subsystem makes HTTP calls to another subsystem. No subsystem imports another subsystem's crate. (Substrate library crates — `onsager-substrate`, `onsager-nodes` — and the `onsager-agent-spawn` utility sit below the seam and may be shared by any side.)
 
-This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md) made it machine-checkable via a six-lever plan (spec #131, all landed and CI-enforced via `lint-seams`, `check-api-contract`, `check-events`); the seam rule is now mechanical, not review-time discipline. [ADR 0018](docs/adr/0018-five-kernel-invariants.md) partially supersedes ADR 0004: the six code-level seam levers remain in force for cross-subsystem discipline, but the substrate's *internal* correctness contract is now the five kernel invariants (above). Note `lint-seams` currently scopes the cross-subsystem checks to `ising` (the last subsystem-shaped crate); portal is the edge and the substrate hosts (`scheduler`, `trigger`) sit below the seam.
+This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md) made it machine-checkable via a six-lever plan (spec #131, all landed and CI-enforced via `lint-seams`, `check-api-contract`, `check-events`); the seam rule is now mechanical, not review-time discipline. [ADR 0018](docs/adr/0018-five-kernel-invariants.md) partially supersedes ADR 0004: the six code-level seam levers remain in force for cross-subsystem discipline, but the substrate's *internal* correctness contract is now the five kernel invariants (above). Note `lint-seams`' cross-subsystem scan set is empty post-#584 (machinery kept until the #587 lint diet re-scopes it to the portal/engine boundary); portal is the edge and the substrate hosts (`scheduler`, `trigger`) sit below the seam.
 
 [ADR 0006](docs/adr/0006-edge-dispatcher-as-the-public-boundary.md) closes the process-level half of clause 1 (Caddy as edge dispatcher; portal owns 100% of the external HTTP surface). ADR 0008's loopback agent control plane retired with stiglab (ADR 0027 / #583).
 
@@ -232,13 +232,11 @@ crates/
   onsager-github/      <- typed GitHub API + webhook verification + OAuth (single home for GitHub HTTP)
   onsager-substrate/   <- 0.2 kernel: Workflow template, Executor trait, WorkflowLibrary, Plan Compiler, five kernel invariants
   onsager-nodes/       <- executor runtime: async Executor impls (script/agent/verify/subworkflow/human), ExecutorRegistry, Scheduler
-  onsager-observers/   <- Observer citizen (VSM S3* audit) — replaces ising
   onsager-agent-spawn/ <- shared agent-session spawn wiring (utility crate; portal + scheduler both depend on it, seam-safely)
   onsager/             <- dispatcher CLI (~100 LOC, no business deps)
   onsager-portal/      <- edge subsystem — public HTTP, dashboard API, GitHub webhooks, OAuth, credentials, MCP server (lib + bin)
   onsager-scheduler/   <- substrate scheduler host: trigger.fired → Plan Compiler → executor dispatch (lib + bin)
   onsager-trigger/     <- manual + replay trigger CLI — emits TriggerFired to the spine (bin)
-  ising/               <- DEPRECATED — superseded by onsager-observers (ADR 0013); not in the dispatcher set
 apps/
   dashboard/           <- React UI (workflows, runs, artifacts, spec plans, governance)
   marketing/           <- marketing site
@@ -246,7 +244,7 @@ apps/
 
 Crate → support-crate dependencies (no crate depends on a sibling subsystem):
 
-- `onsager-substrate` → `artifact`; `onsager-nodes` → `{artifact, substrate}`; `onsager-observers` / `onsager-registry` / `onsager-github` → `{artifact, spine}`
+- `onsager-substrate` → `artifact`; `onsager-nodes` → `{artifact, substrate}`; `onsager-registry` / `onsager-github` → `{artifact, spine}`
 - `onsager-portal` (edge) → `{artifact, spine, github, registry, substrate}`; `onsager-scheduler` → `{artifact, spine, substrate, nodes, agent-spawn}`; `onsager-trigger` → `{spine, registry}`
 
 ## Getting Started

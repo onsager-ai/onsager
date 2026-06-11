@@ -110,7 +110,7 @@ pub async fn handle(
         db::upsert_pr_artifact_ref(&state.pool, &project.id, pr_number, next_state).await?;
 
     // Bump version on synchronize / close so the artifact's lifecycle reflects
-    // commit-by-commit progress (powers ising's PR-churn signal per #62).
+    // commit-by-commit progress (#62).
     if matches!(act, PrAction::Synchronize | PrAction::Closed) {
         let _ = db::bump_pr_artifact(&state.pool, &artifact.artifact_id, Some(next_state)).await?;
     }

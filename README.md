@@ -44,9 +44,9 @@ direct calls.
 ```
                        onsager-spine  (event bus library)
                               │
-        ┌─────────┬───────────┼──────────┐
-        │         │           │          │
-     portal   scheduler    trigger    ising
+        ┌─────────┬───────────┐
+        │         │           │
+     portal   scheduler    trigger
      (edge)   (substrate hosts)
 ```
 
@@ -90,7 +90,6 @@ and the ADRs under [`docs/adr/`](docs/adr/).
 | `onsager`        | Unified CLI dispatcher (`onsager <subsystem> ...`)                               |
 | `onsager-portal` | Edge subsystem — public HTTP, GitHub webhooks, OAuth, credentials                |
 | `forge`          | Production line — drives artifacts through their lifecycle                       |
-| `ising`          | Continuous improvement — observes the spine and surfaces insights                |
 
 Spec Plans (the factory's input contract) are authored externally —
 by the dashboard chat (an MCP client) and by humans writing GitHub

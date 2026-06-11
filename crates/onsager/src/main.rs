@@ -29,8 +29,8 @@ KNOWN SUBCOMMANDS:
     trigger     Fire or replay workflow triggers (manual / replay)
 ";
 
-// `ising` was removed from the known dispatcher set in spec #362
-// (OBS-02): its analyzers moved to `onsager-observers` and the
+// The observer tier (`ising`, `onsager-observers`) retired with
+// ADR 0027 / spec #584; the dispatcher set is the two substrate
 // remaining binary is a deprecation stub, not an active subsystem.
 const KNOWN: &[&str] = &["scheduler", "trigger"];
 
