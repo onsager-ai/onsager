@@ -38,6 +38,7 @@ see [`../architecture.md`](../architecture.md).
 | [0025](0025-chat-as-design-and-maintenance-surface.md) | Chat as design + maintenance surface | Accepted (2026-05-29, adoption ongoing) — `Identity impact: no` — amends ADR 0020 |
 | [0026](0026-nav-ia-sidebar-and-mobile-drawer.md) | Nav IA: desktop sidebar + mobile drawer | Accepted (2026-05-31) — `Identity impact: no` — supersedes ADR 0019's top-bar chrome |
 | [0027](0027-two-process-consolidation.md) | 0.3 consolidation: two-process factory (portal + engine) | Accepted (2026-06-11, **enforced**) — `Identity impact: yes` — supersedes ADR 0013 |
+| [0028](0028-one-workflow-model-one-run-path.md) | 0.4 simplification: one workflow model, one run path | Accepted (2026-06-11, adoption ongoing) — `Identity impact: no` |
 
 ## How to add an ADR
 
