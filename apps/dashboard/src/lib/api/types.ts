@@ -122,7 +122,8 @@ export type EventSubsystem =
   | "stiglab"
   | "synodic"
   | "ising"
-  | "portal";
+  | "portal"
+  | "substrate";
 
 export interface EventManifestEntry {
   kind: string;

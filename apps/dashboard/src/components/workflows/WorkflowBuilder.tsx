@@ -16,7 +16,6 @@ import {
   documentToCreateRequest,
   emptyDocument,
   isTriggerReady,
-  triggerRepos,
   type WorkflowDocument,
 } from "./workflow-draft"
 
@@ -49,27 +48,27 @@ export function WorkflowBuilder({
   const navigate = useNavigate()
   const activeWorkspace = useOptionalActiveWorkspace()
 
-  const isManual = draft.trigger.kind_tag === "manual"
+  const isCron = draft.trigger.kind_tag === "cron"
   // Per-tab completion drives the dots on the tab strip and the footer hint.
   const overviewDone = draft.name.trim() !== ""
-  // Manual triggers carry no config of their own (no label, no repo) — the
-  // fire button derives its label from the workflow name — so the Trigger tab
-  // is always complete for them.
-  const triggerDone = isManual || draft.trigger.label.trim() !== ""
-  const reposDone = isManual || triggerRepos(draft.trigger).length > 0
+  // The Trigger tab carries the per-kind config (manual: nothing; cron: a
+  // schedule; github webhook: a label), so its completion is exactly the
+  // trigger's readiness. Repositories are no longer required by any authorable
+  // kind (manual and cron resolve repos workspace-scoped at fire time), so the
+  // repo set never gates save.
+  const triggerDone = isTriggerReady(draft.trigger)
   const stepsDone = draft.stages.length > 0
 
-  const canSave =
-    overviewDone && isTriggerReady(draft.trigger) && stepsDone
+  const canSave = overviewDone && triggerDone && stepsDone
   const hint = !overviewDone
     ? "Name your workflow"
-    : !reposDone
-      ? "Pick at least one repository"
-      : !triggerDone
-        ? "Pick a trigger label"
-        : !stepsDone
-          ? "Add at least one step"
-          : ""
+    : !triggerDone
+      ? isCron
+        ? "Add a cron schedule"
+        : "Configure the trigger"
+      : !stepsDone
+        ? "Add at least one step"
+        : ""
 
   const create = useMutation({
     mutationFn: (body: CreateWorkflowRequest) => api.createWorkflow(body),
@@ -122,9 +121,7 @@ export function WorkflowBuilder({
             Trigger {!triggerDone && <Dot />}
           </TabsTrigger>
           <TabsTrigger value="steps">Steps {!stepsDone && <Dot />}</TabsTrigger>
-          <TabsTrigger value="repos">
-            Repositories {!reposDone && <Dot />}
-          </TabsTrigger>
+          <TabsTrigger value="repos">Repositories</TabsTrigger>
         </TabsList>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pt-4">
@@ -244,9 +241,13 @@ function PipelineSummary({
   const triggerLabel =
     draft.trigger.kind_tag === "manual"
       ? "Manual trigger"
-      : draft.trigger.label.trim()
-        ? `Label: ${draft.trigger.label}`
-        : "GitHub trigger"
+      : draft.trigger.kind_tag === "cron"
+        ? draft.trigger.expression?.trim()
+          ? `Cron: ${draft.trigger.expression}`
+          : "Cron trigger"
+        : draft.trigger.label.trim()
+          ? `Label: ${draft.trigger.label}`
+          : "GitHub trigger"
 
   return (
     <div className="rounded-lg border bg-muted/20 p-3">

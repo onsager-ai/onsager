@@ -17,12 +17,12 @@ export interface TriggerReposEditorProps {
 }
 
 /**
- * "Repositories" tab content — *what a run operates on*. One home for both
- * trigger kinds: a manual trigger is workspace-scoped (the run gets every
- * repo bound to the workspace), while a GitHub webhook trigger pins the repo
- * set the label fires against. Splitting repos out of the trigger form lines
- * up with #566 making repos a per-workflow binding rather than a per-trigger
- * field.
+ * "Repositories" tab content — *what a run operates on*. One home for every
+ * trigger kind: repo-less kinds (manual, cron) are workspace-scoped — the run
+ * gets every repo bound to the workspace — while a GitHub webhook trigger pins
+ * the repo set the label fires against. Splitting repos out of the trigger
+ * form lines up with #566 making repos a per-workflow binding rather than a
+ * per-trigger field.
  */
 export function TriggerReposEditor({
   workspaceId,
@@ -33,9 +33,10 @@ export function TriggerReposEditor({
   const workspace = useOptionalActiveWorkspace()
 
   // Repo-less workflows are workspace-scoped (#553): the run is handed every
-  // repo bound to the workspace and the agent clones what it needs.
+  // repo bound to the workspace and the agent clones what it needs. Manual and
+  // cron triggers both resolve repos this way at fire time.
   // Per-workflow repo pinning is a backend follow-up (#566).
-  if (value.kind_tag === "manual") {
+  if (value.kind_tag === "manual" || value.kind_tag === "cron") {
     return (
       <div className="space-y-1.5">
         <span className="text-sm font-medium">Repositories</span>

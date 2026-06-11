@@ -93,10 +93,48 @@ describe("documentToCreateRequest", () => {
     );
   });
 
-  it("throws when the trigger isn't ready (missing label)", () => {
+  it("throws when a webhook trigger isn't ready (missing repo + label)", () => {
+    // emptyDocument() now defaults to manual (always ready), so pin the
+    // unready path on an explicit, unconfigured github_issue_webhook draft.
     const d = emptyDocument();
+    d.trigger.kind_tag = "github_issue_webhook";
     expect(() =>
       documentToCreateRequest(d, [installation], "t_1", true),
     ).toThrow(/install, repo, and label/);
+  });
+
+  it("emptyDocument() defaults to a repo-less manual trigger", () => {
+    const d = emptyDocument();
+    d.name = "Manual flow";
+    expect(d.trigger.kind_tag).toBe("manual");
+    const out = documentToCreateRequest(d, [installation], "t_1", true);
+    expect(out.trigger).toEqual({ kind: "manual", name: "Manual flow" });
+    // Manual is repo-less — no install token-mint hint emitted.
+    expect("install_id" in out).toBe(false);
+  });
+
+  it("assembles a structured cron trigger with expression + timezone", () => {
+    const d = emptyDocument();
+    d.name = "Nightly";
+    d.trigger.kind_tag = "cron";
+    d.trigger.expression = "0 9 * * 1-5";
+    d.trigger.timezone = "America/New_York";
+    const out = documentToCreateRequest(d, [installation], "t_1", true);
+    expect(out.trigger).toEqual({
+      kind: "cron",
+      expression: "0 9 * * 1-5",
+      timezone: "America/New_York",
+    });
+    // Cron is repo-less, like manual.
+    expect("install_id" in out).toBe(false);
+  });
+
+  it("throws when a cron trigger has no schedule expression", () => {
+    const d = emptyDocument();
+    d.trigger.kind_tag = "cron";
+    d.trigger.expression = "  ";
+    expect(() =>
+      documentToCreateRequest(d, [installation], "t_1", true),
+    ).toThrow();
   });
 });

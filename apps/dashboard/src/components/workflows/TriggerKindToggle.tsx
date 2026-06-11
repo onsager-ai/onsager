@@ -1,23 +1,17 @@
 import { useQuery } from "@tanstack/react-query"
-import { Webhook, Zap } from "lucide-react"
+import { Clock, Webhook, Zap } from "lucide-react"
 import { api, type TriggerManifestEntry } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 
-// Kinds the builder can author today (#561). The manifest carries every
-// registry kind, but the builder only knows how to collect config for
-// these two; the rest (cron, interval, the other GitHub webhook variants,
-// …) land as the per-kind forms are built out. Order here is the display
-// order in the toggle.
-const SELECTABLE_KINDS = ["github_issue_webhook", "manual"] as const
+// Kinds the builder can author today. The manifest carries every registry
+// kind, but the builder only collects config for these; the rest (the other
+// GitHub webhook variants, interval, …) land as the per-kind forms are built
+// out. Manual is first so it's the default-visible kind. The GitHub issue
+// webhook is hidden for now — still a valid wire/draft value, just not
+// offered here yet. Order here is the display order in the toggle.
+const SELECTABLE_KINDS = ["manual", "cron"] as const
 
 const FALLBACK: TriggerManifestEntry[] = [
-  {
-    kind_tag: "github_issue_webhook",
-    producer: "portal",
-    category: "request",
-    ui_kind: "webhook",
-    description: "Fires when a GitHub issue is labeled with the configured label.",
-  },
   {
     kind_tag: "manual",
     producer: "portal",
@@ -25,11 +19,19 @@ const FALLBACK: TriggerManifestEntry[] = [
     ui_kind: "manual",
     description: "Fires from a UI button or `onsager trigger fire` CLI command.",
   },
+  {
+    kind_tag: "cron",
+    producer: "substrate",
+    category: "schedule",
+    ui_kind: "cron",
+    description: "Fires on a cron schedule (5- or 6-field expression, optional timezone).",
+  },
 ]
 
 const KIND_ICON: Record<string, typeof Webhook> = {
   github_issue_webhook: Webhook,
   manual: Zap,
+  cron: Clock,
 }
 
 /**
