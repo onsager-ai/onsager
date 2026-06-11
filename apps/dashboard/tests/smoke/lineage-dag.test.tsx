@@ -69,7 +69,7 @@ describe("LineageDAG.buildLanes", () => {
       {
         id: 1,
         stream_id: "forge:art_01",
-        stream_type: "forge",
+        stream_type: "workflow",
         event_type: "forge.shaping_dispatched",
         data: { request_id: "r1", artifact_id: "art_01" },
         actor: "forge",
@@ -106,7 +106,7 @@ describe("LineageDAG.buildLanes", () => {
         id: 1,
         stream_id: "s",
         stream_type: "forge",
-        event_type: "forge.decision_made",
+        event_type: "trigger.fired",
         data: {},
         actor: "forge",
         created_at: "2026-04-01T00:00:00Z",

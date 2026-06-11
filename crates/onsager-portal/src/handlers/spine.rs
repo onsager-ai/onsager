@@ -794,12 +794,11 @@ mod tests {
         assert!(kinds.contains(&"session.completed"));
         assert!(kinds.contains(&"verify.verdict"));
         assert!(kinds.contains(&"trigger.fired"));
-        assert!(kinds.contains(&"stage.entered"));
+        assert!(kinds.contains(&"stage.advanced"));
         assert!(kinds.contains(&"node.failed"));
         // Internal subsystem dispatches and analyzer diagnostics are not.
         assert!(!kinds.contains(&"forge.shaping_returned"));
-        assert!(!kinds.contains(&"forge.insight_observed"));
-        assert!(!kinds.contains(&"forge.decision_made"));
+        assert!(!kinds.contains(&"gate.check_updated"));
     }
 
     /// The path-scoped `/api/workspaces/:id/activity` alias must force

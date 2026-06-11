@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 use onsager_artifact::{ArtifactId, ArtifactState, Kind};
 use serde::{Deserialize, Serialize};
 
-use crate::factory_event::{GatePoint, InsightKind, InsightScope};
+use crate::factory_event::GatePoint;
 
 // ===========================================================================
 // Legacy 0.1 shaping payloads (forge-v0.1 §5)
@@ -175,30 +175,6 @@ pub struct FactoryEventRef {
     pub event_type: String,
 }
 
-/// An optional action suggested alongside an insight.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuggestedAction {
-    pub description: String,
-    pub action_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payload: Option<serde_json::Value>,
-}
-
-/// Advisory insight payload (forge-v0.1 §7.2; legacy).
-///
-/// Advisory only — the consumer may or may not act on it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Insight {
-    pub insight_id: String,
-    pub kind: InsightKind,
-    pub scope: InsightScope,
-    pub observation: String,
-    pub evidence: Vec<FactoryEventRef>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suggested_action: Option<SuggestedAction>,
-    pub confidence: f64,
-}
-
 // ===========================================================================
 // Scheduling kernel interface
 // ===========================================================================
@@ -272,24 +248,5 @@ mod tests {
         let json = serde_json::to_value(&deny).unwrap();
         assert_eq!(json["verdict"], "deny");
         assert_eq!(json["reason"], "unsafe operation");
-    }
-
-    #[test]
-    fn insight_serialization() {
-        let insight = Insight {
-            insight_id: "ins_001".into(),
-            kind: InsightKind::Failure,
-            scope: InsightScope::Global,
-            observation: "Code artifacts failing at 40% rate".into(),
-            evidence: vec![FactoryEventRef {
-                event_id: 42,
-                event_type: "forge.shaping_returned".into(),
-            }],
-            suggested_action: None,
-            confidence: 0.87,
-        };
-        let json = serde_json::to_value(&insight).unwrap();
-        assert_eq!(json["kind"], "failure");
-        assert_eq!(json["confidence"], 0.87);
     }
 }

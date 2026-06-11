@@ -117,59 +117,6 @@ fn node_awaiting_human_payload_matches_variant() {
 }
 
 #[test]
-fn node_human_approved_payload_matches_variant() {
-    let s = se::NodeHumanApproved {
-        plan_id: pid(),
-        node_id: nid(),
-        approved_by: "human:42".into(),
-    };
-    let v = FactoryEventKind::NodeHumanApproved {
-        plan_id: s.plan_id.clone(),
-        node_id: s.node_id,
-        approved_by: s.approved_by.clone(),
-    };
-    assert_eq!(
-        serde_json::to_value(&s).unwrap(),
-        strip_type(serde_json::to_value(&v).unwrap()),
-    );
-}
-
-#[test]
-fn node_human_rejected_payload_matches_variant_with_and_without_reason() {
-    // With reason.
-    let s = se::NodeHumanRejected {
-        plan_id: pid(),
-        node_id: nid(),
-        rejected_by: "human:42".into(),
-        reason: Some("scope creep".into()),
-    };
-    let v = FactoryEventKind::NodeHumanRejected {
-        plan_id: s.plan_id.clone(),
-        node_id: s.node_id,
-        rejected_by: s.rejected_by.clone(),
-        reason: s.reason.clone(),
-    };
-    assert_eq!(
-        serde_json::to_value(&s).unwrap(),
-        strip_type(serde_json::to_value(&v).unwrap()),
-    );
-
-    // Without reason — the optional field must be omitted on both
-    // sides (same `skip_serializing_if = "Option::is_none"` behavior).
-    let s = se::NodeHumanRejected { reason: None, ..s };
-    let v = FactoryEventKind::NodeHumanRejected {
-        plan_id: s.plan_id.clone(),
-        node_id: s.node_id,
-        rejected_by: s.rejected_by.clone(),
-        reason: None,
-    };
-    assert_eq!(
-        serde_json::to_value(&s).unwrap(),
-        strip_type(serde_json::to_value(&v).unwrap()),
-    );
-}
-
-#[test]
 fn verify_verdict_payload_matches_variant() {
     let s = se::VerifyVerdict {
         plan_id: pid(),
@@ -333,23 +280,6 @@ fn wire_kind_constants_agree_with_factory_event_kind() {
                 plan_id: pid(),
                 node_id: nid(),
                 prompt: "x".into(),
-            },
-        ),
-        (
-            se::KIND_NODE_HUMAN_APPROVED,
-            F::NodeHumanApproved {
-                plan_id: pid(),
-                node_id: nid(),
-                approved_by: "x".into(),
-            },
-        ),
-        (
-            se::KIND_NODE_HUMAN_REJECTED,
-            F::NodeHumanRejected {
-                plan_id: pid(),
-                node_id: nid(),
-                rejected_by: "x".into(),
-                reason: None,
             },
         ),
         (

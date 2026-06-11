@@ -2,8 +2,8 @@
 //!
 //! This module is the authoring surface for events the 0.2 substrate
 //! emits onto the spine — the scheduler ([`onsager-nodes`]) and the
-//! executor catalog ([`Script`], [`Agent`], [`Verify`], [`Human`],
-//! [`SubWorkflow`]). Each struct mirrors a [`FactoryEventKind`] variant
+//! executor catalog ([`Script`], [`Agent`], [`Verify`]). Each struct
+//! mirrors a [`FactoryEventKind`] variant
 //! over in `onsager-spine`; the two halves intentionally carry the same
 //! payload shape:
 //!
@@ -38,8 +38,6 @@
 //! | `node.completed`             | [`NodeCompleted`]                       |
 //! | `node.failed`                | [`NodeFailed`]                          |
 //! | `node.awaiting_human`        | [`NodeAwaitingHuman`]                   |
-//! | `node.human_approved`        | [`NodeHumanApproved`]                   |
-//! | `node.human_rejected`        | [`NodeHumanRejected`]                   |
 //! | `verify.verdict`             | [`VerifyVerdict`]                       |
 //! | `agent.session_started`      | [`AgentSessionStarted`]                 |
 //! | `agent.session_completed`    | [`AgentSessionCompleted`]               |
@@ -50,8 +48,6 @@
 //! [`Script`]: https://docs.rs/onsager-nodes/latest/onsager_nodes/script/struct.ScriptExecutor.html
 //! [`Agent`]: https://docs.rs/onsager-nodes/latest/onsager_nodes/agent/struct.AgentExecutor.html
 //! [`Verify`]: https://docs.rs/onsager-nodes/latest/onsager_nodes/verify/struct.VerifyExecutor.html
-//! [`Human`]: https://docs.rs/onsager-nodes/latest/onsager_nodes/human/struct.HumanExecutor.html
-//! [`SubWorkflow`]: https://docs.rs/onsager-nodes/latest/onsager_nodes/subworkflow/struct.SubWorkflowExecutor.html
 //! [`FactoryEventKind`]: https://docs.rs/onsager-spine/latest/onsager_spine/enum.FactoryEventKind.html
 
 use onsager_artifact::{ArtifactId, ArtifactState, NodeId};
@@ -71,8 +67,6 @@ pub const KIND_NODE_STARTED: &str = "node.started";
 pub const KIND_NODE_COMPLETED: &str = "node.completed";
 pub const KIND_NODE_FAILED: &str = "node.failed";
 pub const KIND_NODE_AWAITING_HUMAN: &str = "node.awaiting_human";
-pub const KIND_NODE_HUMAN_APPROVED: &str = "node.human_approved";
-pub const KIND_NODE_HUMAN_REJECTED: &str = "node.human_rejected";
 pub const KIND_VERIFY_VERDICT: &str = "verify.verdict";
 pub const KIND_AGENT_SESSION_STARTED: &str = "agent.session_started";
 pub const KIND_AGENT_SESSION_COMPLETED: &str = "agent.session_completed";
@@ -158,8 +152,8 @@ impl NodeFailed {
     }
 }
 
-/// A Human executor is parked waiting on an out-of-band approval
-/// decision.
+/// A node is parked waiting on an out-of-band human decision
+/// (emitted by the Agent executor's authoritative gate, #520 §4c).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeAwaitingHuman {
     pub plan_id: String,
@@ -171,40 +165,6 @@ pub struct NodeAwaitingHuman {
 impl NodeAwaitingHuman {
     pub fn kind(&self) -> &'static str {
         KIND_NODE_AWAITING_HUMAN
-    }
-}
-
-/// A pending Human executor node received an approval decision.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NodeHumanApproved {
-    pub plan_id: String,
-    pub node_id: NodeId,
-    /// Actor identifier — `"human:<id>"` for a dashboard user,
-    /// `"supervisor"` for a delegate agent.
-    pub approved_by: String,
-}
-
-impl NodeHumanApproved {
-    pub fn kind(&self) -> &'static str {
-        KIND_NODE_HUMAN_APPROVED
-    }
-}
-
-/// A pending Human executor node received a rejection decision.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NodeHumanRejected {
-    pub plan_id: String,
-    pub node_id: NodeId,
-    /// Actor identifier — same shape as `approved_by` above.
-    pub rejected_by: String,
-    /// Free-text justification carried into the audit trail.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
-
-impl NodeHumanRejected {
-    pub fn kind(&self) -> &'static str {
-        KIND_NODE_HUMAN_REJECTED
     }
 }
 
@@ -330,8 +290,6 @@ mod tests {
         assert_eq!(KIND_NODE_COMPLETED, "node.completed");
         assert_eq!(KIND_NODE_FAILED, "node.failed");
         assert_eq!(KIND_NODE_AWAITING_HUMAN, "node.awaiting_human");
-        assert_eq!(KIND_NODE_HUMAN_APPROVED, "node.human_approved");
-        assert_eq!(KIND_NODE_HUMAN_REJECTED, "node.human_rejected");
         assert_eq!(KIND_VERIFY_VERDICT, "verify.verdict");
         assert_eq!(KIND_AGENT_SESSION_STARTED, "agent.session_started");
         assert_eq!(KIND_AGENT_SESSION_COMPLETED, "agent.session_completed");
@@ -445,18 +403,10 @@ mod tests {
     /// the correct decoded value.
     #[test]
     fn schema_stable_optional_fields_default_to_none() {
-        // `NodeHumanRejected.reason` is the canonical optional field on
-        // a substrate event. Producing a payload without it (the way
-        // an older emitter would) must still deserialize cleanly.
-        let json = serde_json::json!({
-            "plan_id": pid(),
-            "node_id": nid(),
-            "rejected_by": "human:42",
-        });
-        let ev: NodeHumanRejected = serde_json::from_value(json).unwrap();
-        assert_eq!(ev.reason, None);
-
-        // Mirror for `AgentSessionCompleted.token_usage`.
+        // `AgentSessionCompleted.token_usage` is the canonical optional
+        // field on a substrate event. Producing a payload without it
+        // (the way an older emitter would) must still deserialize
+        // cleanly.
         let json = serde_json::json!({
             "plan_id": pid(),
             "node_id": nid(),

@@ -227,28 +227,6 @@ pub const EVENTS: EventManifest = EventManifest {
             description: "A PR was closed without merging.",
         },
         // -- Forge process events -------------------------------------------
-        EventDefinition {
-            kind: "forge.insight_observed",
-            schema_version: 1,
-            producers: &[Subsystem::Substrate],
-            consumers: &[Subsystem::Substrate],
-            diagnostic_only: false,
-            reason: None,
-            tracking_issue: None,
-            operator_grain: false,
-            description: "Insight forwarded to the scheduling kernel.",
-        },
-        EventDefinition {
-            kind: "forge.decision_made",
-            schema_version: 1,
-            producers: &[Subsystem::Substrate],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("diagnostic trace of forge scheduling kernel; no downstream action"),
-            tracking_issue: None,
-            operator_grain: false,
-            description: "Scheduling kernel produced a ShapingDecision.",
-        },
         // -- Chat-session lifecycle (portal's in-process runner, #583) -------
         EventDefinition {
             kind: "session.completed",
@@ -357,30 +335,23 @@ pub const EVENTS: EventManifest = EventManifest {
             operator_grain: true,
             description: "Audit record for a manual / CLI / replay trigger fire (actor + workflow).",
         },
-        EventDefinition {
-            kind: "stage.entered",
-            schema_version: 1,
-            producers: &[Subsystem::Substrate],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in workflow run timeline"),
-            tracking_issue: None,
-            operator_grain: true,
-            description: "A workflow-tagged artifact entered a new stage.",
-        },
         // Per spec #285: per-gate `stage.gate_passed` / `stage.gate_failed`
         // events were dropped; the run timeline reconstructs gate outcomes
         // from `verify.verdict` plus the stage advancement signal.
         EventDefinition {
             kind: "stage.advanced",
             schema_version: 1,
+            // No live producer post-0.2 — the forge stage machine that
+            // emitted this retired. Portal's FTUE `workflow_activated`
+            // listener still consumes it; #594 tracks restoring a
+            // run-terminal emitter (or re-pointing the listener).
             producers: &[Subsystem::Substrate],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in workflow run timeline"),
+            consumers: &[Subsystem::Portal],
+            diagnostic_only: false,
+            reason: None,
             tracking_issue: None,
             operator_grain: true,
-            description: "All gates on a stage resolved and the artifact advanced.",
+            description: "All gates on a stage resolved and the artifact advanced (terminal when to_stage_index is None). Producer pending re-introduction per #594.",
         },
         EventDefinition {
             kind: "plan.run_requested",
@@ -488,37 +459,11 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some(
-                "rendered in dashboard HITL inbox; Human executor approval round-trips via portal (#357)",
-            ),
-            tracking_issue: Some(357),
-            operator_grain: true,
-            description: "A Human executor is waiting on an out-of-band approval decision.",
-        },
-        EventDefinition {
-            kind: "node.human_approved",
-            schema_version: 1,
-            producers: &[Subsystem::Substrate],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some(
-                "rendered in dashboard HITL audit; the substrate's own Human executor consumes the approval inline",
+                "operator activity feed; emitted by the Agent executor's authoritative gate (#520) when a session delivers nothing — the inline Human-executor resolution retired with #585",
             ),
             tracking_issue: None,
             operator_grain: true,
-            description: "A pending Human executor node received an approval decision.",
-        },
-        EventDefinition {
-            kind: "node.human_rejected",
-            schema_version: 1,
-            producers: &[Subsystem::Substrate],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some(
-                "rendered in dashboard HITL audit; the substrate's own Human executor consumes the rejection inline",
-            ),
-            tracking_issue: None,
-            operator_grain: true,
-            description: "A pending Human executor node received a rejection decision.",
+            description: "A node is parked waiting on an out-of-band human decision.",
         },
         EventDefinition {
             kind: "verify.verdict",
@@ -696,7 +641,6 @@ mod tests {
     #[test]
     fn operator_grain_partition_matches_adr_0019() {
         let surfaced = [
-            "stage.entered",
             "stage.advanced",
             "verify.verdict",
             "trigger.fired",
@@ -712,7 +656,7 @@ mod tests {
                 "`{kind}` should be operator-grain per ADR 0019"
             );
         }
-        let hidden = ["forge.insight_observed", "gate.check_updated"];
+        let hidden = ["gate.check_updated"];
         for kind in hidden {
             let def = EVENTS.lookup(kind).expect(kind);
             assert!(

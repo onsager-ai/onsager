@@ -54,14 +54,13 @@ that requires a coordinated rollout.
 |---|---|---|
 | `artifact` | substrate scheduler (onsager-substrate) | 3 |
 | `git` | onsager-portal (GitHub webhooks) | 4 |
-| `forge` | substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363 | 2 |
 | `session` | onsager-portal (in-process session runner, #583) | 2 |
 | `portal` | (unknown — update `stream_producer` in xtask) | 3 |
-| `workflow` | onsager-portal (trigger) / substrate scheduler (stage) | 3 |
+| `workflow` | onsager-portal (trigger) / substrate scheduler (stage) | 2 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
 | `plan` | (unknown — update `stream_producer` in xtask) | 3 |
 | `gate` | onsager-portal (GitHub) / substrate scheduler (manual) | 2 |
-| `substrate` | substrate scheduler (onsager-nodes) + executor catalog (RUN-02, #360) | 10 |
+| `substrate` | substrate scheduler (onsager-nodes) + executor catalog (RUN-02, #360) | 8 |
 
 Each section below covers one stream. Inside a section, every event lists its wire `event_type` string, the Rust variant name, the variant's doc comment, and a payload field table (where the field's own doc comment is the description).
 
@@ -157,36 +156,6 @@ Producer subsystem: **onsager-portal (GitHub webhooks)**.
 | `artifact_id` | `ArtifactId` |  |
 | `pr_number` | `u64` |  |
 
-## `forge` events
-
-Producer subsystem: **substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363**.
-
-### `forge.insight_observed`
-
-- Variant: `FactoryEventKind::ForgeInsightObserved`
-- Stream: `forge`
-
-Insight forwarded to the scheduling kernel.
-
-| Field | Type | Description |
-|---|---|---|
-| `insight_id` | `String` |  |
-| `insight_kind` | `InsightKind` |  |
-| `scope` | `InsightScope` |  |
-
-### `forge.decision_made`
-
-- Variant: `FactoryEventKind::ForgeDecisionMade`
-- Stream: `forge`
-
-Scheduling kernel produced a ShapingDecision.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `target_version` | `u32` |  |
-| `priority` | `i32` |  |
-
 ## `session` events
 
 Producer subsystem: **onsager-portal (in-process session runner, #583)**.
@@ -277,20 +246,6 @@ A trigger (e.g. a GitHub issue webhook) fired and produced a payload the trigger
 | `workflow_id` | `String` | Workflow whose trigger fired. |
 | `trigger_kind` | `String` | Trigger classification (matches the `workflows.trigger_kind` column). v1 always `"github_issue_webhook"`. |
 | `payload` | `serde_json::Value` | Free-form payload the subscriber needs to translate the trigger into an artifact (e.g. issue number, title, body, repo). |
-
-### `stage.entered`
-
-- Variant: `FactoryEventKind::StageEntered`
-- Stream: `workflow`
-
-A workflow-tagged artifact entered a new stage.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `workflow_id` | `String` |  |
-| `stage_index` | `u32` |  |
-| `stage_name` | `String` |  |
 
 ### `stage.advanced`
 
@@ -417,7 +372,7 @@ Substrate scheduler dispatched a node — execution began.
 |---|---|---|
 | `plan_id` | `String` |  |
 | `node_id` | `NodeId` |  |
-| `executor_kind` | `String` | Executor catalog key (`"script"`, `"agent"`, `"verify"`, `"human"`, `"sub_workflow"`, `"noop"`). |
+| `executor_kind` | `String` | Executor catalog key (`"script"`, `"agent"`, `"verify"`, `"noop"`; the Human / SubWorkflow impls retired with #585). |
 
 ### `node.completed`
 
@@ -451,40 +406,13 @@ A node's executor returned Err. The scheduler aborts the plan (v1; no retries).
 - Variant: `FactoryEventKind::NodeAwaitingHuman`
 - Stream: `substrate`
 
-A Human executor is parked waiting on an out-of-band approval decision. The dashboard's HITL inbox renders this; the substrate's own Human executor (#357) resolves it inline by observing the matching `node.human_approved` / `node.human_rejected`.
+A node is parked waiting on an out-of-band human decision. Emitted by the Agent executor's authoritative gate (#520 §4c) when a session delivers no output; surfaces in the operator activity feed. (The Human executor that resolved these inline retired with #585.)
 
 | Field | Type | Description |
 |---|---|---|
 | `plan_id` | `String` |  |
 | `node_id` | `NodeId` |  |
 | `prompt` | `String` | Free-text prompt shown to the human reviewer. |
-
-### `node.human_approved`
-
-- Variant: `FactoryEventKind::NodeHumanApproved`
-- Stream: `substrate`
-
-A pending Human executor node received an approval decision.
-
-| Field | Type | Description |
-|---|---|---|
-| `plan_id` | `String` |  |
-| `node_id` | `NodeId` |  |
-| `approved_by` | `String` | Actor identifier — `"human:<id>"` for a dashboard user, `"supervisor"` for a delegate agent. |
-
-### `node.human_rejected`
-
-- Variant: `FactoryEventKind::NodeHumanRejected`
-- Stream: `substrate`
-
-A pending Human executor node received a rejection decision.
-
-| Field | Type | Description |
-|---|---|---|
-| `plan_id` | `String` |  |
-| `node_id` | `NodeId` |  |
-| `rejected_by` | `String` | Actor identifier — same shape as `approved_by` above. |
-| `reason` | `Option<String>` | Free-text justification carried into the audit trail. _(optional)_ |
 
 ### `verify.verdict`
 
