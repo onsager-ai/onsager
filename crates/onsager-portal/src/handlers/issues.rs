@@ -6,7 +6,7 @@
 //! the `/api/projects/:id/issues` proxy in `crates/stiglab/src/server/routes/projects.rs`.
 //! Lifecycle moves (`closed` / `reopened`) flip the skeleton's `state`;
 //! everything else (`edited`, `labeled`, `unlabeled`, `assigned`, …) bumps
-//! `current_version` and refreshes `last_observed_at` so ising sees activity
+//! `current_version` and refreshes `last_observed_at` so readers see activity
 //! deltas without the spine carrying the actual change.
 //!
 //! This handler does not perform proxy-cache invalidation — the cache lives
@@ -87,7 +87,7 @@ pub async fn handle(
     let artifact =
         db::upsert_issue_artifact_ref(&state.pool, &project.id, issue_number, lifecycle).await?;
 
-    // For `Touch`, additionally bump `current_version` so ising sees an
+    // For `Touch`, additionally bump `current_version` so readers see an
     // activity delta. `upsert_issue_artifact_ref` already touches the
     // `last_observed_at` timestamp on every call.
     if matches!(category, IssueAction::Touch) {
@@ -99,7 +99,7 @@ pub async fn handle(
     // need to push invalidations cross-process — TTL-bounded drift is
     // strictly better than denormalized writes (#170 design).
 
-    // Emit a `portal.task_materialized` extension event so dashboard / ising
+    // Emit a `portal.task_materialized` extension event so the dashboard
     // consumers see a uniform stream. The event name stays for back-compat
     // with #60 — only the payload reflects the new reference-only shape.
     let metadata = EventMetadata {

@@ -220,7 +220,6 @@ pub enum QualitySource {
     AutomatedTest,
     Lint,
     HumanReview,
-    IsingInference,
     External,
 }
 

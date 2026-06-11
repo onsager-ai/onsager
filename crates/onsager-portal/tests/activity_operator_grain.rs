@@ -63,9 +63,8 @@ async fn seed_mixed_events(pool: &PgPool) -> String {
     insert_event(pool, &workspace_id, "node.failed", "substrate").await;
     insert_event(pool, &workspace_id, "artifact.state_changed", "substrate").await;
     // Not operator-grain ✗
-    insert_event(pool, &workspace_id, "forge.shaping_returned", "substrate").await;
-    insert_event(pool, &workspace_id, "ising.insight_emitted", "ising").await;
-    insert_event(pool, &workspace_id, "ising.rule_proposed", "ising").await;
+    insert_event(pool, &workspace_id, "forge.insight_observed", "substrate").await;
+    insert_event(pool, &workspace_id, "forge.decision_made", "substrate").await;
     workspace_id
 }
 
@@ -130,11 +129,7 @@ async fn operator_grain_true_filters_to_registry_allowlist() {
         );
     }
     // And the five non-operator-grain rows should be absent.
-    for kind in [
-        "forge.shaping_returned",
-        "ising.insight_emitted",
-        "ising.rule_proposed",
-    ] {
+    for kind in ["forge.insight_observed", "forge.decision_made"] {
         assert!(
             !got.contains(kind),
             "non-operator-grain kind leaked into the activity feed: {kind}"
@@ -171,8 +166,8 @@ async fn operator_grain_unset_returns_full_stream() {
         events.iter().map(|e| e.event_type.as_str()).collect();
     // Both sides of the partition are present.
     assert!(got.contains("session.completed"));
-    assert!(got.contains("forge.shaping_returned"));
-    assert!(got.contains("ising.insight_emitted"));
+    assert!(got.contains("forge.insight_observed"));
+    assert!(got.contains("forge.decision_made"));
 
     cleanup_workspace(&pool, &workspace_id).await;
 }

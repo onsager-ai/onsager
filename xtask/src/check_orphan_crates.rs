@@ -6,7 +6,7 @@
 //! workspace crates declare it as a path dep. Zero in-tree reverse deps
 //! → violation.
 //!
-//! Bin-shipping crates (`onsager`, `ising`,
+//! Bin-shipping crates (`onsager`,
 //! `onsager-portal`, `onsager-trigger`, `onsager-scheduler`) are
 //! excluded — they're top-level apps; reverse-dep count doesn't apply.
 //!
@@ -131,7 +131,7 @@ struct CrateInfo {
 
 impl CrateInfo {
     /// "Pure library" means it ships no binary. Bin-shipping subsystems
-    /// (`ising`, `onsager-portal`, `onsager`,
+    /// (`onsager-portal`, `onsager`,
     /// `onsager-trigger`, `onsager-scheduler`) are top-level apps and
     /// don't need a reverse-dep count; their `src/lib.rs` (when present)
     /// is the subsystem's test surface.

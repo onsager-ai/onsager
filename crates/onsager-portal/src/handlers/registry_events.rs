@@ -58,6 +58,5 @@ mod tests {
             .collect();
         assert!(kinds.contains(&"session.completed"));
         assert!(kinds.contains(&"verify.verdict"));
-        assert!(kinds.contains(&"ising.insight_emitted"));
     }
 }

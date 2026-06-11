@@ -10,7 +10,7 @@
 //! - **[`Listener`]** — high-level consumer that filters notifications by
 //!   [`Namespace`] and dispatches them to an [`EventHandler`].
 //! - **[`Namespace`]** — validated newtype that partitions the `events_ext`
-//!   table between components (`session`, `ising`, `telegramable`).
+//!   table between components (`session`, `telegramable`).
 //!
 //! ## Schema
 //!
@@ -57,8 +57,8 @@ pub use onsager_artifact::{
 
 pub use extension_event::ExtensionEventRecord;
 pub use factory_event::{
-    EventRef, FactoryEvent, FactoryEventKind, ForgeProcessState, GatePoint, InsightKind,
-    InsightScope, ShapingOutcome, TokenUsage, VerdictSummary, VerifyCheckResult,
+    FactoryEvent, FactoryEventKind, ForgeProcessState, GatePoint, InsightKind, InsightScope,
+    TokenUsage, VerifyCheckResult,
 };
 pub use listener::{EventHandler, Listener};
 pub use namespace::{Namespace, NamespaceError};

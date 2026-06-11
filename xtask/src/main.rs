@@ -588,7 +588,6 @@ fn stream_producer(stream: &str) -> &'static str {
         "git" => "onsager-portal (GitHub webhooks)",
         "forge" => "substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363",
         "session" => "onsager-portal (in-process session runner, #583)",
-        "ising" => "ising",
         "workflow" => "onsager-portal (trigger) / substrate scheduler (stage)",
         "gate" => "onsager-portal (GitHub) / substrate scheduler (manual)",
         "substrate" => "substrate scheduler (onsager-nodes) + executor catalog (RUN-02, #360)",
@@ -639,7 +638,7 @@ Persisted in two tables (see `crates/onsager-spine/migrations/001_initial.sql`):
   that doesn't (yet) belong on the typed bus. Carries `(namespace, event_type)`
   and a free-form JSON payload. Validated by
   [`Namespace`](../crates/onsager-spine/src/namespace.rs) against the
-  well-known set: `forge`, `session`, `ising`, `telegramable`,
+  well-known set: `forge`, `session`, `telegramable`,
   `workflow`.
 
 ## Versioning

@@ -238,10 +238,10 @@ mod tests {
 
     #[test]
     fn matches_multiple_namespaces() {
-        let namespaces = ns_set(&["session", "ising"]);
+        let namespaces = ns_set(&["session", "telegramable"]);
         assert!(matches_any_namespace("session:chat:1", &namespaces));
-        assert!(matches_any_namespace("ising:run:42", &namespaces));
-        assert!(!matches_any_namespace("telegramable:policy:x", &namespaces));
+        assert!(matches_any_namespace("telegramable:run:42", &namespaces));
+        assert!(!matches_any_namespace("forge:policy:x", &namespaces));
     }
 
     #[test]

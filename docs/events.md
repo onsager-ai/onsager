@@ -37,7 +37,7 @@ Persisted in two tables (see `crates/onsager-spine/migrations/001_initial.sql`):
   that doesn't (yet) belong on the typed bus. Carries `(namespace, event_type)`
   and a free-form JSON payload. Validated by
   [`Namespace`](../crates/onsager-spine/src/namespace.rs) against the
-  well-known set: `forge`, `session`, `ising`, `telegramable`,
+  well-known set: `forge`, `session`, `telegramable`,
   `workflow`.
 
 ## Versioning
@@ -54,10 +54,9 @@ that requires a coordinated rollout.
 |---|---|---|
 | `artifact` | substrate scheduler (onsager-substrate) | 3 |
 | `git` | onsager-portal (GitHub webhooks) | 4 |
-| `forge` | substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363 | 4 |
+| `forge` | substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363 | 2 |
 | `session` | onsager-portal (in-process session runner, #583) | 2 |
 | `portal` | (unknown — update `stream_producer` in xtask) | 3 |
-| `ising` | ising | 6 |
 | `workflow` | onsager-portal (trigger) / substrate scheduler (stage) | 3 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
 | `plan` | (unknown — update `stream_producer` in xtask) | 3 |
@@ -162,32 +161,6 @@ Producer subsystem: **onsager-portal (GitHub webhooks)**.
 
 Producer subsystem: **substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363**.
 
-### `forge.shaping_returned`
-
-- Variant: `FactoryEventKind::ForgeShapingReturned`
-- Stream: `forge`
-
-Legacy 0.1 shaping-result record. Kept for historical spine rows and the deprecated observers runtime (`shape_retry`, retiring with #584); nothing emits it post-ADR 0027.
-
-| Field | Type | Description |
-|---|---|---|
-| `request_id` | `String` |  |
-| `artifact_id` | `ArtifactId` |  |
-| `outcome` | `ShapingOutcome` |  |
-
-### `forge.gate_verdict`
-
-- Variant: `FactoryEventKind::ForgeGateVerdict`
-- Stream: `forge`
-
-GateVerdict observed by the legacy forge gate path. Kept for historical spine rows; nothing emits it post-0.2.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `gate_point` | `GatePoint` |  |
-| `verdict` | `VerdictSummary` |  |
-
 ### `forge.insight_observed`
 
 - Variant: `FactoryEventKind::ForgeInsightObserved`
@@ -287,91 +260,6 @@ Dashboard cancel-session request from portal (spec #303). Diagnostic timeline re
 |---|---|---|
 | `session_id` | `String` |  |
 | `actor` | `Option<String>` | Actor identifier captured for audit / debugging. _(optional)_ |
-
-## `ising` events
-
-Producer subsystem: **ising**.
-
-### `ising.insight_detected`
-
-- Variant: `FactoryEventKind::IsingInsightDetected`
-- Stream: `ising`
-
-An insight passed validation and was recorded on the spine.
-
-| Field | Type | Description |
-|---|---|---|
-| `insight_id` | `String` |  |
-| `kind` | `InsightKind` |  |
-| `scope` | `InsightScope` |  |
-| `observation` | `String` |  |
-| `confidence` | `f64` |  |
-
-### `ising.insight_emitted`
-
-- Variant: `FactoryEventKind::IsingInsightEmitted`
-- Stream: `ising`
-
-A structured signal Ising surfaces on the spine for other subsystems to consume (issue #36 — close the feedback loop). Unlike `IsingInsightDetected`, which carries a human-readable observation, this variant is the machine-readable edge: each emission names the signal kind, the subject it attaches to, and the events that evidence it. Forge tailed these into `WorldState.insights`; no consumer remains post-ADR 0027.
-
-| Field | Type | Description |
-|---|---|---|
-| `signal_kind` | `String` | Stable signal identifier (e.g. `"repeated_gate_override"`, `"shape_retry_spike"`). Consumers match on this string. |
-| `subject_ref` | `String` | What the signal is about — an artifact kind, artifact id, rule id, or intent class — serialized as a free-form string so the event contract doesn't need to know every possible subject type. |
-| `evidence` | `Vec<EventRef>` | Spine events that evidence this signal. Invariant: non-empty (enforced by the producer). |
-| `confidence` | `f64` | 0.0..=1.0; downstream consumers use this to route (advisory vs. crystallization threshold). |
-
-### `ising.insight_suppressed`
-
-- Variant: `FactoryEventKind::IsingInsightSuppressed`
-- Stream: `ising`
-
-An insight was deduplicated or fell below confidence threshold (audit trail).
-
-| Field | Type | Description |
-|---|---|---|
-| `insight_id` | `String` |  |
-| `reason` | `String` |  |
-
-### `ising.rule_proposed`
-
-- Variant: `FactoryEventKind::IsingRuleProposed`
-- Stream: `ising`
-
-An insight was packaged as a rule proposal (issue #36 Step 2). Unlike the legacy form, this variant carries enough structure that a downstream consumer can route it without looking up the original insight — `signal_kind` + `subject_ref` identify the evidence, `proposed_action` names what rule change is being asked for, and `class` decides whether the proposal auto-activates (`safe_auto`) or enters the review queue (`review_required`).
-
-| Field | Type | Description |
-|---|---|---|
-| `insight_id` | `String` | ID of the insight that motivated the proposal. |
-| `signal_kind` | `String` | Copy of the producing analyzer's signal kind (e.g. `"repeated_gate_override"`) so consumers can dedupe against the `insight_emitted` stream. |
-| `subject_ref` | `String` | What the proposal is about (artifact kind, rule id, etc.). |
-| `proposed_action` | `RuleProposalAction` | Kind of change being proposed. |
-| `class` | `RuleProposalClass` | How the proposal should be handled downstream. |
-| `rationale` | `String` | Human-readable justification for the audit trail. |
-| `confidence` | `f64` | Confidence copied from the backing insight (0.0..=1.0). |
-
-### `ising.analyzer_error`
-
-- Variant: `FactoryEventKind::IsingAnalyzerError`
-- Stream: `ising`
-
-An analyzer encountered an error during its run.
-
-| Field | Type | Description |
-|---|---|---|
-| `analyzer` | `String` |  |
-| `error` | `String` |  |
-
-### `ising.catchup_completed`
-
-- Variant: `FactoryEventKind::IsingCatchupCompleted`
-- Stream: `ising`
-
-Ising finished catching up from a lag position.
-
-| Field | Type | Description |
-|---|---|---|
-| `events_processed` | `u64` |  |
 
 ## `workflow` events
 

@@ -798,8 +798,8 @@ mod tests {
         assert!(kinds.contains(&"node.failed"));
         // Internal subsystem dispatches and analyzer diagnostics are not.
         assert!(!kinds.contains(&"forge.shaping_returned"));
-        assert!(!kinds.contains(&"ising.insight_emitted"));
-        assert!(!kinds.contains(&"ising.rule_proposed"));
+        assert!(!kinds.contains(&"forge.insight_observed"));
+        assert!(!kinds.contains(&"forge.decision_made"));
     }
 
     /// The path-scoped `/api/workspaces/:id/activity` alias must force

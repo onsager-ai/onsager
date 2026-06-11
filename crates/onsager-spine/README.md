@@ -2,7 +2,7 @@
 
 Client library for the Onsager event spine — shared PostgreSQL event stream coordination for the [onsager-ai](https://github.com/onsager-ai) polyrepo.
 
-Onsager is a **library**, not a service. It publishes a single Rust crate that subsystem repos (`ising`) and adapter repos (`telegramable`, and future consumers) depend on to coordinate via a shared PostgreSQL `events` / `events_ext` table and the `onsager_events` pg_notify channel.
+Onsager is a **library**, not a service. It publishes a single Rust crate that downstream consumers and adapter repos (`telegramable`, and future consumers) depend on to coordinate via a shared PostgreSQL `events` / `events_ext` table and the `onsager_events` pg_notify channel.
 
 ## Installation
 
@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
     let store = EventStore::connect(&std::env::var("DATABASE_URL")?).await?;
 
     Listener::new(store)
-        .subscribe(Namespace::ising())
+        .subscribe(Namespace::telegramable())
         .run(MyHandler)
         .await
 }

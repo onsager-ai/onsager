@@ -125,11 +125,11 @@ describe("ActivityPage (operator-grain feed, #465)", () => {
       events: [
         {
           id: 3,
-          stream_id: "ising:health",
-          stream_type: "ising",
-          event_type: "ising.catchup_completed",
+          stream_id: "plan:health",
+          stream_type: "substrate",
+          event_type: "node.completed",
           data: {},
-          actor: "ising-worker",
+          actor: "substrate-scheduler",
           created_at: "2026-05-23T03:02:00Z",
         },
       ],
@@ -137,7 +137,7 @@ describe("ActivityPage (operator-grain feed, #465)", () => {
     renderPage()
     // The event type is rendered, but there's no link wrapping it.
     await waitFor(() =>
-      expect(screen.getByText("ising.catchup_completed")).toBeInTheDocument(),
+      expect(screen.getByText("node.completed")).toBeInTheDocument(),
     )
     expect(screen.queryByRole("link")).toBeNull()
   })

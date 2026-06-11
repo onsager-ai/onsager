@@ -46,13 +46,6 @@ mod tests {
     }
 
     #[test]
-    fn shaping_outcome_serde() {
-        let outcome = ShapingOutcome::Completed;
-        let json = serde_json::to_string(&outcome).unwrap();
-        assert_eq!(json, r#""completed""#);
-    }
-
-    #[test]
     fn insight_scope_variants() {
         let global = InsightScope::Global;
         let json = serde_json::to_string(&global).unwrap();
@@ -61,68 +54,6 @@ mod tests {
         let specific = InsightScope::SpecificArtifact(ArtifactId::new("art_12345678"));
         let json = serde_json::to_string(&specific).unwrap();
         assert!(json.contains("art_12345678"));
-    }
-
-    #[test]
-    fn ising_insight_emitted_roundtrip() {
-        // Regression: the event_type / stream_type / stream_id triple must
-        // survive a roundtrip so the listener can filter on `ising:<subject>`
-        // and the dashboard can query by `event_type = "ising.insight_emitted"`.
-        let event = FactoryEventKind::IsingInsightEmitted {
-            signal_kind: "repeated_gate_override".into(),
-            subject_ref: "code".into(),
-            evidence: vec![
-                EventRef {
-                    event_id: 101,
-                    event_type: "forge.gate_verdict".into(),
-                },
-                EventRef {
-                    event_id: 103,
-                    event_type: "forge.gate_verdict".into(),
-                },
-            ],
-            confidence: 0.82,
-        };
-        assert_eq!(event.event_type(), "ising.insight_emitted");
-        assert_eq!(event.stream_type(), "ising");
-        assert_eq!(event.stream_id(), "code");
-
-        let json = serde_json::to_value(&event).unwrap();
-        assert_eq!(json["type"], "ising_insight_emitted");
-        assert_eq!(json["signal_kind"], "repeated_gate_override");
-        assert_eq!(json["subject_ref"], "code");
-        assert_eq!(json["evidence"][0]["event_id"], 101);
-
-        let back: FactoryEventKind = serde_json::from_value(json).unwrap();
-        assert_eq!(back, event);
-    }
-
-    #[test]
-    fn ising_rule_proposed_carries_routing_fields() {
-        // Issue #36 Step 2 contract: a downstream consumer must be able to
-        // route the proposal without looking up the producing insight. The
-        // event_type / stream_type / stream_id triple pins the dashboard
-        // query path.
-        let event = FactoryEventKind::IsingRuleProposed {
-            insight_id: "ins_spine_101".into(),
-            signal_kind: "repeated_gate_override".into(),
-            subject_ref: "code".into(),
-            proposed_action: RuleProposalAction::Retire {
-                rule_id: "noisy-rule".into(),
-            },
-            class: RuleProposalClass::ReviewRequired,
-            rationale: "80% override rate over 40 verdicts".into(),
-            confidence: 0.85,
-        };
-        assert_eq!(event.event_type(), "ising.rule_proposed");
-        assert_eq!(event.stream_type(), "ising");
-        assert_eq!(event.stream_id(), "ins_spine_101");
-
-        let json = serde_json::to_value(&event).unwrap();
-        assert_eq!(json["class"], "review_required");
-        assert_eq!(json["proposed_action"]["action"], "retire");
-        let back: FactoryEventKind = serde_json::from_value(json).unwrap();
-        assert_eq!(back, event);
     }
 
     #[test]

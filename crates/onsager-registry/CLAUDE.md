@@ -88,7 +88,7 @@ with a `reason`.
    consumer) or diagnostic-only (`diagnostic_only = true` plus a
    non-empty `reason`).
 3. Every `append_ext(_, _, "<event_type>", ...)` literal under
-   `crates/{forge,ising}/src/` references an event whose
+   scanned subsystem source references an event whose
    `producers` list includes that subsystem.
 4. Every `notification.event_type [!=|==] "<event_type>"` filter under
    the same source trees references an event whose `consumers` list

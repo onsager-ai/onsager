@@ -34,7 +34,6 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Subsystem {
-    Ising,
     Portal,
     /// The 0.2 substrate — the scheduler (`onsager-nodes::scheduler`) and
     /// executors (`onsager-nodes::{script,agent,verify,...}`) that emit
@@ -43,7 +42,7 @@ pub enum Subsystem {
     /// per [ADR 0009](../../../docs/adr/0009-three-layer-pipeline.md).
     /// Not in `SCANNED` because substrate source lives in
     /// `onsager-substrate` / `onsager-nodes`, outside the
-    /// `crates/ising/` scope the emit / listener
+    /// scanned-source scope the emit / listener
     /// scan walks.
     Substrate,
 }
@@ -51,7 +50,6 @@ pub enum Subsystem {
 impl Subsystem {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Ising => "ising",
             Self::Portal => "portal",
             Self::Substrate => "substrate",
         }
@@ -63,7 +61,7 @@ impl Subsystem {
     /// is excluded for the same reason — its emitters live in
     /// `onsager-substrate` / `onsager-nodes`, not the scanned source
     /// trees.
-    pub const SCANNED: &'static [Subsystem] = &[Self::Ising];
+    pub const SCANNED: &'static [Subsystem] = &[];
 }
 
 /// One row of the event-type registry manifest.
@@ -146,9 +144,11 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "artifact.registered",
             schema_version: 1,
             producers: &[Subsystem::Substrate],
-            consumers: &[Subsystem::Ising],
-            diagnostic_only: false,
-            reason: None,
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard artifact views / activity timeline; observer consumer retired by ADR 0027 / spec #584",
+            ),
             tracking_issue: None,
             operator_grain: true,
             description: "New artifact accepted and ID assigned.",
@@ -157,9 +157,11 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "artifact.state_changed",
             schema_version: 1,
             producers: &[Subsystem::Substrate],
-            consumers: &[Subsystem::Ising],
-            diagnostic_only: false,
-            reason: None,
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard artifact views / activity timeline; observer consumer retired by ADR 0027 / spec #584",
+            ),
             tracking_issue: None,
             operator_grain: true,
             description: "Artifact transitioned between lifecycle states.",
@@ -168,9 +170,11 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "artifact.archived",
             schema_version: 1,
             producers: &[Subsystem::Portal, Subsystem::Substrate],
-            consumers: &[Subsystem::Ising],
-            diagnostic_only: false,
-            reason: None,
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard artifact views / activity timeline; observer consumer retired by ADR 0027 / spec #584",
+            ),
             tracking_issue: None,
             operator_grain: true,
             description: "Artifact reached terminal state (archived).",
@@ -180,9 +184,11 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "git.pr_opened",
             schema_version: 1,
             producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Ising],
-            diagnostic_only: false,
-            reason: None,
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "rendered in dashboard artifact views / activity timeline; observer consumer retired by ADR 0027 / spec #584",
+            ),
             tracking_issue: None,
             operator_grain: true,
             description: "A pull request was opened for an artifact.",
@@ -202,7 +208,7 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "git.pr_merged",
             schema_version: 1,
             producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Substrate, Subsystem::Ising],
+            consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
@@ -221,30 +227,6 @@ pub const EVENTS: EventManifest = EventManifest {
             description: "A PR was closed without merging.",
         },
         // -- Forge process events -------------------------------------------
-        EventDefinition {
-            kind: "forge.shaping_returned",
-            schema_version: 1,
-            producers: &[Subsystem::Substrate],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some(
-                "no emitter remains post-ADR 0027 / spec #583; pattern-matched only by the deprecated observers `shape_retry` analyzer, which retires with #584",
-            ),
-            tracking_issue: Some(584),
-            operator_grain: false,
-            description: "Legacy 0.1 shaping-result record (historical rows only).",
-        },
-        EventDefinition {
-            kind: "forge.gate_verdict",
-            schema_version: 1,
-            producers: &[Subsystem::Substrate],
-            consumers: &[Subsystem::Ising],
-            diagnostic_only: false,
-            reason: None,
-            tracking_issue: None,
-            operator_grain: true,
-            description: "GateVerdict observed by the legacy forge gate path (historical rows only).",
-        },
         EventDefinition {
             kind: "forge.insight_observed",
             schema_version: 1,
@@ -335,75 +317,6 @@ pub const EVENTS: EventManifest = EventManifest {
             tracking_issue: None,
             operator_grain: true,
             description: "Portal failed to open a GitHub PR for a completed session (empty branch, GitHub API error, or missing App config).",
-        },
-        // -- Ising events ---------------------------------------------------
-        EventDefinition {
-            kind: "ising.insight_detected",
-            schema_version: 1,
-            producers: &[Subsystem::Ising],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in dashboard ising views"),
-            tracking_issue: None,
-            operator_grain: false,
-            description: "An insight passed validation and was recorded on the spine.",
-        },
-        EventDefinition {
-            kind: "ising.insight_emitted",
-            schema_version: 1,
-            producers: &[Subsystem::Ising],
-            consumers: &[Subsystem::Substrate],
-            diagnostic_only: false,
-            reason: None,
-            tracking_issue: None,
-            operator_grain: false,
-            description: "Machine-readable signal emitted on the spine for other subsystems to consume.",
-        },
-        EventDefinition {
-            kind: "ising.insight_suppressed",
-            schema_version: 1,
-            producers: &[Subsystem::Ising],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in dashboard ising views"),
-            tracking_issue: None,
-            operator_grain: false,
-            description: "An insight was deduplicated or fell below confidence threshold.",
-        },
-        EventDefinition {
-            kind: "ising.rule_proposed",
-            schema_version: 1,
-            producers: &[Subsystem::Ising],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some(
-                "governance consumer retired by ADR 0027 / spec #582; ising itself retires in #584",
-            ),
-            tracking_issue: Some(584),
-            operator_grain: false,
-            description: "An insight was packaged as a rule proposal (no consumer remains).",
-        },
-        EventDefinition {
-            kind: "ising.analyzer_error",
-            schema_version: 1,
-            producers: &[Subsystem::Ising],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("operator troubleshooting in dashboard"),
-            tracking_issue: None,
-            operator_grain: false,
-            description: "An analyzer encountered an error during its run.",
-        },
-        EventDefinition {
-            kind: "ising.catchup_completed",
-            schema_version: 1,
-            producers: &[Subsystem::Ising],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("ising health monitoring in dashboard"),
-            tracking_issue: None,
-            operator_grain: false,
-            description: "Ising finished catching up from a lag position.",
         },
         // -- Workflow runtime (issue #80 / #81) -----------------------------
         EventDefinition {
@@ -799,12 +712,7 @@ mod tests {
                 "`{kind}` should be operator-grain per ADR 0019"
             );
         }
-        let hidden = [
-            "forge.shaping_returned",
-            "ising.insight_emitted",
-            "ising.rule_proposed",
-            "gate.check_updated",
-        ];
+        let hidden = ["forge.insight_observed", "gate.check_updated"];
         for kind in hidden {
             let def = EVENTS.lookup(kind).expect(kind);
             assert!(

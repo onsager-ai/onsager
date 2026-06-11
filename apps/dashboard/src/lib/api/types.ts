@@ -116,7 +116,6 @@ export interface WorkflowKindInfo {
 // `EventSubsystem` union in sync by hand when the Rust struct changes.
 export type EventSubsystem =
   | "forge"
-  | "ising"
   | "portal"
   | "substrate";
 
