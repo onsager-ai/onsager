@@ -70,8 +70,8 @@ jobs:
         run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build stiglab
-        run: cargo build -p stiglab --release
+      - name: Build portal
+        run: cargo build -p onsager-portal --release
 
       # ── Database setup ──────────────────────────────────────
       - name: Run spine migrations
@@ -98,24 +98,20 @@ jobs:
       # ── Start services ──────────────────────────────────────
       - name: Start Onsager stack
         run: |
-          # Start stiglab (with built-in runner)
-          ONSAGER_DATABASE_URL="$DATABASE_URL" \
-          STIGLAB_PORT=3000 \
-          STIGLAB_MAX_SESSIONS=4 \
-          STIGLAB_CREDENTIAL_KEY="$(openssl rand -hex 32)" \
+          # Start portal (front door + in-process session runner, ADR 0027 / #583)
+          PORTAL_BIND=0.0.0.0:3002 \
+          DATABASE_URL="$DATABASE_URL" \
+          ONSAGER_CREDENTIAL_KEY="$(openssl rand -hex 32)" \
+          DEV_LOGIN_ENABLED=true \
           CLAUDE_CODE_OAUTH_TOKEN="${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}" \
-            ./target/release/stiglab server &
-          STIGLAB_PID=$!
-          echo "STIGLAB_PID=$STIGLAB_PID" >> "$GITHUB_ENV"
+            ./target/release/onsager-portal serve &
+          PORTAL_PID=$!
+          echo "PORTAL_PID=$PORTAL_PID" >> "$GITHUB_ENV"
 
           # Wait for services to be ready
           echo "Waiting for services..."
-          timeout 30 bash -c 'until curl -sf http://localhost:3000/api/health > /dev/null 2>&1; do sleep 1; done'
-          echo "Stiglab ready"
-
-          # Wait for built-in runner to register
-          sleep 3
-          echo "Stack is up"
+          timeout 30 bash -c 'until curl -sf http://localhost:3002/api/health > /dev/null 2>&1; do sleep 1; done'
+          echo "Portal ready"
         env:
           DATABASE_URL: postgres://onsager:onsager@localhost:5432/onsager
 
@@ -123,10 +119,10 @@ jobs:
       - name: Run E2E tests
         run: pnpm --filter onsager-e2e test
         env:
-          ONSAGER_URL: ${{ inputs.onsager_url || 'http://localhost:3000' }}
+          ONSAGER_URL: ${{ inputs.onsager_url || 'http://localhost:3002' }}
 
       # ── Cleanup ─────────────────────────────────────────────
       - name: Stop services
         if: always()
         run: |
-          kill $STIGLAB_PID 2>/dev/null || true
+          kill $PORTAL_PID 2>/dev/null || true

@@ -875,7 +875,7 @@ mod tests {
             "// preamble",            // line 1
             "fn before() {}",         // line 2
             "// seam-allow: legacy",  // line 3 — the marker
-            "let x = SIBLING_URL();",  // line 4 — the violation
+            "let x = SIBLING_URL();", // line 4 — the violation
         ];
         let violation_line: usize = 4;
         let prev_idx = violation_line.saturating_sub(2);

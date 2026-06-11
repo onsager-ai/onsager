@@ -276,7 +276,7 @@ pub enum FactoryEventKind {
     // -- Workflow runtime events (issue #80) --------------------------------
     /// A trigger (e.g. a GitHub issue webhook) fired and produced a payload
     /// the trigger subscriber will translate into an artifact registration.
-    /// Emitted by the stiglab webhook receiver; consumed by forge.
+    /// Emitted by the portal webhook receiver; consumed by the scheduler.
     TriggerFired {
         /// Workflow whose trigger fired.
         workflow_id: String,
@@ -367,8 +367,8 @@ pub enum FactoryEventKind {
     // longer publish a spine event. Add a variant back here when there is
     // a real consumer.
 
-    // -- Workflow events (issue #81 — stiglab workflow CRUD + webhook) ------
-    // `TriggerFired` is defined above in the issue #80 block; the stiglab
+    // -- Workflow events (issue #81 — workflow CRUD + webhook) --------------
+    // `TriggerFired` is defined above in the issue #80 block; the
     // webhook router emits the same variant so forge's trigger subscriber can
     // consume it with no translation.
     /// A GitHub `check_suite`, `check_run`, or `status` event arrived for a

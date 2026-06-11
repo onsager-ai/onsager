@@ -2,7 +2,7 @@
  * L1 Deterministic E2E Smoke Tests
  *
  * Uses agent-browser to verify critical UI paths against a running stack
- * (the stiglab Docker image, which serves the dashboard + backend on :3000).
+ * (the unified onsager image, which serves the dashboard + backend).
  *
  * Assertions check both `browser.url()` (confirm routing actually happened)
  * and page-unique content (confirm the page itself rendered). This avoids

@@ -838,10 +838,7 @@ mod tests {
     #[test]
     fn normalize_backend_strips_api_prefix_and_rewrites_params() {
         assert_eq!(normalize_backend("/api/health", "portal"), "health");
-        assert_eq!(
-            normalize_backend("/api/workspaces", "portal"),
-            "workspaces"
-        );
+        assert_eq!(normalize_backend("/api/workspaces", "portal"), "workspaces");
         assert_eq!(
             normalize_backend("/api/workspaces/{id}/members", "portal"),
             "workspaces/{x}/members"

@@ -82,7 +82,7 @@ describe("ActivityPage (operator-grain feed, #465)", () => {
           id: 1,
           stream_id: "forge:art_42",
           stream_type: "substrate",
-          event_type: "stiglab.session_completed",
+          event_type: "session.completed",
           data: { artifact_id: "art_42" },
           actor: "agent-node-1",
           created_at: "2026-05-23T03:00:00Z",
@@ -91,12 +91,12 @@ describe("ActivityPage (operator-grain feed, #465)", () => {
     })
     renderPage()
     const link = await screen.findByRole("link", {
-      name: /stiglab\.session_completed/,
+      name: /session\.completed/,
     })
     expect(link).toHaveAttribute("href", "/workspaces/acme/runs/art_42")
     // Actor + event_type are visible on the row.
     expect(link).toHaveTextContent("agent-node-1")
-    expect(link).toHaveTextContent("stiglab.session_completed")
+    expect(link).toHaveTextContent("session.completed")
   })
 
   it("deep-links a workflow-keyed event row to /workflows/:id", async () => {

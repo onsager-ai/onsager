@@ -1,7 +1,7 @@
 /**
  * Onsager E2E test client.
  *
- * Talks to a running Onsager instance (Stiglab API) via HTTP + SSE.
+ * Talks to a running Onsager instance (portal API) via HTTP + SSE.
  * Configure target via ONSAGER_URL env var (default: http://localhost:3000).
  */
 

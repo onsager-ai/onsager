@@ -144,7 +144,7 @@ pub enum GateVerdict {
 // Tool-level gate payloads (legacy)
 // ===========================================================================
 
-/// Tool-level gate request from inside a Stiglab session.
+/// Tool-level gate request from inside an agent session (legacy).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolGateRequest {
     pub session_id: String,

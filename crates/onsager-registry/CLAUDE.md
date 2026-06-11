@@ -88,7 +88,7 @@ with a `reason`.
    consumer) or diagnostic-only (`diagnostic_only = true` plus a
    non-empty `reason`).
 3. Every `append_ext(_, _, "<event_type>", ...)` literal under
-   `crates/{forge,stiglab,ising}/src/` references an event whose
+   `crates/{forge,ising}/src/` references an event whose
    `producers` list includes that subsystem.
 4. Every `notification.event_type [!=|==] "<event_type>"` filter under
    the same source trees references an event whose `consumers` list
@@ -96,7 +96,7 @@ with a `reason`.
 
 Tests (modules guarded by `#[cfg(test)]`) are excluded from checks 3
 and 4. Helper-style emitters that pass `event_type` as a variable
-rather than a literal (e.g. stiglab's generic
+rather than a literal (e.g. a generic
 `SpineEmitter::emit(FactoryEventKind)`) are not detected by check 3 —
 that's an accepted false negative; the manifest is still the source of
 truth and reviewers verify the producer subsystem matches.

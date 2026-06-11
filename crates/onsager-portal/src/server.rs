@@ -7,10 +7,9 @@ use axum::routing::{delete, get, post, put};
 
 use crate::config::Config;
 use crate::handlers::{
-    activation as activation_handlers, auth as auth_handlers,
-    build_info as build_info_handlers, chat as chat_handlers, credentials as credential_handlers,
-    github_app as github_app_handlers, installations as installation_handlers,
-    live_data as live_data_handlers, pats as pat_handlers,
+    activation as activation_handlers, auth as auth_handlers, build_info as build_info_handlers,
+    chat as chat_handlers, credentials as credential_handlers, github_app as github_app_handlers,
+    installations as installation_handlers, live_data as live_data_handlers, pats as pat_handlers,
     projects as project_handlers, push as push_handlers,
     registry_events as registry_event_handlers, registry_triggers as registry_trigger_handlers,
     runs as run_handlers, session_liveness as session_liveness_handlers,

@@ -11,10 +11,10 @@
 -- is independent of 3a and may land before or after.
 --
 -- Portal becomes the sole writer (the install-flow + manual-register
--- routes move with this migration). Stiglab keeps idempotent
+-- routes moved with this migration). Stiglab kept idempotent
 -- CREATE TABLE IF NOT EXISTS DDL in `server/db.rs::run_migrations` so
 -- SQLite-backed integration tests build the schema without portal in
--- the loop, and so a fresh deploy's first migrator wins. Stiglab also
+-- the loop, and so a fresh deploy's first migrator won. Stiglab also
 -- keeps reader functions on the same Postgres table (different
 -- connection pool) for `routes/projects.rs` live-data hydration.
 

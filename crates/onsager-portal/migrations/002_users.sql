@@ -3,7 +3,7 @@
 -- debug builds).
 --
 -- Spec #222 Slice 5 — moved from stiglab's inline `CREATE TABLE` block
--- to the portal migrations directory. Stiglab still reads this table
+-- to the portal migrations directory. Stiglab also read this table
 -- through its `AuthUser` extractor (cookie validation) until Slice 2/3
 -- moves the dependent routes; portal is the only writer.
 --
