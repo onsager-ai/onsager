@@ -1,6 +1,6 @@
 ---
 name: onsager-dev-process
-description: The end-to-end spec-issue-driven dev loop for Onsager — spec → branch → implement → PR → merge → closure. Use when asked "how do I start work", "what's the process", "SDD loop", "spec-driven development", "how do we ship a change", "from scratch what do I do", or when you're about to begin a non-trivial change and haven't yet decided how to split spec/PR. Delegates to `issue-spec` (spec writing), `onsager-pre-push` (pre-push checks), and `onsager-pr-lifecycle` (post-push).
+description: The end-to-end spec-issue-driven dev loop for Onsager — spec → branch → implement → PR → merge → closure. Use when asked "how do I start work", "what's the process", "SDD loop", "spec-driven development", "how do we ship a change", "from scratch what do I do", or when you're about to begin a non-trivial change and haven't yet decided how to split spec/PR. Delegates to `issue-spec` (spec writing) and the global `pre-push` (pre-push checks) and `pr-lifecycle` (post-push) skills. This skill carries Onsager's overlay for `pre-push` / `pr-lifecycle` — the check gate, merge-collision patterns, CI-failure table, and the bundled GitHub-ops reference + audit script.
 ---
 
 # onsager-dev-process
@@ -10,7 +10,8 @@ change starts as a GitHub spec issue, proceeds through a PR that references
 it, and closes when the PR merges. Issue open/closed is the only lifecycle
 state — status labels (`draft`, `planned`, `in-progress`) were retired.
 Plan-checkbox ticks, umbrella tracker refresh, and `main-red` issue
-maintenance are documented in `onsager-pr-lifecycle` and `ci-triage`.
+maintenance are documented in the global `pr-lifecycle` and `ci-triage`
+skills.
 
 ## The loop
 
@@ -25,13 +26,13 @@ maintenance are documented in `onsager-pr-lifecycle` and `ci-triage`.
      │   branch + implement                                            │
      │        │                                                        │
      │        ↓                                                        │
-     │   onsager-pre-push skill  ← merge preview, strict warnings      │
+     │   pre-push skill        ← merge preview, strict warnings        │
      │        │                                                        │
      │        ↓                                                        │
      │   git push → open PR (body: "Closes #N" or "Part of #N")        │
      │        │                                                        │
      │        ↓                                                        │
-     │   onsager-pr-lifecycle skill  ← CI triage, review, iterate      │
+     │   pr-lifecycle skill    ← CI triage, review, iterate            │
      │        │                                                        │
      │        ↓                                                        │
      │   merge                                                         │
@@ -103,31 +104,32 @@ update the spec first; do not add a bridge "for now". Spec #131 Lever
 B will hard-fail these in CI, so a bridge that ships today is a
 revert tomorrow.
 
-The `onsager-pre-push` skill includes a seam-rule self-check that
-scans the diff for these violations before push.
+Onsager's pre-push gate (the overlay below, run via the global
+`pre-push` skill) includes a seam-rule self-check — `just lint-rust`
+runs `xtask lint-seams` + `check-api-contract` — that scans the diff
+for these violations before push.
 
 ### 4. Pre-push
 
-Trigger `onsager-pre-push` (or say "ready to push"). It runs:
+Trigger the global `pre-push` skill (or say "ready to push"). It owns
+the generic flow — sync the merge preview, the conflict walkthrough
+(inventory, pattern-match, verify, commit; Onsager's recurring
+collisions are in the overlay below), the spec-link check, the push.
 
-1. Sync `origin/main` into the branch (CI tests a merge preview, not the
-   branch alone). If that surfaces merge conflicts, `onsager-pre-push`
-   owns the resolution walkthrough — inventory, pattern-match against
-   the repo's recurring collisions (migrations, enum variants, event
-   envelope, lockfiles), verify, then commit. Resolve locally, never on
-   the PR web editor.
-2. `RUSTFLAGS="-D warnings" cargo build --workspace`.
-3. `RUSTFLAGS="-D warnings" cargo test --workspace --lib`.
-4. `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings`.
-5. `cargo fmt --all --check`.
-6. Verify a spec issue is linked (this skill is what enforces the
-   no-PR-without-spec rule locally).
+Onsager's check gate (the overlay below) is:
+
+1. `RUSTFLAGS="-D warnings" cargo build --workspace`.
+2. `RUSTFLAGS="-D warnings" cargo test --workspace --lib`.
+3. `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings`.
+4. `cargo fmt --all --check`.
+5. `just lint-rust` (seam + API-contract lints + `_check-tools-and-skills`).
 
 Fix any blocker; don't paper over with `#[allow(dead_code)]` or `--no-verify`.
 
 If a PR is already open and GitHub later flags "This branch has
-conflicts", don't use the web editor — `onsager-pr-lifecycle` covers
-the checkout-and-rerun flow that re-uses the same pre-push walkthrough.
+conflicts", don't use the web editor — the global `pr-lifecycle`
+covers the checkout-and-rerun flow that re-uses the same pre-push
+walkthrough.
 
 ### 5. Open the PR
 
@@ -142,7 +144,7 @@ PR body must begin with a linking line:
 
 Under `## Delivers`, list the Plan items this PR ticks (exact text from the
 spec's Plan). After merge, tick those checkboxes manually on the parent
-spec — see `onsager-pr-lifecycle`.
+spec — see the global `pr-lifecycle` skill.
 
 If the PR is genuinely trivial (typo, doc-only, one-line obvious fix),
 apply the `trivial` label and skip the spec-linking requirement. Use
@@ -157,14 +159,16 @@ Don't push the PR and let the bot ask.
 
 ### 6. During review
 
-Trigger `onsager-pr-lifecycle` (or say "triage PR" / "CI is failing" /
-respond to a webhook). It covers:
+Trigger the global `pr-lifecycle` skill (or say "triage PR" / "CI is
+failing" / respond to a webhook). It covers:
 
-- CI triage: what `cargo build` failed for (merge preview? migration
-  collision? enum variant removed on main?).
-- Review-comment discipline: fix the code, don't reply per comment.
-- Copilot vs real defects.
-- Webhook subscription to stream CI + review events.
+- CI triage: delegates the taxonomy to `ci-triage`; the Onsager
+  failure table (merge preview? migration collision? enum variant
+  removed on main?) is in the overlay below.
+- Review-comment discipline: fix the code, don't reply per comment;
+  Copilot vs real defects.
+- Webhook subscription + the post-push CI sweep (commit-status vs
+  check_run gap).
 
 No label flips during review — the spec stays open until its PR(s) close
 it.
@@ -174,7 +178,7 @@ it.
 - `Closes #N` PRs auto-close the spec on merge.
 - `Part of #N` / `Refs #N` PRs leave the spec open; tick the delivered
   Plan items manually on the parent spec, and if all sub-issues of a
-  parent are closed, ping the parent. See `onsager-pr-lifecycle`.
+  parent are closed, ping the parent. See the global `pr-lifecycle`.
 - A human closes the parent once the spec is end-to-end verified.
 
 ### 8. Closed-unmerged path
@@ -210,7 +214,7 @@ complete; use `Part of #N` for partial slices that leave items behind,
 then tick the delivered checkboxes manually on merge. If a multi-PR spec
 finishes via `Part of` PRs only, a human closes the parent once the last
 Plan item ticks. Plan-item ticks on merge are manual; the
-`onsager-pr-lifecycle` skill documents the procedure.
+global `pr-lifecycle` skill documents the procedure.
 
 ## Anti-patterns (don't)
 
@@ -225,7 +229,7 @@ Plan item ticks. Plan-item ticks on merge are manual; the
 - **Cross-subsystem PRs.** If a PR touches two subsystems (other than
   spine), it should have been split at the spec stage. Stop, split the
   spec, split the PR.
-- **Skipping `onsager-pre-push`.** CI failures cost more time than the
+- **Skipping `pre-push`.** CI failures cost more time than the
   checklist does.
 - **Shipping a primitive without its discovery surface.** Specs that
   introduce a new user-facing resource (workspace, project, credential —
@@ -242,7 +246,37 @@ Plan item ticks. Plan-item ticks on merge are manual; the
 | Stage | Skill / workflow |
 |-------|------------------|
 | Write the spec | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) (installed globally from `onsager-ai/dev-skills`) |
-| Pre-push checks | [`onsager-pre-push`](../onsager-pre-push/SKILL.md) |
+| Pre-push checks | [`pre-push`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pre-push/SKILL.md) (global) + the overlay below |
 | On PR open → spec-link check | [`pr-spec-sync.yml`](../../../.github/workflows/pr-spec-sync.yml) |
-| CI triage, review, iterate | [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md) |
-| On PR merge → tick Plan items / refresh tracker | [`onsager-pr-lifecycle`](../onsager-pr-lifecycle/SKILL.md) (manual) |
+| CI triage, review, iterate | [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (global) + the overlay below |
+| On PR merge → tick Plan items / refresh tracker | [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (global, manual) |
+
+## Pre-push & PR overlay (for the global `pre-push` / `pr-lifecycle` skills)
+
+The global `pre-push` / `pr-lifecycle` skills carry the generic methodology. This is Onsager's repo-specific overlay — the check gate (in step 4 above), the collision patterns the conflict walkthrough should watch for, the CI-failure table, and the bundled GitHub-ops reference + audit script.
+
+### Merge-collision patterns in this repo
+
+Match the symptom in `git status` / build output to the pattern:
+
+- **Migrations (`migrations/NNN_*.sql`)**: both branches added the same `NNN`. Keep main's file at `NNN`, renumber yours to the next unused `NNN+k`, then update **all three** reference sites or the CI migrate step skips it: `justfile` (`db-migrate` recipe), `docker-compose.yml` (`migrate` service entrypoint), `.github/workflows/rust.yml` (`Apply database migrations` step). Sanity check: `git grep -n '<old-NNN>_'` returns zero hits after renumber.
+- **Enum variants** (e.g. `Kind::PullRequest`): main removed variants your branch still uses; build reports `variant not found`. `git grep` each removed variant and update every `match` arm; don't add a catch-all `_ =>` — the exhaustive check is load-bearing.
+- **Event envelope variants** (`FactoryEventKind`, `FactoryEvent`): textual merge succeeds but may duplicate or re-order variants; after merge, dedupe and re-run `cargo build`; serde-renamed variants sharing a tag cause runtime dispatch errors that compile fine.
+- **`Cargo.lock` / `pnpm-lock.yaml`**: regenerate by re-running `cargo build --workspace` / `pnpm install` after taking main's side; never hand-edit.
+- **Spine event schema (`crates/onsager-spine/src/events/`)**: schema drift silently changes wire format; after resolving, run `cargo test -p onsager-spine --lib` to catch serde round-trip failures.
+
+### CI-failure table
+
+| Symptom | Usual cause |
+| ------- | ----------- |
+| `cargo build --workspace` fails, passes locally | CI built the merge preview; main drifted. `git fetch origin main && git merge origin/main`. |
+| `error: no variant ... found for enum` | Main removed an enum variant. Grep match arms. |
+| `cargo test -p onsager-spine` fails at runtime | New migration not listed in `.github/workflows/rust.yml`'s migration step. |
+| `assert!(events.0 >= N)` in DB tests returns 0 | SQL filter on `data->>'type'` — the tag is under `data->'event'->>'type'`, or use the `event_type` column. |
+| Flaky parallel test runs | Global `DELETE FROM events WHERE stream_type = 'registry'` — scope by `data->'event'->>'workspace_id' = $1`. |
+| Seam / API-contract lint fires | `xtask lint-seams` / `check-api-contract` (ADR 0004 / spec #131/#151) — fix the seam, don't add an unscoped `seam-allow`. |
+
+### Bundled GitHub-ops reference + audit script
+
+- [`references/github-ops.md`](references/github-ops.md) — exact `mcp__github__*` tool names, params, and the easy-to-miss gotchas (body replace-vs-merge, label replace-vs-merge, the spec-link regex) the global `pr-lifecycle` flow relies on for this repo.
+- [`scripts/audit-open-prs.sh`](scripts/audit-open-prs.sh) — read-only audit (human/CI use, where MCP isn't available): lists every open PR and flags those missing a spec link / `trivial` label, mirroring `pr-spec-sync.yml`'s regex.
