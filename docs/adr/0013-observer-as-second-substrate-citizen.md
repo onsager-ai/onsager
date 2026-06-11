@@ -1,6 +1,6 @@
 # ADR 0013 — Observer as second substrate citizen
 
-- **Status**: Accepted
+- **Status**: Superseded (2026-06-11)
 - **Date**: 2026-05-15
 - **Identity impact**: yes
 - **Tracking issues**: #347 (ADR-01), #361 (OBS-01), #362 (OBS-02)
@@ -8,7 +8,9 @@
   observer pattern is the in-substrate realization of ADR 0002's
   outer loop; the ADR 0002 framing remains useful as a design
   principle but is no longer the operative mechanism
-- **Superseded by**: none
+- **Superseded by**: ADR 0027 — the observer tier retires with the
+  0.3 consolidation (zero callers landed); observers return only when
+  a concrete consumer exists, via a fresh ADR
 
 This ADR carries `Identity impact: yes` because it introduces a
 second kind of substrate citizen. Until now, the only thing the
