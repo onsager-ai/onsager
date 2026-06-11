@@ -15,7 +15,6 @@ jobs:
     outputs:
       onsager-spine: ${{ steps.filter.outputs.onsager-spine }}
       ising: ${{ steps.filter.outputs.ising }}
-      stiglab: ${{ steps.filter.outputs.stiglab }}
       onsager: ${{ steps.filter.outputs.onsager }}
       workspace: ${{ steps.filter.outputs.workspace }}
       xtask: ${{ steps.filter.outputs.xtask }}
@@ -41,9 +40,6 @@ jobs:
               - 'crates/onsager-spine/**'
             ising:
               - 'crates/ising/**'
-              - 'crates/onsager-spine/**'
-            stiglab:
-              - 'crates/stiglab/**'
               - 'crates/onsager-spine/**'
             onsager:
               - 'crates/onsager/**'
@@ -78,7 +74,6 @@ jobs:
       needs.changes.outputs.workspace == 'true' ||
       needs.changes.outputs.onsager-spine == 'true' ||
       needs.changes.outputs.ising == 'true' ||
-      needs.changes.outputs.stiglab == 'true' ||
       needs.changes.outputs.onsager == 'true' ||
       needs.changes.outputs.xtask == 'true'
     runs-on: ubuntu-latest
@@ -145,9 +140,5 @@ jobs:
         run: cargo test -p onsager-spine -- --test-threads=1
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-      - name: Test stiglab (serial — Lever D #149 routes write the spine schema)
-        run: cargo test -p stiglab -- --test-threads=1
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
       - name: Test remaining crates
-        run: cargo test --workspace --exclude onsager-spine --exclude stiglab
+        run: cargo test --workspace --exclude onsager-spine
