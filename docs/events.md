@@ -165,7 +165,7 @@ Producer subsystem: **onsager-portal (in-process session runner, #583)**.
 - Variant: `FactoryEventKind::SessionCompleted`
 - Stream: `session`
 
-A chat agent session finished successfully. Emitted by portal's in-process session runner (spec #583; formerly `stiglab.session_completed`).
+A chat agent session finished successfully. Emitted by portal's in-process session runner (spec #583; renamed from the legacy session-subsystem kind).
 
 | Field | Type | Description |
 |---|---|---|
@@ -181,7 +181,7 @@ A chat agent session finished successfully. Emitted by portal's in-process sessi
 - Variant: `FactoryEventKind::SessionFailed`
 - Stream: `session`
 
-A chat agent session terminated with an error. Emitted by portal's in-process session runner (spec #583; formerly `stiglab.session_failed`).
+A chat agent session terminated with an error. Emitted by portal's in-process session runner (spec #583; renamed from the legacy session-subsystem kind).
 
 | Field | Type | Description |
 |---|---|---|
