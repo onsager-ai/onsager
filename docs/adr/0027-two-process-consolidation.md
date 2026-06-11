@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-06-11
 - **Identity impact**: yes
-- **Adoption**: ongoing
+- **Adoption**: enforced
 - **Tracking issues**: #581 (umbrella), #582 (synodic), #583 (stiglab), #584 (ising + observers), #585 (executors), #586 (crate merge), #587 (lint diet)
 - **Supersedes**: ADR 0013 (observer as second substrate citizen) — the observer tier retires with the citizen taxonomy; observers return only when a concrete consumer exists. ADR 0009 / 0017 / 0018 (three-layer pipeline, plan compiler, kernel invariants) are explicitly **not** superseded.
 - **Superseded by**: none
@@ -58,14 +58,14 @@ Per ADR 0002: the product move (delete subsystems with no consumer) has the same
 
 ## Adoption checklist
 
-- [ ] Decision recorded (this ADR), CLAUDE.md commitment 1 amended with the 0027 reference, index + ADR 0013 metadata updated. (this PR)
-- [ ] #582 — synodic retired (crate, migrations, manifest rows, dashboard stubs, lint lists).
-- [ ] #583 — agent control plane folded into portal; stiglab deleted.
-- [ ] #584 — ising + onsager-observers deleted; OBS-01/OBS-02 closed or re-scoped.
-- [ ] #585 — SubWorkflow + Human executors deleted; diagnostic-only manifest rows swept.
-- [ ] #586 — factory crates merged into `onsager-engine`; CLAUDE.md workspace layout updated.
-- [ ] #587 — lint diet landed; CLAUDE.md Occam section updated.
-- [ ] Flip `Adoption` to `enforced`; verify one end-to-end run (dashboard "Run" → agent session → artifact) on the consolidated stack.
+- [x] Decision recorded (this ADR), CLAUDE.md commitment 1 amended with the 0027 reference, index + ADR 0013 metadata updated. (PR #588)
+- [x] #582 — synodic retired (crate, migrations, manifest rows, dashboard stubs, lint lists). (PR #591)
+- [x] #583 — agent control plane folded into portal (in-process `session_runner`); stiglab deleted. (PR #592)
+- [x] #584 — ising + onsager-observers deleted; OBS-01/OBS-02 closed. (PR #593)
+- [x] #585 — SubWorkflow + Human executors deleted; manifest swept (`node.awaiting_human` kept — live Agent-executor emitter; `stage.advanced` producer gap tracked by #594). (PR #595)
+- [x] #586 — onsager-nodes/scheduler/trigger merged into `onsager-engine`; dispatcher CLI deleted; substrate + agent-spawn stay shared below-seam (amendment on the issue — portal depends on both). (PR #596)
+- [x] #587 — lint diet landed (`lint-seams` re-scoped to portal/engine; orphan-crates + single-impl-traits retired); CLAUDE.md Occam section updated. (PR #597)
+- [x] Flip `Adoption` to `enforced`; one end-to-end run verified on the consolidated stack 2026-06-11 (manual trigger fire → engine compiled the plan → agent executor ran a live Claude session → artifact registered on the spine).
 
 ## Out of scope
 

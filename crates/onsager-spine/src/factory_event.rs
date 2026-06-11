@@ -96,8 +96,8 @@ pub enum FactoryEventKind {
     // -- Forge process events -----------------------------------------------
     // -- Chat-session lifecycle (portal's in-process runner, ADR 0027) ------
     /// A chat agent session finished successfully. Emitted by portal's
-    /// in-process session runner (spec #583; formerly
-    /// `stiglab.session_completed`).
+    /// in-process session runner (spec #583; renamed from the legacy
+    /// session-subsystem kind).
     SessionCompleted {
         session_id: String,
         duration_ms: u64,
@@ -124,8 +124,8 @@ pub enum FactoryEventKind {
     },
 
     /// A chat agent session terminated with an error. Emitted by portal's
-    /// in-process session runner (spec #583; formerly
-    /// `stiglab.session_failed`).
+    /// in-process session runner (spec #583; renamed from the legacy
+    /// session-subsystem kind).
     SessionFailed {
         session_id: String,
         error: String,

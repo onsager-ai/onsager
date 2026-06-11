@@ -50,7 +50,7 @@ pub const EXCHANGE_CODE_LIFETIME_SECS: i64 = 30;
 /// form stays under URL-length limits even with long return_to values.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StateClaims {
-    /// CSRF nonce — also stored in `stiglab_oauth_state` cookie on the owner.
+    /// CSRF nonce — also stored in `onsager_oauth_state` cookie on the owner.
     pub c: String,
     /// Optional return URL; when present, the callback mints an exchange
     /// code and 302s here instead of minting a local session.

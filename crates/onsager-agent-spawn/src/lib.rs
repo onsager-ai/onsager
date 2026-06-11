@@ -1,21 +1,21 @@
 //! Shared agent-session spawn wiring (spec #535, Part of #533).
 //!
 //! The constants and JSON builders below were authored inline in
-//! stiglab's `agent/session/process.rs` by spec #530/#532. Per #533 the
+//! the legacy session subsystem by spec #530/#532. Per #533 the
 //! production scheduler-side runner (`ClaudeCliRunner`) must spawn the
 //! same `claude` CLI with the same MCP-server / liveness-Stop-hook
-//! wiring — but stiglab and the scheduler live on opposite sides of the
+//! wiring — but the session host and the scheduler lived on opposite sides of the
 //! subsystem seam and cannot import each other. This crate is the pure
-//! utility both depend on instead: extracted **verbatim** from stiglab,
+//! utility both depend on instead: extracted **verbatim**,
 //! it carries no IO, no env reads, and no subsystem knowledge, so
 //! sharing it across the seam is seam-correct (a utility crate is not a
 //! subsystem).
 //!
-//! Behavior is unchanged from the stiglab originals; the unit tests
+//! Behavior is unchanged from the originals; the unit tests
 //! below are the parity assertions #532 added, moved with the functions.
 //!
 //! Per spec #555 the same charter brought the `ONSAGER_REPOS` builder
-//! here too: multi-repo read (#546) was first wired on stiglab's
+//! here too: multi-repo read (#546) was first wired on the legacy
 //! `portal.session_requested` path, but the scheduler/`AgentExecutor`
 //! launch path needs the *identical* env var. The agent-facing wire
 //! shape (the JSON array the agent reads to clone its repos) is the
@@ -39,7 +39,7 @@ pub const LIVENESS_HOOK_URL_ENV: &str = "ONSAGER_LIVENESS_HOOK_URL";
 /// time (kept out of the on-disk settings via Claude Code's
 /// `allowedEnvVars`); the MCP server config (spec #531) interpolates the
 /// same var into its `Authorization` header. Provisioned into the session
-/// env by stiglab's dispatch path (decrypted from the
+/// env by the session-dispatch path (decrypted from the
 /// `portal.session_requested` event); when absent the Stop hook's request
 /// is unauthorized → `401` → it fails open (the authoritative gate #523
 /// still applies) and no MCP server is registered.
@@ -63,7 +63,7 @@ pub const MCP_URL_ENV: &str = "ONSAGER_MCP_URL";
 /// still empty stays blocked until the cap — we never short-circuit on
 /// a `stop_hook_active`-style flag.
 ///
-/// Our stiglab `session_id` + `workspace_id` are baked into the URL
+/// Our `session_id` + `workspace_id` are baked into the URL
 /// query string (the POST body carries Claude Code's *own* session id,
 /// which is unrelated to our manifest stream key).
 pub fn stop_hook_settings_json(

@@ -61,7 +61,7 @@ pub async fn register(pool: &PgPool, workspace_id: &str) -> sqlx::Result<()> {
     Ok(())
 }
 
-/// Same as [`register`] for an `AnyPool`. Stiglab uses sqlx's runtime-
+/// Same as [`register`] for an `AnyPool`. Some callers use sqlx's runtime-
 /// polymorphic pool so it gets its own entry point; the SQL is
 /// identical (postgres-style placeholders work under `Any` driver).
 /// `Any` doesn't accept `JSONB` directly, so the config is passed as

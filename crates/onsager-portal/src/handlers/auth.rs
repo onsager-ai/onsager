@@ -128,7 +128,7 @@ pub async fn github_login(
 
             let sec = secure_attr(config);
             let cookie = format!(
-                "stiglab_oauth_state={csrf_nonce}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600{sec}"
+                "onsager_oauth_state={csrf_nonce}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600{sec}"
             );
 
             ([(header::SET_COOKIE, cookie)], Redirect::temporary(&url)).into_response()
@@ -159,7 +159,7 @@ pub async fn github_callback(
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let cookie_csrf = auth::parse_cookie(cookie_header, "stiglab_oauth_state");
+    let cookie_csrf = auth::parse_cookie(cookie_header, "onsager_oauth_state");
 
     let claims: Option<StateClaims> = if delegate_enabled {
         let secret = config
@@ -234,7 +234,7 @@ pub async fn github_callback(
 
     let sec = secure_attr(config);
     let clear_state_cookie =
-        format!("stiglab_oauth_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}");
+        format!("onsager_oauth_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{sec}");
 
     if let Some(return_to) = delegated_return_to {
         let host = match sso::host_of(&return_to) {

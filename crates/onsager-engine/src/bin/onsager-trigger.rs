@@ -33,7 +33,7 @@ const DEFAULT_DATABASE_URL_VAR: &str = "DATABASE_URL";
 #[command(name = "onsager-trigger", about = "Fire or replay workflow triggers")]
 struct Cli {
     /// Postgres connection URL (defaults to $DATABASE_URL).
-    #[arg(long, global = true, env = DEFAULT_DATABASE_URL_VAR)]
+    #[arg(long, env = DEFAULT_DATABASE_URL_VAR)]
     database_url: String,
 
     #[command(subcommand)]

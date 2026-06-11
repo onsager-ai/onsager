@@ -1,5 +1,5 @@
 //! Per-workspace GitHub App installation routes (spec #222 Slice 3b —
-//! moved from stiglab).
+//! moved here in #222 Slice 3b).
 //!
 //! Endpoints:
 //! - `POST /api/workspaces/:workspace_id/github-installations` — manual

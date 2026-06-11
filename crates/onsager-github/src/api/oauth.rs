@@ -16,7 +16,7 @@ pub struct GithubTokenResponse {
 }
 
 /// GitHub user identity returned by `GET /user`. Field set is what
-/// stiglab's `auth.rs` consumed today (id + login + name + avatar) —
+/// the auth flow consumes (id + login + name + avatar) —
 /// nothing extra.
 #[derive(Debug, Deserialize)]
 pub struct GithubOAuthUser {
