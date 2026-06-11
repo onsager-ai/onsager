@@ -38,6 +38,11 @@ services:
       POSTGRES_USER: onsager
       POSTGRES_PASSWORD: onsager
       POSTGRES_DB: onsager
+    # OS-assigned loopback port so host-run `cargo` (just dev) reaches the
+    # db without a hand-rolled override, conflict-free across parallel
+    # worktrees. `just dev` reads it back via `docker compose port db 5432`.
+    ports:
+      - "127.0.0.1::5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
