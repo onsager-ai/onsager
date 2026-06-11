@@ -11,10 +11,20 @@ default:
 
 # ── Setup ────────────────────────────────────────────────────────────
 
-# One-time dev setup: point git at the committed hooks directory
+# One-time dev setup: point git at the committed hooks directory.
+# Skipped when a machine-global core.hooksPath is set — the global hook
+# (worktree-discipline) delegates to .githooks/pre-commit, and a repo-local
+# hooksPath would override the global one and silently drop the guard.
 setup:
-    git config core.hooksPath .githooks
-    @echo "Git hooks installed from .githooks/"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if git config --global core.hooksPath >/dev/null 2>&1; then
+        git config --unset core.hooksPath 2>/dev/null || true
+        echo "Global core.hooksPath active — it delegates to .githooks/; repo-local hooksPath left unset."
+    else
+        git config core.hooksPath .githooks
+        echo "Git hooks installed from .githooks/"
+    fi
 
 # ── Build ────────────────────────────────────────────────────────────
 build: build-rust build-ui
@@ -203,7 +213,7 @@ dev: dev-infra
         cargo run -p onsager-scheduler -- serve &
 
     echo "==> Starting dashboard on :5173..."
-    pnpm --filter dashboard dev &
+    pnpm --filter dashboard dev -- --strictPort &
 
     echo ""
     echo "=== Onsager dev stack running ==="
