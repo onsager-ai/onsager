@@ -70,6 +70,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         pool,
         spine,
         config: Arc::new(config.clone()),
+        session_runner: Arc::new(crate::session_runner::SessionRunner::from_env()),
         proxy_cache: Arc::new(ProxyCache::from_env()),
         push: PushState::new(push_vapid),
     };

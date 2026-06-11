@@ -167,7 +167,6 @@ impl std::fmt::Display for NodeStatus {
 pub struct Task {
     pub id: String,
     pub prompt: String,
-    pub node_id: Option<String>,
     pub working_dir: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
     pub max_turns: Option<u32>,
@@ -181,7 +180,6 @@ pub struct Task {
 #[ts(export, optional_fields)]
 pub struct TaskRequest {
     pub prompt: String,
-    pub node_id: Option<String>,
     pub working_dir: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
     pub max_turns: Option<u32>,

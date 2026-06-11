@@ -11,14 +11,13 @@
 //! - **Mint** at session creation ([`mint_for_session`]): a PAT pinned to
 //!   the session's workspace, named `session:<session_id>`, with a short
 //!   `expires_at`. Only the hash is persisted (reusing the existing PAT
-//!   machinery); the raw token is **encrypted** with the shared credential
-//!   key and travels inside the `portal.session_requested` event so no
-//!   usable secret is persisted in `events_ext` at rest. Stiglab decrypts
-//!   it at dispatch and injects it as `ONSAGER_SESSION_TOKEN`.
+//!   machinery); the raw token is handed straight to the in-process
+//!   session runner (#583), which injects it as `ONSAGER_SESSION_TOKEN`
+//!   — it never rides a spine event, so nothing usable is at rest.
 //! - **Revoke** when the session ends ([`session_pat_name`] + the
 //!   session-lifecycle listener): the token is soft-revoked on
-//!   `stiglab.session_completed` / `_failed` / `_aborted` so the window
-//!   closes immediately rather than waiting for expiry.
+//!   `session.completed` / `session.failed` so the window closes
+//!   immediately rather than waiting for expiry.
 //!
 //! Per spec #536 the same machinery provisions a **plan-scoped** token
 //! for the substrate-scheduler dispatch path: a single token named
@@ -57,14 +56,13 @@ pub fn plan_pat_name(plan_id: &str) -> String {
     format!("plan:{plan_id}")
 }
 
-/// Mint a workspace-pinned PAT under `name` and return the raw token
-/// **encrypted** with `key_hex` (ready to embed in the dispatch event).
-/// Only the hash is persisted to `user_pats`. Shared body of the
+/// Mint a workspace-pinned PAT under `name` and return the **raw**
+/// token. Only the hash is persisted to `user_pats`. Shared body of the
 /// per-session ([`mint_for_session`]) and per-plan ([`mint_for_plan`])
-/// minters — the only difference between the two is the `name` prefix.
+/// minters; the plan minter encrypts the result before it crosses the
+/// spine, the session minter hands it straight to the in-process runner.
 async fn mint_named(
     pool: &PgPool,
-    key_hex: &str,
     user_id: &str,
     workspace_id: &str,
     name: &str,
@@ -82,28 +80,21 @@ async fn mint_named(
         Some(expires_at),
     )
     .await?;
-    let encrypted = encrypt_credential(key_hex, &pat.token)?;
-    Ok(encrypted)
+    Ok(pat.token)
 }
 
-/// Mint a workspace-pinned PAT for `session_id` and return the raw token
-/// **encrypted** with `key_hex` (ready to embed in the dispatch event).
-/// Only the hash is persisted to `user_pats`.
+/// Mint a workspace-pinned PAT for `session_id` and return the **raw**
+/// token. Only the hash is persisted to `user_pats`. Per #583 the
+/// session runner lives in-process, so the token never crosses the
+/// spine and needs no encrypt→decrypt round-trip (the retired
+/// `portal.session_requested` wire carried it encrypted).
 pub async fn mint_for_session(
     pool: &PgPool,
-    key_hex: &str,
     user_id: &str,
     workspace_id: &str,
     session_id: &str,
 ) -> anyhow::Result<String> {
-    mint_named(
-        pool,
-        key_hex,
-        user_id,
-        workspace_id,
-        &session_pat_name(session_id),
-    )
-    .await
+    mint_named(pool, user_id, workspace_id, &session_pat_name(session_id)).await
 }
 
 /// Mint a workspace-pinned PAT for `plan_id` (spec #536) and return the
@@ -117,14 +108,8 @@ pub async fn mint_for_plan(
     workspace_id: &str,
     plan_id: &str,
 ) -> anyhow::Result<String> {
-    mint_named(
-        pool,
-        key_hex,
-        user_id,
-        workspace_id,
-        &plan_pat_name(plan_id),
-    )
-    .await
+    let raw = mint_named(pool, user_id, workspace_id, &plan_pat_name(plan_id)).await?;
+    encrypt_credential(key_hex, &raw)
 }
 
 /// Revoke the session-scoped PAT for `session_id` (idempotent). Returns the

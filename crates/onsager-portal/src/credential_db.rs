@@ -130,6 +130,29 @@ pub async fn delete_user_credential(
     Ok(())
 }
 
+/// Read every credential row for `(workspace_id, user_id)` as
+/// `(name, encrypted_value)` pairs. Used by the in-process session
+/// runner to build the env-var map handed to the agent process (port of
+/// stiglab's `db/credentials.rs` helper, folded per #583). Sessions
+/// resolve `workspace_id` from `sessions.workspace_id`; legacy
+/// NULL-workspace sessions get an empty map (no credentials → loud
+/// failure via `session.failed`, never the wrong-workspace token).
+pub async fn get_all_user_credential_values(
+    pool: &PgPool,
+    workspace_id: &str,
+    user_id: &str,
+) -> anyhow::Result<Vec<(String, String)>> {
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT name, encrypted_value FROM user_credentials \
+         WHERE workspace_id = $1 AND user_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// Fetch the AES-256-GCM ciphertext for a named credential. Returns
 /// `None` when the credential does not exist. The caller is responsible
 /// for decrypting via `auth::decrypt_credential`.

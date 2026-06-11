@@ -197,6 +197,32 @@ pub async fn get_session_logs_after(
 
 // ── Session writes ────────────────────────────────────────────────────────────
 
+/// Append one log chunk for a session (next `seq` resolved in-query).
+/// Port of stiglab's `server/db/sessions.rs::append_session_log`
+/// (folded per #583) — the in-process session runner is the writer; the
+/// SSE `/api/sessions/:id/logs` reader above was already portal's.
+pub async fn append_session_log(
+    pool: &PgPool,
+    session_id: &str,
+    chunk: &str,
+    stream: &str,
+) -> anyhow::Result<()> {
+    let id = uuid::Uuid::new_v4().to_string();
+    // Subquery resolves the next sequence number for this session.
+    sqlx::query(
+        "INSERT INTO session_logs (id, session_id, seq, chunk, stream, created_at)
+         VALUES ($1, $2, COALESCE((SELECT MAX(seq) FROM session_logs WHERE session_id = $2), 0) + 1, $3, $4, $5)",
+    )
+    .bind(&id)
+    .bind(session_id)
+    .bind(chunk)
+    .bind(stream)
+    .bind(Utc::now().to_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn insert_session_with_user_project_workspace(
     pool: &PgPool,
     session: &Session,

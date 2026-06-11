@@ -54,6 +54,7 @@ pub mod repo_access;
 pub mod runtime;
 pub mod server;
 pub mod session_db;
+pub mod session_runner;
 pub mod session_token;
 pub mod spec_plan_db;
 pub mod sso;

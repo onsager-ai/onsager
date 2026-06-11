@@ -1,14 +1,12 @@
-//! Task creation endpoint (spec #222 Follow-up 3).
+//! Task creation endpoint.
 //!
-//! Moved from `crates/stiglab/src/server/routes/tasks.rs`. The key
-//! difference is that portal cannot dispatch directly to an agent
-//! WebSocket — stiglab owns those connections. Instead, portal:
-//!
-//! 1. Validates the request (node availability, workspace membership).
-//! 2. Inserts the session row in Pending state.
-//! 3. Emits `portal.session_requested` onto the spine.
-//! 4. Returns immediately. Stiglab's `session_requested_listener` picks up
-//!    the event, fetches credentials, and dispatches to the agent WebSocket.
+//! Per spec #583 (ADR 0027) portal owns the whole session lifecycle:
+//! `POST /api/tasks` validates the request, inserts the session row in
+//! Pending state, and hands it to the in-process
+//! [`SessionRunner`](crate::session_runner::SessionRunner) — which
+//! spawns the Claude CLI directly. There is no node fleet and no spine
+//! dispatch hop anymore; `sessions.node_id` is the constant `"portal"`
+//! (the column stays NOT NULL for historical rows).
 
 use axum::Json;
 use axum::extract::State;
@@ -23,48 +21,35 @@ use crate::auth::AuthUser;
 use crate::core::{Session, SessionState, Task, TaskRequest};
 use crate::handlers::workspaces::require_workspace_access;
 use crate::session_db;
+use crate::session_runner::SessionLaunch;
 use crate::state::AppState;
 use crate::workspace_db;
 
-/// Wire payload embedded in every `portal.session_requested` spine event.
-/// Stiglab's `session_requested_listener` deserializes this to dispatch the
-/// session to the correct agent node.
+/// The session runner executes in-process now (#583), so `sessions.node_id`
+/// records this constant instead of a fleet node id.
+pub const PORTAL_NODE_ID: &str = "portal";
+
+/// Diagnostic payload on the `portal.session_requested` timeline event.
+///
+/// Nothing consumes this event anymore — the runner is called in-process
+/// — but the row keeps the dashboard timeline's "a session was asked
+/// for" marker. **Secrets are deliberately absent**: the old wire shape
+/// carried `encrypted_session_token` + `repos` (with encrypted read
+/// tokens) because it crossed the spine to stiglab; the in-process
+/// hand-off means no secret material needs to ride a persisted event,
+/// so none does.
 #[derive(Debug, Serialize)]
-pub struct TaskDispatchPayload {
+pub struct SessionRequestedPayload {
     pub session_id: String,
-    pub node_id: String,
     pub task_id: String,
     pub prompt: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowed_tools: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_turns: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system_prompt: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
     pub user_id: String,
-    /// Workspace-scoped session token (spec #531), **encrypted** with the
-    /// shared credential key. Stiglab decrypts it at dispatch and injects
-    /// it as `ONSAGER_SESSION_TOKEN` so the agent can reach portal's MCP
-    /// surface + the liveness Stop hook. `None` when the session is
-    /// unscoped or no credential key is configured.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub encrypted_session_token: Option<String>,
-    /// The workspace's bound repo set with read-scoped per-repo
-    /// credentials (spec #546). One entry per bound repo (possibly across
-    /// orgs); stiglab decrypts each token and surfaces the set to the
-    /// agent so it can clone on demand. Empty for an unscoped session or a
-    /// workspace with no bound repos — the single-repo / `working_dir`
-    /// path is unchanged. Omitted from the wire when empty.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub repos: Vec<onsager_spine::protocol::RepoAccess>,
 }
 
 /// POST /api/tasks — create a task and its initial session.
@@ -76,7 +61,6 @@ pub async fn create_task(
     let task = Task {
         id: Uuid::new_v4().to_string(),
         prompt: request.prompt.clone(),
-        node_id: request.node_id.clone(),
         working_dir: request.working_dir.clone(),
         allowed_tools: request.allowed_tools.clone(),
         max_turns: request.max_turns,
@@ -84,55 +68,6 @@ pub async fn create_task(
         system_prompt: request.system_prompt.clone(),
         permission_mode: request.permission_mode.clone(),
         created_at: Utc::now(),
-    };
-
-    // Find target node.
-    let target_node = if let Some(ref node_id) = request.node_id {
-        match session_db::get_node(&state.pool, node_id).await {
-            Ok(Some(node)) => {
-                if node.status != crate::core::NodeStatus::Online {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({ "error": format!("node {} is not online", node_id) })),
-                    )
-                        .into_response();
-                }
-                if node.active_sessions >= node.max_sessions {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({ "error": format!("node {} is at capacity", node_id) })),
-                    )
-                        .into_response();
-                }
-                node
-            }
-            Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(serde_json::json!({ "error": format!("node {} not found", node_id) })),
-                )
-                    .into_response();
-            }
-            Err(e) => {
-                tracing::error!("failed to get node: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-            }
-        }
-    } else {
-        match session_db::find_least_loaded_node(&state.pool).await {
-            Ok(Some(node)) => node,
-            Ok(None) => {
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(serde_json::json!({ "error": "no available nodes for dispatch" })),
-                )
-                    .into_response();
-            }
-            Err(e) => {
-                tracing::error!("failed to find node: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-            }
-        }
     };
 
     // Resolve workspace (project wins over explicit, explicit wins over None).
@@ -180,7 +115,7 @@ pub async fn create_task(
     let session = Session {
         id: Uuid::new_v4().to_string(),
         task_id: task.id.clone(),
-        node_id: target_node.id.clone(),
+        node_id: PORTAL_NODE_ID.to_string(),
         state: SessionState::Pending,
         prompt: request.prompt.clone(),
         output: None,
@@ -207,15 +142,12 @@ pub async fn create_task(
     }
 
     // Mint a workspace-scoped session token (spec #531) so the agent can
-    // reach portal's MCP surface + the liveness Stop hook. Requires both a
-    // workspace scope and a configured credential key; absent either, the
-    // session runs without a token (the authoritative gate still applies).
-    let encrypted_session_token = match (
-        workspace_id.as_deref(),
-        state.config.credential_key.as_deref(),
-    ) {
-        (Some(ws), Some(key)) => {
-            match crate::session_token::mint_for_session(&state.pool, key, user_id, ws, &session.id)
+    // reach portal's MCP surface + the liveness Stop hook. The raw token
+    // goes straight to the in-process runner — it never crosses the
+    // spine, so no encryption round-trip (#583).
+    let session_token = match workspace_id.as_deref() {
+        Some(ws) => {
+            match crate::session_token::mint_for_session(&state.pool, user_id, ws, &session.id)
                 .await
             {
                 Ok(token) => Some(token),
@@ -230,7 +162,7 @@ pub async fn create_task(
                 }
             }
         }
-        _ => None,
+        None => None,
     };
 
     // Resolve the workspace's bound repo set with read-scoped per-repo
@@ -243,54 +175,62 @@ pub async fn create_task(
         None => Vec::new(),
     };
 
-    // Emit portal.session_requested so stiglab's listener can pick up the
-    // session, fetch credentials, and dispatch to the agent WebSocket.
-    let dispatch = TaskDispatchPayload {
+    // Diagnostic timeline marker (secret-free — see the payload doc).
+    let diagnostic = SessionRequestedPayload {
         session_id: session.id.clone(),
-        node_id: target_node.id.clone(),
         task_id: task.id.clone(),
         prompt: task.prompt.clone(),
         working_dir: task.working_dir.clone(),
-        allowed_tools: task.allowed_tools.clone(),
-        max_turns: task.max_turns,
         model: task.model.clone(),
-        system_prompt: task.system_prompt.clone(),
-        permission_mode: task.permission_mode.clone(),
         workspace_id: workspace_id.clone(),
         user_id: user_id.to_string(),
-        encrypted_session_token,
-        repos,
     };
-
     let ws_id = workspace_id.as_deref().unwrap_or("default");
-    let stream_id = session.id.clone();
     let metadata = EventMetadata {
         correlation_id: None,
         causation_id: None,
         actor: "portal".to_string(),
     };
-    let data = serde_json::to_value(&dispatch).unwrap_or_default();
-
     if let Err(e) = state
         .spine
         .append_ext(
             ws_id,
-            &stream_id,
+            &session.id,
             "portal",
             "portal.session_requested",
-            data,
+            serde_json::to_value(&diagnostic).unwrap_or_default(),
             &metadata,
             None,
         )
         .await
     {
-        // Non-fatal: the session is in DB; stiglab's WS drain will pick it up
-        // on reconnect. Log loudly so operators can correlate with stalled dispatches.
+        // Non-fatal: the event is diagnostic-only; the session runs anyway.
         tracing::error!(
             session_id = %session.id,
             "failed to emit portal.session_requested: {e}"
         );
     }
+
+    // Hand the session to the in-process runner (#583). Returns
+    // immediately; the runner drives pending → running → done/failed.
+    state.session_runner.spawn_session(
+        state.pool.clone(),
+        state.spine.clone(),
+        state.config.clone(),
+        SessionLaunch {
+            session_id: session.id.clone(),
+            prompt: task.prompt.clone(),
+            working_dir: task.working_dir.clone(),
+            max_turns: task.max_turns,
+            model: task.model.clone(),
+            system_prompt: task.system_prompt.clone(),
+            permission_mode: task.permission_mode.clone(),
+            workspace_id: workspace_id.clone(),
+            user_id: user_id.to_string(),
+            session_token,
+            repos,
+        },
+    );
 
     (
         StatusCode::CREATED,
