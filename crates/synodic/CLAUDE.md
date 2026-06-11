@@ -57,5 +57,5 @@ cargo clippy -p synodic --all-targets -- -D warnings
 ```
 
 CI runs the workspace pass with `RUSTFLAGS="-D warnings"` against a
-merge preview of `origin/main`; reproduce that locally via the
-`onsager-pre-push` skill before pushing.
+merge preview of `origin/main`; reproduce that locally via the global
+`pre-push` skill before pushing (Onsager's gate is in `onsager-dev-process`).
