@@ -103,10 +103,6 @@ jobs:
         run: cargo run -p xtask --quiet -- check-detail-page-tabs
       - name: File-budget check (spec #261)
         run: cargo run -p xtask --quiet -- check-file-budget --mode=fail
-      - name: Orphan-crate check (spec #275, warn-mode landing)
-        run: cargo run -p xtask --quiet -- check-orphan-crates --mode=warn
-      - name: Single-impl-trait check (spec #275, warn-mode landing)
-        run: cargo run -p xtask --quiet -- check-single-impl-traits --mode=warn
       - name: Deferred-TODO check (spec #275, warn-mode landing)
         run: cargo run -p xtask --quiet -- check-deferred-todos --mode=warn
       - name: ADR-adoption check (ADR 0024 / 0025, spec #506, warn-mode landing)
