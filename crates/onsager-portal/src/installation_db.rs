@@ -2,9 +2,8 @@
 //! `github_app_installations` table (portal migration 007).
 //!
 //! Spec #222 Slice 3b moved the routes and schema from stiglab to
-//! portal. Stiglab still reads the same Postgres table from a separate
-//! connection pool for the in-process needs of `routes/projects.rs`
-//! live-data hydration, but **portal is the only writer**.
+//! portal; **portal is the only writer** (and, post-#583, the only
+//! reader).
 
 use chrono::{DateTime, Utc};
 use sqlx::postgres::PgPool;
@@ -146,7 +145,7 @@ pub async fn get_install_webhook_secret_cipher(
 /// Count projects that still reference a given installation. Used by
 /// the delete-installation route for an app-layer referential-integrity
 /// check (the schema does not declare FK constraints, in keeping with
-/// the rest of the stiglab/spine schema).
+/// the rest of the spine schema).
 pub async fn count_projects_for_installation(
     pool: &PgPool,
     install_row_id: &str,
@@ -161,9 +160,8 @@ pub async fn count_projects_for_installation(
 }
 
 /// Membership check — used by every workspace-scoped installation
-/// route's `require_workspace_access` helper. Reads `workspace_members`
-/// from the same Postgres instance (still owned by stiglab's runtime
-/// migrations until #222 Slice 3a moves the schema into the spine).
+/// route's `require_workspace_access` helper. Reads the spine-owned
+/// `workspace_members` table (004_workflows.sql).
 pub async fn is_workspace_member(
     pool: &PgPool,
     workspace_id: &str,

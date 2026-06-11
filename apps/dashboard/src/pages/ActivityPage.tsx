@@ -32,7 +32,7 @@ const SOURCE_CHIPS: SourceTypeChip[] = [
   {
     key: "run",
     label: "Run",
-    match: (e) => e.event_type.startsWith("stiglab."),
+    match: (e) => e.event_type.startsWith("session."),
   },
   {
     key: "verdict",

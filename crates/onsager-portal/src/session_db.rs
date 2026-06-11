@@ -8,7 +8,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::postgres::PgPool;
 
-use crate::core::{LogChunk, LogChunkWithSeq, Node, NodeStatus, Session, SessionState};
+use crate::core::{LogChunk, LogChunkWithSeq, Session, SessionState};
 
 // ── Row types ────────────────────────────────────────────────────────────────
 
@@ -43,46 +43,6 @@ impl TryFrom<SessionRow> for Session {
             created_at: DateTime::parse_from_rfc3339(&r.created_at)?.with_timezone(&Utc),
             updated_at: DateTime::parse_from_rfc3339(&r.updated_at)?.with_timezone(&Utc),
         })
-    }
-}
-
-#[derive(sqlx::FromRow)]
-struct NodeRow {
-    id: String,
-    name: String,
-    hostname: String,
-    status: String,
-    max_sessions: i32,
-    active_sessions: i32,
-    last_heartbeat: String,
-    registered_at: String,
-}
-
-impl TryFrom<NodeRow> for Node {
-    type Error = anyhow::Error;
-    fn try_from(r: NodeRow) -> anyhow::Result<Self> {
-        Ok(Node {
-            id: r.id,
-            name: r.name,
-            hostname: r.hostname,
-            status: r.status.parse::<NodeStatus>()?,
-            max_sessions: r.max_sessions as u32,
-            active_sessions: r.active_sessions as u32,
-            last_heartbeat: DateTime::parse_from_rfc3339(&r.last_heartbeat)?.with_timezone(&Utc),
-            registered_at: DateTime::parse_from_rfc3339(&r.registered_at)?.with_timezone(&Utc),
-        })
-    }
-}
-
-impl std::str::FromStr for NodeStatus {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "online" => Ok(Self::Online),
-            "offline" => Ok(Self::Offline),
-            "draining" => Ok(Self::Draining),
-            _ => Err(anyhow::anyhow!("invalid node status: {s}")),
-        }
     }
 }
 
@@ -267,43 +227,4 @@ pub async fn update_session_state(
         .execute(pool)
         .await?;
     Ok(())
-}
-
-// ── Node reads ────────────────────────────────────────────────────────────────
-
-pub async fn list_nodes(pool: &PgPool) -> anyhow::Result<Vec<Node>> {
-    let rows = sqlx::query_as::<_, NodeRow>(
-        "SELECT id, name, hostname, status, max_sessions, active_sessions, \
-                last_heartbeat, registered_at FROM nodes",
-    )
-    .fetch_all(pool)
-    .await?;
-    rows.into_iter().map(|r| r.try_into()).collect()
-}
-
-pub async fn get_node(pool: &PgPool, node_id: &str) -> anyhow::Result<Option<Node>> {
-    let row = sqlx::query_as::<_, NodeRow>(
-        "SELECT id, name, hostname, status, max_sessions, active_sessions, \
-                last_heartbeat, registered_at FROM nodes WHERE id = $1",
-    )
-    .bind(node_id)
-    .fetch_optional(pool)
-    .await?;
-    row.map(|r| r.try_into()).transpose()
-}
-
-pub async fn find_least_loaded_node(pool: &PgPool) -> anyhow::Result<Option<Node>> {
-    let cutoff = (Utc::now() - chrono::Duration::seconds(120)).to_rfc3339();
-    let row = sqlx::query_as::<_, NodeRow>(
-        "SELECT id, name, hostname, status, max_sessions, active_sessions, \
-                last_heartbeat, registered_at \
-         FROM nodes \
-         WHERE status = 'online' AND active_sessions < max_sessions AND last_heartbeat > $1 \
-         ORDER BY CAST(active_sessions AS REAL) / CAST(max_sessions AS REAL) ASC \
-         LIMIT 1",
-    )
-    .bind(&cutoff)
-    .fetch_optional(pool)
-    .await?;
-    row.map(|r| r.try_into()).transpose()
 }

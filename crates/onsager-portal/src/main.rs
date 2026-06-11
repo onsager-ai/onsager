@@ -24,8 +24,8 @@ enum Command {
         /// Postgres URL (`DATABASE_URL`).
         #[arg(long, env = "DATABASE_URL")]
         database_url: String,
-        /// AES-256-GCM credential key (hex), shared with stiglab so the
-        /// portal can decrypt `webhook_secret_cipher` rows.
+        /// AES-256-GCM credential key (hex) used to decrypt
+        /// `webhook_secret_cipher` rows and workspace credentials.
         #[arg(long, env = "ONSAGER_CREDENTIAL_KEY")]
         credential_key: Option<String>,
         /// Optional GitHub PAT used for posting check runs / comments when

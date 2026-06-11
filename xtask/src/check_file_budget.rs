@@ -518,13 +518,13 @@ mod tests {
     #[test]
     fn prod_classification() {
         assert!(is_prod_source(Path::new(
-            "crates/stiglab/src/core/pipeline.rs"
+            "crates/onsager-portal/src/core/pipeline.rs"
         )));
         assert!(!is_prod_source(Path::new(
             "crates/foo/tests/integration.rs"
         )));
         assert!(!is_prod_source(Path::new(
-            "crates/stiglab/src/core/storage/tests.rs"
+            "crates/onsager-portal/src/core/storage/tests.rs"
         )));
         assert!(!is_prod_source(Path::new("crates/foo/src/x_tests.rs")));
         assert!(is_prod_source(Path::new("apps/dashboard/src/lib/api.ts")));

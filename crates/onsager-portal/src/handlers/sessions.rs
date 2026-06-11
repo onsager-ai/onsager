@@ -10,7 +10,6 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use futures_util::stream;
 use onsager_spine::EventMetadata;
-use serde::Deserialize;
 use std::convert::Infallible;
 use std::time::Duration;
 
@@ -19,22 +18,6 @@ use crate::core::SessionState;
 use crate::handlers::workspaces::require_workspace_access;
 use crate::session_db;
 use crate::state::AppState;
-
-#[derive(Debug, Deserialize)]
-pub struct WorkspaceQuery {
-    pub workspace: String,
-}
-
-pub(super) fn missing_workspace() -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({
-            "error": "workspace query parameter is required",
-            "detail": "every workspace-scoped list endpoint requires ?workspace=<id>",
-        })),
-    )
-        .into_response()
-}
 
 fn not_found() -> Response {
     (

@@ -1,15 +1,16 @@
 //! Architecture + bridge-pattern lints for the seam rule (ADR 0004 / spec #131
 //! Lever B).
 //!
-//! What it checks (subsystem source = `crates/{stiglab,ising}/`):
+//! What it checks (subsystem source = `crates/ising/`, until #584
+//! retires it):
 //!
 //! 1. **Arch-deps** — subsystem A's `Cargo.toml` must not declare another
 //!    subsystem as a path / git / version dep.
 //! 2. **Sibling-subsystem HTTP** — references to a sibling subsystem's
 //!    `*_URL` / `*_PORT` env var, or a `localhost:<port>` literal whose port
 //!    matches another subsystem's well-known port, are flagged. Self-
-//!    references are fine. The legitimate `reqwest::Client` callers in
-//!    stiglab talks to GitHub / LLM APIs — those don't trip this lint.
+//!    references are fine. Legitimate `reqwest::Client` callers talking
+//!    to GitHub / LLM APIs don't trip this lint.
 //! 3. **`#[serde(alias = ...)]`** — bridges that ossify (PR #107 pattern).
 //! 4. **`*_mirror.rs`** — files that mirror a spine concept into a private
 //!    schema (PR #129 pattern, Lever D's removal target).
@@ -32,14 +33,18 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
-const SUBSYSTEMS: &[&str] = &["stiglab", "ising"];
+// Post-ADR 0027 only the deprecated `ising` stub remains behind the
+// seam (stiglab folded into portal per #583; it retires with #584).
+// Portal is the edge and the substrate hosts sit below the seam.
+const SUBSYSTEMS: &[&str] = &["ising"];
 
 /// Well-known **default** ports each subsystem listens on (i.e. what
-/// `cargo run -p <subsys> -- serve` binds without env overrides; verified
-/// against the `*_PORT` defaults in each subsystem's serve command). Hard-
-/// coded because they are part of the subsystem's external contract — see
-/// root `CLAUDE.md`.
-const SUBSYSTEM_PORTS: &[(&str, &str)] = &[("stiglab", "3000")];
+/// `cargo run -p <subsys> -- serve` binds without env overrides). Empty
+/// post-ADR 0027 — no factory subsystem hosts an HTTP server anymore
+/// (the deprecated `ising` stub has no port); the machinery stays until
+/// #584 retires the last subsystem and this lint\'s cross-subsystem
+/// checks with it.
+const SUBSYSTEM_PORTS: &[(&str, &str)] = &[];
 
 pub fn run() -> Result<()> {
     let root = workspace_root()?;
@@ -683,7 +688,7 @@ mod tests {
     use super::*;
 
     fn fake_path() -> &'static Path {
-        Path::new("crates/stiglab/src/test.rs")
+        Path::new("crates/ising/src/test.rs")
     }
 
     fn fake_root() -> &'static Path {
@@ -695,10 +700,10 @@ mod tests {
         let mut v = Vec::new();
         check_sibling_url(
             fake_root(),
-            "ising",
+            "telegramable",
             fake_path(),
             10,
-            r#"std::env::var("STIGLAB_URL")"#,
+            r#"std::env::var("ISING_URL")"#,
             &mut v,
         );
         assert_eq!(v.len(), 1);
@@ -710,10 +715,10 @@ mod tests {
         let mut v = Vec::new();
         check_sibling_url(
             fake_root(),
-            "ising",
+            "telegramable",
             fake_path(),
             10,
-            r#"let url = "http://stiglab:3000/api/x";"#,
+            r#"let url = "http://ising:3003/api/x";"#,
             &mut v,
         );
         assert_eq!(v.len(), 1);
@@ -725,10 +730,10 @@ mod tests {
         let mut v = Vec::new();
         check_sibling_url(
             fake_root(),
-            "stiglab",
+            "ising",
             fake_path(),
             10,
-            r#"std::env::var("STIGLAB_URL")"#,
+            r#"std::env::var("ISING_URL")"#,
             &mut v,
         );
         assert!(v.is_empty(), "self-references must not fire: {:?}", v);
@@ -736,15 +741,15 @@ mod tests {
 
     #[test]
     fn ignores_stream_id_with_colon() {
-        // PR #131 false-positive regression: `format!("stiglab:{id}")` is a
+        // PR #131 false-positive regression: `format!("ising:{id}")` is a
         // stream key, not a hostname. Tightened heuristic only matches URLs.
         let mut v = Vec::new();
         check_sibling_url(
             fake_root(),
-            "ising",
+            "telegramable",
             fake_path(),
             10,
-            r#"format!("stiglab:{artifact_id}")"#,
+            r#"format!("ising:{artifact_id}")"#,
             &mut v,
         );
         assert!(v.is_empty(), "stream ids must not fire: {:?}", v);
@@ -755,30 +760,31 @@ mod tests {
         let mut v = Vec::new();
         check_sibling_url(
             fake_root(),
-            "ising",
+            "telegramable",
             fake_path(),
             10,
-            r#"emit("stiglab.session_completed", payload)"#,
+            r#"emit("ising.insight_detected", payload)"#,
             &mut v,
         );
         assert!(v.is_empty(), "event names must not fire: {:?}", v);
     }
 
     #[test]
-    fn flags_localhost_sibling_port() {
+    fn no_well_known_ports_remain() {
+        // Post-ADR 0027 no factory subsystem binds an HTTP port, so the
+        // localhost-port heuristic has nothing to match. This documents
+        // the empty table rather than deleting the machinery (it goes
+        // with #584).
         let mut v = Vec::new();
         check_sibling_url(
             fake_root(),
-            "ising",
+            "telegramable",
             fake_path(),
             10,
             r#"let s = "http://localhost:3000";"#,
             &mut v,
         );
-        // Either sibling-host (URL form) or sibling-port (localhost form) is
-        // acceptable — both indicate the same problem.
-        assert_eq!(v.len(), 1);
-        assert!(matches!(v[0].kind, "sibling-host" | "sibling-port"));
+        assert_eq!(v.len(), 0);
     }
 
     #[test]
@@ -869,7 +875,7 @@ mod tests {
             "// preamble",            // line 1
             "fn before() {}",         // line 2
             "// seam-allow: legacy",  // line 3 — the marker
-            "let x = STIGLAB_URL();", // line 4 — the violation
+            "let x = SIBLING_URL();",  // line 4 — the violation
         ];
         let violation_line: usize = 4;
         let prev_idx = violation_line.saturating_sub(2);
@@ -892,11 +898,11 @@ mod tests {
     fn github_http_wall_flags_disallowed_crate() {
         let mut violations = Vec::new();
         let mut pending = BTreeSet::new();
-        let path = Path::new("crates/stiglab/src/foo.rs");
+        let path = Path::new("crates/ising/src/foo.rs");
         scan_github_http_wall(
-            "stiglab",
+            "ising",
             path,
-            "crates/stiglab/src/foo.rs",
+            "crates/ising/src/foo.rs",
             r#"let url = "https://api.github.com/repos/x/y";"#,
             &mut violations,
             &mut pending,
@@ -915,7 +921,7 @@ mod tests {
         let (pending_path, _) = GITHUB_HTTP_WALL_PENDING_FILES[0];
         let path = Path::new(pending_path);
         scan_github_http_wall(
-            "stiglab",
+            "onsager-portal",
             path,
             pending_path,
             r#"let url = "https://api.github.com/foo";"#,
@@ -933,11 +939,11 @@ mod tests {
     fn github_http_wall_ignores_clean_file() {
         let mut violations = Vec::new();
         let mut pending = BTreeSet::new();
-        let path = Path::new("crates/stiglab/src/clean.rs");
+        let path = Path::new("crates/ising/src/clean.rs");
         scan_github_http_wall(
-            "stiglab",
+            "ising",
             path,
-            "crates/stiglab/src/clean.rs",
+            "crates/ising/src/clean.rs",
             "fn no_github_here() { let _ = \"https://example.com\"; }",
             &mut violations,
             &mut pending,
@@ -952,11 +958,11 @@ mod tests {
         // string shouldn't trip the wall — comments are stripped first.
         let mut violations = Vec::new();
         let mut pending = BTreeSet::new();
-        let path = Path::new("crates/stiglab/src/clean.rs");
+        let path = Path::new("crates/ising/src/clean.rs");
         scan_github_http_wall(
-            "stiglab",
+            "ising",
             path,
-            "crates/stiglab/src/clean.rs",
+            "crates/ising/src/clean.rs",
             "// seam-allow: notes about api.github.com\nfn x() {}",
             &mut violations,
             &mut pending,

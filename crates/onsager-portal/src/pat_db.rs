@@ -1,10 +1,8 @@
 //! Postgres queries against the portal-owned `user_pats` table.
 //!
 //! Portal owns the table per spec #222 Slice 2b
-//! (`crates/onsager-portal/migrations/005_user_pats.sql`). Stiglab still
-//! reads it through its own `AnyPool` helpers (PAT verification in its
-//! `AuthUser` extractor) — same database, separate connection pool.
-//! Writes go through this module only.
+//! (`crates/onsager-portal/migrations/005_user_pats.sql`); reads and
+//! writes both go through this module.
 
 use chrono::{DateTime, Utc};
 use sqlx::postgres::PgPool;
@@ -216,10 +214,9 @@ pub async fn touch_user_pat(
     Ok(())
 }
 
-/// Membership check used by the create-PAT handler. Workspaces still live
-/// in stiglab's runtime migrations until Slice 3 of spec #222 moves them
-/// into the spine; portal reads `workspace_members` via raw SQL against
-/// the same DB. Once workspaces move, this becomes a typed join.
+/// Membership check used by the create-PAT handler. Reads the
+/// spine-owned `workspace_members` table (004_workflows.sql) via raw
+/// SQL against the same DB.
 pub async fn is_workspace_member(
     pool: &PgPool,
     workspace_id: &str,

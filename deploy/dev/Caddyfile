@@ -6,13 +6,12 @@
 # Routing model — same-origin for everything the browser hits:
 #   /api/*          → portal:3002   (ADR 0006 — portal owns all /api/*)
 #   /mcp/*          → portal:3002   (ADR 0007 — MCP server for AI clients)
-#   /agent/ws*      → portal:3002   (ADR 0008 — portal proxies to stiglab loopback)
 #   /*              → dashboard:5173 (Vite dev server, with HMR upgrade)
 #
 # Caddy upgrades any WebSocket request transparently — no per-route
-# `@websocket matcher` block is needed for the dashboard's HMR or the
-# agent socket. The order of `handle` blocks is significant: more
-# specific paths come first.
+# `@websocket matcher` block is needed for the dashboard's HMR. The
+# order of `handle` blocks is significant: more specific paths come
+# first.
 {
 	# Run as a single, ephemeral container — disable the admin endpoint so
 	# the slot doesn't open another port we'd have to track.
@@ -29,13 +28,8 @@
 		level INFO
 	}
 
-	# Portal owns all /api/* routes (ADR 0006) and is the route owner
-	# for /agent/ws (ADR 0008 — portal terminates the WebSocket and
-	# proxies bytes to stiglab on loopback at /agent/ws-internal).
+	# Portal owns all /api/* routes (ADR 0006).
 	handle /api/* {
-		reverse_proxy portal:3002
-	}
-	handle /agent/ws* {
 		reverse_proxy portal:3002
 	}
 

@@ -23,7 +23,7 @@ no decrypt path, even for the owner.
 Authorization: Bearer ons_pat_<...>
 ```
 
-A request that carries both a valid PAT and a valid `stiglab_session`
+A request that carries both a valid PAT and a valid `onsager_session`
 cookie is authenticated as the PAT user — the bearer wins, so a CLI smoke
 test from a developer's terminal can't silently fall through to the
 browser session that happens to be in scope.

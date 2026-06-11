@@ -2,10 +2,9 @@
 //! `user_credentials` table (portal migration 006).
 //!
 //! Spec #222 Slice 2a moved the routes from stiglab → portal; the
-//! supporting DB functions move with them. Stiglab still reads
-//! encrypted values from the same Postgres table at session-launch
-//! time (decrypted in-process and handed to the agent as env vars),
-//! but portal is the only writer.
+//! supporting DB functions moved with them. Portal is the only reader
+//! and writer — the in-process session runner (#583) decrypts values at
+//! session-launch time and hands them to the agent as env vars.
 
 use chrono::Utc;
 use serde::Serialize;
@@ -175,9 +174,8 @@ pub async fn get_user_credential_encrypted(
 }
 
 /// Membership check — used by the credentials route's
-/// `require_workspace_access` helper. Reads from the spine-shared
-/// `workspace_members` table (still owned by stiglab's runtime
-/// migrations until #222 Slice 3).
+/// `require_workspace_access` helper. Reads the spine-owned
+/// `workspace_members` table (004_workflows.sql).
 pub async fn is_workspace_member(
     pool: &PgPool,
     workspace_id: &str,

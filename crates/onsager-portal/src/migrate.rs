@@ -38,10 +38,9 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/006_user_credentials.sql"),
     ),
     // 007_github_app_installations was historically applied via
-    // stiglab's runtime CREATE TABLE IF NOT EXISTS path; the `.sql`
-    // file is the canonical schema. Wire it here so the apply order
-    // matches filename order — the SQL is idempotent so a deploy
-    // where stiglab migrated first is unaffected.
+    // stiglab's runtime CREATE TABLE IF NOT EXISTS path (retired per
+    // #583); the `.sql` file is the canonical schema, idempotent on
+    // already-migrated deploys.
     (
         "007_github_app_installations",
         include_str!("../migrations/007_github_app_installations.sql"),
@@ -73,6 +72,12 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "014_drop_pr_gate_verdicts",
         include_str!("../migrations/014_drop_pr_gate_verdicts.sql"),
+    ),
+    // Chat-session tables move to portal ownership + the agent-node
+    // fleet's `nodes` table drops (ADR 0027 / spec #583).
+    (
+        "015_agent_sessions",
+        include_str!("../migrations/015_agent_sessions.sql"),
     ),
 ];
 

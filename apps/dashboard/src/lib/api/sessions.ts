@@ -1,6 +1,5 @@
 import { request, scoped } from './client';
 import type {
-  Node,
   Session,
   TaskRequest,
   SessionKind,
@@ -12,7 +11,7 @@ import type {
 
 /**
  * Denormalized session-completion spend row (issue #39). Constructed
- * client-side from `stiglab.session_completed` events — there is no
+ * client-side from `session.completed` events — there is no
  * portal-side endpoint that produces this shape, so it lives next to
  * the derivation. Spec #441 moved this out of the SSOT API types
  * surface because it isn't a wire shape.
@@ -27,8 +26,6 @@ export interface SessionSpend {
 }
 
 export const sessions = {
-  getNodes: (workspaceId: string) =>
-    request<{ nodes: Node[] }>(`/nodes${scoped(workspaceId)}`),
   getSession: (id: string) => request<{ session: Session }>(`/sessions/${id}`),
   /**
    * Request cancellation of an in-flight session (#303). Best-effort —
@@ -62,7 +59,7 @@ export const sessions = {
     ),
   authProviders: () =>
     request<{ github: boolean; dev: boolean }>('/auth/providers'),
-  // Session spend view (issue #39). Reads recent `stiglab.session_completed`
+  // Session spend view (issue #39). Reads recent `session.completed`
   // events and unpacks the typed `token_usage` payload client-side so we
   // don't have to spin up a dedicated pricing/accounting endpoint just to
   // render the dashboard card.
@@ -71,7 +68,7 @@ export const sessions = {
     limit = 50,
   ): Promise<SessionSpend[]> => {
     const res = await request<{ events: SpineEvent[] }>(
-      `/spine/events${scoped(workspaceId, { event_type: 'stiglab.session_completed', limit })}`,
+      `/spine/events${scoped(workspaceId, { event_type: 'session.completed', limit })}`,
     );
     return res.events.map((e) => {
       const d = e.data as {

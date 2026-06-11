@@ -1,7 +1,6 @@
 import { type FormEvent, useMemo, useState, type ReactElement } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api, type TaskRequest } from "@/lib/api"
-import { useNodes } from "@/hooks/useNodes"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   Sheet,
@@ -34,14 +33,11 @@ export function CreateSessionSheet({ children, open: openProp, onOpenChange }: C
   const open = openProp ?? internalOpen
   const setOpen = onOpenChange ?? setInternalOpen
   const [prompt, setPrompt] = useState("")
-  const [nodeId, setNodeId] = useState("")
   const [workingDir, setWorkingDir] = useState("")
   const [workspaceId, setWorkspaceId] = useState("")
   const [projectId, setProjectId] = useState("")
   const isMobile = useIsMobile()
   const queryClient = useQueryClient()
-  const { data: nodesData } = useNodes()
-  const onlineNodes = nodesData?.nodes.filter((n) => n.status === "online") ?? []
 
   const { data: wsData } = useQuery({
     queryKey: ["workspaces"],
@@ -65,7 +61,6 @@ export function CreateSessionSheet({ children, open: openProp, onOpenChange }: C
       queryClient.invalidateQueries({ queryKey: ["sessions"] })
       setOpen(false)
       setPrompt("")
-      setNodeId("")
       setWorkingDir("")
       setWorkspaceId("")
       setProjectId("")
@@ -75,13 +70,11 @@ export function CreateSessionSheet({ children, open: openProp, onOpenChange }: C
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!prompt.trim()) return
-    const validNodeId = onlineNodes.some((n) => n.id === nodeId) ? nodeId : ""
     const validProjectId = visibleProjects.some((p) => p.id === projectId)
       ? projectId
       : ""
     mutation.mutate({
       prompt: prompt.trim(),
-      ...(validNodeId && { node_id: validNodeId }),
       ...(workingDir.trim() && { working_dir: workingDir.trim() }),
       ...(validProjectId && { project_id: validProjectId }),
     })
@@ -162,27 +155,6 @@ export function CreateSessionSheet({ children, open: openProp, onOpenChange }: C
                   </Select>
                 </div>
               )}
-            </div>
-          )}
-
-          {onlineNodes.length > 0 && (
-            <div className="space-y-1.5">
-              <label htmlFor="node" className="text-sm font-medium">
-                Node <span className="text-muted-foreground font-normal">(optional)</span>
-              </label>
-              <Select value={nodeId} onValueChange={(v) => setNodeId(v ?? "")}>
-                <SelectTrigger id="node" className="w-full">
-                  <SelectValue placeholder="Auto-assign" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Auto-assign</SelectItem>
-                  {onlineNodes.map((node) => (
-                    <SelectItem key={node.id} value={node.id}>
-                      {node.name} ({node.active_sessions}/{node.max_sessions})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
           )}
 

@@ -249,13 +249,12 @@ fn check_producer_category_matches(errors: &mut Vec<String>) {
             TriggerCategory::Schedule => &[Subsystem::Substrate],
             // Event producers — internal event-bus signals — live
             // in the substrate scheduler (the event-trigger
-            // listeners). No Stiglab fallback: a webhook receiver
+            // listeners). No edge fallback: a webhook receiver
             // is a Request, not an Event.
             TriggerCategory::Event => &[Subsystem::Substrate],
             // Request producers — external HTTP receivers — live in
-            // the edge subsystem hosting the route. Today that's
-            // stiglab; once #222 promotes portal it moves there.
-            TriggerCategory::Request => &[Subsystem::Stiglab, Subsystem::Portal],
+            // portal, the edge subsystem hosting the route (#222).
+            TriggerCategory::Request => &[Subsystem::Portal],
             // Manual / replay are user-initiated; produced by the
             // portal edge (CLI or HTTP endpoint once #222 lands).
             TriggerCategory::Manual => &[Subsystem::Portal],

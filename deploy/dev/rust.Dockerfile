@@ -1,6 +1,6 @@
-# Dev-overlay image for the Rust services (stiglab, portal, scheduler).
+# Dev-overlay image for the Rust services (portal, scheduler).
 # Used only by docker-compose.slot.yml. Production builds live in
-# crates/stiglab/deploy/Dockerfile.
+# deploy/onsager.Dockerfile.
 #
 # What this image gives a slot:
 #   - The exact rust toolchain pinned in rust-toolchain.toml.

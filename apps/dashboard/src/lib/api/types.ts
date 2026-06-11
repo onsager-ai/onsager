@@ -22,8 +22,6 @@ export type { InstallationDeliveryHealth } from "./generated/InstallationDeliver
 export type { MeResponse } from "./generated/MeResponse";
 export type { MeUser } from "./generated/MeUser";
 export type { MeVia } from "./generated/MeVia";
-export type { Node } from "./generated/Node";
-export type { NodeStatus } from "./generated/NodeStatus";
 export type { Pat } from "./generated/Pat";
 export type { ProjectIssueDetail } from "./generated/ProjectIssueDetail";
 export type { ProjectIssueDetailResponse } from "./generated/ProjectIssueDetailResponse";
@@ -118,7 +116,6 @@ export interface WorkflowKindInfo {
 // `EventSubsystem` union in sync by hand when the Rust struct changes.
 export type EventSubsystem =
   | "forge"
-  | "stiglab"
   | "ising"
   | "portal"
   | "substrate";
@@ -250,8 +247,8 @@ export interface RunDetail {
 }
 
 // GitHub label mirror used by the workflow-builder UI. Hand-written
-// because the same shape is produced by stiglab's project label proxy,
-// not portal.
+// because the same shape is produced by the project label proxy, not a
+// ts-rs export.
 export interface GitHubLabel {
   name: string;
   color: string | null;

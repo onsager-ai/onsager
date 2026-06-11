@@ -27,7 +27,6 @@ COPY crates/onsager-scheduler/Cargo.toml  crates/onsager-scheduler/Cargo.toml
 COPY crates/onsager-trigger/Cargo.toml    crates/onsager-trigger/Cargo.toml
 COPY crates/onsager/Cargo.toml            crates/onsager/Cargo.toml
 COPY crates/ising/Cargo.toml              crates/ising/Cargo.toml
-COPY crates/stiglab/Cargo.toml            crates/stiglab/Cargo.toml
 COPY xtask/Cargo.toml                     xtask/Cargo.toml
 # Create dummy source files so Cargo can compile each crate stub.
 # Crates with [lib] need src/lib.rs; crates with [[bin]] need src/main.rs.
@@ -43,7 +42,6 @@ RUN mkdir -p \
       crates/onsager-trigger/src \
       crates/onsager/src \
       crates/ising/src \
-      crates/stiglab/src \
       xtask/src \
     && touch \
       crates/onsager-spine/src/lib.rs \
@@ -55,17 +53,15 @@ RUN mkdir -p \
       crates/onsager-portal/src/lib.rs \
       crates/onsager-scheduler/src/lib.rs \
       crates/ising/src/lib.rs \
-      crates/stiglab/src/lib.rs \
     && echo "fn main() {}" | tee \
       crates/onsager/src/main.rs \
       crates/onsager-trigger/src/main.rs \
       crates/ising/src/main.rs \
-      crates/stiglab/src/main.rs \
       crates/onsager-portal/src/main.rs \
       crates/onsager-scheduler/src/main.rs \
       xtask/src/main.rs \
     && cargo build --release \
-         -p stiglab -p onsager-portal -p onsager-scheduler 2>/dev/null || true
+         -p onsager-portal -p onsager-scheduler 2>/dev/null || true
 # Copy actual source and rebuild.
 # Touch all .rs files so their mtime is newer than the dummy-build artifacts —
 # Docker's COPY preserves git timestamps which may predate the dummy build,
@@ -73,7 +69,7 @@ RUN mkdir -p \
 COPY crates/ crates/
 RUN find crates -name "*.rs" | xargs touch \
     && cargo build --release \
-         -p stiglab -p onsager-portal -p onsager-scheduler
+         -p onsager-portal -p onsager-scheduler
 
 # ---- Stage 3: Caddy binary ----
 # Pulled as a named build stage so older BuildKit / Docker frontends that
@@ -99,17 +95,16 @@ COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node-runtime /usr/local/bin/claude /usr/local/bin/claude
 
 # Caddy — the edge dispatcher. Caddy terminates the public port and
-# routes /api/* to portal, /agent/ws to portal (which proxies to
-# stiglab on loopback), and /* to the static dashboard files.
-# Caddy's official image ships a static (CGO_ENABLED=0) Go binary,
-# safe to drop into a debian-slim runtime.
-# See ADR 0006 (edge dispatcher) + ADR 0008 (portal owns /agent/ws).
+# routes /api/* + /mcp/* to portal and /* to the static dashboard
+# files. Caddy's official image ships a static (CGO_ENABLED=0) Go
+# binary, safe to drop into a debian-slim runtime.
+# See ADR 0006 (edge dispatcher); /agent/ws retired with ADR 0027.
 COPY --from=caddy-bin /usr/bin/caddy /usr/local/bin/caddy
 
 # Git credential helper — reads GITHUB_TOKEN from env at push time.
-# Users add GITHUB_TOKEN as a credential in Dashboard > Settings; stiglab
-# injects it as an env var into the claude subprocess, and this helper
-# feeds it to git for HTTPS auth.
+# Users add GITHUB_TOKEN as a credential in Dashboard > Settings; portal's
+# in-process session runner injects it as an env var into the claude
+# subprocess, and this helper feeds it to git for HTTPS auth.
 RUN printf '#!/bin/sh\necho "username=x-access-token\npassword=${GITHUB_TOKEN}"\n' \
       > /usr/local/bin/git-credential-env \
     && chmod +x /usr/local/bin/git-credential-env \
@@ -119,16 +114,15 @@ RUN printf '#!/bin/sh\necho "username=x-access-token\npassword=${GITHUB_TOKEN}"\
 RUN useradd -m -s /bin/bash onsager
 
 WORKDIR /app
-COPY --from=rust-builder /app/target/release/stiglab           /app/stiglab
 COPY --from=rust-builder /app/target/release/onsager-portal    /app/onsager-portal
 COPY --from=rust-builder /app/target/release/onsager-scheduler /app/onsager-scheduler
 COPY --from=ui-builder /app/apps/dashboard/dist /app/static
 # Spine migrations — applied on startup when ONSAGER_DATABASE_URL is set
 COPY crates/onsager-spine/migrations/ /app/spine-migrations/
-COPY crates/stiglab/deploy/entrypoint.sh /app/entrypoint.sh
-# Caddy serves /api/* and /agent/ws via reverse proxy and /* (the
+COPY deploy/entrypoint.sh /app/entrypoint.sh
+# Caddy serves /api/* + /mcp/* via reverse proxy and /* (the
 # dashboard) from /app/static. See ADR 0006.
-COPY crates/stiglab/deploy/Caddyfile /etc/caddy/Caddyfile
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
 RUN chmod +x /app/entrypoint.sh
 
 RUN chown -R onsager:onsager /home/onsager

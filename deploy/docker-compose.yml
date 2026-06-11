@@ -8,15 +8,17 @@
 #   docker compose down            # stop
 #
 # The stack:
-#   db       — PostgreSQL 16 (shared event spine + stiglab)
+#   db       — PostgreSQL 16 (shared event spine)
 #   migrate  — runs spine Postgres migrations, then exits
-#   stiglab  — sessions, agents, dashboard UI + Claude Code CLI (port 3000)
+#   onsager  — Caddy edge + portal (API, dashboard, in-process agent
+#              sessions) + substrate scheduler (port 8080)
 #
 # Agent sessions:
-#   Stiglab's built-in runner spawns `claude` (Claude Code CLI) as a subprocess.
-#   The AGENT_WORKSPACE_DIR host directory is bind-mounted into the container
-#   so agents can clone repos and make changes that persist across restarts.
-#   Credentials (CLAUDE_CODE_OAUTH_TOKEN) are added via Dashboard > Settings.
+#   Portal's in-process session runner spawns `claude` (Claude Code CLI)
+#   as a subprocess (ADR 0027 / #583). The AGENT_WORKSPACE_DIR host
+#   directory is bind-mounted into the container so agents can clone
+#   repos and make changes that persist across restarts. Credentials
+#   (CLAUDE_CODE_OAUTH_TOKEN) are added via Dashboard > Settings.
 
 services:
   db:
@@ -57,36 +59,33 @@ services:
         echo '==> Migrations complete.'
       "
 
-  stiglab:
+  onsager:
     build:
       context: ..
-      dockerfile: crates/stiglab/deploy/Dockerfile
+      dockerfile: deploy/onsager.Dockerfile
     restart: unless-stopped
     ports:
-      - "${STIGLAB_PORT:-3000}:8080"
+      - "${EDGE_PORT:-8080}:8080"
     depends_on:
       migrate:
         condition: service_completed_successfully
     volumes:
       - ${AGENT_WORKSPACE_DIR:-./workspace}:/workspace
     environment:
-      # Caddy (in the same image) is the externally-reachable process
-      # on $PORT; stiglab binds internally to STIGLAB_PORT on loopback
-      # (ADR 0006 / ADR 0008). Railway sets $PORT for its preview/prod
-      # environments; for compose we pick 8080 to avoid colliding with
-      # the stiglab loopback port.
+      # Caddy (in the same image) is the externally-reachable process on
+      # $PORT; portal binds internally to PORTAL_PORT on loopback
+      # (ADR 0006). Railway sets $PORT for its preview/prod
+      # environments; for compose we pick 8080.
       PORT: "8080"
-      STIGLAB_PORT: "3000"
       DATABASE_URL: "postgres://${POSTGRES_USER:-onsager}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onsager}"
       ONSAGER_DATABASE_URL: "postgres://${POSTGRES_USER:-onsager}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-onsager}"
-      STIGLAB_NODE_NAME: "${STIGLAB_NODE_NAME:-main}"
-      STIGLAB_MAX_SESSIONS: "${STIGLAB_MAX_SESSIONS:-4}"
-      STIGLAB_AGENT_COMMAND: "${STIGLAB_AGENT_COMMAND:-claude}"
+      PORTAL_MAX_SESSIONS: "${PORTAL_MAX_SESSIONS:-4}"
+      PORTAL_AGENT_COMMAND: "${PORTAL_AGENT_COMMAND:-claude}"
       # GitHub OAuth (optional — auth disabled when unset)
       GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
-      STIGLAB_CREDENTIAL_KEY: "${STIGLAB_CREDENTIAL_KEY:-}"
-      STIGLAB_PUBLIC_URL: "${STIGLAB_PUBLIC_URL:-}"
+      ONSAGER_CREDENTIAL_KEY: "${ONSAGER_CREDENTIAL_KEY:-}"
+      PORTAL_PUBLIC_URL: "${PORTAL_PUBLIC_URL:-}"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/health || exit 1"]
       interval: 10s

@@ -260,7 +260,7 @@ pub async fn verify_pat(
 /// gate behavior on the principal kind.
 #[derive(Debug, Clone)]
 pub enum RequestPrincipal {
-    /// Cookie-based session (the `stiglab_session` flow).
+    /// Cookie-based session (the `onsager_session` flow).
     Session,
     /// PAT-authenticated request. `pat_id` identifies the issuing token row;
     /// `workspace_id` pins the request to that workspace — every PAT is
@@ -437,7 +437,7 @@ impl FromRequestParts<AppState> for AuthUser {
             .headers
             .get(axum::http::header::COOKIE)
             .and_then(|v| v.to_str().ok())
-            .and_then(|cookie_header| parse_cookie(cookie_header, "stiglab_session"))
+            .and_then(|cookie_header| parse_cookie(cookie_header, "onsager_session"))
             .map(|s| s.to_string());
 
         let Some(session_id) = session_id else {
@@ -485,25 +485,25 @@ mod tests {
     #[test]
     fn test_parse_cookie() {
         assert_eq!(
-            parse_cookie("stiglab_session=abc123; theme=dark", "stiglab_session"),
+            parse_cookie("onsager_session=abc123; theme=dark", "onsager_session"),
             Some("abc123")
         );
         assert_eq!(
-            parse_cookie("theme=dark; stiglab_session=xyz", "stiglab_session"),
+            parse_cookie("theme=dark; onsager_session=xyz", "onsager_session"),
             Some("xyz")
         );
-        assert_eq!(parse_cookie("theme=dark", "stiglab_session"), None);
+        assert_eq!(parse_cookie("theme=dark", "onsager_session"), None);
     }
 
     #[test]
     fn test_parse_cookie_empty() {
-        assert_eq!(parse_cookie("", "stiglab_session"), None);
+        assert_eq!(parse_cookie("", "onsager_session"), None);
     }
 
     #[test]
     fn test_parse_cookie_no_value() {
         assert_eq!(
-            parse_cookie("stiglab_session; theme=dark", "stiglab_session"),
+            parse_cookie("onsager_session; theme=dark", "onsager_session"),
             None
         );
     }
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn test_parse_cookie_whitespace() {
         assert_eq!(
-            parse_cookie("  stiglab_session = abc123 ; theme=dark", "stiglab_session"),
+            parse_cookie("  onsager_session = abc123 ; theme=dark", "onsager_session"),
             Some("abc123")
         );
     }
