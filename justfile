@@ -247,7 +247,7 @@ dev: dev-infra
 
     echo "==> Starting onsager-scheduler (substrate scheduler)..."
     DATABASE_URL="$DATABASE_URL" \
-        cargo run -p onsager-scheduler -- serve &
+        cargo run -p onsager-engine --bin onsager-scheduler -- serve &
 
     echo "==> Starting dashboard on :${DASHBOARD_PORT}..."
     pnpm --filter dashboard dev -- --port "$DASHBOARD_PORT" --strictPort &
@@ -288,7 +288,7 @@ dev-portal port="3002":
 
 dev-scheduler:
     DATABASE_URL="${DATABASE_URL:-postgres://onsager:onsager@localhost:5432/onsager}" \
-        cargo run -p onsager-scheduler -- serve
+        cargo run -p onsager-engine --bin onsager-scheduler -- serve
 
 # ── DB ───────────────────────────────────────────────────────────────
 db-migrate:
@@ -358,8 +358,7 @@ deploy: deploy-build deploy-up
 
 # ── Install from source ──────────────────────────────────────────────
 install:
-    cargo install --path crates/onsager
-    cargo install --path crates/onsager-scheduler
+    cargo install --path crates/onsager-engine
     cargo install --path crates/onsager-portal
 
 # ── Per-worktree dev slots (spec #194) ───────────────────────────────

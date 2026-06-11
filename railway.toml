@@ -6,7 +6,7 @@
 #   ------------------ | ------------------------------------------------- | -----------------
 #   caddy              | Edge dispatcher — the only exposed process        | $PORT (exposed)
 #   onsager-portal     | Dashboard API, webhooks, MCP, session runner      | 3002 (proxied)
-#   onsager-scheduler  | Substrate scheduler — trigger.fired → ExecPlan    | — (spine listener)
+#   onsager-scheduler  | Engine bin — trigger.fired → ExecPlan → executors | — (spine listener)
 #   PostgreSQL         | Shared event spine (Railway plugin)               | 5432
 #
 # Portal is the front door behind Caddy — it serves the dashboard API,

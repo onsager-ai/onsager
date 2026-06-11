@@ -69,9 +69,7 @@ The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md
    100% of the external HTTP surface today.
 2. **Internal coordination.** Factory processes coordinate
    **exclusively** via the spine —
-   no sibling-subsystem HTTP, no cross-subsystem Cargo deps. The `onsager`
-   dispatcher has zero business deps and discovers subsystem binaries on
-   `PATH`.
+   no sibling-process HTTP, no cross-process Cargo deps.
 
 Clause 2 is mechanically enforced today by `xtask lint-seams`,
 `xtask check-events`, and `xtask check-api-contract`. Clause 1's lint
@@ -87,9 +85,8 @@ and the ADRs under [`docs/adr/`](docs/adr/).
 | Crate            | Role                                                                             |
 |------------------|----------------------------------------------------------------------------------|
 | `onsager-spine`  | Shared event bus library (PostgreSQL + `pg_notify`); SoT for shared workflow tables |
-| `onsager`        | Unified CLI dispatcher (`onsager <subsystem> ...`)                               |
 | `onsager-portal` | Edge subsystem — public HTTP, GitHub webhooks, OAuth, credentials                |
-| `forge`          | Production line — drives artifacts through their lifecycle                       |
+| `onsager-engine` | Factory process — executor runtime + substrate scheduler host                   |
 
 Spec Plans (the factory's input contract) are authored externally —
 by the dashboard chat (an MCP client) and by humans writing GitHub
@@ -183,13 +180,12 @@ cargo fmt --all -- --check
 ## Install
 
 ```bash
-just install         # installs onsager dispatcher + subsystem binaries
+just install         # installs the engine + portal binaries
 ```
 
-After install, both forms work:
+After install:
 
 ```bash
-onsager scheduler serve
 onsager-scheduler serve
 ```
 

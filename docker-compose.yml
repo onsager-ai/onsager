@@ -85,9 +85,9 @@ services:
       ONSAGER_CREDENTIAL_KEY: ${ONSAGER_CREDENTIAL_KEY:-}
       RUST_LOG: ${RUST_LOG:-info}
     command: >
-      cargo watch -q -w crates/onsager-scheduler -w crates/onsager-nodes
+      cargo watch -q -w crates/onsager-engine
       -w crates/onsager-substrate -w crates/onsager-spine
-      -x 'run -p onsager-scheduler -- serve'
+      -x 'run -p onsager-engine --bin onsager-scheduler -- serve'
 
   portal:
     <<: *rust-dev

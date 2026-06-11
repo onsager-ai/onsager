@@ -590,7 +590,7 @@ fn stream_producer(stream: &str) -> &'static str {
         "session" => "onsager-portal (in-process session runner, #583)",
         "workflow" => "onsager-portal (trigger) / substrate scheduler (stage)",
         "gate" => "onsager-portal (GitHub) / substrate scheduler (manual)",
-        "substrate" => "substrate scheduler (onsager-nodes) + executor catalog (RUN-02, #360)",
+        "substrate" => "the engine (onsager-engine scheduler + executor catalog, RUN-02 #360)",
         _ => "(unknown — update `stream_producer` in xtask)",
     }
 }

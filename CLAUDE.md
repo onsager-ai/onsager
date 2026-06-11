@@ -80,7 +80,7 @@ When we launch, delete this section and replace it with the post-launch operatin
 
 See § What makes Onsager Onsager (above) for the identity commitments these choices instantiate, and the ADRs under [`docs/adr/`](docs/adr/) for the *why* behind any rule ([`docs/adr/README.md`](docs/adr/README.md) is the current index). (`docs/architecture.md` predates the ADR 0009–0026 "0.2 refoundation" and is stale; trust this file and the ADRs.)
 
-The shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel is still the single runtime coordination medium — components stay runtime-decoupled and coordinate through stigmergy (indirect signals via the shared medium), not direct calls. The `onsager` dispatcher is a ~100-LOC CLI with zero business deps that discovers subsystem binaries on `PATH` (`scheduler`, `trigger`).
+The shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel is still the single runtime coordination medium — components stay runtime-decoupled and coordinate through stigmergy (indirect signals via the shared medium), not direct calls. The `onsager` dispatcher CLI retired with ADR 0027 / #586 — with one factory binary left it was a wire with one end; the engine bins (`onsager-scheduler`, `onsager-trigger`) are invoked directly.
 
 [ADR 0002](docs/adr/0002-process-product-isomorphism.md)'s two-loop framing — the **inner loop** (spec → PR → merge) and the **outer loop** (observe drift → propose rule → activate → modify the inner loop) — is superseded as a mechanism (the ADR 0013 observer citizen itself retired with ADR 0027 / #584) but kept as a principle: every factory primitive ships with its dev-process counterpart, and every durable dev-process pattern is evidence for a future primitive.
 
@@ -231,12 +231,9 @@ crates/
   onsager-registry/    <- type registry, seed catalog, evaluators, static event manifest, trigger registry
   onsager-github/      <- typed GitHub API + webhook verification + OAuth (single home for GitHub HTTP)
   onsager-substrate/   <- 0.2 kernel: Workflow template, Executor trait, WorkflowLibrary, Plan Compiler, five kernel invariants
-  onsager-nodes/       <- executor runtime: async Executor impls (script/agent/verify/subworkflow/human), ExecutorRegistry, Scheduler
-  onsager-agent-spawn/ <- shared agent-session spawn wiring (utility crate; portal + scheduler both depend on it, seam-safely)
-  onsager/             <- dispatcher CLI (~100 LOC, no business deps)
-  onsager-portal/      <- edge subsystem — public HTTP, dashboard API, GitHub webhooks, OAuth, credentials, MCP server (lib + bin)
-  onsager-scheduler/   <- substrate scheduler host: trigger.fired → Plan Compiler → executor dispatch (lib + bin)
-  onsager-trigger/     <- manual + replay trigger CLI — emits TriggerFired to the spine (bin)
+  onsager-agent-spawn/ <- shared agent-session spawn wiring (utility crate; portal + engine both depend on it, seam-safely)
+  onsager-portal/      <- edge process — public HTTP, dashboard API, GitHub webhooks, OAuth, credentials, MCP server, session runner (lib + bin)
+  onsager-engine/      <- factory process — executor runtime (engine::nodes) + scheduler host (engine::scheduler); bins: onsager-scheduler, onsager-trigger
 apps/
   dashboard/           <- React UI (workflows, runs, artifacts, spec plans, governance)
   marketing/           <- marketing site
@@ -244,8 +241,8 @@ apps/
 
 Crate → support-crate dependencies (no crate depends on a sibling subsystem):
 
-- `onsager-substrate` → `artifact`; `onsager-nodes` → `{artifact, substrate}`; `onsager-registry` / `onsager-github` → `{artifact, spine}`
-- `onsager-portal` (edge) → `{artifact, spine, github, registry, substrate}`; `onsager-scheduler` → `{artifact, spine, substrate, nodes, agent-spawn}`; `onsager-trigger` → `{spine, registry}`
+- `onsager-substrate` → `artifact`; `onsager-registry` / `onsager-github` → `{artifact, spine}`
+- `onsager-portal` (edge) → `{artifact, spine, github, registry, substrate, agent-spawn}`; `onsager-engine` → `{artifact, spine, registry, substrate, agent-spawn}`
 
 ## Getting Started
 

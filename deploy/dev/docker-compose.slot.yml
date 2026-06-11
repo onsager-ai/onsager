@@ -105,9 +105,9 @@ services:
       ONSAGER_CREDENTIAL_KEY: ${ONSAGER_CREDENTIAL_KEY:-}
       RUST_LOG: ${RUST_LOG:-info}
     command: >
-      cargo watch -q -w crates/onsager-scheduler -w crates/onsager-nodes
+      cargo watch -q -w crates/onsager-engine
       -w crates/onsager-substrate -w crates/onsager-spine
-      -x 'run -p onsager-scheduler -- serve'
+      -x 'run -p onsager-engine --bin onsager-scheduler -- serve'
 
   # Edge subsystem (ADR 0006). Owns every external /api/* route and
   # runs agent sessions in-process (ADR 0027 / #583).
