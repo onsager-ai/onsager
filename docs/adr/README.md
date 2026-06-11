@@ -23,7 +23,7 @@ see [`../architecture.md`](../architecture.md).
 | [0010](0010-provenance-as-substrate-first-class.md) | Provenance as substrate first-class | Accepted (2026-05-15) — `Identity impact: yes` |
 | [0011](0011-subworkflow-implements-vsm-recursion.md) | SubWorkflow implements VSM recursion | Accepted (2026-05-15) — `Identity impact: no` |
 | [0012](0012-executor-catalog-replaces-nodekind.md) | Executor catalog replaces NodeKind | Accepted (2026-05-15) — `Identity impact: no` |
-| [0013](0013-observer-as-second-substrate-citizen.md) | Observer as second substrate citizen | Accepted (2026-05-15) — `Identity impact: yes` |
+| [0013](0013-observer-as-second-substrate-citizen.md) | Observer as second substrate citizen | Superseded (2026-06-11) by ADR 0027 — `Identity impact: yes` |
 | [0014](0014-onsager-refract-boundary.md) | Onsager–Refract boundary: Refract leaves the monorepo | Accepted (2026-05-15) — `Identity impact: no` |
 | [0015](0015-spec-plan-as-dag-external-contract.md) | Spec Plan as DAG-shaped external contract | Accepted (2026-05-15) — `Identity impact: no` |
 | [0016](0016-workflow-library-n-isomorphic-islands.md) | Workflow Library: N isomorphic islands | Accepted (2026-05-15) — `Identity impact: no` |
@@ -36,6 +36,8 @@ see [`../architecture.md`](../architecture.md).
 | [0023](0023-spec-plan-run-orchestration-and-dashboard-placement.md) | Spec-plan run orchestration and dashboard placement | Accepted (2026-05-29) — `Identity impact: no` |
 | [0024](0024-workflow-lifecycle-orthogonal-readiness-autofire-axes.md) | Workflow lifecycle: orthogonal readiness/autofire axes + trigger-neutral binding | Accepted (2026-05-29, adoption ongoing) — `Identity impact: no` |
 | [0025](0025-chat-as-design-and-maintenance-surface.md) | Chat as design + maintenance surface | Accepted (2026-05-29, adoption ongoing) — `Identity impact: no` — amends ADR 0020 |
+| [0026](0026-nav-ia-sidebar-and-mobile-drawer.md) | Nav IA: desktop sidebar + mobile drawer | Accepted (2026-05-31) — `Identity impact: no` — supersedes ADR 0019's top-bar chrome |
+| [0027](0027-two-process-consolidation.md) | 0.3 consolidation: two-process factory (portal + engine) | Accepted (2026-06-11, adoption ongoing) — `Identity impact: yes` — supersedes ADR 0013 |
 
 ## How to add an ADR
 
