@@ -14,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       onsager-spine: ${{ steps.filter.outputs.onsager-spine }}
-      ising: ${{ steps.filter.outputs.ising }}
-      onsager: ${{ steps.filter.outputs.onsager }}
       workspace: ${{ steps.filter.outputs.workspace }}
       xtask: ${{ steps.filter.outputs.xtask }}
     steps:
@@ -28,21 +26,16 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
-              # The 0.2 substrate + nodes crates have no dedicated
+              # The substrate + engine crates have no dedicated
               # filter, but their tests (incl. the Crawlab capstone
-              # fixture in `onsager-nodes/tests/`) must still run on
+              # fixture in `onsager-engine/tests/`) must still run on
               # changes to either crate. Folding them into `workspace`
               # keeps the `check` job triggered without growing the
               # filter matrix.
               - 'crates/onsager-substrate/**'
-              - 'crates/onsager-nodes/**'
+              - 'crates/onsager-engine/**'
             onsager-spine:
               - 'crates/onsager-spine/**'
-            ising:
-              - 'crates/ising/**'
-              - 'crates/onsager-spine/**'
-            onsager:
-              - 'crates/onsager/**'
             xtask:
               - 'xtask/**'
               - 'docs/events.md'
@@ -73,8 +66,6 @@ jobs:
     if: |
       needs.changes.outputs.workspace == 'true' ||
       needs.changes.outputs.onsager-spine == 'true' ||
-      needs.changes.outputs.ising == 'true' ||
-      needs.changes.outputs.onsager == 'true' ||
       needs.changes.outputs.xtask == 'true'
     runs-on: ubuntu-latest
     services:

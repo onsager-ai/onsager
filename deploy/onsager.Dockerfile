@@ -20,12 +20,9 @@ COPY crates/onsager-spine/Cargo.toml      crates/onsager-spine/Cargo.toml
 COPY crates/onsager-artifact/Cargo.toml   crates/onsager-artifact/Cargo.toml
 COPY crates/onsager-registry/Cargo.toml   crates/onsager-registry/Cargo.toml
 COPY crates/onsager-substrate/Cargo.toml  crates/onsager-substrate/Cargo.toml
-COPY crates/onsager-nodes/Cargo.toml      crates/onsager-nodes/Cargo.toml
 COPY crates/onsager-github/Cargo.toml     crates/onsager-github/Cargo.toml
 COPY crates/onsager-portal/Cargo.toml     crates/onsager-portal/Cargo.toml
-COPY crates/onsager-scheduler/Cargo.toml  crates/onsager-scheduler/Cargo.toml
-COPY crates/onsager-trigger/Cargo.toml    crates/onsager-trigger/Cargo.toml
-COPY crates/onsager/Cargo.toml            crates/onsager/Cargo.toml
+COPY crates/onsager-engine/Cargo.toml     crates/onsager-engine/Cargo.toml
 COPY xtask/Cargo.toml                     xtask/Cargo.toml
 # Create dummy source files so Cargo can compile each crate stub.
 # Crates with [lib] need src/lib.rs; crates with [[bin]] need src/main.rs.
@@ -34,30 +31,25 @@ RUN mkdir -p \
       crates/onsager-artifact/src \
       crates/onsager-registry/src \
       crates/onsager-substrate/src \
-      crates/onsager-nodes/src \
       crates/onsager-github/src \
       crates/onsager-portal/src \
-      crates/onsager-scheduler/src \
-      crates/onsager-trigger/src \
-      crates/onsager/src \
+      crates/onsager-engine/src/bin \
       xtask/src \
     && touch \
       crates/onsager-spine/src/lib.rs \
       crates/onsager-artifact/src/lib.rs \
       crates/onsager-registry/src/lib.rs \
       crates/onsager-substrate/src/lib.rs \
-      crates/onsager-nodes/src/lib.rs \
       crates/onsager-github/src/lib.rs \
       crates/onsager-portal/src/lib.rs \
-      crates/onsager-scheduler/src/lib.rs \
+      crates/onsager-engine/src/lib.rs \
     && echo "fn main() {}" | tee \
-      crates/onsager/src/main.rs \
-      crates/onsager-trigger/src/main.rs \
       crates/onsager-portal/src/main.rs \
-      crates/onsager-scheduler/src/main.rs \
+      crates/onsager-engine/src/bin/onsager-scheduler.rs \
+      crates/onsager-engine/src/bin/onsager-trigger.rs \
       xtask/src/main.rs \
     && cargo build --release \
-         -p onsager-portal -p onsager-scheduler 2>/dev/null || true
+         -p onsager-portal -p onsager-engine 2>/dev/null || true
 # Copy actual source and rebuild.
 # Touch all .rs files so their mtime is newer than the dummy-build artifacts —
 # Docker's COPY preserves git timestamps which may predate the dummy build,
@@ -65,7 +57,7 @@ RUN mkdir -p \
 COPY crates/ crates/
 RUN find crates -name "*.rs" | xargs touch \
     && cargo build --release \
-         -p onsager-portal -p onsager-scheduler
+         -p onsager-portal -p onsager-engine
 
 # ---- Stage 3: Caddy binary ----
 # Pulled as a named build stage so older BuildKit / Docker frontends that

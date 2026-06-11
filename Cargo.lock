@@ -2170,10 +2170,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "onsager"
-version = "0.2.0-alpha.1"
-
-[[package]]
 name = "onsager-agent-spawn"
 version = "0.2.0-alpha.1"
 dependencies = [
@@ -2189,6 +2185,34 @@ dependencies = [
  "serde",
  "serde_json",
  "ulid",
+ "uuid",
+]
+
+[[package]]
+name = "onsager-engine"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "hex",
+ "onsager-agent-spawn",
+ "onsager-artifact",
+ "onsager-registry",
+ "onsager-spine",
+ "onsager-substrate",
+ "ring",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "typetag",
  "uuid",
 ]
 
@@ -2213,24 +2237,6 @@ dependencies = [
  "tokio",
  "tracing",
  "ts-rs",
-]
-
-[[package]]
-name = "onsager-nodes"
-version = "0.2.0-alpha.1"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "onsager-artifact",
- "onsager-substrate",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "typetag",
- "uuid",
 ]
 
 [[package]]
@@ -2289,32 +2295,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "onsager-scheduler"
-version = "0.2.0-alpha.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "clap",
- "hex",
- "onsager-agent-spawn",
- "onsager-artifact",
- "onsager-nodes",
- "onsager-spine",
- "onsager-substrate",
- "ring",
- "serde",
- "serde_json",
- "sqlx",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "onsager-spine"
 version = "0.2.0-alpha.1"
 dependencies = [
@@ -2348,23 +2328,6 @@ dependencies = [
  "tokio",
  "typetag",
  "uuid",
-]
-
-[[package]]
-name = "onsager-trigger"
-version = "0.2.0-alpha.1"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "onsager-registry",
- "onsager-spine",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
