@@ -13,7 +13,7 @@ pub const GITHUB_API: &str = "https://api.github.com";
 
 /// User-Agent string sent on every API call. GitHub requires a
 /// non-empty UA; setting one here keeps the value consistent across
-/// callers (today stiglab and portal had divergent UAs).
+/// callers (historically the subsystems had divergent UAs).
 pub const USER_AGENT: &str = "onsager-github/0.1";
 
 /// Shared GitHub HTTP client. First call builds it; subsequent calls

@@ -628,11 +628,11 @@ const GITHUB_HTTP_WALL_ALLOWED_CRATES: &[&str] = &["onsager-github"];
 const GITHUB_HTTP_WALL_PENDING_FILES: &[(&str, &str)] = &[
     (
         "crates/onsager-portal/src/handlers/live_data.rs",
-        "list_project_issues / get_project_issue / list_project_pulls / fetch_issue_for_replay — fold into onsager-github::api::{issues,pulls} once the portal live-data layer is decoupled from reqwest directly (#220 Sub-issue B). Moved from stiglab routes/projects.rs to portal in #222 Follow-up 2.",
+        "list_project_issues / get_project_issue / list_project_pulls / fetch_issue_for_replay — fold into onsager-github::api::{issues,pulls} once the portal live-data layer is decoupled from reqwest directly (#220 Sub-issue B).",
     ),
     (
         "crates/onsager-portal/src/workflow_activation.rs",
-        "ensure_label / register_webhook / deregister_webhook — fold into onsager-github::api::{labels,webhooks} once the workflow URL-resolution + ActivationError shape is decoupled (follow-up to #221). Moved from stiglab to portal in #222 Slice 4.",
+        "ensure_label / register_webhook / deregister_webhook — fold into onsager-github::api::{labels,webhooks} once the workflow URL-resolution + ActivationError shape is decoupled (follow-up to #221).",
     ),
 ];
 
@@ -740,11 +740,11 @@ mod tests {
             "telegramable",
             fake_path(),
             10,
-            r#"std::env::var("ISING_URL")"#,
+            r#"std::env::var("WIDGETLAB_URL")"#,
             &[Seam {
-                krate: "ising",
-                env_prefix: "ISING",
-                host: "ising",
+                krate: "widgetlab",
+                env_prefix: "WIDGETLAB",
+                host: "widgetlab",
             }],
             &mut v,
         );
@@ -760,11 +760,11 @@ mod tests {
             "telegramable",
             fake_path(),
             10,
-            r#"let url = "http://ising:3003/api/x";"#,
+            r#"let url = "http://widgetlab:3003/api/x";"#,
             &[Seam {
-                krate: "ising",
-                env_prefix: "ISING",
-                host: "ising",
+                krate: "widgetlab",
+                env_prefix: "WIDGETLAB",
+                host: "widgetlab",
             }],
             &mut v,
         );
@@ -777,10 +777,10 @@ mod tests {
         let mut v = Vec::new();
         check_sibling_url(
             fake_root(),
-            "ising",
+            "widgetlab",
             fake_path(),
             10,
-            r#"std::env::var("ISING_URL")"#,
+            r#"std::env::var("WIDGETLAB_URL")"#,
             &mut v,
         );
         assert!(v.is_empty(), "self-references must not fire: {:?}", v);
@@ -788,7 +788,7 @@ mod tests {
 
     #[test]
     fn ignores_stream_id_with_colon() {
-        // PR #131 false-positive regression: `format!("ising:{id}")` is a
+        // PR #131 false-positive regression: `format!("widgetlab:{id}")` is a
         // stream key, not a hostname. Tightened heuristic only matches URLs.
         let mut v = Vec::new();
         check_sibling_url(
@@ -796,7 +796,7 @@ mod tests {
             "telegramable",
             fake_path(),
             10,
-            r#"format!("ising:{artifact_id}")"#,
+            r#"format!("widgetlab:{artifact_id}")"#,
             &mut v,
         );
         assert!(v.is_empty(), "stream ids must not fire: {:?}", v);
@@ -810,7 +810,7 @@ mod tests {
             "telegramable",
             fake_path(),
             10,
-            r#"emit("ising.insight_detected", payload)"#,
+            r#"emit("widgetlab.insight_detected", payload)"#,
             &mut v,
         );
         assert!(v.is_empty(), "event names must not fire: {:?}", v);
@@ -945,11 +945,11 @@ mod tests {
     fn github_http_wall_flags_disallowed_crate() {
         let mut violations = Vec::new();
         let mut pending = BTreeSet::new();
-        let path = Path::new("crates/ising/src/foo.rs");
+        let path = Path::new("crates/widgetlab/src/foo.rs");
         scan_github_http_wall(
-            "ising",
+            "widgetlab",
             path,
-            "crates/ising/src/foo.rs",
+            "crates/widgetlab/src/foo.rs",
             r#"let url = "https://api.github.com/repos/x/y";"#,
             &mut violations,
             &mut pending,
@@ -986,11 +986,11 @@ mod tests {
     fn github_http_wall_ignores_clean_file() {
         let mut violations = Vec::new();
         let mut pending = BTreeSet::new();
-        let path = Path::new("crates/ising/src/clean.rs");
+        let path = Path::new("crates/widgetlab/src/clean.rs");
         scan_github_http_wall(
-            "ising",
+            "widgetlab",
             path,
-            "crates/ising/src/clean.rs",
+            "crates/widgetlab/src/clean.rs",
             "fn no_github_here() { let _ = \"https://example.com\"; }",
             &mut violations,
             &mut pending,
@@ -1005,11 +1005,11 @@ mod tests {
         // string shouldn't trip the wall — comments are stripped first.
         let mut violations = Vec::new();
         let mut pending = BTreeSet::new();
-        let path = Path::new("crates/ising/src/clean.rs");
+        let path = Path::new("crates/widgetlab/src/clean.rs");
         scan_github_http_wall(
-            "ising",
+            "widgetlab",
             path,
-            "crates/ising/src/clean.rs",
+            "crates/widgetlab/src/clean.rs",
             "// seam-allow: notes about api.github.com\nfn x() {}",
             &mut violations,
             &mut pending,

@@ -17,7 +17,7 @@ use crate::error::GithubError;
 /// Account flavor returned by the App `installations/:id` endpoint.
 /// Mirrors GitHub's `User` / `Organization` distinction.
 ///
-/// Subsystems that maintain their own enum (e.g. stiglab's
+/// Callers that maintain their own enum (e.g. a legacy
 /// `core::GitHubAccountType`) map between their type and this one at
 /// the boundary — keeps the library free of subsystem domain types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ pub enum AccountKind {
 impl AccountKind {
     /// Map GitHub's mixed-case `"User"` / `"Organization"` (anything
     /// else collapses to `Organization`, matching the existing
-    /// stiglab behavior we're preserving).
+    /// pre-#583 behavior we're preserving).
     pub fn from_github_str(s: &str) -> Self {
         match s {
             "User" => AccountKind::User,

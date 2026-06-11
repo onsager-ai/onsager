@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Shared agent-session spawn wiring — env-var constants + claude MCP/Stop-hook JSON builders reused across stiglab and the scheduler-side runner (spec #535)."
+description = "Shared agent-session spawn wiring — env-var constants + claude MCP/Stop-hook JSON builders reused across portal's session runner and the engine's scheduler-side runner (spec #535)."
 
 [dependencies]
 serde = { workspace = true }

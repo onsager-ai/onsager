@@ -528,7 +528,7 @@ mod tests {
 
     #[test]
     fn artifact_roundtrips_provenance_through_serde() {
-        let mut art = Artifact::new(Kind::Code, "agent-edit", "marvin", "stiglab", vec![]);
+        let mut art = Artifact::new(Kind::Code, "agent-edit", "marvin", "session", vec![]);
         art.provenance = Provenance::Uncertain {
             source: SourceTag::Agent,
         };

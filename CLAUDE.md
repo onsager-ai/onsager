@@ -306,7 +306,7 @@ just lint            # fmt + clippy + eslint
 
 Subsystem-specific env vars worth calling out:
 
-- Verify fail policy — what the Verify executor does when a check fails. One of `escalate` | `deny` | `allow` (`FailPolicy` in `crates/onsager-nodes/src/verify.rs`): `escalate` parks the run non-blockingly (default); `deny` hard-fails the run; `allow` is legacy fail-open and must be opted into explicitly. Set per-node in workflow config, not via env var (the governance subsystem and its `SYNODIC_FAIL_POLICY` env var retired with ADR 0027).
+- Verify fail policy — what the Verify executor does when a check fails. One of `escalate` | `deny` | `allow` (`FailPolicy` in `crates/onsager-engine/src/nodes/verify.rs`): `escalate` parks the run non-blockingly (default); `deny` hard-fails the run; `allow` is legacy fail-open and must be opted into explicitly. Set per-node in workflow config, not via env var (the governance subsystem and its `SYNODIC_FAIL_POLICY` env var retired with ADR 0027).
 
 ## Code exploration: codegraph vs grep
 
