@@ -1,17 +1,12 @@
 //! Spine read + write API for the dashboard.
 //!
-//! Spec #259 (sub-issue of #222) moved this from stiglab to portal so the
-//! dashboard's `API_BASE` cutover (#222 Slice 6) can eventually drop the
-//! `routes::portal::proxy` shim.
+//! Spec #259 (sub-issue of #222) made portal the dashboard's spine API.
 //!
 //! Reads land directly against the spine `events_ext` and `artifacts`
 //! tables. Writes are control-only — retry/abort emit a single event
 //! via `EventStore::append_ext`, no GitHub side-effects, no row
-//! inserts. (Per #278 artifact creation
-//! is exclusively forge's auto-trigger flow; portal does not own a
-//! creation endpoint.) Stiglab's `SpineEmitter::emit_raw` wrapper
-//! stays in stiglab for the agent-runtime emits; portal calls
-//! `state.spine.append_ext` directly.
+//! inserts. (Per #278 artifact creation is exclusively the substrate's
+//! auto-trigger flow; portal does not own a creation endpoint.)
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -594,7 +589,7 @@ async fn fetch_related_events(
                 COALESCE(metadata->>'actor', '') AS actor, created_at \
          FROM events_ext \
          WHERE stream_id = $1 \
-            OR (event_type IN ('stiglab.session_completed', 'stiglab.session_failed') \
+            OR (event_type IN ('session.completed', 'session.failed') \
                 AND data->>'artifact_id' = $2) \
          ORDER BY id ASC \
          LIMIT 500",
@@ -796,15 +791,13 @@ mod tests {
     fn operator_grain_allowlist_pulls_from_registry() {
         let kinds = operator_grain_kinds();
         // Run lifecycle / verdict / trigger events are operator-grain.
-        assert!(kinds.contains(&"stiglab.session_completed"));
+        assert!(kinds.contains(&"session.completed"));
         assert!(kinds.contains(&"verify.verdict"));
         assert!(kinds.contains(&"trigger.fired"));
         assert!(kinds.contains(&"stage.entered"));
         assert!(kinds.contains(&"node.failed"));
         // Internal subsystem dispatches and analyzer diagnostics are not.
-        assert!(!kinds.contains(&"forge.shaping_dispatched"));
         assert!(!kinds.contains(&"forge.shaping_returned"));
-        assert!(!kinds.contains(&"stiglab.session_result_ready"));
         assert!(!kinds.contains(&"ising.insight_emitted"));
         assert!(!kinds.contains(&"ising.rule_proposed"));
     }

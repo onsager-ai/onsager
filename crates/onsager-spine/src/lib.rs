@@ -10,7 +10,7 @@
 //! - **[`Listener`]** — high-level consumer that filters notifications by
 //!   [`Namespace`] and dispatches them to an [`EventHandler`].
 //! - **[`Namespace`]** — validated newtype that partitions the `events_ext`
-//!   table between components (`stiglab`, `ising`, `telegramable`).
+//!   table between components (`session`, `ising`, `telegramable`).
 //!
 //! ## Schema
 //!

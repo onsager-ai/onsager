@@ -275,7 +275,7 @@ impl AgentSessionCompleted {
 /// LLM token usage carried on [`AgentSessionCompleted`]. Mirrors the
 /// shape used by `onsager-spine::TokenUsage` so the dashboard and
 /// budget consumers see the same fields whether the row originated
-/// here or from the legacy `stiglab.session_completed` event.
+/// here or from the chat-path `session.completed` event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct TokenUsage {
     pub input_tokens: u64,

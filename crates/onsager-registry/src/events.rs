@@ -34,7 +34,6 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Subsystem {
-    Stiglab,
     Ising,
     Portal,
     /// The 0.2 substrate — the scheduler (`onsager-nodes::scheduler`) and
@@ -44,7 +43,7 @@ pub enum Subsystem {
     /// per [ADR 0009](../../../docs/adr/0009-three-layer-pipeline.md).
     /// Not in `SCANNED` because substrate source lives in
     /// `onsager-substrate` / `onsager-nodes`, outside the
-    /// `crates/{stiglab,ising}/` scope the emit / listener
+    /// `crates/ising/` scope the emit / listener
     /// scan walks.
     Substrate,
 }
@@ -52,7 +51,6 @@ pub enum Subsystem {
 impl Subsystem {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Stiglab => "stiglab",
             Self::Ising => "ising",
             Self::Portal => "portal",
             Self::Substrate => "substrate",
@@ -65,7 +63,7 @@ impl Subsystem {
     /// is excluded for the same reason — its emitters live in
     /// `onsager-substrate` / `onsager-nodes`, not the scanned source
     /// trees.
-    pub const SCANNED: &'static [Subsystem] = &[Self::Stiglab, Self::Ising];
+    pub const SCANNED: &'static [Subsystem] = &[Self::Ising];
 }
 
 /// One row of the event-type registry manifest.
@@ -224,26 +222,17 @@ pub const EVENTS: EventManifest = EventManifest {
         },
         // -- Forge process events -------------------------------------------
         EventDefinition {
-            kind: "forge.shaping_dispatched",
-            schema_version: 1,
-            producers: &[Subsystem::Substrate],
-            consumers: &[Subsystem::Stiglab],
-            diagnostic_only: false,
-            reason: None,
-            tracking_issue: None,
-            operator_grain: false,
-            description: "ShapingRequest sent to Stiglab via the spine (replaces POST /api/shaping).",
-        },
-        EventDefinition {
             kind: "forge.shaping_returned",
             schema_version: 1,
             producers: &[Subsystem::Substrate],
-            consumers: &[Subsystem::Ising],
-            diagnostic_only: false,
-            reason: None,
-            tracking_issue: None,
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "no emitter remains post-ADR 0027 / spec #583; pattern-matched only by the deprecated observers `shape_retry` analyzer, which retires with #584",
+            ),
+            tracking_issue: Some(584),
             operator_grain: false,
-            description: "ShapingResult received from Stiglab and recorded by Forge.",
+            description: "Legacy 0.1 shaping-result record (historical rows only).",
         },
         EventDefinition {
             kind: "forge.gate_verdict",
@@ -278,73 +267,61 @@ pub const EVENTS: EventManifest = EventManifest {
             operator_grain: false,
             description: "Scheduling kernel produced a ShapingDecision.",
         },
-        // -- Stiglab events -------------------------------------------------
+        // -- Chat-session lifecycle (portal's in-process runner, #583) -------
         EventDefinition {
-            kind: "stiglab.session_completed",
+            kind: "session.completed",
             schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[Subsystem::Substrate],
+            // Portal both emits (the in-process `SessionRunner`) and
+            // consumes (the `session_completed` PR-opener listener +
+            // the session-token revoke listener) — the spine stays the
+            // coordination record even though dispatch is in-process.
+            producers: &[Subsystem::Portal],
+            consumers: &[Subsystem::Portal],
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
             operator_grain: true,
-            description: "A session finished successfully; carries optional artifact_id, token usage, branch, and PR number.",
+            description: "A chat agent session finished successfully; carries optional artifact_id, token usage, branch, and PR number. Renamed from stiglab.session_completed per spec #583.",
         },
         EventDefinition {
-            kind: "stiglab.session_result_ready",
+            kind: "session.failed",
             schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[Subsystem::Substrate],
-            diagnostic_only: false,
-            reason: None,
-            tracking_issue: None,
-            operator_grain: false,
-            description: "Full session ShapingResult ready for Forge to act on (replaces POST /api/shaping response). Renamed from stiglab.shaping_result_ready per spec #285.",
-        },
-        EventDefinition {
-            kind: "stiglab.session_failed",
-            schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[Subsystem::Substrate],
+            // Same emit/consume split as `session.completed` — the
+            // token-revoke listener acts on it.
+            producers: &[Subsystem::Portal],
+            consumers: &[Subsystem::Portal],
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
             operator_grain: true,
-            description: "A session terminated with an error.",
+            description: "A chat agent session terminated with an error. Renamed from stiglab.session_failed per spec #583.",
         },
-        EventDefinition {
-            kind: "stiglab.session_aborted",
-            schema_version: 1,
-            producers: &[Subsystem::Stiglab],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("dashboard event-timeline troubleshooting for node/deadline failures"),
-            tracking_issue: None,
-            operator_grain: true,
-            description: "A session was aborted (node lost, deadline exceeded).",
-        },
-        // -- Portal intents (dashboard → agent dispatch) --------------------
+        // -- Portal intents (dashboard → session runner) --------------------
         EventDefinition {
             kind: "portal.session_requested",
             schema_version: 1,
             producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Stiglab],
-            diagnostic_only: false,
-            reason: None,
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "dashboard activity timeline; dispatch is in-process post-ADR 0027 (spec #583)",
+            ),
             tracking_issue: None,
             operator_grain: true,
-            description: "Dashboard task request from portal; stiglab dispatches the session to an agent node.",
+            description: "Dashboard task request from portal; the in-process SessionRunner spawns the session directly.",
         },
         EventDefinition {
             kind: "portal.session_cancel_requested",
             schema_version: 1,
             producers: &[Subsystem::Portal],
-            consumers: &[Subsystem::Stiglab],
-            diagnostic_only: false,
-            reason: None,
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "dashboard activity timeline; the cancel is applied in-process post-ADR 0027 (spec #583)",
+            ),
             tracking_issue: None,
             operator_grain: true,
-            description: "Dashboard cancel-session request from portal (spec #303); stiglab forwards a CancelSession to the session's agent node.",
+            description: "Dashboard cancel-session request from portal (spec #303); portal's SessionRunner kills the session in-process.",
         },
         EventDefinition {
             kind: "portal.pr_open_failed",
@@ -433,16 +410,17 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "trigger.fired",
             schema_version: 1,
             // Producers (all four trigger categories from #236):
-            // - Stiglab manual-replay route (`/api/projects/:id/issues/:n/replay-trigger`).
-            // - Forge scheduler (#238 — cron / delay / interval).
-            // - Forge event-trigger listeners (#239 — spine_event /
-            //   pg_notify / outbox_row).
+            // - Substrate scheduler (#238 — cron / delay / interval) and
+            //   event-trigger listeners (#239 — spine_event / pg_notify /
+            //   outbox_row).
             // - Portal — live GitHub `issues.labeled` webhook receiver
             //   (#222 Slice 1), GitHub `pull_request.closed` /
             //   `workflow_run.completed` / Telegram receivers (#240),
-            //   the `onsager trigger fire` CLI and the dashboard
+            //   the manual-replay route
+            //   (`/api/projects/:id/issues/:n/replay-trigger`), the
+            //   `onsager trigger fire` CLI and the dashboard
             //   "Run now" / replay endpoints (#241).
-            producers: &[Subsystem::Stiglab, Subsystem::Substrate, Subsystem::Portal],
+            producers: &[Subsystem::Substrate, Subsystem::Portal],
             consumers: &[Subsystem::Substrate],
             diagnostic_only: false,
             reason: None,
@@ -649,7 +627,7 @@ pub const EVENTS: EventManifest = EventManifest {
             consumers: &[],
             diagnostic_only: true,
             reason: Some(
-                "rendered in dashboard agent timeline; supersedes the 0.1 `stiglab.session_*` events once MIG-01 retires stiglab",
+                "rendered in dashboard agent timeline; the substrate counterpart of the chat-path `session.completed`",
             ),
             tracking_issue: None,
             operator_grain: true,
@@ -811,7 +789,7 @@ mod tests {
             "trigger.fired",
             "artifact.registered",
             "artifact.state_changed",
-            "stiglab.session_completed",
+            "session.completed",
             "node.failed",
         ];
         for kind in surfaced {
@@ -822,9 +800,7 @@ mod tests {
             );
         }
         let hidden = [
-            "forge.shaping_dispatched",
             "forge.shaping_returned",
-            "stiglab.session_result_ready",
             "ising.insight_emitted",
             "ising.rule_proposed",
             "gate.check_updated",
@@ -840,11 +816,9 @@ mod tests {
 
     #[test]
     fn lookup_finds_known_kind_and_misses_unknown() {
-        let def = EVENTS
-            .lookup("forge.shaping_dispatched")
-            .expect("known kind");
-        assert!(def.producers.contains(&Subsystem::Substrate));
-        assert!(def.consumers.contains(&Subsystem::Stiglab));
+        let def = EVENTS.lookup("gate.check_updated").expect("known kind");
+        assert!(def.producers.contains(&Subsystem::Portal));
+        assert!(def.consumers.contains(&Subsystem::Substrate));
         assert!(EVENTS.lookup("does.not_exist").is_none());
     }
 

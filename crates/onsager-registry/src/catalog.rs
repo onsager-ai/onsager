@@ -202,14 +202,14 @@ pub fn workflow_builtin_types() -> Vec<TypeDefinition> {
         },
         TypeDefinition {
             type_id: RegistryId::new("Session"),
-            description: "Stiglab agent session promoted to a first-class \
+            description: "Agent chat session promoted to a first-class \
                           registered artifact (v1 built-in, issue #105)."
                 .into(),
-            adapter_id: RegistryId::new("stiglab.session"),
+            adapter_id: RegistryId::new("agent.session"),
             gate_ids: vec![],
             producer_profile_id: None,
             config: serde_json::json!({
-                "external_kind": "stiglab.session",
+                "external_kind": "agent.session",
                 "builtin": true,
             }),
             intrinsic_schema: session_intrinsic_schema(),
@@ -239,8 +239,8 @@ pub fn deployment_intrinsic_schema() -> serde_json::Value {
     })
 }
 
-/// JSON Schema for `Session` intrinsic fields (issue #105). Stiglab's
-/// `Session` struct is the source of truth; the schema mirrors its
+/// JSON Schema for `Session` intrinsic fields (issue #105). Portal's
+/// `core::Session` struct is the source of truth; the schema mirrors its
 /// public-surface fields so the registry can project it uniformly.
 pub fn session_intrinsic_schema() -> serde_json::Value {
     serde_json::json!({

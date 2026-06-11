@@ -23,8 +23,8 @@
 //!
 //! Conventions (locked in spec #520 §3 — do not re-litigate):
 //!
-//! - `namespace = "stiglab"` (the emit happens inside a stiglab-
-//!   orchestrated session; reuse the existing validated namespace).
+//! - `namespace = "session"` (the chat-session namespace; renamed from
+//!   `"stiglab"` when that subsystem folded into portal, ADR 0027 / #583).
 //! - `stream_id = "session:<session_id>"`.
 //! - `event_type = "artifact.emitted"` for a real output;
 //!   `"output.declared_empty"` for an explicit no-output declaration.
@@ -44,8 +44,9 @@ use onsager_artifact::ContentRef;
 use crate::extension_event::ExtensionEventRecord;
 use crate::store::{EventMetadata, EventStore};
 
-/// Namespace the manifest rows live under (spec #520 §3).
-pub const MANIFEST_NAMESPACE: &str = "stiglab";
+/// Namespace the manifest rows live under (spec #520 §3; renamed from
+/// `"stiglab"` when that subsystem folded into portal, ADR 0027 / #583).
+pub const MANIFEST_NAMESPACE: &str = "session";
 /// `events_ext.event_type` for a real emitted output.
 pub const EVENT_ARTIFACT_EMITTED: &str = "artifact.emitted";
 /// `events_ext.event_type` for an explicit "I produced nothing".
@@ -147,7 +148,7 @@ pub struct EmitStatus {
 /// workspace are skipped so a session-id collision across workspaces
 /// can never leak outputs. `query_ext_stream` also returns every
 /// extension row on the stream regardless of namespace, so rows outside
-/// the manifest namespace (`stiglab`) are skipped too — another
+/// the manifest namespace (`session`) are skipped too — another
 /// subsystem reusing the same `event_type` on the same stream must not
 /// be miscounted as a manifest record. An `artifact.emitted` row whose
 /// `data` fails to parse (missing `artifact_id` / `content_ref`) is

@@ -588,9 +588,8 @@ impl SessionRunner {
                     tracing::warn!("failed to record branch link: {e}");
                 }
 
-                let event = onsager_spine::factory_event::FactoryEventKind::StiglabSessionCompleted {
+                let event = onsager_spine::factory_event::FactoryEventKind::SessionCompleted {
                     session_id: launch.session_id.clone(),
-                    request_id: String::new(),
                     duration_ms: 0,
                     artifact_id: artifact_id.clone(),
                     token_usage: None,
@@ -607,9 +606,8 @@ impl SessionRunner {
                     tracing::error!("failed to append session log: {e}");
                 }
                 let artifact_id = artifact_id_for_session(pool, &launch.session_id).await;
-                let event = onsager_spine::factory_event::FactoryEventKind::StiglabSessionFailed {
+                let event = onsager_spine::factory_event::FactoryEventKind::SessionFailed {
                     session_id: launch.session_id.clone(),
-                    request_id: String::new(),
                     error,
                     artifact_id,
                 };
@@ -636,9 +634,8 @@ async fn fail_session(pool: &PgPool, session_id: &str, error: &str) {
 /// Emit `session.failed` for a session that never produced a result.
 async fn emit_session_failed(pool: &PgPool, spine: &EventStore, launch: &SessionLaunch, error: &str) {
     let artifact_id = artifact_id_for_session(pool, &launch.session_id).await;
-    let event = onsager_spine::factory_event::FactoryEventKind::StiglabSessionFailed {
+    let event = onsager_spine::factory_event::FactoryEventKind::SessionFailed {
         session_id: launch.session_id.clone(),
-        request_id: String::new(),
         error: error.to_string(),
         artifact_id,
     };

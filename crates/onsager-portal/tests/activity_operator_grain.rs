@@ -56,22 +56,14 @@ async fn insert_event(pool: &PgPool, workspace_id: &str, event_type: &str, names
 async fn seed_mixed_events(pool: &PgPool) -> String {
     let workspace_id = format!("ws-{}", Uuid::new_v4());
     // Operator-grain ✓
-    insert_event(pool, &workspace_id, "stiglab.session_completed", "stiglab").await;
+    insert_event(pool, &workspace_id, "session.completed", "portal").await;
     insert_event(pool, &workspace_id, "verify.verdict", "substrate").await;
     insert_event(pool, &workspace_id, "trigger.fired", "substrate").await;
     insert_event(pool, &workspace_id, "stage.entered", "substrate").await;
     insert_event(pool, &workspace_id, "node.failed", "substrate").await;
     insert_event(pool, &workspace_id, "artifact.state_changed", "substrate").await;
     // Not operator-grain ✗
-    insert_event(pool, &workspace_id, "forge.shaping_dispatched", "substrate").await;
     insert_event(pool, &workspace_id, "forge.shaping_returned", "substrate").await;
-    insert_event(
-        pool,
-        &workspace_id,
-        "stiglab.session_result_ready",
-        "stiglab",
-    )
-    .await;
     insert_event(pool, &workspace_id, "ising.insight_emitted", "ising").await;
     insert_event(pool, &workspace_id, "ising.rule_proposed", "ising").await;
     workspace_id
@@ -125,7 +117,7 @@ async fn operator_grain_true_filters_to_registry_allowlist() {
     let got: std::collections::HashSet<&str> =
         events.iter().map(|e| e.event_type.as_str()).collect();
     for kind in [
-        "stiglab.session_completed",
+        "session.completed",
         "verify.verdict",
         "trigger.fired",
         "stage.entered",
@@ -139,9 +131,7 @@ async fn operator_grain_true_filters_to_registry_allowlist() {
     }
     // And the five non-operator-grain rows should be absent.
     for kind in [
-        "forge.shaping_dispatched",
         "forge.shaping_returned",
-        "stiglab.session_result_ready",
         "ising.insight_emitted",
         "ising.rule_proposed",
     ] {
@@ -180,8 +170,8 @@ async fn operator_grain_unset_returns_full_stream() {
     let got: std::collections::HashSet<&str> =
         events.iter().map(|e| e.event_type.as_str()).collect();
     // Both sides of the partition are present.
-    assert!(got.contains("stiglab.session_completed"));
-    assert!(got.contains("forge.shaping_dispatched"));
+    assert!(got.contains("session.completed"));
+    assert!(got.contains("forge.shaping_returned"));
     assert!(got.contains("ising.insight_emitted"));
 
     cleanup_workspace(&pool, &workspace_id).await;

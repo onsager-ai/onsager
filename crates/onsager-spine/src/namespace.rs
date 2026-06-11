@@ -67,9 +67,10 @@ impl Namespace {
         Self::new("forge").unwrap()
     }
 
-    /// Namespace for the stiglab component.
-    pub fn stiglab() -> Self {
-        Self::new("stiglab").unwrap()
+    /// Namespace for chat-session lifecycle events + the session output
+    /// manifest (portal's in-process runner, ADR 0027 / spec #583).
+    pub fn session() -> Self {
+        Self::new("session").unwrap()
     }
 
     /// Namespace for the ising component.
@@ -83,8 +84,8 @@ impl Namespace {
     }
 
     /// Namespace for workflow-runtime events (issue #80). Owned by forge
-    /// but consumed by the dashboard and stiglab too, so it gets its own
-    /// namespace instead of piggybacking on `forge:`.
+    /// but consumed by the dashboard too, so it gets its own namespace
+    /// instead of piggybacking on `forge:`.
     pub fn workflow() -> Self {
         Self::new("workflow").unwrap()
     }
@@ -102,7 +103,7 @@ mod tests {
 
     #[test]
     fn valid_namespaces() {
-        assert!(Namespace::new("stiglab").is_ok());
+        assert!(Namespace::new("session").is_ok());
         assert!(Namespace::new("a").is_ok());
         assert!(Namespace::new("my_ns_2").is_ok());
         assert!(Namespace::new("a1234567890123456789012345678901").is_ok()); // 32 chars
@@ -156,13 +157,13 @@ mod tests {
     #[test]
     fn well_known_constants() {
         assert_eq!(Namespace::forge().as_str(), "forge");
-        assert_eq!(Namespace::stiglab().as_str(), "stiglab");
+        assert_eq!(Namespace::session().as_str(), "session");
         assert_eq!(Namespace::ising().as_str(), "ising");
         assert_eq!(Namespace::telegramable().as_str(), "telegramable");
     }
 
     #[test]
     fn display() {
-        assert_eq!(Namespace::stiglab().to_string(), "stiglab");
+        assert_eq!(Namespace::session().to_string(), "session");
     }
 }

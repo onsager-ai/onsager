@@ -10,14 +10,18 @@
 //! See `specs/forge-v0.1.md §5-7` for the field-level contracts.
 
 use chrono::{DateTime, Utc};
-use onsager_artifact::{ArtifactId, ArtifactState, ContentRef, Kind, QualitySignal};
+use onsager_artifact::{ArtifactId, ArtifactState, Kind};
 use serde::{Deserialize, Serialize};
 
-use crate::factory_event::{GatePoint, InsightKind, InsightScope, ShapingOutcome};
+use crate::factory_event::{GatePoint, InsightKind, InsightScope};
 
 // ===========================================================================
-// Forge → Stiglab: shaping dispatch payloads
+// Legacy 0.1 shaping payloads (forge-v0.1 §5)
 // ===========================================================================
+//
+// The `ShapingRequest` / `ShapingResult` exchange types retired with
+// stiglab's shaping path (ADR 0027 / spec #583); only the building
+// blocks still referenced by `ShapingDecision` remain.
 
 /// A reference to another artifact used as horizontal lineage input.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -27,7 +31,7 @@ pub struct ArtifactRef {
     pub role: String,
 }
 
-/// A constraint that Stiglab must respect during shaping.
+/// A constraint a shaping session must respect.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Constraint {
     /// Constraint type (e.g., "max_tokens", "tool_allowlist", "timeout_ms").
@@ -37,68 +41,8 @@ pub struct Constraint {
     pub value: serde_json::Value,
 }
 
-/// Shaping request from Forge to Stiglab (forge-v0.1 §5.2).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ShapingRequest {
-    /// Unique request ID (ULID). Forge never mutates this. Used for
-    /// idempotent dispatch (forge invariant #6).
-    pub request_id: String,
-    /// Which artifact to shape.
-    pub artifact_id: ArtifactId,
-    /// Which version to produce (usually `current_version + 1`).
-    pub target_version: u32,
-    /// Structured description of what the shaping should accomplish.
-    pub shaping_intent: serde_json::Value,
-    /// Other artifacts used as horizontal lineage inputs.
-    pub inputs: Vec<ArtifactRef>,
-    /// Governance and resource constraints.
-    pub constraints: Vec<Constraint>,
-    /// Optional soft deadline.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deadline: Option<DateTime<Utc>>,
-    /// User the request runs on behalf of — drives credential lookup so
-    /// the spawned agent gets `CLAUDE_CODE_OAUTH_TOKEN` (issue #156).
-    /// `None` means "no user context" (legacy direct-shaping callers);
-    /// stiglab will spawn the agent without OAuth env vars and the
-    /// session will fail loudly via `stiglab.session_failed`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub created_by: Option<String>,
-}
-
-/// Error detail attached to failed or aborted shaping results.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ErrorDetail {
-    pub code: String,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retriable: Option<bool>,
-}
-
-/// Shaping result from Stiglab back to Forge (forge-v0.1 §5.2).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ShapingResult {
-    /// Echoed from the original request.
-    pub request_id: String,
-    /// Outcome of the shaping attempt.
-    pub outcome: ShapingOutcome,
-    /// Pointer to the produced content (if any).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content_ref: Option<ContentRef>,
-    /// Semantic summary of what changed.
-    pub change_summary: String,
-    /// Quality signals produced during shaping.
-    pub quality_signals: Vec<QualitySignal>,
-    /// Session ID for vertical lineage. Owned by Stiglab, not Forge.
-    pub session_id: String,
-    /// How long the shaping took.
-    pub duration_ms: u64,
-    /// Error detail if outcome is Failed or Aborted.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<ErrorDetail>,
-}
-
 // ===========================================================================
-// Portal → Stiglab: multi-repo session-launch handoff (spec #546)
+// Portal → scheduler: multi-repo session-launch handoff (spec #546)
 // ===========================================================================
 
 /// One repo handed to an agent session at launch, with read-scoped
@@ -113,9 +57,10 @@ pub struct ShapingResult {
 ///
 /// The token is **read-scoped** (`contents:read` + `metadata:read`) and
 /// **encrypted** with the shared credential key — never the raw token on
-/// the wire. The consumer (stiglab) decrypts it and builds the
-/// authenticated clone URL before surfacing it to the agent. *Writes* to
-/// origin are out of scope here and gated separately (#548).
+/// the wire. The consumer (the scheduler's agent launch path) decrypts it
+/// and builds the authenticated clone URL before surfacing it to the
+/// agent. *Writes* to origin are out of scope here and gated separately
+/// (#548).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepoAccess {
     /// GitHub repo owner (org or user login).
@@ -279,73 +224,6 @@ pub struct ShapingDecision {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn shaping_request_roundtrip() {
-        let req = ShapingRequest {
-            request_id: "01HXYZ".into(),
-            artifact_id: ArtifactId::new("art_test1234"),
-            target_version: 2,
-            shaping_intent: serde_json::json!({"action": "improve_tests"}),
-            inputs: vec![],
-            constraints: vec![],
-            deadline: None,
-            created_by: None,
-        };
-        let json = serde_json::to_value(&req).unwrap();
-        let back: ShapingRequest = serde_json::from_value(json).unwrap();
-        assert_eq!(back.request_id, "01HXYZ");
-        assert_eq!(back.target_version, 2);
-    }
-
-    #[test]
-    fn shaping_request_created_by_is_wire_optional() {
-        // Issue #156: legacy callers serialize without `created_by` and
-        // deserialize cleanly thanks to `#[serde(default)]`. Populated
-        // values round-trip through the wire format unchanged.
-        let with = ShapingRequest {
-            request_id: "01HABC".into(),
-            artifact_id: ArtifactId::new("art_owned_1234"),
-            target_version: 1,
-            shaping_intent: serde_json::json!({}),
-            inputs: vec![],
-            constraints: vec![],
-            deadline: None,
-            created_by: Some("user_42".into()),
-        };
-        let json = serde_json::to_value(&with).unwrap();
-        assert_eq!(json["created_by"], "user_42");
-        let back: ShapingRequest = serde_json::from_value(json).unwrap();
-        assert_eq!(back.created_by.as_deref(), Some("user_42"));
-
-        let without = ShapingRequest {
-            request_id: "01HDEF".into(),
-            artifact_id: ArtifactId::new("art_legacy_1234"),
-            target_version: 1,
-            shaping_intent: serde_json::json!({}),
-            inputs: vec![],
-            constraints: vec![],
-            deadline: None,
-            created_by: None,
-        };
-        let json = serde_json::to_value(&without).unwrap();
-        assert!(
-            !json.as_object().unwrap().contains_key("created_by"),
-            "None created_by must be omitted for wire compat with legacy callers"
-        );
-
-        // Legacy payload (no `created_by` key) still parses.
-        let legacy: ShapingRequest = serde_json::from_value(serde_json::json!({
-            "request_id": "01HOLD",
-            "artifact_id": "art_old_12345",
-            "target_version": 1,
-            "shaping_intent": {},
-            "inputs": [],
-            "constraints": []
-        }))
-        .expect("legacy ShapingRequest must deserialize");
-        assert!(legacy.created_by.is_none());
-    }
 
     #[test]
     fn repo_access_roundtrip_and_token_wire_optional() {

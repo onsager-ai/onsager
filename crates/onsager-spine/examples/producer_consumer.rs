@@ -70,9 +70,8 @@ async fn main() -> anyhow::Result<()> {
     let mut first_id: Option<i64> = None;
     for i in 1..=expected {
         let event = FactoryEvent {
-            event: FactoryEventKind::StiglabSessionCompleted {
-                session_id: format!("stiglab:session:demo-{i}"),
-                request_id: format!("stiglab:request:{i}"),
+            event: FactoryEventKind::SessionCompleted {
+                session_id: format!("session:chat:demo-{i}"),
                 duration_ms: 100,
                 artifact_id: None,
                 token_usage: None,
@@ -92,12 +91,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Start the listener with a backfill cursor that picks up all pre-existing
-    // events. The listener matches events whose stream_id starts with "stiglab:".
+    // events. The listener matches events whose stream_id starts with "session:".
     let cursor = first_id.map(|id| id - 1); // replay from just before the first event
     let listener_store = store.clone();
     let listener_handle = tokio::spawn(async move {
         Listener::new(listener_store)
-            .subscribe(Namespace::stiglab())
+            .subscribe(Namespace::session())
             .with_since(cursor)
             .run(handler)
             .await

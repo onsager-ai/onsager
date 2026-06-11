@@ -594,7 +594,7 @@ pub async fn append_factory_event_tx(
 }
 
 /// Resolve the correlation_id to write into the typed column. Prefers the
-/// metadata field (the canonical write site portal/forge/stiglab use today)
+/// metadata field (the canonical write site portal/forge use today)
 /// and falls back to the envelope. Anything that doesn't parse as a UUID
 /// stores NULL — the column is for portal's `await_response` to index on,
 /// and only portal-minted values are guaranteed to be UUIDs.

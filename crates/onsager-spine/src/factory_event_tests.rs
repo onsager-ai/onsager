@@ -128,9 +128,8 @@ mod tests {
     #[test]
     fn token_usage_on_session_completed_is_optional() {
         // Without token_usage (legacy shape)
-        let without = FactoryEventKind::StiglabSessionCompleted {
+        let without = FactoryEventKind::SessionCompleted {
             session_id: "sess_1".into(),
-            request_id: "req_1".into(),
             duration_ms: 123,
             artifact_id: None,
             token_usage: None,
@@ -152,9 +151,8 @@ mod tests {
         );
 
         // With token_usage populated
-        let with = FactoryEventKind::StiglabSessionCompleted {
+        let with = FactoryEventKind::SessionCompleted {
             session_id: "sess_2".into(),
-            request_id: "req_2".into(),
             duration_ms: 42,
             artifact_id: Some("art_x".into()),
             token_usage: Some(TokenUsage {
@@ -193,119 +191,38 @@ mod tests {
         assert_eq!(deserialized.event_type(), "git.ci_completed");
     }
 
-    // -- Phase 2 (Lever C) wire-format regressions ------------------------
-    //
-    // Phase-3 listeners will rely on these events keeping their shape across
-    // upgrades; pin the additive-schema and round-trip behavior here.
+    // -- Chat-session lifecycle routing (spec #583) -------------------------
 
     #[test]
-    fn forge_shaping_dispatched_request_field_serde_compat() {
-        use crate::protocol::ShapingRequest;
-
-        // 1. With request = None, the field is omitted from the wire form
-        //    (skip_serializing_if), keeping legacy JSON shape on emit.
-        let event_without = FactoryEventKind::ForgeShapingDispatched {
-            request_id: "req_no_payload".into(),
-            artifact_id: ArtifactId::new("art_legacy_shape"),
-            target_version: 3,
-            request: None,
+    fn session_lifecycle_events_route_by_session_id() {
+        // Portal's listeners (PR opener, token revoke) and the dashboard
+        // filter on this triple — pin it. Renamed from the
+        // `stiglab.session_*` names when stiglab folded into portal
+        // (ADR 0027 / spec #583).
+        let completed = FactoryEventKind::SessionCompleted {
+            session_id: "sess_42".into(),
+            duration_ms: 12_500,
+            artifact_id: Some("art_x".into()),
+            token_usage: None,
+            branch: Some("claude/feature".into()),
+            pr_number: None,
         };
-        let json_without = serde_json::to_value(&event_without).unwrap();
-        assert!(
-            json_without.get("request").is_none(),
-            "request: None must be omitted on serialization, got: {json_without}"
-        );
+        assert_eq!(completed.event_type(), "session.completed");
+        assert_eq!(completed.stream_type(), "session");
+        assert_eq!(completed.stream_id(), "sess_42");
 
-        // 2. Legacy JSON lacking the `request` field deserializes with
-        //    request = None — the #[serde(default)] contract that lets
-        //    pre-Lever-C events still parse.
-        let legacy_json = serde_json::json!({
-            "type": "forge_shaping_dispatched",
-            "request_id": "req_legacy",
-            "artifact_id": "art_legacy_shape",
-            "target_version": 1,
-        });
-        let parsed: FactoryEventKind = serde_json::from_value(legacy_json).unwrap();
-        match parsed {
-            FactoryEventKind::ForgeShapingDispatched { request, .. } => {
-                assert!(
-                    request.is_none(),
-                    "legacy JSON must default request to None"
-                );
-            }
-            other => panic!("expected ForgeShapingDispatched, got {other:?}"),
-        }
-
-        // 3. With request = Some(...), full payload round-trips. The
-        //    Stiglab listener depends on the inner ShapingRequest staying
-        //    byte-stable across upgrades.
-        let event_with = FactoryEventKind::ForgeShapingDispatched {
-            request_id: "req_full".into(),
-            artifact_id: ArtifactId::new("art_full_shape"),
-            target_version: 5,
-            request: Some(ShapingRequest {
-                request_id: "req_full".into(),
-                artifact_id: ArtifactId::new("art_full_shape"),
-                target_version: 5,
-                shaping_intent: serde_json::json!({"prompt": "do the thing"}),
-                inputs: vec![],
-                constraints: vec![],
-                deadline: None,
-                created_by: Some("user_42".into()),
-            }),
+        let failed = FactoryEventKind::SessionFailed {
+            session_id: "sess_43".into(),
+            error: "boom".into(),
+            artifact_id: None,
         };
-        let json_with = serde_json::to_value(&event_with).unwrap();
-        assert_eq!(json_with["type"], "forge_shaping_dispatched");
-        assert_eq!(json_with["request"]["request_id"], "req_full");
-        assert_eq!(
-            json_with["request"]["shaping_intent"]["prompt"],
-            "do the thing"
-        );
-        assert_eq!(json_with["request"]["created_by"], "user_42");
+        assert_eq!(failed.event_type(), "session.failed");
+        assert_eq!(failed.stream_type(), "session");
+        assert_eq!(failed.stream_id(), "sess_43");
 
-        let back: FactoryEventKind = serde_json::from_value(json_with).unwrap();
-        assert_eq!(back, event_with);
-        assert_eq!(back.event_type(), "forge.shaping_dispatched");
-    }
-
-    #[test]
-    fn stiglab_session_result_ready_roundtrip() {
-        use crate::protocol::ShapingResult;
-        use onsager_artifact::ContentRef;
-
-        let event = FactoryEventKind::StiglabSessionResultReady {
-            artifact_id: ArtifactId::new("art_shaped"),
-            result: ShapingResult {
-                request_id: "req_shaping_42".into(),
-                outcome: ShapingOutcome::Completed,
-                content_ref: Some(ContentRef {
-                    uri: "git://repo@abc123".into(),
-                    checksum: None,
-                }),
-                change_summary: "added auth middleware".into(),
-                quality_signals: vec![],
-                session_id: "sess_42".into(),
-                duration_ms: 12_500,
-                error: None,
-            },
-        };
-
-        // event_type / stream routing — phase-3 listeners filter on these.
-        assert_eq!(event.event_type(), "stiglab.session_result_ready");
-        assert_eq!(event.stream_type(), "stiglab");
-        assert_eq!(event.stream_id(), "art_shaped");
-
-        let json = serde_json::to_value(&event).unwrap();
-        assert_eq!(json["type"], "stiglab_session_result_ready");
-        assert_eq!(json["artifact_id"], "art_shaped");
-        assert_eq!(json["result"]["request_id"], "req_shaping_42");
-        assert_eq!(json["result"]["outcome"], "completed");
-        assert_eq!(json["result"]["content_ref"]["uri"], "git://repo@abc123");
-        // checksum and error are skip_serializing_if Option::is_none
-        assert!(json["result"]["content_ref"].get("checksum").is_none());
-        assert!(json["result"].get("error").is_none());
-
+        let json = serde_json::to_value(&failed).unwrap();
+        assert_eq!(json["type"], "session_failed");
         let back: FactoryEventKind = serde_json::from_value(json).unwrap();
-        assert_eq!(back, event);
+        assert_eq!(back, failed);
     }
 }

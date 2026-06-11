@@ -40,8 +40,7 @@ use crate::events::Subsystem;
 /// - **Schedule** — time-based fires (`cron`, `delay`, `interval`).
 ///   Producer is always the substrate scheduler.
 /// - **Request** — external HTTP requests (webhooks: GitHub, Telegram,
-///   …). Producer is the edge subsystem hosting the receiver (stiglab
-///   today; portal once #222 lands).
+///   …). Producer is the edge subsystem hosting the receiver (portal).
 /// - **Manual** — user-initiated fires (UI button, CLI, replay).
 ///   Producer is portal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -130,8 +129,8 @@ pub const TRIGGERS: TriggerManifest = TriggerManifest {
         TriggerDefinition {
             kind_tag: "github_issue_webhook",
             // Producer is portal — `/webhooks/github` lives there since
-            // #222 Slice 1 (PR #248); stiglab no longer hosts the
-            // receiver. Keeping the row in `Request` matches #236's
+            // #222 Slice 1 (PR #248). Keeping the row in `Request`
+            // matches #236's
             // category split (webhooks are external HTTP requests, not
             // internal event-bus signals).
             producer: Subsystem::Portal,
