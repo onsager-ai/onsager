@@ -147,14 +147,8 @@ mod tests {
     fn test_gate_kind_display_and_parse() {
         assert_eq!(GateKind::AgentSession.to_string(), "agent-session");
         assert_eq!(GateKind::ExternalCheck.to_string(), "external-check");
-        assert_eq!(GateKind::Governance.to_string(), "governance");
         assert_eq!(GateKind::ManualApproval.to_string(), "manual-approval");
-        for s in [
-            "agent-session",
-            "external-check",
-            "governance",
-            "manual-approval",
-        ] {
+        for s in ["agent-session", "external-check", "manual-approval"] {
             assert_eq!(s.parse::<GateKind>().unwrap().to_string(), s);
         }
         assert!("bogus".parse::<GateKind>().is_err());

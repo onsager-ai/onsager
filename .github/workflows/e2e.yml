@@ -70,8 +70,8 @@ jobs:
         run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build stiglab + synodic
-        run: cargo build -p stiglab -p synodic --release --features synodic/postgres
+      - name: Build stiglab
+        run: cargo build -p stiglab --release
 
       # ── Database setup ──────────────────────────────────────
       - name: Run spine migrations
@@ -98,11 +98,6 @@ jobs:
       # ── Start services ──────────────────────────────────────
       - name: Start Onsager stack
         run: |
-          # Start synodic
-          PORT=3001 ./target/release/synodic serve &
-          SYNODIC_PID=$!
-          echo "SYNODIC_PID=$SYNODIC_PID" >> "$GITHUB_ENV"
-
           # Start stiglab (with built-in runner)
           ONSAGER_DATABASE_URL="$DATABASE_URL" \
           STIGLAB_PORT=3000 \
@@ -117,8 +112,6 @@ jobs:
           echo "Waiting for services..."
           timeout 30 bash -c 'until curl -sf http://localhost:3000/api/health > /dev/null 2>&1; do sleep 1; done'
           echo "Stiglab ready"
-          timeout 30 bash -c 'until curl -sf http://localhost:3001/api/health > /dev/null 2>&1; do sleep 1; done'
-          echo "Synodic ready"
 
           # Wait for built-in runner to register
           sleep 3
@@ -136,4 +129,4 @@ jobs:
       - name: Stop services
         if: always()
         run: |
-          kill $STIGLAB_PID $SYNODIC_PID 2>/dev/null || true
+          kill $STIGLAB_PID 2>/dev/null || true

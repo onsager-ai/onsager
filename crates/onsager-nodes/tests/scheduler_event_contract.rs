@@ -21,7 +21,7 @@
 //!   `node.completed` / `node.failed`.
 //! - Agent node only: one `agent.session_started`, then one of
 //!   `agent.session_completed` / `agent.session_failed`.
-//! - Verify node only: one `synodic.verdict` (pass or fail).
+//! - Verify node only: one `verify.verdict` (pass or fail).
 //!
 //! `node.awaiting_human` / `node.human_approved` / `node.human_rejected`
 //! are the Human executor's contract (#357); not exercised here.
@@ -215,13 +215,13 @@ async fn script_agent_verify_emits_full_substrate_contract() {
         0,
     );
 
-    // -- Verify executor: one synodic.verdict, passed=true.
+    // -- Verify executor: one verify.verdict, passed=true.
     let verdicts: Vec<&Value> = emitted
         .iter()
-        .filter(|(k, _)| k == se::KIND_SYNODIC_VERDICT)
+        .filter(|(k, _)| k == se::KIND_VERIFY_VERDICT)
         .map(|(_, p)| p)
         .collect();
-    assert_eq!(verdicts.len(), 1, "expected one synodic.verdict emit");
+    assert_eq!(verdicts.len(), 1, "expected one verify.verdict emit");
 
     // -- Executor-side emits MUST carry the real plan_id (not the
     // empty-string regression the v1 implementation had before
@@ -232,7 +232,7 @@ async fn script_agent_verify_emits_full_substrate_contract() {
     for kind in &[
         se::KIND_AGENT_SESSION_STARTED,
         se::KIND_AGENT_SESSION_COMPLETED,
-        se::KIND_SYNODIC_VERDICT,
+        se::KIND_VERIFY_VERDICT,
     ] {
         let payload = emitted
             .iter()
@@ -274,9 +274,9 @@ async fn script_agent_verify_emits_full_substrate_contract() {
 }
 
 #[tokio::test]
-async fn verify_failure_still_emits_synodic_verdict() {
+async fn verify_failure_still_emits_verify_verdict() {
     // A verify node with a failing check + Escalate policy emits a
-    // `synodic.verdict` (passed=false) AND a `node.failed`. The
+    // `verify.verdict` (passed=false) AND a `node.failed`. The
     // contract is "verdict emits regardless of pass/fail" — the
     // dashboard renders the verdict row even on the failure path so a
     // human can see why the run halted.
@@ -340,8 +340,8 @@ async fn verify_failure_still_emits_synodic_verdict() {
     let emitted = spine.emitted.lock().unwrap().clone();
     let verdict = emitted
         .iter()
-        .find(|(k, _)| k == se::KIND_SYNODIC_VERDICT)
-        .expect("synodic.verdict must emit on the failure path too");
+        .find(|(k, _)| k == se::KIND_VERIFY_VERDICT)
+        .expect("verify.verdict must emit on the failure path too");
     assert_eq!(verdict.1["passed"], false);
 
     let failed = emitted

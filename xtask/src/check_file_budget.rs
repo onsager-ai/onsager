@@ -524,7 +524,7 @@ mod tests {
             "crates/foo/tests/integration.rs"
         )));
         assert!(!is_prod_source(Path::new(
-            "crates/synodic/src/core/storage/tests.rs"
+            "crates/stiglab/src/core/storage/tests.rs"
         )));
         assert!(!is_prod_source(Path::new("crates/foo/src/x_tests.rs")));
         assert!(is_prod_source(Path::new("apps/dashboard/src/lib/api.ts")));

@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn ising_rule_proposed_carries_routing_fields() {
-        // Issue #36 Step 2 contract: a Synodic consumer must be able to
+        // Issue #36 Step 2 contract: a downstream consumer must be able to
         // route the proposal without looking up the producing insight. The
         // event_type / stream_type / stream_id triple pins the dashboard
         // query path.
@@ -122,23 +122,6 @@ mod tests {
         assert_eq!(json["class"], "review_required");
         assert_eq!(json["proposed_action"]["action"], "retire");
         let back: FactoryEventKind = serde_json::from_value(json).unwrap();
-        assert_eq!(back, event);
-    }
-
-    #[test]
-    fn gate_resolution_proposed_round_trip() {
-        let event = FactoryEventKind::SynodicGateResolutionProposed {
-            escalation_id: "esc_42".into(),
-            artifact_id: ArtifactId::new("art_ri"),
-            proposer: "supervisor".into(),
-            proposed_verdict: VerdictSummary::Allow,
-            rationale: "supervisor reviewed the evidence".into(),
-        };
-        assert_eq!(event.event_type(), "synodic.gate_resolution_proposed");
-        assert_eq!(event.stream_type(), "synodic");
-        assert_eq!(event.stream_id(), "esc_42");
-        let back: FactoryEventKind =
-            serde_json::from_value(serde_json::to_value(&event).unwrap()).expect("round trip");
         assert_eq!(back, event);
     }
 
@@ -214,81 +197,6 @@ mod tests {
     //
     // Phase-3 listeners will rely on these events keeping their shape across
     // upgrades; pin the additive-schema and round-trip behavior here.
-
-    #[test]
-    fn forge_gate_requested_request_field_serde_compat() {
-        use crate::protocol::{GateContext, GateRequest, ProposedAction};
-
-        // 1. With request = None, the field is omitted from the wire form
-        //    (skip_serializing_if), keeping legacy JSON shape on emit.
-        let event_without = FactoryEventKind::ForgeGateRequested {
-            gate_id: "gate_no_request".into(),
-            artifact_id: ArtifactId::new("art_legacy_shape"),
-            gate_point: GatePoint::PreDispatch,
-            request: None,
-        };
-        let json_without = serde_json::to_value(&event_without).unwrap();
-        assert!(
-            json_without.get("request").is_none(),
-            "request: None must be omitted on serialization, got: {json_without}"
-        );
-
-        // 2. Legacy JSON lacking the `request` field deserializes with
-        //    request = None — the #[serde(default)] contract that lets
-        //    pre-Lever-C events still parse.
-        let legacy_json = serde_json::json!({
-            "type": "forge_gate_requested",
-            "gate_id": "gate_legacy",
-            "artifact_id": "art_legacy_shape",
-            "gate_point": "pre_dispatch",
-        });
-        let parsed: FactoryEventKind = serde_json::from_value(legacy_json).unwrap();
-        match parsed {
-            FactoryEventKind::ForgeGateRequested { request, .. } => {
-                assert!(
-                    request.is_none(),
-                    "legacy JSON must default request to None"
-                );
-            }
-            other => panic!("expected ForgeGateRequested, got {other:?}"),
-        }
-
-        // 3. With request = Some(...), full payload round-trips. Phase 3
-        //    consumers depend on the inner GateRequest staying byte-stable.
-        let event_with = FactoryEventKind::ForgeGateRequested {
-            gate_id: "gate_full".into(),
-            artifact_id: ArtifactId::new("art_full_shape"),
-            gate_point: GatePoint::StateTransition,
-            request: Some(GateRequest {
-                context: GateContext {
-                    gate_point: GatePoint::StateTransition,
-                    artifact_id: ArtifactId::new("art_full_shape"),
-                    artifact_kind: Kind::Code,
-                    current_state: ArtifactState::InProgress,
-                    target_state: Some(ArtifactState::UnderReview),
-                    extra: None,
-                },
-                proposed_action: ProposedAction {
-                    description: "advance art_full_shape to UnderReview".into(),
-                    payload: serde_json::json!({"summary": "ok"}),
-                },
-            }),
-        };
-        let json_with = serde_json::to_value(&event_with).unwrap();
-        assert_eq!(json_with["type"], "forge_gate_requested");
-        assert_eq!(
-            json_with["request"]["context"]["gate_point"],
-            "state_transition"
-        );
-        assert_eq!(
-            json_with["request"]["proposed_action"]["description"],
-            "advance art_full_shape to UnderReview"
-        );
-
-        let back: FactoryEventKind = serde_json::from_value(json_with).unwrap();
-        assert_eq!(back, event_with);
-        assert_eq!(back.event_type(), "forge.gate_requested");
-    }
 
     #[test]
     fn forge_shaping_dispatched_request_field_serde_compat() {

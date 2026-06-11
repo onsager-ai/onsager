@@ -221,7 +221,6 @@ pub enum QualitySource {
     Lint,
     HumanReview,
     IsingInference,
-    SynodicCheck,
     External,
 }
 

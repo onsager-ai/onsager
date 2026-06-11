@@ -35,17 +35,16 @@ use serde::Serialize;
 #[serde(rename_all = "snake_case")]
 pub enum Subsystem {
     Stiglab,
-    Synodic,
     Ising,
     Portal,
     /// The 0.2 substrate — the scheduler (`onsager-nodes::scheduler`) and
     /// executors (`onsager-nodes::{script,agent,verify,...}`) that emit
     /// runtime lifecycle events (`node.*`, `agent.session_*`,
-    /// `synodic.verdict`) onto the spine. Replaces the Forge tick loop
+    /// `verify.verdict`) onto the spine. Replaces the Forge tick loop
     /// per [ADR 0009](../../../docs/adr/0009-three-layer-pipeline.md).
     /// Not in `SCANNED` because substrate source lives in
     /// `onsager-substrate` / `onsager-nodes`, outside the
-    /// `crates/{stiglab,synodic,ising}/` scope the emit / listener
+    /// `crates/{stiglab,ising}/` scope the emit / listener
     /// scan walks.
     Substrate,
 }
@@ -54,7 +53,6 @@ impl Subsystem {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Stiglab => "stiglab",
-            Self::Synodic => "synodic",
             Self::Ising => "ising",
             Self::Portal => "portal",
             Self::Substrate => "substrate",
@@ -67,7 +65,7 @@ impl Subsystem {
     /// is excluded for the same reason — its emitters live in
     /// `onsager-substrate` / `onsager-nodes`, not the scanned source
     /// trees.
-    pub const SCANNED: &'static [Subsystem] = &[Self::Stiglab, Self::Synodic, Self::Ising];
+    pub const SCANNED: &'static [Subsystem] = &[Self::Stiglab, Self::Ising];
 }
 
 /// One row of the event-type registry manifest.
@@ -248,17 +246,6 @@ pub const EVENTS: EventManifest = EventManifest {
             description: "ShapingResult received from Stiglab and recorded by Forge.",
         },
         EventDefinition {
-            kind: "forge.gate_requested",
-            schema_version: 1,
-            producers: &[Subsystem::Portal, Subsystem::Substrate],
-            consumers: &[Subsystem::Synodic],
-            diagnostic_only: false,
-            reason: None,
-            tracking_issue: None,
-            operator_grain: false,
-            description: "GateRequest sent to Synodic via the spine (replaces POST /api/gate). Portal emits it for the GatePoint::RepoWrite gate (#548) before minting a write token for a bound-but-unpinned repo.",
-        },
-        EventDefinition {
             kind: "forge.gate_verdict",
             schema_version: 1,
             producers: &[Subsystem::Substrate],
@@ -267,7 +254,7 @@ pub const EVENTS: EventManifest = EventManifest {
             reason: None,
             tracking_issue: None,
             operator_grain: true,
-            description: "GateVerdict observed by Forge after Synodic responded.",
+            description: "GateVerdict observed by the legacy forge gate path (historical rows only).",
         },
         EventDefinition {
             kind: "forge.insight_observed",
@@ -372,110 +359,6 @@ pub const EVENTS: EventManifest = EventManifest {
             operator_grain: true,
             description: "Portal failed to open a GitHub PR for a completed session (empty branch, GitHub API error, or missing App config).",
         },
-        // -- Synodic events -------------------------------------------------
-        // Per spec #285: the redundant `synodic.gate_evaluated` /
-        // `gate_denied` / `gate_modified` summary variants were dropped;
-        // the dashboard renders gate timelines from `synodic.gate_verdict`
-        // directly (verdict-shape filtering is a query-side concern).
-        EventDefinition {
-            kind: "synodic.gate_verdict",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[Subsystem::Portal, Subsystem::Substrate],
-            diagnostic_only: false,
-            reason: None,
-            tracking_issue: None,
-            operator_grain: true,
-            description: "Full GateVerdict in response to forge.gate_requested (replaces POST /api/gate response). Portal consumes the RepoWrite verdict (#548) to mint-or-deny a per-repo write token.",
-        },
-        EventDefinition {
-            kind: "synodic.escalation_started",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("audit trail for escalation context"),
-            tracking_issue: None,
-            operator_grain: true,
-            description: "An escalation was initiated.",
-        },
-        EventDefinition {
-            kind: "synodic.escalation_resolved",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in synodic governance UI; audit trail"),
-            tracking_issue: None,
-            operator_grain: true,
-            description: "An escalation was resolved (human, delegate, or timeout).",
-        },
-        EventDefinition {
-            kind: "synodic.escalation_timed_out",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in synodic governance UI; audit trail"),
-            tracking_issue: None,
-            operator_grain: true,
-            description: "An escalation timed out and the default verdict was applied.",
-        },
-        EventDefinition {
-            kind: "synodic.gate_resolution_proposed",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in synodic governance UI; audit trail"),
-            tracking_issue: None,
-            operator_grain: true,
-            description: "A delegate proposed a resolution for an active escalation.",
-        },
-        EventDefinition {
-            kind: "synodic.rule_proposed",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in synodic governance UI; audit trail"),
-            tracking_issue: None,
-            operator_grain: false,
-            description: "A crystallization candidate rule was created.",
-        },
-        EventDefinition {
-            kind: "synodic.rule_approved",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in synodic governance UI; audit trail"),
-            tracking_issue: None,
-            operator_grain: false,
-            description: "A proposed rule was approved and entered the active set.",
-        },
-        EventDefinition {
-            kind: "synodic.rule_disabled",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in synodic governance UI; audit trail"),
-            tracking_issue: None,
-            operator_grain: false,
-            description: "A rule was disabled.",
-        },
-        EventDefinition {
-            kind: "synodic.rule_version_created",
-            schema_version: 1,
-            producers: &[Subsystem::Synodic],
-            consumers: &[],
-            diagnostic_only: true,
-            reason: Some("rendered in synodic governance UI; audit trail"),
-            tracking_issue: None,
-            operator_grain: false,
-            description: "A rule was modified, producing a new version.",
-        },
         // -- Ising events ---------------------------------------------------
         EventDefinition {
             kind: "ising.insight_detected",
@@ -514,12 +397,14 @@ pub const EVENTS: EventManifest = EventManifest {
             kind: "ising.rule_proposed",
             schema_version: 1,
             producers: &[Subsystem::Ising],
-            consumers: &[Subsystem::Synodic],
-            diagnostic_only: false,
-            reason: None,
-            tracking_issue: None,
+            consumers: &[],
+            diagnostic_only: true,
+            reason: Some(
+                "governance consumer retired by ADR 0027 / spec #582; ising itself retires in #584",
+            ),
+            tracking_issue: Some(584),
             operator_grain: false,
-            description: "An insight was packaged as a rule proposal for Synodic.",
+            description: "An insight was packaged as a rule proposal (no consumer remains).",
         },
         EventDefinition {
             kind: "ising.analyzer_error",
@@ -594,7 +479,7 @@ pub const EVENTS: EventManifest = EventManifest {
         },
         // Per spec #285: per-gate `stage.gate_passed` / `stage.gate_failed`
         // events were dropped; the run timeline reconstructs gate outcomes
-        // from `synodic.gate_verdict` plus the stage advancement signal.
+        // from `verify.verdict` plus the stage advancement signal.
         EventDefinition {
             kind: "stage.advanced",
             schema_version: 1,
@@ -745,13 +630,13 @@ pub const EVENTS: EventManifest = EventManifest {
             description: "A pending Human executor node received a rejection decision.",
         },
         EventDefinition {
-            kind: "synodic.verdict",
+            kind: "verify.verdict",
             schema_version: 1,
             producers: &[Subsystem::Substrate],
             consumers: &[],
             diagnostic_only: true,
             reason: Some(
-                "rendered in dashboard run timeline as gate outcome; Observer / dashboard read it directly — distinct from the legacy `synodic.gate_verdict` emitted by the 0.1 Synodic subsystem (retired by MIG-03)",
+                "rendered in dashboard run timeline as gate outcome; renamed from the governance-era name when that subsystem retired (ADR 0027 / spec #582)",
             ),
             tracking_issue: None,
             operator_grain: true,
@@ -922,8 +807,7 @@ mod tests {
         let surfaced = [
             "stage.entered",
             "stage.advanced",
-            "synodic.gate_verdict",
-            "synodic.verdict",
+            "verify.verdict",
             "trigger.fired",
             "artifact.registered",
             "artifact.state_changed",
@@ -940,10 +824,9 @@ mod tests {
         let hidden = [
             "forge.shaping_dispatched",
             "forge.shaping_returned",
-            "forge.gate_requested",
             "stiglab.session_result_ready",
             "ising.insight_emitted",
-            "synodic.rule_proposed",
+            "ising.rule_proposed",
             "gate.check_updated",
         ];
         for kind in hidden {

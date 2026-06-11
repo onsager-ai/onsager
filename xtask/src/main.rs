@@ -588,10 +588,8 @@ fn stream_producer(stream: &str) -> &'static str {
         "git" => "onsager-portal (GitHub webhooks)",
         "forge" => "substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363",
         "stiglab" => "stiglab",
-        "synodic" => "synodic",
         "ising" => "ising",
         "workflow" => "stiglab (trigger) / substrate scheduler (stage)",
-        "registry" => "synodic (catalog crud)",
         "gate" => "onsager-portal (GitHub) / substrate scheduler (manual)",
         "substrate" => "substrate scheduler (onsager-nodes) + executor catalog (RUN-02, #360)",
         _ => "(unknown — update `stream_producer` in xtask)",
@@ -641,7 +639,7 @@ Persisted in two tables (see `crates/onsager-spine/migrations/001_initial.sql`):
   that doesn't (yet) belong on the typed bus. Carries `(namespace, event_type)`
   and a free-form JSON payload. Validated by
   [`Namespace`](../crates/onsager-spine/src/namespace.rs) against the
-  well-known set: `forge`, `stiglab`, `synodic`, `ising`, `telegramable`,
+  well-known set: `forge`, `stiglab`, `ising`, `telegramable`,
   `workflow`.
 
 ## Versioning

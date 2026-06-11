@@ -17,22 +17,6 @@ if [ -n "$ONSAGER_DATABASE_URL" ] && [ -d /app/spine-migrations ]; then
     echo "Spine migrations complete."
 fi
 
-# Run synodic (governance) migrations.
-if [ -n "$ONSAGER_DATABASE_URL" ] && [ -d /app/synodic-migrations ]; then
-    echo "Running synodic migrations..."
-    for f in $(ls /app/synodic-migrations/*.sql | sort -V); do
-        echo "  applying $(basename "$f")..."
-        psql -X -v ON_ERROR_STOP=1 "$ONSAGER_DATABASE_URL" -f "$f"
-    done
-    echo "Synodic migrations complete."
-fi
-
-# Start synodic (governance API) on an internal port.
-# Not exposed by Railway — portal reverse-proxies /api/governance/* to it.
-SYNODIC_PORT="${SYNODIC_PORT:-3001}"
-echo "Starting synodic on :${SYNODIC_PORT}..."
-gosu onsager sh -c "while true; do DATABASE_URL=\"$ONSAGER_DATABASE_URL\" /app/synodic serve --port $SYNODIC_PORT 2>&1; echo 'synodic exited, restarting in 1s...'; sleep 1; done" &
-
 # Start onsager-portal on an internal port. Caddy (the edge dispatcher)
 # routes /api/* and /agent/ws here (ADR 0006 + ADR 0008). Skipped when
 # the spine DB isn't configured (useful for local smoke tests without
@@ -43,9 +27,8 @@ if [ -n "$ONSAGER_DATABASE_URL" ]; then
     # Resolve nested expansion before passing to gosu to avoid dash multi-line
     # continuation bugs with complex parameter expansions inside "-quoted strings.
     PORTAL_CREDENTIAL_KEY="${STIGLAB_CREDENTIAL_KEY:-${ONSAGER_CREDENTIAL_KEY:-}}"
-    PORTAL_SYNODIC_URL="${SYNODIC_URL:-http://127.0.0.1:${SYNODIC_PORT}}"
     echo "Starting onsager-portal on ${PORTAL_BIND}..."
-    gosu onsager sh -c "while true; do PORTAL_BIND=\"$PORTAL_BIND\" DATABASE_URL=\"$ONSAGER_DATABASE_URL\" ONSAGER_CREDENTIAL_KEY=\"$PORTAL_CREDENTIAL_KEY\" SYNODIC_URL=\"$PORTAL_SYNODIC_URL\" /app/onsager-portal serve 2>&1; echo 'onsager-portal exited, restarting in 1s...'; sleep 1; done" &
+    gosu onsager sh -c "while true; do PORTAL_BIND=\"$PORTAL_BIND\" DATABASE_URL=\"$ONSAGER_DATABASE_URL\" ONSAGER_CREDENTIAL_KEY=\"$PORTAL_CREDENTIAL_KEY\" /app/onsager-portal serve 2>&1; echo 'onsager-portal exited, restarting in 1s...'; sleep 1; done" &
 fi
 
 # Start the substrate scheduler (RUN-03, #386) — listens on the spine
@@ -61,7 +44,7 @@ fi
 
 # Issue #156: legacy callers still expect STIGLAB_INTERNAL_DISPATCH_TOKEN
 # in the environment as a per-boot ephemeral secret. The 0.1 forge ↔
-# stiglab dispatch path is gone after spec #363, but synodic + stiglab
+# stiglab dispatch path is gone after spec #363, but stiglab
 # still source the variable on startup; auto-generate to keep
 # co-located processes trusting each other.
 if [ -z "$STIGLAB_INTERNAL_DISPATCH_TOKEN" ]; then
@@ -93,6 +76,6 @@ gosu onsager sh -c "while true; do STIGLAB_HOST=\"$STIGLAB_HOST\" STIGLAB_PORT=\
 : "${PORT:=8080}"
 export PORT
 echo "==> pre-exec: binaries present"
-ls -la /app/stiglab /app/synodic /app/onsager-portal /app/onsager-scheduler /usr/local/bin/caddy
+ls -la /app/stiglab /app/onsager-portal /app/onsager-scheduler /usr/local/bin/caddy
 echo "==> exec-ing caddy on :${PORT}..."
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

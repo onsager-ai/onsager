@@ -20,7 +20,7 @@
 //!   [`RepoAccess`] handoff the `portal.session_requested` event carries.
 //!
 //! *Writes* to origin are out of scope: this stops at read/checkout. The
-//! write-token mint lands behind the synodic gate in #548.
+//! write-token mint is consent-gated by workspace binding (#548; gate protocol retired by ADR 0027).
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -121,7 +121,7 @@ impl std::fmt::Display for WriteTokenError {
 }
 
 /// Mint a **write-scoped** installation token for one bound repo, after a
-/// Synodic `RepoWrite` gate has approved it (#548).
+/// workspace binding grants consent (#548; ADR 0027).
 ///
 /// This is the per-repo resolver's first write consumer (the #545-absorbed
 /// `resolve_install_for_repo` picks the install; this adds the write mint

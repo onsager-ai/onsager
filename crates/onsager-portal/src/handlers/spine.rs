@@ -5,9 +5,9 @@
 //! `routes::portal::proxy` shim.
 //!
 //! Reads land directly against the spine `events_ext` and `artifacts`
-//! tables. Writes are control-only — retry/abort/override-gate emit a
-//! single event via `EventStore::append_ext`, no synodic side-effects,
-//! no GitHub side-effects, no row inserts. (Per #278 artifact creation
+//! tables. Writes are control-only — retry/abort emit a single event
+//! via `EventStore::append_ext`, no GitHub side-effects, no row
+//! inserts. (Per #278 artifact creation
 //! is exclusively forge's auto-trigger flow; portal does not own a
 //! creation endpoint.) Stiglab's `SpineEmitter::emit_raw` wrapper
 //! stays in stiglab for the agent-runtime emits; portal calls
@@ -173,17 +173,6 @@ pub struct RetryRequest {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct AbortRequest {
-    #[serde(default)]
-    pub reason: Option<String>,
-    #[serde(default)]
-    pub actor: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct OverrideGateRequest {
-    /// `allow` (default) or `deny`.
-    #[serde(default)]
-    pub verdict: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
     #[serde(default)]
@@ -795,99 +784,6 @@ pub async fn abort_artifact(
         .into_response()
 }
 
-/// POST /api/spine/artifacts/:id/override-gate
-pub async fn override_gate(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(id): Path<String>,
-    Json(req): Json<OverrideGateRequest>,
-) -> Response {
-    let pool = state.spine.pool();
-
-    let workspace_id: String = match sqlx::query_scalar::<_, String>(
-        "SELECT workspace_id FROM artifacts WHERE artifact_id = $1",
-    )
-    .bind(&id)
-    .fetch_optional(pool)
-    .await
-    {
-        Ok(Some(w)) => w,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "artifact not found" })),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            tracing::error!("artifact lookup failed: {e}");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "failed to load artifact" })),
-            )
-                .into_response();
-        }
-    };
-    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workspace_id).await {
-        if r.status() == StatusCode::NOT_FOUND {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "artifact not found" })),
-            )
-                .into_response();
-        }
-        return r;
-    }
-
-    let verdict = req.verdict.as_deref().unwrap_or("allow").to_lowercase();
-    if verdict != "allow" && verdict != "deny" {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "verdict must be 'allow' or 'deny'",
-            })),
-        )
-            .into_response();
-    }
-
-    let actor = req.actor.as_deref().unwrap_or("dashboard");
-    let reason = req
-        .reason
-        .clone()
-        .unwrap_or_else(|| format!("manual {verdict} via dashboard"));
-    let escalation_id = format!("esc_{}", ulid::Ulid::new());
-
-    emit(
-        &state,
-        &workspace_id,
-        &format!("forge:{id}"),
-        "synodic",
-        actor,
-        "synodic.escalation_resolved",
-        serde_json::json!({
-            "escalation_id": escalation_id,
-            "artifact_id": id,
-            "resolution": {
-                "verdict": verdict,
-                "resolved_by": actor,
-                "reason": reason,
-            },
-        }),
-    )
-    .await;
-
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "artifact_id": id,
-            "action": "gate_override",
-            "verdict": verdict,
-            "escalation_id": escalation_id,
-        })),
-    )
-        .into_response()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -901,7 +797,7 @@ mod tests {
         let kinds = operator_grain_kinds();
         // Run lifecycle / verdict / trigger events are operator-grain.
         assert!(kinds.contains(&"stiglab.session_completed"));
-        assert!(kinds.contains(&"synodic.gate_verdict"));
+        assert!(kinds.contains(&"verify.verdict"));
         assert!(kinds.contains(&"trigger.fired"));
         assert!(kinds.contains(&"stage.entered"));
         assert!(kinds.contains(&"node.failed"));
@@ -910,7 +806,7 @@ mod tests {
         assert!(!kinds.contains(&"forge.shaping_returned"));
         assert!(!kinds.contains(&"stiglab.session_result_ready"));
         assert!(!kinds.contains(&"ising.insight_emitted"));
-        assert!(!kinds.contains(&"synodic.rule_proposed"));
+        assert!(!kinds.contains(&"ising.rule_proposed"));
     }
 
     /// The path-scoped `/api/workspaces/:id/activity` alias must force
@@ -923,7 +819,7 @@ mod tests {
     fn activity_alias_forces_operator_grain_true() {
         let q = ActivityQuery {
             stream_type: None,
-            event_type: Some("synodic.gate_verdict".into()),
+            event_type: Some("verify.verdict".into()),
             stream_id: None,
             run_id: None,
             limit: Some(50),
@@ -942,7 +838,7 @@ mod tests {
         };
         assert_eq!(params.workspace, "ws-test");
         assert_eq!(params.operator_grain, Some(true));
-        assert_eq!(params.event_type.as_deref(), Some("synodic.gate_verdict"));
+        assert_eq!(params.event_type.as_deref(), Some("verify.verdict"));
         assert_eq!(params.limit, Some(50));
     }
 

@@ -1,6 +1,6 @@
-# Dev-overlay image for the three Rust services (stiglab, synodic, forge).
+# Dev-overlay image for the Rust services (stiglab, portal, scheduler).
 # Used only by docker-compose.slot.yml. Production builds live in
-# crates/stiglab/deploy/Dockerfile and crates/synodic/docker/Dockerfile.
+# crates/stiglab/deploy/Dockerfile.
 #
 # What this image gives a slot:
 #   - The exact rust toolchain pinned in rust-toolchain.toml.

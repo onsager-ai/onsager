@@ -1,5 +1,5 @@
 //! Inter-subsystem request/response payload types — the typed shapes that
-//! Forge ↔ Stiglab and Forge ↔ Synodic exchange via spine events.
+//! Legacy 0.1 subsystem exchange payloads carried on spine events.
 //!
 //! These types previously lived in the `onsager-protocol` crate, where they
 //! described HTTP request/response contracts. Per spec #131 / ADR 0004
@@ -135,7 +135,7 @@ pub struct RepoAccess {
 }
 
 // ===========================================================================
-// Forge → Synodic: gate evaluation payloads
+// Legacy gate evaluation payloads (0.1 gate protocol)
 // ===========================================================================
 
 /// Context for a gate evaluation.
@@ -156,7 +156,7 @@ pub struct GateContext {
     pub extra: Option<serde_json::Value>,
 }
 
-/// The action Forge proposes and Synodic evaluates.
+/// The action a gate request proposes for evaluation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProposedAction {
     /// Human-readable description.
@@ -165,14 +165,14 @@ pub struct ProposedAction {
     pub payload: serde_json::Value,
 }
 
-/// Gate request from Forge to Synodic (forge-v0.1 §6.2).
+/// Gate request payload (forge-v0.1 §6.2; legacy).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GateRequest {
     pub context: GateContext,
     pub proposed_action: ProposedAction,
 }
 
-/// Escalation context — returned when Synodic cannot decide autonomously.
+/// Escalation context — returned when a gate cannot decide autonomously.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EscalationContext {
     pub escalation_id: String,
@@ -183,7 +183,7 @@ pub struct EscalationContext {
     pub timeout_at: DateTime<Utc>,
 }
 
-/// Gate verdict from Synodic to Forge (forge-v0.1 §6.2).
+/// Gate verdict payload (forge-v0.1 §6.2; legacy).
 ///
 /// Forge honors this unconditionally. There is no override mechanism.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -196,7 +196,7 @@ pub enum GateVerdict {
 }
 
 // ===========================================================================
-// Stiglab → Synodic: tool-level gate payloads
+// Tool-level gate payloads (legacy)
 // ===========================================================================
 
 /// Tool-level gate request from inside a Stiglab session.

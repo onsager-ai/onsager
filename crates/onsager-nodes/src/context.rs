@@ -25,7 +25,7 @@ use crate::scheduler::PlanId;
 pub struct ExecutorContext {
     /// Identifier for the Execution Plan run this dispatch belongs
     /// to. Threaded onto every substrate lifecycle event the executor
-    /// emits (`agent.session_*`, `synodic.verdict`) so consumers can
+    /// emits (`agent.session_*`, `verify.verdict`) so consumers can
     /// correlate them back to a specific run — without it the spine
     /// envelope's `stream_id` (`plan:<plan_id>:<node_id>`) collapses
     /// across runs.

@@ -487,7 +487,7 @@ const get_workflow_v2: McpToolBinding = {
 }
 
 // -----------------------------------------------------------------------------
-// Repo-write gate (#548 / #544)
+// Repo-write token mint (#548 / #544; gate protocol retired by ADR 0027 / #582)
 //
 // Agent-session tool: an agent calls this to request write access to a
 // bound-but-unpinned repo in a workspace-scoped run. Bound here so the
@@ -506,12 +506,12 @@ const request_repo_write: McpToolBinding = {
       kind: "destructive",
       title: `Authorize write · ${repo}`,
       body: {
-        info: `Grant the run write access (push + open PR) to ${repo}. Binding a repo grants candidacy, not write consent — this is the consent point.`,
+        info: `Grant the run write access (push + open PR) to ${repo}. Binding a repo to the workspace is the write-consent boundary — only bound repos are mintable.`,
       },
       sideEffects: [
         `Mints a least-privilege \`contents:write\` + \`pull_requests:write\` token scoped to ${repo}`,
-        "Emits `forge.gate_requested` (RepoWrite) and acts on Synodic's `synodic.gate_verdict`",
-        "On deny / escalate / timeout no token is minted and the write is parked",
+        "No gate round-trip (ADR 0027): portal verifies the repo is bound to the workspace and mints directly",
+        "When the repo is not bound, no token is minted and the write is refused",
       ],
       reversibility:
         "The token is short-lived and single-repo; revoke by letting it expire. The PR it enables is reviewable before merge.",
@@ -607,7 +607,7 @@ const BINDINGS: McpToolBinding[] = [
   retire_workflow,
   list_workflows_v2,
   get_workflow_v2,
-  // Repo-write gate (#548 / #544)
+  // Repo-write token mint (#548 / #544)
   request_repo_write,
   // Session output manifest (#520 §4a / #521)
   emit_artifact,

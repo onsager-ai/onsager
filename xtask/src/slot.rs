@@ -43,7 +43,7 @@ const RESERVED_NAMES: &[&str] = &["main", "0"];
 
 /// Legacy port layout for slot 0 (the main checkout). Keeping this
 /// special-cased preserves zero behavioral change for single-checkout
-/// developers who never create a worktree. The legacy stiglab / synodic
+/// developers who never create a worktree. The legacy stiglab
 /// ports (3000 / 3001) are owned by `just dev` directly, not by the slot
 /// allocator — they aren't part of `SlotPorts` because no slot 1..=99
 /// publishes a parallel set on the host.
@@ -91,7 +91,7 @@ pub struct SlotEntry {
 ///
 /// Only `edge` and `postgres` are published on the VM host by
 /// `docker-compose.slot.yml`; everything else stays on the compose
-/// network. The dashboard reaches stiglab/synodic via Caddy's
+/// network. The dashboard reaches stiglab via Caddy's
 /// same-origin reverse proxy at `edge`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotPorts {

@@ -26,8 +26,8 @@ export interface StageEditorProps {
  */
 export function StageEditor({ stage, index, onChange, onRemove }: StageEditorProps) {
   // Keep the name in lock-step with the gate while it's still the default,
-  // so the rail reads "Governance" the instant you switch a fresh stage to
-  // Governance — but never clobber a name the user actually typed.
+  // so the rail reads "Manual approval" the instant you switch a fresh stage
+  // to Manual approval — but never clobber a name the user actually typed.
   const changeGate = (gate_kind: WorkflowGateKind) => {
     const untouched =
       stage.name.trim() === "" || stage.name === defaultStageName(stage.gate_kind)

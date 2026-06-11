@@ -8,7 +8,7 @@
 //! v1 semantics:
 //! - **Trigger** kinds: `github_issue_webhook` only.
 //! - **Stage** kinds (per stage-gate pair): `agent-session`, `external-check`,
-//!   `governance`, `manual-approval`.
+//!   `manual-approval`.
 //! - Ordering is static — stages run in declared order, never reordered.
 //!
 //! A workflow is a plain DB record (not an artifact). The `workflow_stages`
@@ -32,7 +32,6 @@ use ts_rs::TS;
 pub enum GateKind {
     AgentSession,
     ExternalCheck,
-    Governance,
     ManualApproval,
 }
 
@@ -41,7 +40,6 @@ impl fmt::Display for GateKind {
         match self {
             GateKind::AgentSession => write!(f, "agent-session"),
             GateKind::ExternalCheck => write!(f, "external-check"),
-            GateKind::Governance => write!(f, "governance"),
             GateKind::ManualApproval => write!(f, "manual-approval"),
         }
     }
@@ -53,7 +51,6 @@ impl FromStr for GateKind {
         match s {
             "agent-session" => Ok(GateKind::AgentSession),
             "external-check" => Ok(GateKind::ExternalCheck),
-            "governance" => Ok(GateKind::Governance),
             "manual-approval" => Ok(GateKind::ManualApproval),
             other => Err(anyhow::anyhow!("invalid gate kind: {other}")),
         }

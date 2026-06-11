@@ -6,7 +6,7 @@
 //! sliding window, grouped by artifact `Kind`. A kind whose artifacts
 //! systematically need many reshape cycles is one whose decomposer or
 //! shaping rules are underspecified — the right downstream response
-//! is a Synodic rule that caps rework or tightens the spec.
+//! is a governance rule that caps rework or tightens the spec.
 
 use std::collections::HashMap;
 

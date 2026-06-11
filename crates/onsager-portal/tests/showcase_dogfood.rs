@@ -60,20 +60,13 @@ async fn seed_dogfood_workflow(spine: &PgPool, workspace_id: &str) -> String {
             id: Uuid::new_v4().to_string(),
             workflow_id: workflow_id.clone(),
             seq: 1,
-            gate_kind: GateKind::Governance,
-            params: serde_json::json!({}),
-        },
-        WorkflowStage {
-            id: Uuid::new_v4().to_string(),
-            workflow_id: workflow_id.clone(),
-            seq: 2,
             gate_kind: GateKind::ExternalCheck,
             params: serde_json::json!({}),
         },
         WorkflowStage {
             id: Uuid::new_v4().to_string(),
             workflow_id: workflow_id.clone(),
-            seq: 3,
+            seq: 2,
             gate_kind: GateKind::ManualApproval,
             params: serde_json::json!({}),
         },
@@ -187,28 +180,27 @@ async fn seed_git_pr_merged_event(spine: &PgPool, workspace_id: &str, pr_number:
     .expect("seed git.pr_merged event");
 }
 
-/// Seed a `synodic.gate_verdict` event with the given verdict tag. The
-/// stats query reads `data->'verdict'->>'verdict'` to match the
-/// `GateVerdict` enum's `#[serde(tag = "verdict")]` shape — i.e. the
-/// envelope serializes as `{type, gate_id, ..., verdict: {verdict, ...}}`.
-async fn seed_gate_verdict_event(spine: &PgPool, workspace_id: &str, verdict: &str) {
+/// Seed a `verify.verdict` event with the given outcome. The stats
+/// query reads `data->>'passed'` off the `FactoryEventKind::VerifyVerdict`
+/// payload shape.
+async fn seed_gate_verdict_event(spine: &PgPool, workspace_id: &str, passed: bool) {
     let payload = serde_json::json!({
-        "type": "synodic_gate_verdict",
-        "gate_id": format!("gate-{verdict}"),
-        "artifact_id": "art_some",
-        "gate_point": "merge",
-        "verdict": { "verdict": verdict },
+        "type": "verify_verdict",
+        "plan_id": format!("plan-{passed}"),
+        "node_id": "verify-1",
+        "passed": passed,
+        "check_results": [],
     });
     sqlx::query(
         "INSERT INTO events_ext (stream_id, namespace, event_type, data, metadata, workspace_id) \
-         VALUES ($1, 'synodic', 'synodic.gate_verdict', $2, '{}'::jsonb, $3)",
+         VALUES ($1, 'substrate', 'verify.verdict', $2, '{}'::jsonb, $3)",
     )
-    .bind(format!("gate-{verdict}"))
+    .bind(format!("verdict-{passed}"))
     .bind(&payload)
     .bind(workspace_id)
     .execute(spine)
     .await
-    .expect("seed synodic.gate_verdict event");
+    .expect("seed verify.verdict event");
 }
 
 async fn cleanup_workflow(spine: &PgPool, portal: &PgPool, workflow_id: &str) {
@@ -478,9 +470,9 @@ async fn projection_counts_recent_events_into_stats() {
     seed_git_pr_merged_event(&spine, &workspace_id, 412).await;
     seed_git_pr_merged_event(&spine, &workspace_id, 413).await;
     seed_git_pr_merged_event(&spine, &workspace_id, 414).await;
-    seed_gate_verdict_event(&spine, &workspace_id, "allow").await;
-    seed_gate_verdict_event(&spine, &workspace_id, "allow").await;
-    seed_gate_verdict_event(&spine, &workspace_id, "deny").await;
+    seed_gate_verdict_event(&spine, &workspace_id, true).await;
+    seed_gate_verdict_event(&spine, &workspace_id, true).await;
+    seed_gate_verdict_event(&spine, &workspace_id, false).await;
 
     let body = build_projection_for_test(&spine, &portal, &workflow_id)
         .await
@@ -501,7 +493,7 @@ async fn projection_counts_recent_events_into_stats() {
     assert_eq!(
         body["stats_7d"]["verify_gates_passed"],
         Value::Number(2.into()),
-        "verify_gates_passed counts only `allow` verdicts in the workspace"
+        "verify_gates_passed counts only passed verdicts in the workspace"
     );
 
     cleanup_workflow(&spine, &portal, &workflow_id).await;

@@ -2,7 +2,7 @@
 
 The **edge** subsystem. Portal owns clause 1 of the seam rule —
 external HTTP boundaries — so the factory subsystems (`forge`,
-`stiglab`, `synodic`, `ising`) can stay behind the seam and
+`stiglab`, `ising`) can stay behind the seam and
 coordinate exclusively via the spine.
 
 ## The seam rule (canonical)
@@ -12,7 +12,7 @@ coordinate exclusively via the spine.
 > - **Webhooks** called by external services (GitHub, etc.).
 >
 > The external HTTP boundary is owned by `portal` (the edge subsystem).
-> Factory subsystems (`forge`, `stiglab`, `synodic`, `ising`) coordinate
+> Factory subsystems (`forge`, `stiglab`, `ising`) coordinate
 > **exclusively** via the spine: events on the bus + reads against
 > shared spine tables. No subsystem makes HTTP calls to another
 > subsystem. No subsystem imports another subsystem's crate.
@@ -28,11 +28,11 @@ What this means for portal specifically:
   over `127.0.0.1:3000/agent/ws-internal`.
 - **Forbidden HTTP surfaces.** Routes that exist only to be called by
   a sibling subsystem. Clause 2 still applies to portal — when portal
-  needs `forge`/`stiglab`/`synodic`/`ising` to do work, it emits a
+  needs `forge`/`stiglab`/`ising` to do work, it emits a
   spine intent, not an HTTP request.
 - **Cargo deps.** Portal may depend on `onsager-{artifact, github,
   spine, registry}`. It must NOT depend on `forge`, `stiglab`,
-  `synodic`, or `ising`.
+  or `ising`.
 - **Spine is the coordination medium.** When a portal route handler
   needs another subsystem to act, emit a spine event (e.g. portal
   receives `PATCH /api/workflows/:id active=true`, does the GitHub
@@ -174,7 +174,7 @@ first-class edge subsystem. The migration is staged:
   `GET /api/spine/artifacts/:id`,
   `POST /api/spine/artifacts/:id/{retry,abort,override-gate}`).
   Reads run against `events_ext` / `artifacts`; writes
-  `EventStore::append_ext` a single event — no synodic side-effects,
+  `EventStore::append_ext` a single event — no cross-subsystem side-effects,
   no GitHub side-effects. Artifact creation is not part of this
   surface (per #278 the only creation path is forge's auto-trigger
   flow, which emits `artifact.registered` directly on the spine).

@@ -28,9 +28,6 @@ enum Command {
         /// portal can decrypt `webhook_secret_cipher` rows.
         #[arg(long, env = "ONSAGER_CREDENTIAL_KEY")]
         credential_key: Option<String>,
-        /// Synodic gate URL (e.g. `http://synodic:3001`).
-        #[arg(long, env = "SYNODIC_URL")]
-        synodic_url: Option<String>,
         /// Optional GitHub PAT used for posting check runs / comments when
         /// installation-token signing isn't wired up. Prefer per-installation
         /// tokens when available.
@@ -131,7 +128,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             bind,
             database_url,
             credential_key,
-            synodic_url,
             github_token,
             public_url,
             github_client_id,
@@ -166,7 +162,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 bind: bind.clone(),
                 database_url,
                 credential_key,
-                synodic_url,
                 github_token,
                 public_url: public_url
                     .filter(|s| !s.trim().is_empty())

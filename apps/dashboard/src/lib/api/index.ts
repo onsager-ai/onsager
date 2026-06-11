@@ -19,7 +19,6 @@ export type {
   GitHubAppInstallation,
   WorkspaceRepo,
   AccessibleRepo,
-  GovernanceEvent,
   TokenUsage,
   SpineEvent,
   SpineArtifact,
@@ -54,7 +53,6 @@ export type {
   RunLinkedSession,
   GitHubLabel,
   ArtifactActionRequest,
-  OverrideGateRequestBody,
   ArtifactActionResponse,
   InstallationDeliveryHealth,
   WorkspaceDeliveryHealthResponse,
@@ -84,7 +82,6 @@ import { sessions } from "./sessions";
 import { credentials } from "./credentials";
 import { pats } from "./pats";
 import { workspaces } from "./workspaces";
-import { governance } from "./governance";
 import { spine } from "./spine";
 import { artifacts } from "./artifacts";
 import { workflows } from "./workflows";
@@ -100,7 +97,6 @@ export const api = {
   ...credentials,
   ...pats,
   ...workspaces,
-  ...governance,
   ...spine,
   ...artifacts,
   ...workflows,

@@ -10,6 +10,6 @@ name = "onsager"
 path = "src/main.rs"
 
 [dependencies]
-# Note: NO business crate deps here. This dispatcher must not link stiglab or
-# synodic — that would break runtime loose coupling by forcing a rebuild on
+# Note: NO business crate deps here. This dispatcher must not link stiglab —
+# that would break runtime loose coupling by forcing a rebuild on
 # any subsystem change.

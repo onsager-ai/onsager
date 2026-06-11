@@ -72,7 +72,7 @@ export function NewWorkspaceDialog({
           <DialogTitle>Create a workspace</DialogTitle>
           <DialogDescription>
             A workspace groups the GitHub projects and agent sessions that share
-            credentials and governance. You can create more later.
+            credentials. You can create more later.
           </DialogDescription>
         </DialogHeader>
         <form

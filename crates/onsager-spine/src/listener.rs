@@ -230,7 +230,10 @@ mod tests {
     fn matches_single_namespace() {
         let namespaces = ns_set(&["stiglab"]);
         assert!(matches_any_namespace("stiglab:session:abc", &namespaces));
-        assert!(!matches_any_namespace("synodic:session:abc", &namespaces));
+        assert!(!matches_any_namespace(
+            "telegramable:session:abc",
+            &namespaces
+        ));
     }
 
     #[test]
@@ -238,7 +241,7 @@ mod tests {
         let namespaces = ns_set(&["stiglab", "ising"]);
         assert!(matches_any_namespace("stiglab:session:1", &namespaces));
         assert!(matches_any_namespace("ising:run:42", &namespaces));
-        assert!(!matches_any_namespace("synodic:policy:x", &namespaces));
+        assert!(!matches_any_namespace("telegramable:policy:x", &namespaces));
     }
 
     #[test]

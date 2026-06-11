@@ -5,7 +5,6 @@
 #   Process            | Description                                       | Port
 #   ------------------ | ------------------------------------------------- | -----------------
 #   stiglab            | Sessions, agents, dashboard, API                  | 3000 (exposed)
-#   synodic            | Governance API (internal)                         | 3001 (proxied)
 #   onsager-portal     | GitHub webhook ingress (internal)                 | 3002 (proxied)
 #   onsager-scheduler  | Substrate scheduler — trigger.fired → ExecPlan    | — (spine listener)
 #   PostgreSQL         | Shared event spine (Railway plugin)               | 5432
@@ -17,13 +16,13 @@
 # Quick start:
 #   1. Create a Railway project and connect this repo
 #   2. Add a PostgreSQL plugin (auto-provides DATABASE_URL)
-#   3. Default service uses this config (builds stiglab + synodic + portal)
+#   3. Default service uses this config (builds stiglab + portal)
 #   4. Set required variables (see [deploy] section below)
 #   5. Point your GitHub App webhook at
 #      https://<app>.up.railway.app/webhooks/github
 #
 # Migrations:
-#   The entrypoint auto-applies onsager-spine and synodic migrations on
+#   The entrypoint auto-applies onsager-spine migrations on
 #   startup when ONSAGER_DATABASE_URL is set. The portal applies its own
 #   tables when it boots.
 
@@ -36,7 +35,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "crates/stiglab/deploy/Dockerfile"
 watchPatterns = [
     # All crates — every workspace member is linked into at least one of
-    # the binaries shipped in this unified container (stiglab, synodic,
+    # the binaries shipped in this unified container (stiglab,
     # onsager-portal), so any change can affect the deploy.
     "crates/**",
     "apps/dashboard/**",
@@ -98,7 +97,6 @@ numReplicas = 1
 #                                 or an exact host (`app.onsager.ai`).
 #                                 Any `return_to` whose host is not listed
 #                                 is rejected at the start of the flow.
-#   SYNODIC_PORT              — internal port for synodic (default: 3001)
 #   PORTAL_PORT               — internal port for onsager-portal (default: 3002)
 #   GITHUB_TOKEN              — optional PAT used by the portal for posting
 #                               check runs / comments when installation-token

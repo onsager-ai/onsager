@@ -81,7 +81,7 @@ describe("LineageDAG.buildLanes", () => {
         stream_type: "forge",
         event_type: "forge.gate_verdict",
         data: { request_id: "r1", verdict: "Allow" },
-        actor: "synodic",
+        actor: "substrate",
         created_at: "2026-04-01T00:00:01Z",
       },
       {

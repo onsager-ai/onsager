@@ -16,7 +16,6 @@ import { makeDraft } from "@/lib/drafts"
 const VALID_GATE_KINDS = new Set([
   "agent-session",
   "external-check",
-  "governance",
   "manual-approval",
 ])
 

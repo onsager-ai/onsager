@@ -4,7 +4,7 @@
 //! The portal speaks Postgres directly (not the cross-backend `AnyPool`
 //! stiglab uses) because it co-locates with the spine, which is Postgres-only,
 //! and the only tables the portal authors itself (`factory_tasks`,
-//! `pr_gate_verdicts`, `pr_branch_links`) live in the same database.
+//! `pr_branch_links`) live in the same database.
 //!
 //! Tables not owned by the portal (tenants, github_app_installations,
 //! projects, sessions, artifacts, vertical_lineage) are created by stiglab
@@ -456,48 +456,6 @@ impl IssueLifecycleState {
 // the table present so historical rows remain queryable; the writer
 // function was removed when the last caller (issues webhook + backfill)
 // switched to ref-only writes per #167.
-
-// ── Verdict dedup (Phase 2) ───────────────────────────────────────────────
-
-/// Returns the existing verdict for `(pr_artifact_id, head_sha)` if any.
-/// Used to short-circuit duplicate `synchronize` events on the same SHA so
-/// gate evaluation runs at most once per commit.
-pub async fn find_existing_verdict(
-    pool: &PgPool,
-    pr_artifact_id: &str,
-    head_sha: &str,
-) -> anyhow::Result<Option<String>> {
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT verdict FROM pr_gate_verdicts \
-         WHERE pr_artifact_id = $1 AND head_sha = $2",
-    )
-    .bind(pr_artifact_id)
-    .bind(head_sha)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row.map(|(v,)| v))
-}
-
-/// Persist a verdict for `(pr_artifact_id, head_sha)`. Idempotent — if a row
-/// already exists for the SHA the new write is silently dropped.
-pub async fn record_verdict(
-    pool: &PgPool,
-    pr_artifact_id: &str,
-    head_sha: &str,
-    verdict: &str,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO pr_gate_verdicts (pr_artifact_id, head_sha, verdict, recorded_at) \
-         VALUES ($1, $2, $3, NOW()) \
-         ON CONFLICT (pr_artifact_id, head_sha) DO NOTHING",
-    )
-    .bind(pr_artifact_id)
-    .bind(head_sha)
-    .bind(verdict)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
 
 // ── Session↔PR correlation (Phase 1) ──────────────────────────────────────
 

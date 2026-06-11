@@ -7,7 +7,7 @@ AI factory stack — monorepo for the Onsager event bus and its subsystems.
 These commitments define Onsager-the-factory's identity — the monorepo and its subsystems. They do not, in general, prescribe the internal structure of what the factory produces; downstream artifacts and deployed systems are their own viable systems with their own identities. The exception is **how** the factory operates on its work (specs as ground truth, below) — that commitment binds both Onsager's self-construction and its production discipline.
 
 - **Event-bus factory, not service mesh.** Coordination flows through the spine (events, pg_notify, shared tables), not synchronous calls. [ADR 0001](docs/adr/0001-event-bus-coordination-model.md) first concretized this; [ADR 0009](docs/adr/0009-three-layer-pipeline.md) / [ADR 0017](docs/adr/0017-plan-compiler-three-step-algorithm.md) (both `Identity impact: yes`) reframe it: the spine is still the runtime medium but is no longer authored directly by feature subsystems. Authorship flows Spec Plan → Workflow → Execution Plan → substrate scheduler, and the scheduler is what emits on the spine. [ADR 0027](docs/adr/0027-two-process-consolidation.md) (`Identity impact: yes`, adoption ongoing) consolidates the factory to two processes — **portal** (edge) and **engine** (compile + execute) — with the spine as the only coupling between them; the multi-subsystem citizen taxonomy (ADR 0013) retires with it. Scope: factory only.
-- **Artifacts are the unit of meaning.** Every persistent, lifecycle-bearing object in the factory is an artifact — internal-authored (specs, designs) and external-referenced (PRs, Issues) alike. Workflow nodes (via executors) and the remaining subsystems (Stiglab, Synodic) operate on artifacts; events are state-change notifications, not first-class entities. Every artifact carries first-class **provenance** ([ADR 0010](docs/adr/0010-provenance-as-substrate-first-class.md), `Identity impact: yes`) — `Deterministic` or `Uncertain`, with a `SourceTag` — that the substrate validates and propagates. Scope: factory only — products have their own ontology.
+- **Artifacts are the unit of meaning.** Every persistent, lifecycle-bearing object in the factory is an artifact — internal-authored (specs, designs) and external-referenced (PRs, Issues) alike. Workflow nodes (via executors) and the remaining subsystem (Stiglab) operate on artifacts; events are state-change notifications, not first-class entities. Every artifact carries first-class **provenance** ([ADR 0010](docs/adr/0010-provenance-as-substrate-first-class.md), `Identity impact: yes`) — `Deterministic` or `Uncertain`, with a `SourceTag` — that the substrate validates and propagates. Scope: factory only — products have their own ontology.
 - **Specs are ground truth, code is downstream.** When spec and code conflict, the code is wrong. Specs are amended deliberately; code is amended to match. Scope: both factory self-construction and production discipline — Onsager sessions producing artifacts inherit this.
 - **Internal symmetry is load-bearing.** Equivalent concepts must have equivalent shapes (names, types, error models, write paths). Asymmetry between equivalents is a defect, not a polish concern. The seam rule and three lints (`lint-seams`, `check-events`, `check-api-contract`) are the enforcement surface. Scope: factory only; applies to session-produced code once it lands in the monorepo.
 
@@ -80,7 +80,7 @@ When we launch, delete this section and replace it with the post-launch operatin
 
 See § What makes Onsager Onsager (above) for the identity commitments these choices instantiate, and the ADRs under [`docs/adr/`](docs/adr/) for the *why* behind any rule ([`docs/adr/README.md`](docs/adr/README.md) is the current index). (`docs/architecture.md` predates the ADR 0009–0026 "0.2 refoundation" and is stale; trust this file and the ADRs.)
 
-The shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel is still the single runtime coordination medium — components stay runtime-decoupled and coordinate through stigmergy (indirect signals via the shared medium), not direct calls. The `onsager` dispatcher is a ~100-LOC CLI with zero business deps that discovers subsystem binaries on `PATH` (`scheduler`, `stiglab`, `synodic`, `trigger`).
+The shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel is still the single runtime coordination medium — components stay runtime-decoupled and coordinate through stigmergy (indirect signals via the shared medium), not direct calls. The `onsager` dispatcher is a ~100-LOC CLI with zero business deps that discovers subsystem binaries on `PATH` (`scheduler`, `stiglab`, `trigger`).
 
 [ADR 0002](docs/adr/0002-process-product-isomorphism.md)'s two-loop framing — the **inner loop** (spec → PR → merge) and the **outer loop** (observe drift → propose rule → activate → modify the inner loop) — is superseded as a mechanism by the observer citizen (ADR 0013) but kept as a principle: every factory primitive ships with its dev-process counterpart, and every durable dev-process pattern is evidence for a future primitive.
 
@@ -105,7 +105,7 @@ Two more 0.2 pillars:
 
 ### Remaining subsystems and the edge
 
-Mid-migration, two factory subsystems survive behind the seam and still coordinate exclusively via the spine: **stiglab** (distributed AI agent session orchestration) and **synodic** (AI agent governance — gates, verdicts, escalations). `forge` is retired (→ substrate scheduler), `ising` deprecated (→ `onsager-observers`).
+Mid-migration, one factory subsystem survives behind the seam and still coordinates exclusively via the spine: **stiglab** (distributed AI agent session orchestration; folds into portal per ADR 0027 / #583). `forge` is retired (→ substrate scheduler), `synodic` retired (ADR 0027 / #582 — governance returns, when real, as in-process Verify checks), `ising` deprecated (→ `onsager-observers`).
 
 **Architectural invariant**: subsystems must NOT import each other or be statically linked into the same binary. The substrate library crates (`onsager-substrate`, `onsager-nodes`, `onsager-observers`) and the shared utility crate `onsager-agent-spawn` sit below the seam and may be depended on by any side — a utility crate isn't a subsystem.
 
@@ -135,9 +135,9 @@ The pieces (landed in stages under #288; ADR 0007 has the full history):
 
 > HTTP APIs exist only at external boundaries: **user-facing endpoints** called by the dashboard, and **webhooks** called by external services (GitHub, etc.).
 >
-> The external HTTP boundary is owned by `portal` (the edge subsystem). Factory subsystems (`stiglab`, `synodic`) coordinate **exclusively** via the spine: events on the bus + reads against shared spine tables. No subsystem makes HTTP calls to another subsystem. No subsystem imports another subsystem's crate. (Substrate library crates — `onsager-substrate`, `onsager-nodes`, `onsager-observers` — and the `onsager-agent-spawn` utility sit below the seam and may be shared by any side.)
+> The external HTTP boundary is owned by `portal` (the edge subsystem). Factory subsystems (`stiglab`) coordinate **exclusively** via the spine: events on the bus + reads against shared spine tables. No subsystem makes HTTP calls to another subsystem. No subsystem imports another subsystem's crate. (Substrate library crates — `onsager-substrate`, `onsager-nodes`, `onsager-observers` — and the `onsager-agent-spawn` utility sit below the seam and may be shared by any side.)
 
-This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md) made it machine-checkable via a six-lever plan (spec #131, all landed and CI-enforced via `lint-seams`, `check-api-contract`, `check-events`); the seam rule is now mechanical, not review-time discipline. [ADR 0018](docs/adr/0018-five-kernel-invariants.md) partially supersedes ADR 0004: the six code-level seam levers remain in force for cross-subsystem discipline, but the substrate's *internal* correctness contract is now the five kernel invariants (above). Note `lint-seams` currently scopes the cross-subsystem checks to `stiglab` / `synodic` / `ising`; portal is the edge and the substrate hosts (`scheduler`, `trigger`) sit below the seam.
+This is the rule. ADR 0001 set it; [ADR 0004](docs/adr/0004-tighten-the-seams.md) made it machine-checkable via a six-lever plan (spec #131, all landed and CI-enforced via `lint-seams`, `check-api-contract`, `check-events`); the seam rule is now mechanical, not review-time discipline. [ADR 0018](docs/adr/0018-five-kernel-invariants.md) partially supersedes ADR 0004: the six code-level seam levers remain in force for cross-subsystem discipline, but the substrate's *internal* correctness contract is now the five kernel invariants (above). Note `lint-seams` currently scopes the cross-subsystem checks to `stiglab` / `ising`; portal is the edge and the substrate hosts (`scheduler`, `trigger`) sit below the seam.
 
 [ADR 0006](docs/adr/0006-edge-dispatcher-as-the-public-boundary.md) and [ADR 0008](docs/adr/0008-portal-owns-the-agent-control-plane.md) close the process-level half of clause 1 (Caddy as edge dispatcher; portal owns 100% of the external HTTP surface including `/agent/ws`; stiglab loopback-only). `xtask check-api-contract` enforces "every stiglab route is loopback-only" — any new route on a factory subsystem outside the allowlist is a hard failure.
 
@@ -239,7 +239,6 @@ crates/
   onsager-scheduler/   <- substrate scheduler host: trigger.fired → Plan Compiler → executor dispatch (lib + bin)
   onsager-trigger/     <- manual + replay trigger CLI — emits TriggerFired to the spine (bin)
   stiglab/             <- distributed AI agent session orchestration (lib + bin)
-  synodic/             <- AI agent governance — gates, verdicts, escalations (lib + bin)
   ising/               <- DEPRECATED — superseded by onsager-observers (ADR 0013); not in the dispatcher set
 apps/
   dashboard/           <- React UI (workflows, runs, artifacts, spec plans, governance)
@@ -250,7 +249,7 @@ Crate → support-crate dependencies (no crate depends on a sibling subsystem):
 
 - `onsager-substrate` → `artifact`; `onsager-nodes` → `{artifact, substrate}`; `onsager-observers` / `onsager-registry` / `onsager-github` → `{artifact, spine}`
 - `onsager-portal` (edge) → `{artifact, spine, github, registry, substrate}`; `onsager-scheduler` → `{artifact, spine, substrate, nodes, agent-spawn}`; `onsager-trigger` → `{spine, registry}`
-- `stiglab` → `{artifact, spine, github, agent-spawn}`; `synodic` → `{artifact, spine}` (all `onsager-*`)
+- `stiglab` → `{artifact, spine, github, agent-spawn}` (all `onsager-*`)
 
 ## Getting Started
 
@@ -264,11 +263,10 @@ just smoke-test                 # verify everything works (in another terminal)
 
 To run agent sessions, add your `CLAUDE_CODE_OAUTH_TOKEN` via Dashboard > Settings > Credentials (encrypted at rest, passed to agents as env vars).
 
-Services (`just dev` launches portal, stiglab, synodic, and the substrate scheduler):
+Services (`just dev` launches portal, stiglab, and the substrate scheduler):
 - **Dashboard**: http://localhost:5173 (Vite dev server, HMR)
 - **Portal (edge)**: http://localhost:3002 (dashboard API, GitHub webhooks, OAuth, credentials, MCP server, `/agent/ws`)
 - **Stiglab API**: http://localhost:3000 (agent sessions, nodes, WebSocket)
-- **Synodic API**: http://localhost:3001 (governance)
 - **onsager-scheduler**: substrate scheduler (no HTTP — watches the spine for `trigger.fired`)
 - **Postgres**: localhost:5432 (event spine)
 
@@ -288,7 +286,7 @@ just worktree-rm feat-a        # tear down + remove worktree (keeps branch)
 just worktree-rm feat-a --with-branch   # also delete the branch
 ```
 
-The slot's edge port serves the dashboard and reverse-proxies the backend APIs same-origin (`/api/synodic/...`, `/api/...` → portal/stiglab), so the dashboard makes relative-path fetches with no per-environment URL config and no CORS surface. SSH-forward `localhost:9010` (slot 1's edge), open it, done. See [spec #194](https://github.com/onsager-ai/onsager/issues/194).
+The slot's edge port serves the dashboard and reverse-proxies the backend APIs same-origin (`/api/...` → portal/stiglab), so the dashboard makes relative-path fetches with no per-environment URL config and no CORS surface. SSH-forward `localhost:9010` (slot 1's edge), open it, done. See [spec #194](https://github.com/onsager-ai/onsager/issues/194).
 
 ## Build & Test
 
@@ -318,7 +316,7 @@ just lint            # fmt + clippy + eslint
 
 Subsystem-specific env vars worth calling out:
 
-- Synodic-gate fail policy — the verdict returned when the Synodic gate is unreachable, returns 5xx, or can't be parsed. One of `escalate` | `deny` | `allow`: `escalate` parks the decision non-blockingly; `deny` keeps the artifact in its current state; `allow` is legacy fail-open and must be opted into explicitly. 4xx and parse errors always deny regardless of policy — those are protocol bugs that should surface loudly. Was forge's `SYNODIC_FAIL_POLICY`; in the 0.2 substrate the choice lives in the Verify executor (`crates/onsager-nodes/src/verify.rs`). See `crates/synodic/CLAUDE.md`.
+- Verify fail policy — what the Verify executor does when a check fails. One of `escalate` | `deny` | `allow` (`FailPolicy` in `crates/onsager-nodes/src/verify.rs`): `escalate` parks the run non-blockingly (default); `deny` hard-fails the run; `allow` is legacy fail-open and must be opted into explicitly. Set per-node in workflow config, not via env var (the governance subsystem and its `SYNODIC_FAIL_POLICY` env var retired with ADR 0027).
 
 ## Code exploration: codegraph vs grep
 
@@ -345,7 +343,7 @@ Skip this for branches that don't start with `claude/` (local/manual work).
 
 ## Per-crate context
 
-Several crates carry their own CLAUDE.md or `.claude/` directory with crate-specific instructions: `onsager-spine`, `onsager-portal`, `onsager-registry`, `stiglab` (+ `.claude/`), `synodic` (+ `.claude/`).
+Several crates carry their own CLAUDE.md or `.claude/` directory with crate-specific instructions: `onsager-spine`, `onsager-portal`, `onsager-registry`, `stiglab` (+ `.claude/`).
 
 ## Worktree dev stack (Traefik / devproxy)
 

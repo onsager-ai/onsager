@@ -2,7 +2,6 @@ import {
   Bot,
   CheckSquare,
   CircleDot,
-  Gavel,
   GitPullRequest,
   Rocket,
   ShieldCheck,
@@ -92,12 +91,6 @@ export const GATE_KINDS: {
     label: "External check",
     description: "Wait for a CI check or external signal.",
     icon: CheckSquare,
-  },
-  {
-    value: "governance",
-    label: "Governance",
-    description: "Synodic verdict decides pass/fail.",
-    icon: Gavel,
   },
   {
     value: "manual-approval",

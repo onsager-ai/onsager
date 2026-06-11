@@ -9,7 +9,7 @@ project, and the failure modes you're likely to hit.
 
 ## What ships per PR
 
-Each preview is a full unified container (`stiglab` + `synodic` +
+Each preview is a full unified container (`stiglab` +
 `onsager-portal`) plus a dedicated Postgres plugin. Migrations run at
 container startup — see `crates/stiglab/deploy/entrypoint.sh` — so the
 preview DB reflects the schema on the PR branch, not main.

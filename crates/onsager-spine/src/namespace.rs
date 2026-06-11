@@ -72,11 +72,6 @@ impl Namespace {
         Self::new("stiglab").unwrap()
     }
 
-    /// Namespace for the synodic component.
-    pub fn synodic() -> Self {
-        Self::new("synodic").unwrap()
-    }
-
     /// Namespace for the ising component.
     pub fn ising() -> Self {
         Self::new("ising").unwrap()
@@ -162,7 +157,6 @@ mod tests {
     fn well_known_constants() {
         assert_eq!(Namespace::forge().as_str(), "forge");
         assert_eq!(Namespace::stiglab().as_str(), "stiglab");
-        assert_eq!(Namespace::synodic().as_str(), "synodic");
         assert_eq!(Namespace::ising().as_str(), "ising");
         assert_eq!(Namespace::telegramable().as_str(), "telegramable");
     }

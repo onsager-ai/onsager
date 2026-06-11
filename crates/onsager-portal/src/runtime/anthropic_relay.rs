@@ -63,7 +63,7 @@ mod tests {
     fn provenance_is_clean_commercial() {
         // Doesn't make a network call — `AnthropicClient::new` just
         // builds the reqwest client. The provenance shape is what
-        // the Synodic admissibility gate (Phase 3) consumes.
+        // a future admissibility check (Phase 3) consumes.
         let relay = AnthropicRelay::new("test-key".into()).unwrap();
         let p = relay.provenance();
         assert_eq!(p.runtime_id, "anthropic_relay");

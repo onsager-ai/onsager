@@ -9,7 +9,6 @@
 set -euo pipefail
 
 STIGLAB_URL="${STIGLAB_URL:-http://localhost:3000}"
-SYNODIC_URL="${SYNODIC_URL:-http://localhost:3001}"
 DASHBOARD_URL="${DASHBOARD_URL:-http://localhost:5173}"
 SPINE_URL="${SPINE_URL:-postgres://onsager:onsager@localhost:5432/onsager}"
 
@@ -34,10 +33,6 @@ echo "-- Stiglab --"
 check "health"   "$STIGLAB_URL/api/health"   '"status"'
 check "nodes"    "$STIGLAB_URL/api/nodes"     'nodes'
 check "sessions" "$STIGLAB_URL/api/sessions"  'sessions'
-
-echo ""
-echo "-- Synodic --"
-check "health"   "$SYNODIC_URL/api/health"    '"status"'
 
 echo ""
 echo "-- Dashboard --"

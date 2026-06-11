@@ -1,6 +1,5 @@
 import { ApiError, request } from "./client";
 import type {
-  GovernanceEvent,
   SpineArtifact,
   Workflow,
   WorkflowStage,
@@ -147,8 +146,6 @@ function defaultStageName(gate: WorkflowGateKind): string {
       return "Agent session";
     case "external-check":
       return "CI check";
-    case "governance":
-      return "Governance";
     case "manual-approval":
       return "Manual approval";
   }
@@ -295,17 +292,12 @@ export const workflows = {
     request<{ runs: WorkflowRun[] }>(
       `/workflows/${encodeURIComponent(id)}/runs?limit=${limit}`,
     ),
-  // Workflow-scoped artifacts + verdicts (#302). One round-trip
-  // replaces the dashboard's per-run artifact fan-out fetch and the
-  // workspace-wide governance-events filter. Backend clamps `limit`
+  // Workflow-scoped artifacts (#302). One round-trip replaces the
+  // dashboard's per-run artifact fan-out fetch. Backend clamps `limit`
   // to [1, 500]; default 50 matches `/workflows/:id/runs`.
   getWorkflowArtifacts: (id: string, limit = 50) =>
     request<{ artifacts: SpineArtifact[] }>(
       `/workflows/${encodeURIComponent(id)}/artifacts?limit=${limit}`,
-    ),
-  getWorkflowVerdicts: (id: string, limit = 50) =>
-    request<{ verdicts: GovernanceEvent[] }>(
-      `/workflows/${encodeURIComponent(id)}/verdicts?limit=${limit}`,
     ),
   // Run detail hub (#303). Backend returns the projected run alongside
   // the parent workflow's backend shape; reuse `workflowFromBackend` so

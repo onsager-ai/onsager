@@ -177,8 +177,6 @@ export function defaultStageName(gate: WorkflowGateKind): string {
       return "Agent session";
     case "external-check":
       return "CI check";
-    case "governance":
-      return "Governance";
     case "manual-approval":
       return "Manual approval";
   }
@@ -254,21 +252,6 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
       trigger,
       stages: [
         makeStage("external-check", "CI check"),
-        makeStage("manual-approval", "Merge approval"),
-      ],
-    }),
-  },
-  {
-    id: "governed-pipeline",
-    label: "Governed pipeline",
-    description: "Agent builds, CI checks, Synodic governs, human merges.",
-    build: (trigger) => ({
-      name: `${trigger.repo_owner || "repo"}/${trigger.repo_name || "pipeline"} — governed`,
-      trigger,
-      stages: [
-        makeStage("agent-session", "Spec → PR"),
-        makeStage("external-check", "CI check"),
-        makeStage("governance", "Synodic gate"),
         makeStage("manual-approval", "Merge approval"),
       ],
     }),

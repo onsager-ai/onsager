@@ -15,17 +15,15 @@ import { ArrowRight, Building2 } from "lucide-react"
 import { usePageHeader } from "@/components/layout/PageHeader"
 import { WorkspaceCredentials } from "@/components/workspaces/WorkspaceCredentials"
 import { NodeTable } from "@/components/nodes/NodeTable"
-import { GovernanceEventsList } from "@/components/governance/GovernanceEventsList"
 import { PushNotificationsCard } from "@/components/chat/PushNotificationsCard"
 
-const TABS = ["workspace", "infrastructure", "governance"] as const
+const TABS = ["workspace", "infrastructure"] as const
 type TabValue = (typeof TABS)[number]
 
 /**
- * Workspace-scoped settings (#305). Three tabs:
+ * Workspace-scoped settings (#305). Two tabs:
  * - Workspace: GitHub install link-out + credentials.
  * - Infrastructure: registered agent nodes (folds the old /nodes page).
- * - Governance audit: events list scoped to this workspace.
  *
  * Tab selection persists in the URL hash so deep links and reloads
  * preserve which tab the user was on.
@@ -50,7 +48,6 @@ export function WorkspaceSettingsPage() {
         <TabsList>
           <TabsTrigger value="workspace">Workspace</TabsTrigger>
           <TabsTrigger value="infrastructure">Infrastructure</TabsTrigger>
-          <TabsTrigger value="governance">Governance audit</TabsTrigger>
         </TabsList>
 
         <TabsContent value="workspace" className="space-y-4 md:space-y-6">
@@ -80,10 +77,6 @@ export function WorkspaceSettingsPage() {
 
         <TabsContent value="infrastructure" className="space-y-4 md:space-y-6">
           <InfrastructureTab />
-        </TabsContent>
-
-        <TabsContent value="governance" className="space-y-4 md:space-y-6">
-          <GovernanceEventsList workspaceId={workspace.id} />
         </TabsContent>
       </Tabs>
     </div>
