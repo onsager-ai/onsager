@@ -201,21 +201,6 @@ pub enum FactoryEventKind {
         detail: serde_json::Value,
     },
 
-    /// All gates on a stage resolved and the artifact advanced to the next
-    /// stage (or reached terminal state when this was the last stage).
-    ///
-    /// Per spec #285 the redundant per-gate `stage.gate_passed` /
-    /// `stage.gate_failed` events are gone; the run timeline reconstructs
-    /// gate outcomes from `verify.verdict` plus this advancement
-    /// signal.
-    StageAdvanced {
-        artifact_id: ArtifactId,
-        workflow_id: String,
-        from_stage_index: u32,
-        /// `None` when the artifact has just completed the final stage.
-        to_stage_index: Option<u32>,
-    },
-
     /// A persisted multi-spec `SpecPlan` was requested to run (#501,
     /// ADR 0023). Emitted by portal's `run_spec_plan` MCP tool;
     /// consumed by the substrate scheduler host, which loads the stored
@@ -405,7 +390,6 @@ impl FactoryEventKind {
             Self::PortalPrOpenFailed { .. } => "portal.pr_open_failed",
             Self::TriggerFired { .. } => "trigger.fired",
             Self::WorkflowManualTriggered { .. } => "workflow.manual_triggered",
-            Self::StageAdvanced { .. } => "stage.advanced",
             Self::SpecPlanRunRequested { .. } => "plan.run_requested",
             Self::PlanRunCompleted { .. } => "plan.run_completed",
             Self::PlanRunFailed { .. } => "plan.run_failed",
@@ -436,7 +420,7 @@ impl FactoryEventKind {
             Self::PortalSessionRequested { .. }
             | Self::PortalSessionCancelRequested { .. }
             | Self::PortalPrOpenFailed { .. } => "portal",
-            Self::TriggerFired { .. } | Self::StageAdvanced { .. } => "workflow",
+            Self::TriggerFired { .. } => "workflow",
             // Plan-run intent (portal → scheduler host) and the
             // plan-terminal signals (scheduler → portal, #536). Their
             // own namespace so the dashboard can scope plan-run
@@ -490,9 +474,6 @@ impl FactoryEventKind {
             Self::TriggerFired { workflow_id, .. } => format!("workflow:{workflow_id}"),
             Self::WorkflowManualTriggered { workflow_id, .. } => {
                 format!("audit:workflow:{workflow_id}")
-            }
-            Self::StageAdvanced { artifact_id, .. } => {
-                format!("workflow:{artifact_id}")
             }
             Self::SpecPlanRunRequested {
                 workspace_id,

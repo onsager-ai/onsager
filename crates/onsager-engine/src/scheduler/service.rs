@@ -1,5 +1,6 @@
 //! [`SchedulerService`] — long-running task that subscribes to the
-//! spine and drives [`TriggerBridge`] on every `trigger.fired` event.
+//! spine and runs a plan on every `plan.run_requested` event (the one
+//! run entry kind post-ADR 0028 / #601; portal converts trigger fires).
 //!
 //! The service is the binary's main loop. It:
 //!
@@ -28,7 +29,6 @@ use onsager_spine::{EventHandler, EventNotification, EventStore, Listener};
 use onsager_substrate::workflow_library::WorkflowLibrary as PersistedWorkflowLibrary;
 use sqlx::Row;
 
-use crate::scheduler::bridge::{PreloadedWorkflow, TriggerBridge, WorkflowMeta};
 use crate::scheduler::plan_registry::{self, derive_plan_id};
 use crate::scheduler::plan_runner::{PlanRunner, SchedulerLibrarySnapshot, resolve_kind_versions};
 use crate::scheduler::plan_store::SqlxPlanStore;
@@ -168,7 +168,7 @@ impl SchedulerService {
         tracing::info!(
             actor = %self.config.actor,
             replay = self.config.replay_history,
-            "substrate scheduler listening for trigger.fired / plan.run_requested",
+            "substrate scheduler listening for plan.run_requested",
         );
         listener.run(handler).await?;
         Ok(())
@@ -301,7 +301,6 @@ struct TriggerHandler {
 impl EventHandler for TriggerHandler {
     async fn handle(&self, event: EventNotification) -> anyhow::Result<()> {
         match event.event_type.as_str() {
-            "trigger.fired" => self.handle_trigger_fired(event).await,
             "plan.run_requested" => self.handle_plan_run_requested(event).await,
             _ => Ok(()),
         }
@@ -309,96 +308,6 @@ impl EventHandler for TriggerHandler {
 }
 
 impl TriggerHandler {
-    async fn handle_trigger_fired(&self, event: EventNotification) -> anyhow::Result<()> {
-        // Pull the row's data + workspace_id. Notifications carry
-        // only stream_id + event_type; the body lives on
-        // `events_ext`. workspace_id is the indexed tenant column —
-        // we thread it into the per-fire spine client so node
-        // lifecycle events emit under the same workspace as the
-        // triggering fire (Copilot review on PR #390).
-        let row = sqlx::query("SELECT data, workspace_id FROM events_ext WHERE id = $1")
-            .bind(event.id)
-            .fetch_optional(self.store.pool())
-            .await
-            .context("loading trigger.fired body")?;
-        let Some(row) = row else { return Ok(()) };
-        let data: serde_json::Value = row.try_get("data")?;
-        let row_workspace_id: String = row.try_get("workspace_id").unwrap_or_default();
-        let kind = match decode_trigger_fired(&data) {
-            Some(k) => k,
-            None => {
-                tracing::warn!(
-                    event_id = event.id,
-                    "trigger.fired body did not decode as TriggerFired"
-                );
-                return Ok(());
-            }
-        };
-        let FactoryEventKind::TriggerFired {
-            workflow_id,
-            trigger_kind: _,
-            payload,
-        } = kind
-        else {
-            return Ok(());
-        };
-
-        let meta = load_workflow_meta(&self.store, &workflow_id).await?;
-        let spec_kind = crate::scheduler::bridge::resolve_spec_kind_for_logging(&payload, &meta);
-        let workflow = match spec_kind.as_deref() {
-            Some(kind) => self
-                .library
-                .lookup(kind)
-                .await
-                .with_context(|| format!("library lookup for kind `{kind}`"))?,
-            None => None,
-        };
-        let lookup = PreloadedWorkflow {
-            kind: spec_kind.clone().unwrap_or_default(),
-            workflow,
-        };
-        // Workspace-scope this fire's emits: prefer the value the
-        // bridge resolves (workflows.workspace_id is the canonical
-        // truth) and fall back to the events_ext row's column. If
-        // both are empty we leave the default — the bridge / spine
-        // client still emits, just to "default".
-        let workspace_id = lookup_workspace(&self.store, &workflow_id)
-            .await
-            .unwrap_or(None)
-            .or_else(|| (!row_workspace_id.is_empty()).then(|| row_workspace_id.clone()))
-            .unwrap_or_else(|| "default".to_string());
-        let scoped_spine: Arc<dyn SpineClient> =
-            Arc::new(self.base_spine.with_workspace(&workspace_id));
-        let runner = PlanRunner::new(
-            Arc::clone(&self.registry),
-            Arc::clone(&self.plan_store),
-            scoped_spine,
-        );
-        let bridge = TriggerBridge::new(runner);
-        match bridge
-            .handle_payload(&workflow_id, &payload, &meta, lookup)
-            .await
-        {
-            Ok(plan_id) => tracing::info!(
-                event_id = event.id,
-                %workflow_id,
-                %workspace_id,
-                plan_id = %plan_id,
-                "trigger.fired dispatched",
-            ),
-            Err(e) => tracing::warn!(
-                event_id = event.id,
-                %workflow_id,
-                "trigger.fired dispatch failed: {e}",
-            ),
-        }
-        Ok(())
-    }
-
-    /// Load a persisted multi-spec `SpecPlan`, compile it, and run it
-    /// to completion through the shared [`PlanRunner`] (B2 #500 / B3
-    /// #501). Portal's `run_spec_plan` tool emitted the
-    /// `plan.run_requested` event this consumes.
     async fn handle_plan_run_requested(&self, event: EventNotification) -> anyhow::Result<()> {
         let row = sqlx::query("SELECT data, workspace_id FROM events_ext WHERE id = $1")
             .bind(event.id)
@@ -609,52 +518,9 @@ fn decode_plan_repos(data: &serde_json::Value) -> Vec<onsager_spine::protocol::R
         .unwrap_or_default()
 }
 
-/// Extract `FactoryEventKind::TriggerFired` from an `events_ext.data`
-/// column.
-///
-/// Three accepted shapes (in priority order — same precedent
-/// `onsager_trigger::main::load_trigger_fired` set, plus the raw-
-/// payload fallback Copilot flagged on PR #390):
-///
-/// 1. **`FactoryEvent` envelope** — `onsager-trigger` CLI and
-///    `onsager-portal/src/handlers/triggers.rs` write this shape.
-/// 2. **Bare `FactoryEventKind`** — historical shape some legacy
-///    producers wrote.
-/// 3. **Raw trigger payload** — `onsager-portal/src/mcp/tools/
-///    workflows.rs` writes the trigger payload object directly,
-///    with `workflow_id` (mandatory) and `trigger_kind` (optional,
-///    defaults to "unknown") inline. Synthesize a `TriggerFired`
-///    variant from that so the scheduler still dispatches.
-fn decode_trigger_fired(data: &serde_json::Value) -> Option<FactoryEventKind> {
-    if let Ok(env) = serde_json::from_value::<FactoryEvent>(data.clone()) {
-        return Some(env.event);
-    }
-    if let Ok(kind) = serde_json::from_value::<FactoryEventKind>(data.clone()) {
-        return Some(kind);
-    }
-    // Raw payload fallback. The payload itself becomes
-    // `TriggerFired::payload` — every emitter convention seen so far
-    // (manual fire, MCP run_workflow, telegram webhook) embeds
-    // `workflow_id` and an optional `trigger_kind` directly in the
-    // payload object, so passing the whole thing back through keeps
-    // the bridge's spec_kind resolution working against the same
-    // fields.
-    let workflow_id = data.get("workflow_id").and_then(|v| v.as_str())?;
-    let trigger_kind = data
-        .get("trigger_kind")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
-    Some(FactoryEventKind::TriggerFired {
-        workflow_id: workflow_id.to_string(),
-        trigger_kind,
-        payload: data.clone(),
-    })
-}
-
 /// Extract `(spec_plan_id, workspace_id)` from a `plan.run_requested`
-/// `events_ext.data` column. Accepts the same three shapes as
-/// [`decode_trigger_fired`]: a `FactoryEvent` envelope, a bare
+/// `events_ext.data` column. Accepts three shapes: a `FactoryEvent`
+/// envelope, a bare
 /// `FactoryEventKind`, or a raw `{ spec_plan_id, workspace_id }`
 /// payload (the shape portal's MCP tool writes). The events_ext row's
 /// `workspace_id` column is the fallback when the payload omits it.
@@ -687,112 +553,9 @@ fn decode_spec_plan_run_requested(
     Some((spec_plan_id, workspace_id))
 }
 
-/// Pull the workflow row's workspace_id. Returns `Ok(None)` if no
-/// such row exists — the caller falls back to the events_ext row's
-/// workspace_id column (which is mandatory on append_ext).
-async fn lookup_workspace(store: &EventStore, workflow_id: &str) -> anyhow::Result<Option<String>> {
-    let row = sqlx::query("SELECT workspace_id FROM workflows WHERE workflow_id = $1")
-        .bind(workflow_id)
-        .fetch_optional(store.pool())
-        .await
-        .context("loading workflow workspace_id")?;
-    Ok(row.and_then(|r| r.try_get::<String, _>("workspace_id").ok()))
-}
-
-/// Pull the workflow row's preset_id so the bridge can fall back to
-/// it. A missing workflow row produces an empty `WorkflowMeta`; the
-/// bridge then surfaces `UnresolvedSpecKind` to the caller.
-async fn load_workflow_meta(store: &EventStore, workflow_id: &str) -> anyhow::Result<WorkflowMeta> {
-    let row = sqlx::query("SELECT preset_id FROM workflows WHERE workflow_id = $1")
-        .bind(workflow_id)
-        .fetch_optional(store.pool())
-        .await
-        .context("loading workflow meta")?;
-    let Some(row) = row else {
-        return Ok(WorkflowMeta::default());
-    };
-    let preset_id: Option<String> = row.try_get("preset_id").ok();
-    Ok(WorkflowMeta { preset_id })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn decode_handles_factory_event_envelope() {
-        let env = FactoryEvent {
-            event: FactoryEventKind::TriggerFired {
-                workflow_id: "wf-1".into(),
-                trigger_kind: "manual".into(),
-                payload: serde_json::json!({"hello": "world"}),
-            },
-            correlation_id: None,
-            causation_id: None,
-            actor: "test".into(),
-            timestamp: chrono::Utc::now(),
-        };
-        let data = serde_json::to_value(&env).unwrap();
-        let kind = decode_trigger_fired(&data).expect("envelope decodes");
-        assert!(matches!(
-            kind,
-            FactoryEventKind::TriggerFired { ref workflow_id, .. } if workflow_id == "wf-1",
-        ));
-    }
-
-    #[test]
-    fn decode_handles_bare_kind() {
-        let kind = FactoryEventKind::TriggerFired {
-            workflow_id: "wf-2".into(),
-            trigger_kind: "github_issue_webhook".into(),
-            payload: serde_json::json!({}),
-        };
-        let data = serde_json::to_value(&kind).unwrap();
-        let decoded = decode_trigger_fired(&data).expect("bare kind decodes");
-        assert!(matches!(
-            decoded,
-            FactoryEventKind::TriggerFired { ref workflow_id, .. } if workflow_id == "wf-2",
-        ));
-    }
-
-    /// The MCP `run_workflow` producer
-    /// (`crates/onsager-portal/src/mcp/tools/workflows.rs`) writes a
-    /// raw payload object directly with `workflow_id` inline. Without
-    /// this fallback the scheduler logged "did not decode" and
-    /// dropped the fire (Copilot review on PR #390).
-    #[test]
-    fn decode_falls_back_to_raw_payload() {
-        let raw = serde_json::json!({
-            "workflow_id": "wf-mcp",
-            "trigger_kind": "manual",
-            "workspace_id": "ws-7",
-            "name": "run-it",
-            "actor": "mcp-client",
-        });
-        let decoded = decode_trigger_fired(&raw).expect("raw payload decodes");
-        let FactoryEventKind::TriggerFired {
-            workflow_id,
-            trigger_kind,
-            payload,
-        } = decoded
-        else {
-            panic!("expected TriggerFired");
-        };
-        assert_eq!(workflow_id, "wf-mcp");
-        assert_eq!(trigger_kind, "manual");
-        // The whole raw object survives as `payload` so the bridge's
-        // resolve_spec_kind / spec_kind lookup can read its fields.
-        assert_eq!(
-            payload.get("workspace_id").and_then(|v| v.as_str()),
-            Some("ws-7")
-        );
-    }
-
-    #[test]
-    fn decode_returns_none_for_payload_without_workflow_id() {
-        let data = serde_json::json!({ "not_a_workflow": "nope" });
-        assert!(decode_trigger_fired(&data).is_none());
-    }
 
     #[test]
     fn decode_plan_run_requested_from_raw_payload() {

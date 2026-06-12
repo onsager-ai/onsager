@@ -33,7 +33,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::auth::AuthUser;
-use crate::session_token;
 use crate::spec_plan_db;
 use crate::state::AppState;
 use crate::substrate_library_db;
@@ -375,99 +374,9 @@ pub async fn run_spec_plan(state: &AppState, auth_user: &AuthUser, args: Value) 
         })?
         .ok_or_else(|| ToolError::NotFound(format!("spec plan `{spec_plan_id}` not found")))?;
 
-    // Derived run id (shared with the scheduler, ADR 0023) so the
-    // dashboard can subscribe to this run's `node.*` events on the
-    // `substrate:<plan_id>:` stream prefix for the F2 progress surface.
-    // Computed before the emit so the plan-scoped session token (#536)
-    // can be minted under `plan:<plan_id>` and ride the event.
-    let plan_id = onsager_substrate::derive_plan_id(&args.workspace_id, &stored.spec_plan_id);
-
-    // Mint a plan-scoped session token (spec #536) so every agent node
-    // the scheduler dispatches for this plan can reach portal's MCP
-    // surface + the liveness Stop hook. One token per plan, reused
-    // across nodes, revoked on the plan-terminal event. Requires a
-    // configured credential key; absent it, the plan runs without a
-    // token (the authoritative gate still applies) — mirrors the chat
-    // path's graceful degradation in `handlers/tasks.rs`.
-    let encrypted_session_token = match state.config.credential_key.as_deref() {
-        Some(key) => {
-            match session_token::mint_for_plan(
-                &state.pool,
-                key,
-                &auth_user.user_id,
-                &args.workspace_id,
-                &plan_id,
-            )
-            .await
-            {
-                Ok(token) => Some(token),
-                Err(e) => {
-                    tracing::error!(plan_id = %plan_id, "failed to mint plan token: {e}");
-                    None
-                }
-            }
-        }
-        None => None,
-    };
-
-    // Resolve the workspace's bound repo set with read-scoped per-repo
-    // credentials (spec #555, parity with #546's chat path). Portal owns
-    // the mint — it has the GitHub App config + credential key; the
-    // scheduler can't reach them across the seam — so, exactly like the
-    // plan session token above, the set rides the event encrypted and the
-    // scheduler decrypts it to surface `ONSAGER_REPOS` to each agent node.
-    // Empty for a workspace with no bound repos; the single-repo /
-    // `working_dir` path is then unchanged.
-    let repos = crate::repo_access::build_workspace_repo_access(state, &args.workspace_id).await;
-
-    // Raw payload — the scheduler's `decode_spec_plan_run_requested`
-    // accepts this shape (alongside a FactoryEvent envelope / bare
-    // kind), mirroring how `run_workflow` emits `trigger.fired`. Fields:
-    //   - `spec_plan_id`: the stored plan's id.
-    //   - `workspace_id`: owning workspace.
-    //   - `plan_id`: derived run id (ADR 0023), shared with the
-    //     scheduler so consumers can subscribe to `substrate:<plan_id>:`.
-    //   - `actor`: the requesting user, threaded into event metadata.
-    //   - `source`: always `"mcp"` on this path.
-    //   - `encrypted_session_token` (optional): present only when a
-    //     plan token was minted; the scheduler decrypts it and injects
-    //     `ONSAGER_SESSION_TOKEN` into each agent node (#536).
-    //   - `repos` (optional): the workspace's bound repo set with
-    //     read-scoped encrypted tokens (#555); present only when the
-    //     workspace binds ≥1 repo. The scheduler decrypts each and
-    //     surfaces the set as `ONSAGER_REPOS`. Additive — older
-    //     consumers ignore it.
-    // All are in-contract — consumers may rely on the non-optional ones.
-    let mut payload = serde_json::json!({
-        "spec_plan_id": stored.spec_plan_id,
-        "workspace_id": args.workspace_id,
-        "plan_id": plan_id,
-        "actor": auth_user.user_id,
-        "source": "mcp",
-    });
-    if let Some(token) = &encrypted_session_token {
-        payload["encrypted_session_token"] = serde_json::Value::String(token.clone());
-    }
-    if !repos.is_empty() {
-        payload["repos"] = serde_json::to_value(&repos).unwrap_or_default();
-    }
-    let metadata = onsager_spine::EventMetadata {
-        correlation_id: None,
-        causation_id: None,
-        actor: auth_user.user_id.clone(),
-    };
-    let stream_id = format!("plan:{}:{}", args.workspace_id, stored.spec_plan_id);
-    let event_id = state
-        .spine
-        .append_ext(
-            &args.workspace_id,
-            &stream_id,
-            "plan",
-            "plan.run_requested",
-            payload,
-            &metadata,
-            None,
-        )
+    // Mint + repo set + emit — shared with the trigger_fired listener
+    // (ADR 0028 / #601); one tokenized run path for both entries.
+    let run = crate::plan_run::request(state, &auth_user.user_id, "mcp", &stored)
         .await
         .map_err(|e| {
             tracing::error!("mcp run_spec_plan emit failed: {e}");
@@ -477,8 +386,8 @@ pub async fn run_spec_plan(state: &AppState, auth_user: &AuthUser, args: Value) 
     Ok(serde_json::json!({
         "spec_plan_id": stored.spec_plan_id,
         "workspace_id": args.workspace_id,
-        "plan_id": plan_id,
-        "run_requested_event_id": event_id,
+        "plan_id": run.plan_id,
+        "run_requested_event_id": run.event_id,
     }))
 }
 

@@ -202,17 +202,31 @@ impl AgentRunner for ClaudeCliRunner {
         // stderr is discarded, not piped: this runner has no consumer
         // for it (unlike stiglab, which forwards stderr as UI chunks),
         // and an unread pipe would deadlock — if `claude` writes enough
-        // diagnostics to fill the OS pipe buffer, the child blocks on the
-        // stderr write before closing stdout and the NDJSON read loop
-        // below waits forever. `Stdio::null()` lets the child write
-        // freely with nowhere to block.
+        // diagnostics could fill the OS pipe buffer and block the child;
+        // the dedicated drain task spawned below keeps the pipe empty
+        // while making CLI errors visible (ADR 0028 / #601 — they used
+        // to vanish into Stdio::null).
         cmd.stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
         let mut child = cmd
             .spawn()
             .map_err(|e| AgentRunError::new(format!("spawning `{}`: {e}", self.command)))?;
+
+        // Surface the CLI's stderr (ADR 0028 / #601): a claude usage
+        // error (e.g. an empty prompt) used to vanish into Stdio::null
+        // and present only as "stdout closed without a result event".
+        if let Some(stderr) = child.stderr.take() {
+            let sid = request.session_id.clone();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::warn!(session_id = %sid, "agent stderr: {line}");
+                }
+            });
+        }
 
         // Drain stdout, parsing NDJSON to the terminal `Result` event.
         let stdout = child

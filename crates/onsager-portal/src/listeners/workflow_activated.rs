@@ -1,12 +1,16 @@
-//! Spine listener for `stage.advanced` → `ftue.activated` activation row
-//! (spec #404).
+//! Spine listener for `plan.run_completed` → `ftue.activated`
+//! activation row (spec #404; re-pointed by ADR 0028 / #601 — the
+//! `stage.advanced` signal it originally consumed lost its producer
+//! when the forge stage machine retired, #594).
 //!
 //! The fourth rung of the FTUE activation ladder (Inspected → Drafted →
 //! Bound → Activated) is the moment a bound workflow's first run reaches
-//! a terminal stage status. The substrate is the truth: when an
-//! artifact moves past the final stage of its workflow, the spine emits
-//! `stage.advanced` with `to_stage_index: None`. This listener consumes
-//! that signal, resolves the workflow's `created_by` user, and writes
+//! a terminal status. The substrate is the truth: when a workflow's
+//! run finishes, the engine emits `plan.run_completed`; portal's
+//! trigger conversion names the spec plan `workflow:<id>:run:<fire>`
+//! (#601), so the workflow id parses straight off `spec_plan_id`.
+//! This listener consumes that signal, resolves the workflow's
+//! `created_by` user, and writes
 //! the `ftue.activated` row into the portal-owned `activation_events`
 //! table — fire-once per (user, workflow) via the table's
 //! `dedup_key` UNIQUE constraint.
@@ -16,12 +20,9 @@
 //! happens to view the run-detail page would mean a closed tab silently
 //! drops the rung. The substrate already knows.
 //!
-//! Failure / cancellation: today's spine vocabulary has no
-//! workflow-run-level terminal signal for failure (`node.failed` is per
-//! executor, not per run). v1 lights up the "completed" path only; the
-//! `terminal_status` field on the row is set to `completed`. When the
-//! substrate gains an explicit run-terminal event, extend the match
-//! below.
+//! Failure / cancellation: `plan.run_failed` exists but is not an
+//! activation moment; the "completed" path alone lights the rung and
+//! the `terminal_status` field on the row is set to `completed`.
 
 use std::sync::Arc;
 
@@ -40,7 +41,7 @@ pub async fn run(pool: PgPool, store: EventStore, is_oss: bool) -> anyhow::Resul
         is_oss,
     };
     // Warm-start cursor — `ftue.activated` is a forward-looking signal;
-    // backfilling years of historical `stage.advanced` events on every
+    // backfilling historical `plan.run_completed` events on every
     // process boot would log misleading "first activation" rows and
     // run a DB lookup per event. `dedup_key` would still drop the
     // duplicate inserts, but the work itself is wasted.
@@ -55,7 +56,7 @@ struct WorkflowActivated {
 }
 
 impl WorkflowActivated {
-    async fn handle_stage_advanced(&self, notification: &EventNotification) -> anyhow::Result<()> {
+    async fn handle_run_completed(&self, notification: &EventNotification) -> anyhow::Result<()> {
         let ext_row = match notification.table.as_str() {
             "events_ext" => {
                 let Some(row) = self.store.get_ext_event_by_id(notification.id).await? else {
@@ -67,21 +68,20 @@ impl WorkflowActivated {
         };
         let kind = serde_json::from_value::<FactoryEventKind>(ext_row.data.clone())?;
 
-        let FactoryEventKind::StageAdvanced {
-            workflow_id,
-            to_stage_index,
-            ..
-        } = kind
-        else {
+        let FactoryEventKind::PlanRunCompleted { spec_plan_id, .. } = kind else {
             return Ok(());
         };
 
-        // Only the artifact-just-completed-the-final-stage transition is
-        // a workflow-run terminal status today. Mid-workflow advances
-        // are not activation moments.
-        if to_stage_index.is_some() {
+        // Only workflow-fire runs carry the rung — their spec plan is
+        // named `workflow:<id>:run:<fire>` by the #601 conversion.
+        // Dashboard-authored plan runs are not the FTUE workflow rung.
+        let Some(rest) = spec_plan_id.strip_prefix("workflow:") else {
             return Ok(());
-        }
+        };
+        let Some((workflow_id, _run)) = rest.split_once(":run:") else {
+            return Ok(());
+        };
+        let workflow_id = workflow_id.to_string();
 
         // Resolve the workflow's owner. The spine `workflows` table is
         // keyed by `workflow_id` (see migration 006). Without a
@@ -143,10 +143,10 @@ impl WorkflowActivated {
 #[async_trait]
 impl EventHandler for WorkflowActivated {
     async fn handle(&self, notification: EventNotification) -> anyhow::Result<()> {
-        if notification.event_type != "stage.advanced" {
+        if notification.event_type != "plan.run_completed" {
             return Ok(());
         }
-        if let Err(e) = self.handle_stage_advanced(&notification).await {
+        if let Err(e) = self.handle_run_completed(&notification).await {
             tracing::warn!(
                 error = %e,
                 event_id = notification.id,

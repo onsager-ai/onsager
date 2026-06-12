@@ -56,7 +56,7 @@ that requires a coordinated rollout.
 | `git` | onsager-portal (GitHub webhooks) | 4 |
 | `session` | onsager-portal (in-process session runner, #583) | 2 |
 | `portal` | (unknown — update `stream_producer` in xtask) | 3 |
-| `workflow` | onsager-portal (trigger) / substrate scheduler (stage) | 2 |
+| `workflow` | onsager-portal (trigger) / substrate scheduler (stage) | 1 |
 | `audit` | (unknown — update `stream_producer` in xtask) | 1 |
 | `plan` | (unknown — update `stream_producer` in xtask) | 3 |
 | `gate` | onsager-portal (GitHub) / substrate scheduler (manual) | 2 |
@@ -246,22 +246,6 @@ A trigger (e.g. a GitHub issue webhook) fired and produced a payload the trigger
 | `workflow_id` | `String` | Workflow whose trigger fired. |
 | `trigger_kind` | `String` | Trigger classification (matches the `workflows.trigger_kind` column). v1 always `"github_issue_webhook"`. |
 | `payload` | `serde_json::Value` | Free-form payload the subscriber needs to translate the trigger into an artifact (e.g. issue number, title, body, repo). |
-
-### `stage.advanced`
-
-- Variant: `FactoryEventKind::StageAdvanced`
-- Stream: `workflow`
-
-All gates on a stage resolved and the artifact advanced to the next stage (or reached terminal state when this was the last stage).
-
-Per spec #285 the redundant per-gate `stage.gate_passed` / `stage.gate_failed` events are gone; the run timeline reconstructs gate outcomes from `verify.verdict` plus this advancement signal.
-
-| Field | Type | Description |
-|---|---|---|
-| `artifact_id` | `ArtifactId` |  |
-| `workflow_id` | `String` |  |
-| `from_stage_index` | `u32` |  |
-| `to_stage_index` | `Option<u32>` | `None` when the artifact has just completed the final stage. _(optional)_ |
 
 ## `audit` events
 

@@ -312,12 +312,12 @@ pub const EVENTS: EventManifest = EventManifest {
             //   `onsager trigger fire` CLI and the dashboard
             //   "Run now" / replay endpoints (#241).
             producers: &[Subsystem::Substrate, Subsystem::Portal],
-            consumers: &[Subsystem::Substrate],
+            consumers: &[Subsystem::Portal],
             diagnostic_only: false,
             reason: None,
             tracking_issue: None,
             operator_grain: true,
-            description: "A trigger fired (webhook / schedule / event / manual).",
+            description: "A trigger fired (webhook / schedule / event / manual). Portal's trigger_fired listener converts each fire into a tokenized plan.run_requested (ADR 0028 / #601); the engine no longer consumes this kind directly.",
         },
         EventDefinition {
             kind: "workflow.manual_triggered",
@@ -338,21 +338,6 @@ pub const EVENTS: EventManifest = EventManifest {
         // Per spec #285: per-gate `stage.gate_passed` / `stage.gate_failed`
         // events were dropped; the run timeline reconstructs gate outcomes
         // from `verify.verdict` plus the stage advancement signal.
-        EventDefinition {
-            kind: "stage.advanced",
-            schema_version: 1,
-            // No live producer post-0.2 — the forge stage machine that
-            // emitted this retired. Portal's FTUE `workflow_activated`
-            // listener still consumes it; #594 tracks restoring a
-            // run-terminal emitter (or re-pointing the listener).
-            producers: &[Subsystem::Substrate],
-            consumers: &[Subsystem::Portal],
-            diagnostic_only: false,
-            reason: None,
-            tracking_issue: None,
-            operator_grain: true,
-            description: "All gates on a stage resolved and the artifact advanced (terminal when to_stage_index is None). Producer pending re-introduction per #594.",
-        },
         EventDefinition {
             kind: "plan.run_requested",
             schema_version: 1,
@@ -641,7 +626,6 @@ mod tests {
     #[test]
     fn operator_grain_partition_matches_adr_0019() {
         let surfaced = [
-            "stage.advanced",
             "verify.verdict",
             "trigger.fired",
             "artifact.registered",
