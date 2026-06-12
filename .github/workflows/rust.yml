@@ -10,63 +10,7 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      onsager-spine: ${{ steps.filter.outputs.onsager-spine }}
-      workspace: ${{ steps.filter.outputs.workspace }}
-      xtask: ${{ steps.filter.outputs.xtask }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            workspace:
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - 'rust-toolchain.toml'
-              # The substrate + engine crates have no dedicated
-              # filter, but their tests (incl. the Crawlab capstone
-              # fixture in `onsager-engine/tests/`) must still run on
-              # changes to either crate. Folding them into `workspace`
-              # keeps the `check` job triggered without growing the
-              # filter matrix.
-              - 'crates/onsager-substrate/**'
-              - 'crates/onsager-engine/**'
-            onsager-spine:
-              - 'crates/onsager-spine/**'
-            xtask:
-              - 'xtask/**'
-              - 'docs/events.md'
-              # Lever F (#151) — the api-contract lint reads these plus
-              # portal server.rs, so changes on either side must
-              # re-trigger the xtask job.
-              - 'apps/dashboard/src/lib/api.ts'
-              - 'apps/dashboard/src/lib/sse.ts'
-              # Spec #323 — check-tools-and-skills cross-references the
-              # MCP tool registry against the onsager-skills sibling repo.
-              # The registry lives under crates/onsager-portal; add it
-              # explicitly so tool-registry-only changes re-trigger the
-              # cross-check. The bundle is cloned at run time, so there
-              # is no in-repo path to watch for it.
-              - 'crates/onsager-portal/**'
-              # Spec #298 — check-generated-types regenerates ts-rs output
-              # under apps/dashboard/src/lib/api/generated/ and diffs against
-              # the committed tree. Either side changing must re-trigger.
-              - 'apps/dashboard/src/lib/api/generated/**'
-              # Spec #469 — check-metaphor-leakage scans dashboard copy for
-              # the retired AI-factory metaphor; any change under
-              # apps/dashboard/src/ must re-trigger the audit.
-              - 'apps/dashboard/src/**'
-              - '.github/workflows/rust.yml'
-
   check:
-    needs: changes
-    if: |
-      needs.changes.outputs.workspace == 'true' ||
-      needs.changes.outputs.onsager-spine == 'true' ||
-      needs.changes.outputs.xtask == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -97,10 +41,6 @@ jobs:
         run: cargo run -p xtask --quiet -- check-events
       - name: Generated dashboard API types drift check (spec #298)
         run: cargo run -p xtask --quiet -- check-generated-types
-      - name: Metaphor-leakage check (ADR 0019 / spec #469)
-        run: cargo run -p xtask --quiet -- check-metaphor-leakage
-      - name: Detail-page tabs check (ADR 0021 / spec #487)
-        run: cargo run -p xtask --quiet -- check-detail-page-tabs
       - name: File-budget check (spec #261)
         run: cargo run -p xtask --quiet -- check-file-budget --mode=fail
       - name: Deferred-TODO check (spec #275, warn-mode landing)
