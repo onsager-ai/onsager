@@ -1,23 +1,31 @@
 import { Link, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { runsApi } from '@/lib/api'
+import { operateApi, runsApi } from '@/lib/api'
+import { Button } from '@/components/ui/button'
 
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive'> = {
   completed: 'default',
   running: 'secondary',
   failed: 'destructive',
+  aborted: 'destructive',
 }
 
 export function RunDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const qc = useQueryClient()
   const { data } = useQuery({
     queryKey: ['run', id],
     queryFn: () => runsApi.get(id!),
     enabled: !!id,
     refetchInterval: (q) => (q.state.data?.run.status === 'running' ? 2000 : false),
+  })
+
+  const abort = useMutation({
+    mutationFn: () => operateApi.abortRun(id!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['run', id] }),
   })
 
   if (!data) return <p className="text-sm text-muted-foreground">Loading...</p>
@@ -33,7 +41,19 @@ export function RunDetailPage() {
       </Link>
       <div className="flex items-center justify-between">
         <h1 className="font-mono text-lg font-bold tracking-tight">{run.id}</h1>
-        <Badge variant={STATUS_VARIANT[run.status] ?? 'secondary'}>{run.status}</Badge>
+        <div className="flex items-center gap-2">
+          {run.status === 'running' && (
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={abort.isPending}
+              onClick={() => abort.mutate()}
+            >
+              Abort
+            </Button>
+          )}
+          <Badge variant={STATUS_VARIANT[run.status] ?? 'secondary'}>{run.status}</Badge>
+        </div>
       </div>
       {run.error && (
         <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">

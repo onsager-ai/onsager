@@ -8,6 +8,8 @@ import { WorkflowsPage } from '@/pages/WorkflowsPage'
 import { WorkflowDetailPage } from '@/pages/WorkflowDetailPage'
 import { RunDetailPage } from '@/pages/RunDetailPage'
 import { ArtifactDetailPage, ArtifactsPage } from '@/pages/ArtifactsPage'
+import { ActivityPage } from '@/pages/ActivityPage'
+import { CredentialsPage } from '@/pages/CredentialsPage'
 
 const queryClient = new QueryClient()
 
@@ -44,6 +46,8 @@ export default function App() {
                         <Route path="/runs/:id" element={<RunDetailPage />} />
                         <Route path="/artifacts" element={<ArtifactsPage />} />
                         <Route path="/artifacts/:id" element={<ArtifactDetailPage />} />
+                        <Route path="/activity" element={<ActivityPage />} />
+                        <Route path="/credentials" element={<CredentialsPage />} />
                       </Routes>
                     </Shell>
                   </WorkspaceProvider>
