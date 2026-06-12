@@ -167,6 +167,15 @@ async fn run_agent_stage(
     // trigger repo, minted per run, in-memory only.
     let repos = crate::github::repo_access_for(&state.pool, workflow).await;
 
+    // Live feed (#634): registered for the session's lifetime; removing
+    // it at the end drops the sender, which closes every SSE stream.
+    let (feed, _) = tokio::sync::broadcast::channel(256);
+    state
+        .feeds
+        .lock()
+        .expect("feeds lock")
+        .insert(session_id.clone(), feed.clone());
+
     let outcome = run_agent_session(SessionRequest {
         session_id: session_id.clone(),
         token,
@@ -178,8 +187,10 @@ async fn run_agent_stage(
         repos,
         pgid_slot: pgid_slot.clone(),
         pool: state.pool.clone(),
+        feed,
     })
     .await;
+    state.feeds.lock().expect("feeds lock").remove(&session_id);
 
     match outcome {
         Ok(out) => {

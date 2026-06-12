@@ -16,8 +16,11 @@
 //!   + warnings for error subtypes and permission denials
 //! - `system/model_fallback`  → `agent.warning`
 //! - unknown top-level types  → `agent.warning`, once per distinct type
-//! - `stream_event` partials and thinking blocks → ignored (progress noise;
-//!   token deltas return if/when live streaming lands)
+//! - `rate_limit_event`        → `agent.warning` when degraded or using
+//!   overage; healthy `allowed` is silent
+//! - `stream_event` text deltas → transient drafts via [`text_delta`]
+//!   (never persisted; the SSE live feed forwards them, #634); other
+//!   partials and thinking blocks are ignored progress noise
 //!
 //! Not ported from arbor: the out-of-workspace path watcher (v2 has no
 //! per-run workspace root yet) and transient text deltas (polling UI).
@@ -100,9 +103,29 @@ impl Normalizer {
             Some("assistant") => self.handle_assistant(event),
             Some("user") => self.handle_user(event),
             Some("result") => Self::handle_result(event),
-            // Partial messages / token deltas: progress noise for the
-            // polling UI; ignored, not warned.
+            // Partial messages: token deltas flow to the transient
+            // delta path (`text_delta`, #634); other stream_event
+            // subtypes are progress noise — ignored, not warned.
             Some("stream_event") => vec![],
+            Some("rate_limit_event") => {
+                // "allowed" arrives on every healthy run — only
+                // degradations warrant a warning (arbor parity, #634).
+                let info = event.get("rate_limit_info");
+                let status = info.and_then(|i| i.get("status")).and_then(Value::as_str);
+                if let Some(status) = status
+                    && status != "allowed"
+                {
+                    let kind = info
+                        .and_then(|i| i.get("rateLimitType"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    return vec![Self::warning(&format!("rate limit {status} ({kind})"))];
+                }
+                if info.and_then(|i| i.get("isUsingOverage")) == Some(&json!(true)) {
+                    return vec![Self::warning("rate limit: consuming overage")];
+                }
+                vec![]
+            }
             Some(other) => {
                 if self.warned_unknown.insert(other.to_string()) {
                     vec![Self::warning(&format!(
@@ -256,6 +279,25 @@ impl Normalizer {
     }
 }
 
+/// Extract the text from a `stream_event` token delta, if this event is
+/// one (#634). Transient: forwarded to live SSE subscribers, never
+/// persisted — the durable `agent.text` row arrives with the full
+/// message.
+pub fn text_delta(event: &Value) -> Option<&str> {
+    if s(event, "type") != Some("stream_event") {
+        return None;
+    }
+    let inner = event.get("event")?;
+    if s(inner, "type") != Some("content_block_delta") {
+        return None;
+    }
+    let delta = inner.get("delta")?;
+    if s(delta, "type") != Some("text_delta") {
+        return None;
+    }
+    s(delta, "text").filter(|t| !t.is_empty())
+}
+
 /// `tool_result.content` is either a string or an array of typed blocks.
 fn tool_result_text(content: Option<&Value>) -> String {
     match content {
@@ -369,6 +411,50 @@ mod tests {
             events[0].payload["text"].as_str().unwrap().chars().count(),
             MAX_TEXT_CHARS
         );
+    }
+
+    #[test]
+    fn rate_limit_allowed_is_silent_degraded_warns() {
+        let mut n = Normalizer::new();
+        assert!(
+            n.handle(&json!({"type":"rate_limit_event",
+                "rate_limit_info":{"status":"allowed"}}))
+                .is_empty()
+        );
+        let warned = n.handle(&json!({"type":"rate_limit_event",
+            "rate_limit_info":{"status":"rejected","rateLimitType":"five_hour"}}));
+        assert_eq!(warned[0].kind, "agent.warning");
+        assert_eq!(
+            warned[0].payload["message"],
+            "rate limit rejected (five_hour)"
+        );
+        let overage = n.handle(&json!({"type":"rate_limit_event",
+            "rate_limit_info":{"status":"allowed","isUsingOverage":true}}));
+        assert_eq!(
+            overage[0].payload["message"],
+            "rate limit: consuming overage"
+        );
+        // and it no longer trips the unknown-type warning
+        assert!(
+            n.handle(&json!({"type":"rate_limit_event",
+                "rate_limit_info":{"status":"allowed"}}))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn text_delta_extracts_only_token_deltas() {
+        assert_eq!(
+            text_delta(&json!({"type":"stream_event","event":{
+                "type":"content_block_delta","delta":{"type":"text_delta","text":"hel"}}})),
+            Some("hel")
+        );
+        assert_eq!(
+            text_delta(&json!({"type":"stream_event","event":{
+                "type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{"}}})),
+            None
+        );
+        assert_eq!(text_delta(&json!({"type":"assistant"})), None);
     }
 
     #[test]

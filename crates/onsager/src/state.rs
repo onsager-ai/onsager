@@ -26,6 +26,11 @@ pub struct AppState {
     /// deregisters on finish; the abort endpoint aborts the task and
     /// kills the session's process group.
     pub running: Arc<Mutex<HashMap<String, RunHandle>>>,
+    /// Live session feeds (#634): one broadcast channel per running
+    /// session, carrying durable `agent.*` events and transient
+    /// `agent.text_delta` drafts to SSE subscribers. In-process only —
+    /// one process is the whole factory (ADR 0029), so no pg_notify.
+    pub feeds: Arc<Mutex<HashMap<String, tokio::sync::broadcast::Sender<serde_json::Value>>>>,
 }
 
 impl AppState {
@@ -34,6 +39,7 @@ impl AppState {
             pool,
             config,
             running: Arc::new(Mutex::new(HashMap::new())),
+            feeds: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
