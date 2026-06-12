@@ -34,11 +34,15 @@ pub async fn fire(state: &AppState, workflow: Workflow) -> anyhow::Result<String
     )
     .await;
 
-    let state = state.clone();
+    let pgid_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let task_state = state.clone();
+    let task_pgid = pgid_slot.clone();
     let id = run_id.clone();
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
+        let state = task_state;
+        let pgid_slot = task_pgid;
         let workspace_id = workflow.workspace_id.clone();
-        match execute(&state, &workflow, &id).await {
+        match execute(&state, &workflow, &id, &pgid_slot).await {
             Ok(()) => {
                 finish(&state.pool, &id, "completed", None).await;
                 record(
@@ -64,7 +68,15 @@ pub async fn fire(state: &AppState, workflow: Workflow) -> anyhow::Result<String
                 .await;
             }
         }
+        state.running.lock().expect("registry lock").remove(&id);
     });
+    state.running.lock().expect("registry lock").insert(
+        run_id.clone(),
+        crate::state::RunHandle {
+            abort: handle.abort_handle(),
+            pgid: pgid_slot,
+        },
+    );
     Ok(run_id)
 }
 
@@ -82,7 +94,12 @@ async fn finish(pool: &PgPool, run_id: &str, status: &str, error: Option<&str>) 
 }
 
 /// Iterate the stage list. The first failing stage fails the run.
-async fn execute(state: &AppState, workflow: &Workflow, run_id: &str) -> anyhow::Result<()> {
+async fn execute(
+    state: &AppState,
+    workflow: &Workflow,
+    run_id: &str,
+    pgid_slot: &std::sync::Arc<std::sync::Mutex<Option<i32>>>,
+) -> anyhow::Result<()> {
     for (index, stage) in workflow.definition.iter().enumerate() {
         match stage {
             StageKind::Agent {
@@ -98,6 +115,7 @@ async fn execute(state: &AppState, workflow: &Workflow, run_id: &str) -> anyhow:
                     model.clone(),
                     system_prompt.clone(),
                     user_prompt,
+                    pgid_slot,
                 )
                 .await?;
             }
@@ -106,6 +124,7 @@ async fn execute(state: &AppState, workflow: &Workflow, run_id: &str) -> anyhow:
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_agent_stage(
     state: &AppState,
     workflow: &Workflow,
@@ -114,6 +133,7 @@ async fn run_agent_stage(
     model: Option<String>,
     system_prompt: Option<String>,
     user_prompt: &str,
+    pgid_slot: &std::sync::Arc<std::sync::Mutex<Option<i32>>>,
 ) -> anyhow::Result<()> {
     let session_id = format!("sess_{}", Uuid::new_v4());
     let token = random_token();
@@ -156,6 +176,7 @@ async fn run_agent_stage(
         mcp_url: state.config.mcp_url(),
         env,
         repos,
+        pgid_slot: pgid_slot.clone(),
     })
     .await;
 

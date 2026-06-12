@@ -172,3 +172,20 @@ export function decodeInlineContent(uri: string | null): string | null {
     return null
   }
 }
+
+// ── M3: activity / abort / credentials ──
+
+export interface ActivityEvent {
+  id: number
+  run_id: string | null
+  kind: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
+export const operateApi = {
+  activity: (workspaceId: string) =>
+    request<{ events: ActivityEvent[] }>(`/activity?workspace=${workspaceId}`),
+  abortRun: (runId: string) =>
+    request<{ ok: boolean; status: string }>(`/runs/${runId}/abort`, { method: 'POST' }),
+}

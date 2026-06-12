@@ -112,6 +112,9 @@ pub struct SessionRequest {
     pub env: Vec<(String, String)>,
     /// The run's repo-access set, surfaced as `ONSAGER_REPOS` (#624).
     pub repos: Vec<ClonableRepo>,
+    /// Written with the child's pid (== its pgid) after spawn so the
+    /// abort endpoint can kill the whole process tree (M3 #625).
+    pub pgid_slot: std::sync::Arc<std::sync::Mutex<Option<i32>>>,
 }
 
 pub struct SessionOutcome {
@@ -170,11 +173,19 @@ pub async fn run_agent_session(req: SessionRequest) -> Result<SessionOutcome, Se
     }
     cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::null());
+        .stdin(Stdio::null())
+        // Abort (#625) drops this future; the child must die with it.
+        // The child leads its own process group so abort can SIGKILL
+        // the whole tree (claude spawns subprocess trees).
+        .kill_on_drop(true)
+        .process_group(0);
 
     let mut child = cmd
         .spawn()
         .map_err(|e| SessionError(format!("spawning `{command}`: {e}")))?;
+    if let Some(pid) = child.id() {
+        *req.pgid_slot.lock().expect("pgid slot lock") = Some(pid as i32);
+    }
 
     // Drain stderr to tracing — a CLI usage error must surface, not
     // fill the pipe buffer (#601).

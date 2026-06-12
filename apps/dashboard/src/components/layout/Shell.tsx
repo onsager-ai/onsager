@@ -8,6 +8,8 @@ import { useAuth } from '@/lib/auth'
 const NAV = [
   { to: '/workflows', label: 'Workflows' },
   { to: '/artifacts', label: 'Artifacts' },
+  { to: '/activity', label: 'Activity' },
+  { to: '/credentials', label: 'Credentials' },
 ]
 
 /** The v2 app frame: top bar + nav. */
