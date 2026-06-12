@@ -15,9 +15,7 @@
 # numbers describe a single VM's port layout and shouldn't propagate
 # across machines. The worktrees/ directory holds linked git worktrees
 # created by `just worktree-new` and is similarly local.
-/.dev-slots.json
 /worktrees/
-**/.env.slot
 
 # Local runtime data. Stiglab defaults its DB to sqlite://./data/stiglab.db
 # (see .env.example); the file is per-machine dev state, never committed.
