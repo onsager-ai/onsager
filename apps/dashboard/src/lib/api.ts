@@ -69,3 +69,101 @@ export const api = {
       method: 'DELETE',
     }),
 }
+
+// ── M1: workflows / runs / artifacts ──
+
+export interface StageAgent {
+  kind: 'agent'
+  model?: string | null
+  system_prompt?: string | null
+  user_prompt: string
+}
+export type Stage = StageAgent
+export interface TriggerManual {
+  kind: 'manual'
+  name: string
+}
+export type Trigger = TriggerManual
+
+export interface Workflow {
+  id: string
+  workspace_id: string
+  name: string
+  trigger: Trigger
+  definition: Stage[]
+  active: boolean
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Run {
+  id: string
+  workspace_id: string
+  workflow_id: string
+  status: string
+  error: string | null
+  started_at: string
+  finished_at: string | null
+}
+
+export interface RunEvent {
+  id: number
+  kind: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
+export interface Artifact {
+  id: string
+  workspace_id: string
+  run_id: string | null
+  session_id: string | null
+  kind: string
+  name: string
+  content_uri: string | null
+  content_checksum: string | null
+  external_ref: Record<string, unknown> | null
+  provenance: { kind: string; source: string }
+  created_at: string
+}
+
+export const workflowsApi = {
+  list: (workspaceId: string) =>
+    request<{ workflows: Workflow[] }>(`/workflows?workspace=${workspaceId}`),
+  create: (body: {
+    workspace_id: string
+    name: string
+    trigger: Trigger
+    definition: Stage[]
+  }) => request<{ workflow: Workflow }>('/workflows', { method: 'POST', body: JSON.stringify(body) }),
+  get: (id: string) => request<{ workflow: Workflow }>(`/workflows/${id}`),
+  setActive: (id: string, active: boolean) =>
+    request<{ workflow: Workflow }>(`/workflows/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ active }),
+    }),
+  fire: (id: string) => request<{ run_id: string }>(`/workflows/${id}/fire`, { method: 'POST' }),
+  runs: (id: string) => request<{ runs: Run[] }>(`/workflows/${id}/runs`),
+}
+
+export const runsApi = {
+  get: (id: string) =>
+    request<{ run: Run; timeline: RunEvent[]; artifacts: Artifact[] }>(`/runs/${id}`),
+}
+
+export const artifactsApi = {
+  list: (workspaceId: string) =>
+    request<{ artifacts: Artifact[] }>(`/artifacts?workspace=${workspaceId}`),
+  get: (id: string) => request<{ artifact: Artifact }>(`/artifacts/${id}`),
+}
+
+/** Decode an `inline:base64,...` content URI to text; null otherwise. */
+export function decodeInlineContent(uri: string | null): string | null {
+  if (!uri?.startsWith('inline:base64,')) return null
+  try {
+    return atob(uri.slice('inline:base64,'.length))
+  } catch {
+    return null
+  }
+}

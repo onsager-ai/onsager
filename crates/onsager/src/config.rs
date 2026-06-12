@@ -42,4 +42,16 @@ impl Config {
     pub fn dev_login_enabled(&self) -> bool {
         cfg!(debug_assertions) || self.dev_login_flag
     }
+
+    /// The MCP endpoint agent sessions call back into — this process.
+    /// `ONSAGER_MCP_URL` overrides (containers where the agent's view
+    /// of the host differs); defaults to the bind address.
+    pub fn mcp_url(&self) -> Option<String> {
+        if let Ok(url) = std::env::var("ONSAGER_MCP_URL")
+            && !url.is_empty()
+        {
+            return Some(url);
+        }
+        Some(format!("http://{}/mcp/messages", self.bind))
+    }
 }

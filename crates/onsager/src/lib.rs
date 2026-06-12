@@ -13,7 +13,12 @@ pub mod auth;
 pub mod config;
 pub mod crypto;
 pub mod db;
+pub mod domain;
+pub mod events;
 pub mod http;
+pub mod mcp;
+pub mod scheduler;
+pub mod sessions;
 pub mod state;
 
 use anyhow::Context;

@@ -11,6 +11,7 @@ use crate::state::AppState;
 
 mod credentials;
 mod me;
+mod workflows;
 mod workspaces;
 
 pub fn router(state: AppState) -> Router {
@@ -27,7 +28,22 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/workspaces/{workspace_id}/credentials/{name}",
             put(credentials::set_credential).delete(credentials::delete_credential),
-        );
+        )
+        .route(
+            "/api/workflows",
+            get(workflows::list_workflows).post(workflows::create_workflow),
+        )
+        .route(
+            "/api/workflows/{id}",
+            get(workflows::get_workflow).patch(workflows::patch_workflow),
+        )
+        .route("/api/workflows/{id}/fire", post(workflows::fire_workflow))
+        .route("/api/workflows/{id}/runs", get(workflows::list_runs))
+        .route("/api/runs/{id}", get(workflows::get_run))
+        .route("/api/artifacts", get(workflows::list_artifacts))
+        .route("/api/artifacts/{id}", get(workflows::get_artifact))
+        // Agent-facing MCP output channel (session-token auth).
+        .route("/mcp/messages", post(crate::mcp::messages));
 
     if state.config.dev_login_enabled() {
         app = app.route("/api/auth/dev-login", post(auth::dev_login));

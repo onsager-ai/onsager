@@ -12,10 +12,16 @@ use sqlx::postgres::PgPoolOptions;
 
 /// Ordered list of embedded migrations. Append-only; the pre-commit
 /// hook enforces the NNN_ numbering stays contiguous.
-const MIGRATIONS: &[(&str, &str)] = &[(
-    "001_identity.sql",
-    include_str!("../migrations/001_identity.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "001_identity.sql",
+        include_str!("../migrations/001_identity.sql"),
+    ),
+    (
+        "002_run_loop.sql",
+        include_str!("../migrations/002_run_loop.sql"),
+    ),
+];
 
 pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
     Ok(PgPoolOptions::new()
