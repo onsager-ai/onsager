@@ -312,6 +312,7 @@ impl SubstrateExecutor for AgentExecutor {
         Some(AgentConfig {
             model: self.model.clone(),
             system_prompt: self.system_prompt.clone(),
+            user_prompt: self.user_prompt.clone(),
             tools: self.tools.clone(),
             credential_ref: self.credential_ref.clone(),
         })
@@ -352,6 +353,7 @@ impl Executor for AgentExecutor {
         let effective = ctx.agent_config.clone().unwrap_or_else(|| AgentConfig {
             model: self.model.clone(),
             system_prompt: self.system_prompt.clone(),
+            user_prompt: self.user_prompt.clone(),
             tools: self.tools.clone(),
             credential_ref: self.credential_ref.clone(),
         });
@@ -361,7 +363,7 @@ impl Executor for AgentExecutor {
             system_prompt: effective.system_prompt.clone(),
             tools: effective.tools.clone(),
             credential_ref: effective.credential_ref.clone(),
-            user_prompt: render_user_prompt(self.user_prompt.as_deref(), &ctx),
+            user_prompt: render_user_prompt(effective.user_prompt.as_deref(), &ctx),
             session_id: session_id.clone(),
             // Plan-scoped token (#536) flows context → request so the
             // runner injects it as ONSAGER_SESSION_TOKEN. The scheduler
@@ -646,6 +648,18 @@ mod tests {
     fn agent_with_stub(output: &str) -> AgentExecutor {
         AgentExecutor::new("claude-sonnet-4-6", "you are helpful")
             .with_runner(Arc::new(StubAgentRunner::new(output)))
+    }
+
+    /// #616 runtime path: the shared registered instance executes with
+    /// per-node config from `ctx.agent_config` — `agent_config()` must
+    /// carry the authored user_prompt or it dies at the singleton hop.
+    #[test]
+    fn agent_config_carries_user_prompt() {
+        let exec = AgentExecutor::new("m", "s").with_user_prompt("do the task");
+        assert_eq!(
+            exec.agent_config().unwrap().user_prompt.as_deref(),
+            Some("do the task")
+        );
     }
 
     /// #616: the authored user_prompt leads the rendered body, so an
