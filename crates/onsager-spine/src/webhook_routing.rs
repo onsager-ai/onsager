@@ -13,8 +13,8 @@
 //!   produces zero events; the caller ignores the webhook.
 //! - `check_suite.completed` / `check_run.completed` → `gate.check_updated`
 //!   keyed by repo + PR. Emitted only when a PR number is resolvable.
-//!   `status` events carry no PR number and are skipped here — forge's
-//!   external-check gate cross-references on commit SHA instead.
+//!   `status` events carry no PR number and are skipped here — the
+//!   external-check gate cross-referenced on commit SHA instead.
 //! - `pull_request.closed` with `merged=true` → `gate.manual_approval_signal`
 //!   keyed by repo + PR.
 //! - Anything else → no events (caller returns 202 so GitHub stops retrying).

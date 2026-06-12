@@ -25,9 +25,7 @@ const SOURCE_CHIPS: SourceTypeChip[] = [
   {
     key: "artifact",
     label: "Artifact",
-    match: (e) =>
-      e.event_type.startsWith("artifact.") ||
-      e.event_type.startsWith("forge."),
+    match: (e) => e.event_type.startsWith("artifact."),
   },
   {
     key: "run",
@@ -162,8 +160,9 @@ function EventRow({
 }) {
   // Map event → best deep-link. Operator-grain events fall into three
   // shapes (ADR 0019):
-  // - Run-keyed: payload carries `artifact_id` (or stream_id is a
-  //   `forge:<artifact_id>`). Route to /runs/:id.
+  // - Run-keyed: payload carries `artifact_id` (or stream_id is an
+  //   `artifact:<artifact_id>`; `forge:` for pre-0.4 rows). Route to
+  //   /runs/:id.
   // - Workflow-keyed: payload carries `workflow_id` (trigger.fired,
   //   workflow.manual_triggered). Route to /workflows/:id.
   // - Otherwise unlinked (rendered as a plain row).
@@ -174,10 +173,13 @@ function EventRow({
     if (artifactId) {
       return `/workspaces/${workspaceSlug}/runs/${artifactId}`
     }
-    // Forge-style stream ids `forge:<artifact_id>` deep-link to the run.
-    if (event.stream_id.startsWith("forge:")) {
-      const id = event.stream_id.slice("forge:".length)
-      if (id) return `/workspaces/${workspaceSlug}/runs/${id}`
+    // Artifact-keyed stream ids deep-link to the run (`forge:` is the
+    // pre-0.4 spelling on historical rows).
+    for (const prefix of ["artifact:", "forge:"]) {
+      if (event.stream_id.startsWith(prefix)) {
+        const id = event.stream_id.slice(prefix.length)
+        if (id) return `/workspaces/${workspaceSlug}/runs/${id}`
+      }
     }
     const workflowId =
       typeof data.workflow_id === "string" ? data.workflow_id : null

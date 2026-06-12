@@ -80,7 +80,7 @@ describe("ActivityPage (operator-grain feed, #465)", () => {
       events: [
         {
           id: 1,
-          stream_id: "forge:art_42",
+          stream_id: "artifact:art_42",
           stream_type: "substrate",
           event_type: "session.completed",
           data: { artifact_id: "art_42" },
@@ -97,6 +97,27 @@ describe("ActivityPage (operator-grain feed, #465)", () => {
     // Actor + event_type are visible on the row.
     expect(link).toHaveTextContent("agent-node-1")
     expect(link).toHaveTextContent("session.completed")
+  })
+
+  it("deep-links via the artifact: stream prefix when the payload has no artifact_id", async () => {
+    apiMock.getActivity.mockResolvedValue({
+      events: [
+        {
+          id: 5,
+          stream_id: "artifact:art_77",
+          stream_type: "artifact",
+          event_type: "artifact.archived",
+          data: { reason: "aborted" },
+          actor: "dashboard",
+          created_at: "2026-05-23T03:00:00Z",
+        },
+      ],
+    })
+    renderPage()
+    const link = await screen.findByRole("link", {
+      name: /artifact\.archived/,
+    })
+    expect(link).toHaveAttribute("href", "/workspaces/acme/runs/art_77")
   })
 
   it("deep-links a workflow-keyed event row to /workflows/:id", async () => {

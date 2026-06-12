@@ -1,8 +1,9 @@
 //! Namespace partitioning for the `events_ext` table.
 //!
-//! Each subsystem in the Onsager monorepo owns a namespace that scopes its
-//! extension events. Adding a new component means adding a well-known constant
-//! to [`Namespace`].
+//! Each emitter owns a namespace that scopes its extension events
+//! (`session`, `workflow`, `artifact`, `plan`, …). Namespaces are plain
+//! validated strings — construct them at the emit site with
+//! [`Namespace::new`].
 
 use std::fmt;
 
@@ -56,33 +57,6 @@ impl Namespace {
     /// Return the namespace as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-
-    // -- Well-known constants ---------------------------------------------------
-    // These are the soft contract for namespace ownership across the monorepo.
-    // Adding a new component means adding a constant here.
-
-    /// Namespace for the forge component.
-    pub fn forge() -> Self {
-        Self::new("forge").unwrap()
-    }
-
-    /// Namespace for chat-session lifecycle events + the session output
-    /// manifest (portal's in-process runner, ADR 0027 / spec #583).
-    pub fn session() -> Self {
-        Self::new("session").unwrap()
-    }
-
-    /// Namespace for the telegramable component.
-    pub fn telegramable() -> Self {
-        Self::new("telegramable").unwrap()
-    }
-
-    /// Namespace for workflow-runtime events (issue #80). Owned by forge
-    /// but consumed by the dashboard too, so it gets its own namespace
-    /// instead of piggybacking on `forge:`.
-    pub fn workflow() -> Self {
-        Self::new("workflow").unwrap()
     }
 }
 
@@ -150,14 +124,7 @@ mod tests {
     }
 
     #[test]
-    fn well_known_constants() {
-        assert_eq!(Namespace::forge().as_str(), "forge");
-        assert_eq!(Namespace::session().as_str(), "session");
-        assert_eq!(Namespace::telegramable().as_str(), "telegramable");
-    }
-
-    #[test]
     fn display() {
-        assert_eq!(Namespace::session().to_string(), "session");
+        assert_eq!(Namespace::new("session").unwrap().to_string(), "session");
     }
 }

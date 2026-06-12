@@ -3,7 +3,7 @@
 //! Spec #259 (sub-issue of #222) made portal the dashboard's spine API.
 //!
 //! Reads land directly against the spine `events_ext` and `artifacts`
-//! tables. Writes are control-only — retry/abort emit a single event
+//! tables. Writes are control-only — abort emits a single event
 //! via `EventStore::append_ext`, no GitHub side-effects, no row
 //! inserts. (Per #278 artifact creation is exclusively the substrate's
 //! auto-trigger flow; portal does not own a creation endpoint.)
@@ -156,14 +156,6 @@ pub struct ArtifactDetail {
 #[derive(Debug, Serialize)]
 struct ArtifactDetailEnvelope {
     artifact: ArtifactDetail,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct RetryRequest {
-    #[serde(default)]
-    pub reason: Option<String>,
-    #[serde(default)]
-    pub actor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -576,108 +568,31 @@ pub async fn get_artifact(
 }
 
 /// Fetch spine events related to an artifact for the per-run DAG (issue #14
-/// phase 3). Filters on `stream_id = forge:<artifact_id>` (the convention
-/// forge follows) and on session completions whose payload references this
-/// artifact.
+/// phase 3). Filters on `stream_id = artifact:<artifact_id>` (plus the
+/// legacy `forge:<artifact_id>` key for pre-0.4 rows — historical events
+/// are never rewritten) and on session completions whose payload
+/// references this artifact.
 async fn fetch_related_events(
     pool: &sqlx::PgPool,
     artifact_id: &str,
 ) -> Result<Vec<SpineEvent>, sqlx::Error> {
-    let stream_key = format!("forge:{artifact_id}");
+    let stream_key = format!("artifact:{artifact_id}");
+    let legacy_stream_key = format!("forge:{artifact_id}");
     sqlx::query_as::<_, SpineEvent>(
         "SELECT id, stream_id, namespace AS stream_type, event_type, data, \
                 COALESCE(metadata->>'actor', '') AS actor, created_at \
          FROM events_ext \
-         WHERE stream_id = $1 \
+         WHERE stream_id IN ($1, $2) \
             OR (event_type IN ('session.completed', 'session.failed') \
-                AND data->>'artifact_id' = $2) \
+                AND data->>'artifact_id' = $3) \
          ORDER BY id ASC \
          LIMIT 500",
     )
     .bind(&stream_key)
+    .bind(&legacy_stream_key)
     .bind(artifact_id)
     .fetch_all(pool)
     .await
-}
-
-/// POST /api/spine/artifacts/:id/retry
-pub async fn retry_artifact(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(id): Path<String>,
-    Json(req): Json<RetryRequest>,
-) -> Response {
-    let pool = state.spine.pool();
-
-    let row = match sqlx::query_as::<_, (String, String)>(
-        "SELECT workspace_id, state FROM artifacts WHERE artifact_id = $1",
-    )
-    .bind(&id)
-    .fetch_optional(pool)
-    .await
-    {
-        Ok(opt) => opt,
-        Err(e) => {
-            tracing::error!("artifact lookup failed: {e}");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "failed to load artifact" })),
-            )
-                .into_response();
-        }
-    };
-    let Some((workspace_id, state_str)) = row else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "artifact not found" })),
-        )
-            .into_response();
-    };
-    if let Err(r) = require_workspace_access(&state.pool, &auth_user, &workspace_id).await {
-        if r.status() == StatusCode::NOT_FOUND {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "artifact not found" })),
-            )
-                .into_response();
-        }
-        return r;
-    }
-
-    if state_str == "archived" || state_str == "released" {
-        return (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({
-                "error": format!("cannot retry artifact in {state_str} state"),
-            })),
-        )
-            .into_response();
-    }
-
-    let actor = req.actor.as_deref().unwrap_or("dashboard");
-    emit(
-        &state,
-        &workspace_id,
-        &format!("forge:{id}"),
-        "forge",
-        actor,
-        "forge.retry_requested",
-        serde_json::json!({
-            "artifact_id": id,
-            "reason": req.reason,
-            "previous_state": state_str,
-        }),
-    )
-    .await;
-
-    (
-        StatusCode::ACCEPTED,
-        Json(serde_json::json!({
-            "artifact_id": id,
-            "action": "retry_requested",
-        })),
-    )
-        .into_response()
 }
 
 /// POST /api/spine/artifacts/:id/abort
@@ -756,8 +671,8 @@ pub async fn abort_artifact(
     emit(
         &state,
         &workspace_id,
-        &format!("forge:{id}"),
-        "forge",
+        &format!("artifact:{id}"),
+        "artifact",
         actor,
         "artifact.archived",
         serde_json::json!({
@@ -797,7 +712,6 @@ mod tests {
         assert!(kinds.contains(&"trigger.fired"));
         assert!(kinds.contains(&"node.failed"));
         // Internal subsystem dispatches and analyzer diagnostics are not.
-        assert!(!kinds.contains(&"forge.shaping_returned"));
         assert!(!kinds.contains(&"gate.check_updated"));
     }
 

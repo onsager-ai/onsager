@@ -542,7 +542,7 @@ pub struct ArtifactInfo {
     pub workspace_id: String,
     pub current_version: i32,
     /// `project_id` extracted from `metadata->>'project_id'` (set by
-    /// `upsert_issue_artifact_ref` and forge's `insert_artifact_row`).
+    /// `upsert_issue_artifact_ref` and the engine's artifact registration).
     pub project_id: Option<String>,
     /// `issue_number` extracted from `metadata->>'issue_number'` (set by
     /// `upsert_issue_artifact_ref`).

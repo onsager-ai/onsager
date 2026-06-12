@@ -4,9 +4,8 @@
 //! (the same shape `GET /api/workflows/:id/runs` projects). `cancel_run`
 //! mirrors REST's `POST /api/spine/artifacts/:id/abort`: it UPDATEs
 //! the artifact row to `state = 'archived'` and emits
-//! `artifact.archived` on the `forge:{artifact_id}` stream so forge's
-//! existing consumers see the same event shape they'd see from a
-//! dashboard-driven abort.
+//! `artifact.archived` on the `artifact:{artifact_id}` stream — the
+//! same event shape a dashboard-driven abort produces.
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -138,9 +137,8 @@ pub async fn cancel_run(state: &AppState, auth_user: &AuthUser, args: Value) -> 
     }
 
     // Mirror REST `abort_artifact`: UPDATE state = 'archived', then
-    // emit `artifact.archived` on the `forge:{id}` stream so existing
-    // forge consumers see the same shape they'd see from the dashboard
-    // abort path.
+    // emit `artifact.archived` on the `artifact:{id}` stream — the same
+    // shape the dashboard abort path produces.
     sqlx::query(
         "UPDATE artifacts SET state = 'archived', updated_at = NOW() WHERE artifact_id = $1",
     )
@@ -166,13 +164,13 @@ pub async fn cancel_run(state: &AppState, auth_user: &AuthUser, args: Value) -> 
         causation_id: None,
         actor: auth_user.user_id.clone(),
     };
-    let stream_id = format!("forge:{}", args.artifact_id);
+    let stream_id = format!("artifact:{}", args.artifact_id);
     let event_id = state
         .spine
         .append_ext(
             &workspace_id,
             &stream_id,
-            "forge",
+            "artifact",
             "artifact.archived",
             payload,
             &metadata,

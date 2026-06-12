@@ -734,7 +734,7 @@ mod tests {
             return;
         };
         let store = EventStore::connect(&url).await.unwrap();
-        let stream_id = format!("forge:art_ws_test_{}", ulid::Ulid::new());
+        let stream_id = format!("artifact:art_ws_test_{}", ulid::Ulid::new());
         let workspace_id = format!("ws_round_trip_{}", ulid::Ulid::new());
         let metadata = test_metadata();
 
@@ -742,7 +742,7 @@ mod tests {
             .append_ext(
                 &workspace_id,
                 &stream_id,
-                "forge",
+                "artifact",
                 "test.workspace_round_trip",
                 serde_json::json!({"hello": "world"}),
                 &metadata,

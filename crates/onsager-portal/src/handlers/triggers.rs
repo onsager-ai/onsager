@@ -9,9 +9,9 @@
 //! Both are authenticated and workspace-scoped (membership required).
 //! Both emit two spine events:
 //!
-//!   1. `workflow.trigger_fired` — same shape forge's
-//!      `trigger_subscriber` already consumes, so a manual fire flows
-//!      through the workflow runtime exactly like a webhook fire would.
+//!   1. `workflow.trigger_fired` — same shape the trigger listener
+//!      already consumes, so a manual fire flows through the workflow
+//!      runtime exactly like a webhook fire would.
 //!   2. `workflow.manual_triggered` — audit-only, namespace `audit`,
 //!      capturing actor + workflow + trigger source for the audit log.
 //!
