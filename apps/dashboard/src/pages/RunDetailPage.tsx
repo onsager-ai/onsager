@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { operateApi, runsApi } from '@/lib/api'
+import { SessionFeed } from '@/components/runs/SessionFeed'
 import { Button } from '@/components/ui/button'
 
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive'> = {
@@ -29,7 +30,7 @@ export function RunDetailPage() {
   })
 
   if (!data) return <p className="text-sm text-muted-foreground">Loading...</p>
-  const { run, timeline, artifacts } = data
+  const { run, timeline, artifacts, sessions } = data
 
   return (
     <>
@@ -79,6 +80,10 @@ export function RunDetailPage() {
           ))}
         </CardContent>
       </Card>
+
+      {sessions.map((s) => (
+        <SessionFeed key={s.id} sessionId={s.id} status={s.status} />
+      ))}
 
       <Card>
         <CardHeader>

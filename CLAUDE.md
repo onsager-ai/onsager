@@ -39,7 +39,7 @@ In dev, the dashboard is Vite with an `/api` + `/mcp` proxy.
 
 ### Schema (11 tables, fresh migrations, `schema_migrations` ledger)
 
-`users`, `auth_sessions`, `workspaces`, `workspace_members`, `credentials` (001) · `workflows`, `runs`, `sessions`, `session_logs`*, `artifacts`, `events` (002) · `github_app_installations` (003). Migrations are immutable after merge; fixes are new migrations. (*`session_logs` is in 002 awaiting its consumer — first candidate for the ratchet if streaming logs don't land.)
+`users`, `auth_sessions`, `workspaces`, `workspace_members`, `credentials` (001) · `workflows`, `runs`, `sessions`, `artifacts`, `events` (002) · `github_app_installations` (003) · `session_events` (004 — the normalized agent feed, #632). Migrations are immutable after merge; fixes are new migrations.
 
 Key shapes:
 

@@ -115,6 +115,8 @@ pub struct SessionRequest {
     /// Written with the child's pid (== its pgid) after spawn so the
     /// abort endpoint can kill the whole process tree (M3 #625).
     pub pgid_slot: std::sync::Arc<std::sync::Mutex<Option<i32>>>,
+    /// Sink for normalized `agent.*` session events (#632).
+    pub pool: PgPool,
 }
 
 pub struct SessionOutcome {
@@ -205,6 +207,8 @@ pub async fn run_agent_session(req: SessionRequest) -> Result<SessionOutcome, Se
         .ok_or_else(|| SessionError("child produced no stdout pipe".into()))?;
     let mut lines = BufReader::new(stdout).lines();
     let mut result: Option<Result<String, String>> = None;
+    let mut normalizer = crate::agent_events::Normalizer::new();
+    let mut seq: i32 = 0;
     loop {
         let line = match lines.next_line().await {
             Ok(Some(line)) => line,
@@ -214,18 +218,36 @@ pub async fn run_agent_session(req: SessionRequest) -> Result<SessionOutcome, Se
                 return Err(SessionError(format!("reading agent stdout: {e}")));
             }
         };
-        match serde_json::from_str::<ClaudeEvent>(&line) {
-            Ok(ClaudeEvent::Result {
-                subtype,
-                result: text,
-                error,
-            }) => {
-                result = Some(match subtype.as_str() {
-                    "success" => Ok(text.unwrap_or_default()),
-                    _ => Err(error.unwrap_or_else(|| format!("claude exited: {subtype}"))),
-                });
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        // Normalize + persist the session feed (#632). A failed insert
+        // is logged, never fatal — the feed must not fail the work.
+        for event in normalizer.handle(&value) {
+            seq += 1;
+            let inserted = sqlx::query(
+                "INSERT INTO session_events (session_id, seq, kind, payload)                  VALUES ($1, $2, $3, $4)",
+            )
+            .bind(&req.session_id)
+            .bind(seq)
+            .bind(event.kind)
+            .bind(&event.payload)
+            .execute(&req.pool)
+            .await;
+            if let Err(e) = inserted {
+                tracing::warn!(session_id = %req.session_id, "session event insert failed: {e}");
             }
-            Ok(ClaudeEvent::Other) | Err(_) => {}
+        }
+        if let Ok(ClaudeEvent::Result {
+            subtype,
+            result: text,
+            error,
+        }) = serde_json::from_value::<ClaudeEvent>(value)
+        {
+            result = Some(match subtype.as_str() {
+                "success" => Ok(text.unwrap_or_default()),
+                _ => Err(error.unwrap_or_else(|| format!("claude exited: {subtype}"))),
+            });
         }
     }
     let _ = child.wait().await;

@@ -177,6 +177,7 @@ async fn run_agent_stage(
         env,
         repos,
         pgid_slot: pgid_slot.clone(),
+        pool: state.pool.clone(),
     })
     .await;
 
