@@ -1,4 +1,5 @@
-//! Workflow CRUD against the spine `workflows` / `workflow_stages` tables.
+//! Workflow CRUD against the spine `workflows` table (authored
+//! definition on the row; executable DAG in `workflow_library` — ADR 0028).
 //!
 //! Spec #222 Slice 4 moved the writer surface from stiglab to portal.
 //! Portal is the only process that performs `INSERT` / `UPDATE` /
@@ -20,51 +21,9 @@
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use onsager_registry::TRIGGERS;
-use serde_json::json;
 use sqlx::{PgPool, Row};
 
 use crate::workflow::{GateKind, TriggerKind, Workflow, WorkflowStage};
-
-/// Translate the workflow's `gate_kind` + opaque `params` into the spine's
-/// `(target_state, gates)` pair. The artifact-state transitions match the
-/// "issue → PR" flow forge expects: agent-session moves Draft → InProgress,
-/// review-style gates move to UnderReview.
-fn translate_stage(
-    gate_kind: GateKind,
-    params: &serde_json::Value,
-) -> (Option<&'static str>, serde_json::Value) {
-    match gate_kind {
-        GateKind::AgentSession => {
-            let gate = json!({
-                "kind": "agent_session",
-                "shaping_intent": params.clone(),
-            });
-            (Some("in_progress"), json!([gate]))
-        }
-        GateKind::ExternalCheck => {
-            let check_name = params
-                .get("check_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("ci");
-            let gate = json!({
-                "kind": "external_check",
-                "check_name": check_name,
-            });
-            (Some("under_review"), json!([gate]))
-        }
-        GateKind::ManualApproval => {
-            let signal_kind = params
-                .get("signal_kind")
-                .and_then(|v| v.as_str())
-                .unwrap_or("dashboard_approve");
-            let gate = json!({
-                "kind": "manual_approval",
-                "signal_kind": signal_kind,
-            });
-            (Some("under_review"), json!([gate]))
-        }
-    }
-}
 
 // ── Public CRUD surface ───────────────────────────────────────────────────
 
@@ -102,11 +61,21 @@ pub async fn insert_workflow_with_stages(
     // legacy `active` pin (`false` at create → `off`). Neither reads
     // `install_id` — status is trigger-source-neutral.
 
+    let definition_json = serde_json::to_value(
+        stages
+            .iter()
+            .map(|st| {
+                serde_json::json!({ "gate_kind": st.gate_kind.to_string(), "params": st.params })
+            })
+            .collect::<Vec<_>>(),
+    )
+    .context("serialize workflow definition")?;
     sqlx::query(
         "INSERT INTO workflows (workflow_id, name, trigger_kind, trigger_config, \
                                 active, preset_id, workspace_id, install_id, \
-                                created_by, created_at, updated_at, readiness, autofire) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+                                created_by, created_at, updated_at, readiness, autofire, \
+                                definition_json) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
     )
     .bind(&workflow.id)
     .bind(&workflow.name)
@@ -121,44 +90,33 @@ pub async fn insert_workflow_with_stages(
     .bind(workflow.updated_at)
     .bind("ready")
     .bind(autofire_for_active(workflow.active))
+    .bind(&definition_json)
     .execute(&mut *tx)
     .await
     .context("insert spine workflows row")?;
 
-    // Materialize stage rows + collect snapshot inputs in one pass so
-    // the v1 `workflow_versions` row below carries the same shape
-    // migration 025's backfill produces for pre-existing workflows.
-    let mut snapshot_stages: Vec<(
+    // Snapshot input for the v1 `workflow_versions` row (spec #337):
+    // the authored definition, one tuple per stage. `target_state` /
+    // `gates` retired with the stage-chain storage (ADR 0028 / #602) —
+    // None / [] keep the snapshot shape backward-readable.
+    let snapshot_stages: Vec<(
         i32,
         String,
         Option<&'static str>,
         serde_json::Value,
         serde_json::Value,
-    )> = Vec::with_capacity(stages.len());
-    for stage in stages {
-        let (target_state, gates) = translate_stage(stage.gate_kind, &stage.params);
-        sqlx::query(
-            "INSERT INTO workflow_stages (workflow_id, stage_order, name, \
-                                          target_state, gates, params) \
-             VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind(&workflow.id)
-        .bind(stage.seq)
-        .bind(stage.gate_kind.to_string())
-        .bind(target_state)
-        .bind(&gates)
-        .bind(&stage.params)
-        .execute(&mut *tx)
-        .await
-        .context("insert spine workflow_stages row")?;
-        snapshot_stages.push((
-            stage.seq,
-            stage.gate_kind.to_string(),
-            target_state,
-            gates,
-            stage.params.clone(),
-        ));
-    }
+    )> = stages
+        .iter()
+        .map(|stage| {
+            (
+                stage.seq,
+                stage.gate_kind.to_string(),
+                None,
+                serde_json::json!([]),
+                stage.params.clone(),
+            )
+        })
+        .collect();
 
     // v1 version + audit row. Spec #337: every workflow is a versioned
     // artifact, and the initial version is published with the same
@@ -215,6 +173,24 @@ pub async fn insert_workflow_with_stages(
     .context("insert initial workflow_changes row")?;
 
     tx.commit().await?;
+
+    // Register the executable DAG under spec_kind = workflow id
+    // (ADR 0028 / #602): the #601 trigger conversion resolves the
+    // library by workflow id directly. No executable stage → no entry;
+    // a fire then fails loudly at the engine's library lookup.
+    match crate::workflow_dag::register_executable(pool, &workflow.id, stages).await {
+        Ok(Some(version)) => {
+            tracing::info!(workflow_id = %workflow.id, version, "registered executable workflow DAG");
+        }
+        Ok(None) => {
+            tracing::warn!(workflow_id = %workflow.id, "workflow has no executable stage; no library entry registered");
+        }
+        Err(e) => {
+            // The authored row is committed; a registration failure is
+            // loud but not fatal to creation (re-saving re-registers).
+            tracing::error!(workflow_id = %workflow.id, "library registration failed: {e}");
+        }
+    }
     Ok(())
 }
 
@@ -401,14 +377,53 @@ pub async fn list_stages_for_workflow(
     pool: &PgPool,
     workflow_id: &str,
 ) -> anyhow::Result<Vec<WorkflowStage>> {
-    let rows = sqlx::query(
-        "SELECT workflow_id, stage_order, name, params \
-           FROM workflow_stages WHERE workflow_id = $1 ORDER BY stage_order ASC",
-    )
-    .bind(workflow_id)
-    .fetch_all(pool)
-    .await?;
-    rows.into_iter().map(row_to_stage).collect()
+    let row: Option<(serde_json::Value,)> =
+        sqlx::query_as("SELECT definition_json FROM workflows WHERE workflow_id = $1")
+            .bind(workflow_id)
+            .fetch_optional(pool)
+            .await?;
+    let Some((definition,)) = row else {
+        return Ok(Vec::new());
+    };
+    definition_to_stages(workflow_id, &definition)
+}
+
+/// Materialize stage DTOs from the authored `definition_json` (ADR
+/// 0028 / #602). Ids stay deterministic (`<workflow_id>#<seq>`), the
+/// same contract the dashboard's per-stage anchors relied on when the
+/// rows came from the dropped `workflow_stages` table.
+pub fn definition_to_stages(
+    workflow_id: &str,
+    definition: &serde_json::Value,
+) -> anyhow::Result<Vec<WorkflowStage>> {
+    let entries = definition
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("definition_json is not an array"))?;
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let seq = i as i32;
+            let name = entry
+                .get("gate_kind")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("definition entry {i} missing gate_kind"))?;
+            let gate_kind = name.parse::<GateKind>().map_err(|e| {
+                anyhow::anyhow!("definition gate_kind not a known kind ({name}): {e}")
+            })?;
+            Ok(WorkflowStage {
+                id: format!("{workflow_id}#{seq}"),
+                workflow_id: workflow_id.to_string(),
+                seq,
+                gate_kind,
+                executable: crate::workflow_dag::stage_is_executable(gate_kind),
+                params: entry
+                    .get("params")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({})),
+            })
+        })
+        .collect()
 }
 
 /// Toggle the `active` flag and bump `updated_at`. The `workflow_updated`
@@ -430,8 +445,8 @@ pub async fn set_workflow_active(
     Ok(())
 }
 
-/// Delete the workflow row. `workflow_stages` is `ON DELETE CASCADE` so
-/// the stage chain goes with it — no explicit per-stage DELETE.
+/// Delete the workflow row (the authored definition lives on it; the
+/// library rows under this workflow's kind are retired separately).
 ///
 /// Artifacts that still reference this workflow are detached in the
 /// same transaction: `workflow_id`, `current_stage_index` and
@@ -451,6 +466,16 @@ pub async fn set_workflow_active(
 /// the DELETE commits, the trigger's workflow lookup then misses and
 /// it drops the trigger — no orphan stage state can leak.
 pub async fn delete_workflow(pool: &PgPool, workflow_id: &str) -> anyhow::Result<()> {
+    // Retire this workflow's executable library entries (ADR 0028 —
+    // the kind is the workflow id, so retirement is a kind-level mark).
+    sqlx::query(
+        "UPDATE workflow_library SET retired_at = NOW() \
+         WHERE spec_kind = $1 AND retired_at IS NULL",
+    )
+    .bind(workflow_id)
+    .execute(pool)
+    .await
+    .context("retire workflow library entries")?;
     let mut tx = pool.begin().await?;
     sqlx::query("SELECT workflow_id FROM workflows WHERE workflow_id = $1 FOR UPDATE")
         .bind(workflow_id)
@@ -765,27 +790,6 @@ fn row_to_workflow(row: sqlx::postgres::PgRow) -> anyhow::Result<Workflow> {
     })
 }
 
-/// Stage rows on spine don't carry an explicit `id` (PK is
-/// `(workflow_id, stage_order)`). Synthesize a stable `${workflow_id}#${seq}`
-/// string for the dashboard's per-stage anchors — the same input always
-/// produces the same id, which is the contract callers rely on.
-fn row_to_stage(row: sqlx::postgres::PgRow) -> anyhow::Result<WorkflowStage> {
-    let workflow_id: String = row.try_get("workflow_id")?;
-    let stage_order: i32 = row.try_get("stage_order")?;
-    let name: String = row.try_get("name")?;
-    let params: serde_json::Value = row.try_get("params")?;
-    let gate_kind = name
-        .parse::<GateKind>()
-        .map_err(|e| anyhow::anyhow!("workflow_stages.name not a known gate kind ({name}): {e}"))?;
-    Ok(WorkflowStage {
-        id: format!("{workflow_id}#{stage_order}"),
-        workflow_id,
-        seq: stage_order,
-        gate_kind,
-        params,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     //! Pure-function unit tests for the translation helpers. Round-trip
@@ -882,30 +886,6 @@ mod tests {
     fn autofire_mirrors_active() {
         assert_eq!(autofire_for_active(true), "active");
         assert_eq!(autofire_for_active(false), "off");
-    }
-
-    #[test]
-    fn agent_session_maps_to_in_progress() {
-        let (state, gates) =
-            translate_stage(GateKind::AgentSession, &json!({"action": "implement"}));
-        assert_eq!(state, Some("in_progress"));
-        assert_eq!(gates[0]["kind"], "agent_session");
-        assert_eq!(gates[0]["shaping_intent"]["action"], "implement");
-    }
-
-    #[test]
-    fn external_check_pulls_check_name() {
-        let (state, gates) =
-            translate_stage(GateKind::ExternalCheck, &json!({"check_name": "ci/test"}));
-        assert_eq!(state, Some("under_review"));
-        assert_eq!(gates[0]["kind"], "external_check");
-        assert_eq!(gates[0]["check_name"], "ci/test");
-    }
-
-    #[test]
-    fn manual_approval_defaults_signal_kind() {
-        let (_, gates) = translate_stage(GateKind::ManualApproval, &json!({}));
-        assert_eq!(gates[0]["signal_kind"], "dashboard_approve");
     }
 
     #[test]

@@ -175,10 +175,10 @@ Per spec #286, the dashboard, public API field names, route segments, button cop
 
 The four canonical nouns:
 
-- **Workflow** — the automation unit (trigger + ordered stages + prompts). `/api/workflows`; spine `workflows` / `workflow_stages` (Lever D).
+- **Workflow** — the automation unit (trigger + ordered stages + prompts). `/api/workflows`; authored definition on the spine `workflows` row, executable DAG in `workflow_library` keyed by the workflow id (ADR 0028 / #602 — one model, derived at save).
 - **Run** — one execution of a workflow against an artifact. `/api/workflows/:id/runs`; has a status and a sequence of stage outcomes.
 - **Artifact** — what a run produces (issue, PR, deployment, etc.). The core noun; `/api/spine/artifacts`; spine `artifacts`.
-- **Stage** — a step within a workflow definition (gate kind + parameters). A workflow's structural unit; never a top-level nav noun.
+- **Stage** — a step within a workflow definition (gate kind + parameters), materialized as a DAG node in the executable form. A workflow's structural unit; never a top-level nav noun.
 
 **Sanctioned carve-out — "Plans" (spec plans).** ADR 0023 made the authored spec-plan graph a first-class user concept; ADR 0025 / spec #514 require a noun-surface launch path so chat isn't the sole way to run one. The dashboard carries a fifth nav noun, **Plans** (`/workspaces/:slug/spec-plans`), listing persisted spec plans with a HitlCard-routed "Run" button. A deliberate exception under the four-noun rule, not a violation: a spec **plan** (a substrate authoring artifact — a DAG of specs run in dependency order) is distinct from the internal-only dev-process **spec** (a GitHub issue) demoted below. Scoped to this one surface; new nav nouns still default to "no" and need their own ADR.
 

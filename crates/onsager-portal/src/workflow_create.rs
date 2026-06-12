@@ -116,6 +116,7 @@ pub fn validate_create_body(
                 workflow_id: String::new(),
                 seq: i as i32,
                 gate_kind: s.gate_kind,
+                executable: crate::workflow_dag::stage_is_executable(s.gate_kind),
                 params: s.params,
             })
             .collect()
@@ -135,6 +136,7 @@ pub fn validate_create_body(
                 workflow_id: String::new(),
                 seq: i as i32,
                 gate_kind,
+                executable: crate::workflow_dag::stage_is_executable(gate_kind),
                 params: s.params.clone().unwrap_or_else(|| serde_json::json!({})),
             });
         }

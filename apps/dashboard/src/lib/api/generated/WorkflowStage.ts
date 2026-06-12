@@ -12,6 +12,13 @@ export type WorkflowStage = { id: string, workflow_id: string,
  */
 seq: number, gate_kind: WorkflowGateKind, 
 /**
+ * Whether this stage's gate kind has a registered engine executor
+ * today (ADR 0028 / #602). `external-check` / `manual-approval`
+ * stages stay in the authored definition but are excluded from the
+ * executable DAG until their substrate executors land.
+ */
+executable: boolean, 
+/**
  * Gate-kind-specific config (e.g. agent profile, check name). Stored as
  * free-form JSON so the schema doesn't need to know every param shape.
  */

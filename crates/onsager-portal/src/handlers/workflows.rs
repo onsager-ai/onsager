@@ -411,7 +411,7 @@ pub struct RunsQuery {
 /// status derived from `artifacts.current_stage_index` and
 /// `workflow_parked_reason`.
 ///
-/// Stage IDs come from spine `workflow_stages` keyed by `(workflow_id,
+/// Stage IDs derive from the authored definition keyed by `(workflow_id,
 /// stage_order)`; the per-run stage list aligns 1:1 with that ordering so
 /// the dashboard can zip stages by index.
 pub async fn list_workflow_runs(
@@ -901,6 +901,7 @@ mod tests {
                 workflow_id: "wf_test".into(),
                 seq: i,
                 gate_kind: GateKind::AgentSession,
+                executable: true,
                 params: serde_json::json!({}),
             })
             .collect()

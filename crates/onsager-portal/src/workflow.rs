@@ -67,6 +67,12 @@ pub struct WorkflowStage {
     /// ascending `seq` order.
     pub seq: i32,
     pub gate_kind: GateKind,
+    /// Whether this stage's gate kind has a registered engine executor
+    /// today (ADR 0028 / #602). `external-check` / `manual-approval`
+    /// stages stay in the authored definition but are excluded from the
+    /// executable DAG until their substrate executors land.
+    #[serde(default)]
+    pub executable: bool,
     /// Gate-kind-specific config (e.g. agent profile, check name). Stored as
     /// free-form JSON so the schema doesn't need to know every param shape.
     pub params: serde_json::Value,
