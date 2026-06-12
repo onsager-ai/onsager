@@ -11,6 +11,7 @@ use crate::state::AppState;
 
 mod credentials;
 mod me;
+mod oauth;
 mod workflows;
 mod workspaces;
 
@@ -43,7 +44,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/artifacts", get(workflows::list_artifacts))
         .route("/api/artifacts/{id}", get(workflows::get_artifact))
         // Agent-facing MCP output channel (session-token auth).
-        .route("/mcp/messages", post(crate::mcp::messages));
+        .route("/mcp/messages", post(crate::mcp::messages))
+        // GitHub: the App's webhook + OAuth login (M2 #624).
+        .route("/api/webhooks/github", post(crate::github::receive))
+        .route("/api/auth/github", get(oauth::start))
+        .route("/api/auth/github/callback", get(oauth::callback));
 
     if state.config.dev_login_enabled() {
         app = app.route("/api/auth/dev-login", post(auth::dev_login));

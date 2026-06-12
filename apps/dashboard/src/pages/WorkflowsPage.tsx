@@ -27,16 +27,26 @@ export function WorkflowsPage() {
 
   const [showBuilder, setShowBuilder] = useState(false)
   const [name, setName] = useState('')
+  const [triggerKind, setTriggerKind] = useState<'manual' | 'github_issue_webhook'>('manual')
+  const [repo, setRepo] = useState('')
+  const [label, setLabel] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [userPrompt, setUserPrompt] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  const trigger =
+    triggerKind === 'manual'
+      ? ({ kind: 'manual', name: 'run' } as const)
+      : ({ kind: 'github_issue_webhook', repo, label } as const)
+  const triggerValid =
+    triggerKind === 'manual' || (repo.includes('/') && label.trim().length > 0)
 
   const create = useMutation({
     mutationFn: () =>
       workflowsApi.create({
         workspace_id: ws.id,
         name,
-        trigger: { kind: 'manual', name: 'run' },
+        trigger,
         definition: [
           {
             kind: 'agent',
@@ -76,6 +86,39 @@ export function WorkflowsPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Trigger</span>
+              <Button
+                type="button"
+                variant={triggerKind === 'manual' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTriggerKind('manual')}
+              >
+                Manual
+              </Button>
+              <Button
+                type="button"
+                variant={triggerKind === 'github_issue_webhook' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTriggerKind('github_issue_webhook')}
+              >
+                GitHub issue label
+              </Button>
+            </div>
+            {triggerKind === 'github_issue_webhook' && (
+              <div className="flex gap-2">
+                <Input
+                  placeholder="owner/repo"
+                  value={repo}
+                  onChange={(e) => setRepo(e.target.value)}
+                />
+                <Input
+                  placeholder="label"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                />
+              </div>
+            )}
             <Textarea
               placeholder="System prompt (optional)"
               value={systemPrompt}
@@ -88,7 +131,9 @@ export function WorkflowsPage() {
             />
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button
-              disabled={create.isPending || !name.trim() || !userPrompt.trim()}
+              disabled={
+                create.isPending || !name.trim() || !userPrompt.trim() || !triggerValid
+              }
               onClick={() => create.mutate()}
             >
               Create

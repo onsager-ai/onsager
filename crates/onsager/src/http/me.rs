@@ -14,7 +14,8 @@ use crate::state::AppState;
 /// M2 with the GitHub port; until then only dev-login can exist.
 pub async fn auth_providers(State(state): State<AppState>) -> Response {
     Json(serde_json::json!({
-        "github": false,
+        "github": state.config.github_client_id.is_some()
+            && state.config.github_client_secret.is_some(),
         "dev": state.config.dev_login_enabled(),
     }))
     .into_response()

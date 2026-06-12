@@ -143,6 +143,10 @@ async fn run_agent_stage(
         None => Vec::new(),
     };
 
+    // Repo access (#624): a write-scoped installation token for the
+    // trigger repo, minted per run, in-memory only.
+    let repos = crate::github::repo_access_for(&state.pool, workflow).await;
+
     let outcome = run_agent_session(SessionRequest {
         session_id: session_id.clone(),
         token,
@@ -151,6 +155,7 @@ async fn run_agent_stage(
         user_prompt: user_prompt.to_string(),
         mcp_url: state.config.mcp_url(),
         env,
+        repos,
     })
     .await;
 

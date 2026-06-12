@@ -83,7 +83,12 @@ export interface TriggerManual {
   kind: 'manual'
   name: string
 }
-export type Trigger = TriggerManual
+export interface TriggerGithubIssue {
+  kind: 'github_issue_webhook'
+  repo: string
+  label: string
+}
+export type Trigger = TriggerManual | TriggerGithubIssue
 
 export interface Workflow {
   id: string

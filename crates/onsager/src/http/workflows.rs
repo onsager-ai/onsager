@@ -198,7 +198,16 @@ pub async fn fire_workflow(
     if let Err(r) = require_workspace_access(&state.pool, &user, &wf.workspace_id).await {
         return r;
     }
-    let TriggerKind::Manual { .. } = &wf.trigger;
+    if !matches!(&wf.trigger, TriggerKind::Manual { .. }) {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "not_a_manual_trigger",
+                "detail": "this workflow fires from its GitHub trigger, not the Run button",
+            })),
+        )
+            .into_response();
+    }
     if !wf.active {
         return (
             StatusCode::CONFLICT,
