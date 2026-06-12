@@ -663,6 +663,18 @@ async fn activate_workflow(
         }
     };
 
+    // Triggers with no GitHub surface (manual / cron / spine-event) have
+    // nothing to verify or register upstream — activation is just the
+    // `active` flag flip (#614). The GitHub App requirement below is the
+    // `github_*` webhook shape only.
+    if workflow.github_repo_any().is_none() {
+        if let Err(e) = workflow_db::set_workflow_active(spine, workflow_id, true).await {
+            tracing::error!("mark workflow active: {e}");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        }
+        return Ok(());
+    }
+
     let Some(app_cfg) = AppConfig::from_env() else {
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
