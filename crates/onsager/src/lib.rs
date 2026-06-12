@@ -15,6 +15,7 @@ pub mod crypto;
 pub mod db;
 pub mod domain;
 pub mod events;
+pub mod github;
 pub mod http;
 pub mod mcp;
 pub mod scheduler;

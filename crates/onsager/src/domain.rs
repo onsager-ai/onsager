@@ -11,6 +11,21 @@ use serde::{Deserialize, Serialize};
 pub enum TriggerKind {
     /// Fired by `POST /api/workflows/:id/fire`.
     Manual { name: String },
+    /// Fired by a GitHub `issues.labeled` webhook whose repo + label
+    /// match. `repo` is the `owner/name` slug. The App's own webhook
+    /// delivers the event (no per-repo registration, #624).
+    GithubIssueWebhook { repo: String, label: String },
+}
+
+impl TriggerKind {
+    /// The `owner/name` slug for GitHub-shaped triggers; the run's
+    /// repo-access set derives from this.
+    pub fn github_repo(&self) -> Option<&str> {
+        match self {
+            TriggerKind::GithubIssueWebhook { repo, .. } => Some(repo.as_str()),
+            TriggerKind::Manual { .. } => None,
+        }
+    }
 }
 
 /// One stage of a workflow definition. Execution is "iterate the

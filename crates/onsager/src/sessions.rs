@@ -20,7 +20,65 @@ use tokio::process::Command;
 /// contract, unchanged from legacy so existing agent-side docs hold.
 pub const SESSION_ID_ENV: &str = "ONSAGER_SESSION_ID";
 pub const SESSION_TOKEN_ENV: &str = "ONSAGER_SESSION_TOKEN";
+pub const REPOS_ENV: &str = "ONSAGER_REPOS";
 const CLAUDE_BIN_ENV: &str = "ONSAGER_CLAUDE_BIN";
+
+/// One repo surfaced to the agent (token already minted). Ported from
+/// legacy `onsager-agent-spawn` (#624) — the `ONSAGER_REPOS` array is
+/// the agent-facing contract and must not drift.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClonableRepo {
+    pub owner: String,
+    pub name: String,
+    pub default_branch: String,
+    pub token: Option<String>,
+}
+
+/// Build the `ONSAGER_REPOS` JSON array; `None` for an empty set so
+/// the caller injects nothing.
+pub fn repos_env_json(repos: &[ClonableRepo]) -> Option<String> {
+    if repos.is_empty() {
+        return None;
+    }
+    let entries: Vec<serde_json::Value> = repos
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "owner": r.owner,
+                "name": r.name,
+                "default_branch": r.default_branch,
+                "clone_url": clone_url(&r.owner, &r.name, r.token.as_deref()),
+            })
+        })
+        .collect();
+    serde_json::to_string(&entries).ok()
+}
+
+/// HTTPS clone URL, authenticated via the `x-access-token` convention
+/// when a token is present; the token is percent-encoded defensively.
+fn clone_url(owner: &str, name: &str, token: Option<&str>) -> String {
+    match token {
+        Some(t) => format!(
+            "https://x-access-token:{}@github.com/{owner}/{name}.git",
+            urlencode(t)
+        ),
+        None => format!("https://github.com/{owner}/{name}.git"),
+    }
+}
+
+/// Minimal percent-encoding for URL userinfo / query values (ported).
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
 
 /// Inline `--mcp-config` registering this process's MCP endpoint. The
 /// bearer token interpolates from `$ONSAGER_SESSION_TOKEN` at startup
@@ -52,6 +110,8 @@ pub struct SessionRequest {
     /// Decrypted workspace credentials injected as env vars
     /// (CLAUDE_CODE_OAUTH_TOKEN etc.).
     pub env: Vec<(String, String)>,
+    /// The run's repo-access set, surfaced as `ONSAGER_REPOS` (#624).
+    pub repos: Vec<ClonableRepo>,
 }
 
 pub struct SessionOutcome {
@@ -102,6 +162,9 @@ pub async fn run_agent_session(req: SessionRequest) -> Result<SessionOutcome, Se
 
     cmd.env(SESSION_ID_ENV, &req.session_id);
     cmd.env(SESSION_TOKEN_ENV, &req.token);
+    if let Some(repos) = repos_env_json(&req.repos) {
+        cmd.env(REPOS_ENV, repos);
+    }
     for (k, v) in &req.env {
         cmd.env(k, v);
     }
@@ -204,6 +267,34 @@ mod tests {
             server["headers"]["Authorization"],
             "Bearer ${ONSAGER_SESSION_TOKEN}"
         );
+    }
+
+    #[test]
+    fn repos_env_json_builds_authenticated_entries() {
+        // Ported parity tests from legacy onsager-agent-spawn (#624).
+        let repos = vec![
+            ClonableRepo {
+                owner: "acme".into(),
+                name: "widgets".into(),
+                default_branch: "main".into(),
+                token: Some("tok_a".into()),
+            },
+            ClonableRepo {
+                owner: "acme".into(),
+                name: "public".into(),
+                default_branch: "main".into(),
+                token: None,
+            },
+        ];
+        let json = repos_env_json(&repos).unwrap();
+        let arr: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 2);
+        assert_eq!(
+            arr[0]["clone_url"],
+            "https://x-access-token:tok_a@github.com/acme/widgets.git"
+        );
+        assert_eq!(arr[1]["clone_url"], "https://github.com/acme/public.git");
+        assert_eq!(repos_env_json(&[]), None);
     }
 
     #[test]

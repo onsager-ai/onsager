@@ -21,6 +21,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "002_run_loop.sql",
         include_str!("../migrations/002_run_loop.sql"),
     ),
+    (
+        "003_github.sql",
+        include_str!("../migrations/003_github.sql"),
+    ),
 ];
 
 pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {

@@ -18,6 +18,13 @@ pub struct Config {
     /// Release-build opt-in for dev-login (`DEV_LOGIN_ENABLED=true`).
     /// Debug builds always allow it.
     pub dev_login_flag: bool,
+    /// HMAC secret for the GitHub App's webhook (`GITHUB_WEBHOOK_SECRET`).
+    /// Unset → the webhook route rejects everything (fail closed).
+    pub github_webhook_secret: Option<String>,
+    /// GitHub OAuth app (`GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`).
+    /// Unset → no GitHub login button.
+    pub github_client_id: Option<String>,
+    pub github_client_secret: Option<String>,
 }
 
 impl Config {
@@ -35,6 +42,15 @@ impl Config {
                 .ok()
                 .filter(|s| !s.is_empty()),
             dev_login_flag: std::env::var("DEV_LOGIN_ENABLED").is_ok_and(|v| v == "true"),
+            github_webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            github_client_id: std::env::var("GITHUB_CLIENT_ID")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            github_client_secret: std::env::var("GITHUB_CLIENT_SECRET")
+                .ok()
+                .filter(|s| !s.is_empty()),
         })
     }
 
