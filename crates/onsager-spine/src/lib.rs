@@ -56,7 +56,7 @@ pub use onsager_artifact::{
 };
 
 pub use extension_event::ExtensionEventRecord;
-pub use factory_event::{FactoryEvent, FactoryEventKind, GatePoint, TokenUsage, VerifyCheckResult};
+pub use factory_event::{FactoryEvent, FactoryEventKind, TokenUsage, VerifyCheckResult};
 pub use listener::{EventHandler, Listener};
 pub use namespace::{Namespace, NamespaceError};
 pub use store::{

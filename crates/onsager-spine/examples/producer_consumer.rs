@@ -96,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
     let listener_store = store.clone();
     let listener_handle = tokio::spawn(async move {
         Listener::new(listener_store)
-            .subscribe(Namespace::session())
+            .subscribe(Namespace::new("session").unwrap())
             .with_since(cursor)
             .run(handler)
             .await

@@ -36,9 +36,9 @@ Persisted in two tables (see `crates/onsager-spine/migrations/001_initial.sql`):
 - **`events_ext`** — namespaced extension events for subsystem-private data
   that doesn't (yet) belong on the typed bus. Carries `(namespace, event_type)`
   and a free-form JSON payload. Validated by
-  [`Namespace`](../crates/onsager-spine/src/namespace.rs) against the
-  well-known set: `forge`, `session`, `telegramable`,
-  `workflow`.
+  [`Namespace`](../crates/onsager-spine/src/namespace.rs) — lowercase
+  `[a-z][a-z0-9_]*`, constructed at the emit site (`session`,
+  `workflow`, `artifact`, `plan`, ...).
 
 ## Versioning
 
@@ -317,7 +317,7 @@ Producer subsystem: **onsager-portal (GitHub) / substrate scheduler (manual)**.
 - Variant: `FactoryEventKind::GateCheckUpdated`
 - Stream: `gate`
 
-A GitHub `check_suite`, `check_run`, or `status` event arrived for a PR we care about. Forge's external-check gate consumes this to advance or block artifacts whose current stage is `external-check`.
+A GitHub `check_suite`, `check_run`, or `status` event arrived for a PR we care about. The legacy external-check gate consumed this to advance or block artifacts whose current stage was `external-check`.
 
 | Field | Type | Description |
 |---|---|---|
@@ -332,7 +332,7 @@ A GitHub `check_suite`, `check_run`, or `status` event arrived for a PR we care 
 - Variant: `FactoryEventKind::GateManualApprovalSignal`
 - Stream: `gate`
 
-A manual-approval gate received a signal (e.g. the PR was merged). Forge's manual-approval gate advances when this arrives.
+A manual-approval gate received a signal (e.g. the PR was merged). The legacy manual-approval gate advanced when this arrived.
 
 | Field | Type | Description |
 |---|---|---|

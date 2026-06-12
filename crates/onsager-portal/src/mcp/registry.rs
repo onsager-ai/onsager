@@ -150,7 +150,7 @@ fn build_registry() -> Vec<ToolDescriptor> {
         },
         ToolDescriptor {
             name: "cancel_run",
-            description: "Abort an in-flight run: archives the artifact (sets `state = 'archived'`) and emits `artifact.archived` on the `forge:<artifact_id>` stream. Mirrors REST `POST /api/spine/artifacts/:id/abort`. Irreversible at the artifact level — the row is archived synchronously; downstream consumers see the same event shape as the dashboard abort path.",
+            description: "Abort an in-flight run: archives the artifact (sets `state = 'archived'`) and emits `artifact.archived` on the `artifact:<artifact_id>` stream. Mirrors REST `POST /api/spine/artifacts/:id/abort`. Irreversible at the artifact level — the row is archived synchronously; downstream consumers see the same event shape as the dashboard abort path.",
             category: ToolCategory::Destructive,
             input_schema: super::input_schema::<tools::runs::CancelRunArgs>(),
             invoke: |state, user, args| Box::pin(tools::runs::cancel_run(state, user, args)),

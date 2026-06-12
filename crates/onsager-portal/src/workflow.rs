@@ -1,5 +1,5 @@
 //! Workflow domain model — persisted declarative production-line blueprint
-//! that the dashboard surfaces and forge executes (issue #81 / parent #79).
+//! that the dashboard surfaces and the engine executes (issue #81 / parent #79).
 //!
 //! Trigger kinds and per-kind config live in [`onsager_spine::TriggerKind`]
 //! (the canonical registry-backed type, spec #237). Stage / gate kinds are
@@ -24,8 +24,9 @@ use std::fmt;
 use std::str::FromStr;
 use ts_rs::TS;
 
-/// Gate kind attached to a workflow stage. These map to the four gate runtime
-/// implementations forge ships.
+/// Gate kind attached to a workflow stage. Only `AgentSession` is
+/// executable in the 0.4 substrate (see `workflow_dag.rs`); the others
+/// survive in authored form for the builder UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export, rename = "WorkflowGateKind")]

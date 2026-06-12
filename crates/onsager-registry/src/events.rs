@@ -74,7 +74,7 @@ impl Subsystem {
 #[derive(Debug, Clone, Serialize)]
 pub struct EventDefinition {
     /// Wire `event_type` string, matching `FactoryEventKind::event_type()`
-    /// (e.g. `"forge.shaping_dispatched"`).
+    /// (e.g. `"artifact.registered"`).
     pub kind: &'static str,
     /// Schema version for this event's payload. Bumped on backwards-
     /// incompatible payload changes; additive `Option<T>` fields with
@@ -226,7 +226,6 @@ pub const EVENTS: EventManifest = EventManifest {
             operator_grain: true,
             description: "A PR was closed without merging.",
         },
-        // -- Forge process events -------------------------------------------
         // -- Chat-session lifecycle (portal's in-process runner, #583) -------
         EventDefinition {
             kind: "session.completed",

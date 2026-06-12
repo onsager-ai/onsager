@@ -44,7 +44,7 @@ pub async fn insert_workflow_with_stages(
     // Loop guard (#239): a `SpineEvent { event_kind: "trigger.fired" }`
     // workflow self-amplifies — every fire produces another `trigger.fired`
     // event that the same workflow listens to. Reject at create time;
-    // forge's event-trigger listener also has a runtime backstop.
+    // the trigger listener also has a runtime backstop.
     if let TriggerKind::SpineEvent { event_kind, .. } = &workflow.trigger
         && event_kind == "trigger.fired"
     {
@@ -457,7 +457,7 @@ pub async fn set_workflow_active(
 /// indices and park reasons behind on the orphan rows. See #233.
 ///
 /// We row-lock the workflow up front (`SELECT ... FOR UPDATE`) so a
-/// concurrent forge `register_artifact_from_trigger` can't tag a new
+/// concurrent trigger-side artifact registration can't tag a new
 /// artifact with this workflow_id between the artifact UPDATE and the
 /// workflow DELETE. Without the lock such a late writer's artifact
 /// would have its `workflow_id` cleared by the FK cascade but keep

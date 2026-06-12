@@ -33,7 +33,7 @@ function baseArtifact(overrides: Partial<ArtifactDetail>): ArtifactDetail {
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-29T00:00:00Z",
     last_observed_at: "2026-04-29T00:00:00Z",
-    created_by: "forge",
+    created_by: "engine",
     versions: [],
     vertical_lineage: [],
     horizontal_lineage: [],

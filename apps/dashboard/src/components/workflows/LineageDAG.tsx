@@ -13,11 +13,6 @@ const NODE_WIDTH = 220
 const NODE_HEIGHT = 82
 const LANE_HEIGHT = 140
 
-type GateEventData = {
-  gate_point?: string
-  verdict?: string
-}
-
 export function LineageDAG({ artifact }: LineageDAGProps) {
   const lanes = buildLanes(artifact.related_events)
   const paired = pairVersions(artifact.versions ?? [], lanes)
@@ -31,7 +26,7 @@ export function LineageDAG({ artifact }: LineageDAGProps) {
   }
 
   const height = paired.length * LANE_HEIGHT + 40
-  const width = NODE_WIDTH * 3 + 120
+  const width = NODE_WIDTH * 2 + 120
 
   return (
     <div className="overflow-x-auto">
@@ -64,18 +59,11 @@ export function LineageDAG({ artifact }: LineageDAGProps) {
           const prevY = i > 0 ? 20 + (i - 1) * LANE_HEIGHT + NODE_HEIGHT : null
           const cx = 40 + NODE_WIDTH / 2
 
-          const gateEvent = lane?.find(
-            (e) => e.event_type === "forge.gate_verdict",
-          )
-          const gateData = (gateEvent?.data ?? {}) as GateEventData
           const failed = lane?.some(
             (e) => e.event_type === "session.failed",
           )
           const completed = lane?.some(
             (e) => e.event_type === "session.completed",
-          )
-          const retried = lane?.some(
-            (e) => e.event_type === "forge.retry_requested",
           )
 
           return (
@@ -173,66 +161,6 @@ export function LineageDAG({ artifact }: LineageDAGProps) {
                 markerEnd="url(#arrow)"
               />
 
-              {/* Gate node */}
-              {gateEvent && (
-                <g>
-                  <rect
-                    x={40 + (NODE_WIDTH + 40) * 2}
-                    y={y}
-                    width={NODE_WIDTH}
-                    height={NODE_HEIGHT}
-                    rx={8}
-                    className={
-                      gateData.verdict === "Allow"
-                        ? "fill-emerald-50 stroke-emerald-200 dark:fill-emerald-950/40 dark:stroke-emerald-900"
-                        : gateData.verdict === "Deny"
-                          ? "fill-red-50 stroke-red-200 dark:fill-red-950/40 dark:stroke-red-900"
-                          : "fill-amber-50 stroke-amber-200 dark:fill-amber-950/40 dark:stroke-amber-900"
-                    }
-                    strokeWidth={1}
-                  />
-                  <text
-                    x={40 + (NODE_WIDTH + 40) * 2 + 12}
-                    y={y + 22}
-                    className="fill-foreground text-[12px] font-semibold"
-                  >
-                    Gate
-                  </text>
-                  <text
-                    x={40 + (NODE_WIDTH + 40) * 2 + 12}
-                    y={y + 44}
-                    className="fill-muted-foreground text-[11px]"
-                  >
-                    {gateData.gate_point ?? "unknown"}
-                  </text>
-                  <text
-                    x={40 + (NODE_WIDTH + 40) * 2 + 12}
-                    y={y + 62}
-                    className="fill-muted-foreground text-[11px]"
-                  >
-                    verdict: {gateData.verdict ?? "—"}
-                  </text>
-                  <line
-                    x1={40 + NODE_WIDTH * 2 + 40}
-                    y1={y + NODE_HEIGHT / 2}
-                    x2={40 + (NODE_WIDTH + 40) * 2}
-                    y2={y + NODE_HEIGHT / 2}
-                    className="stroke-muted-foreground"
-                    strokeWidth={1.5}
-                    markerEnd="url(#arrow)"
-                  />
-                </g>
-              )}
-
-              {retried && (
-                <text
-                  x={40}
-                  y={y + NODE_HEIGHT + 14}
-                  className="fill-amber-600 text-[11px] dark:fill-amber-400"
-                >
-                  ↺ retry requested
-                </text>
-              )}
             </g>
           )
         })}
@@ -244,16 +172,8 @@ export function LineageDAG({ artifact }: LineageDAGProps) {
           session
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block h-3 w-3 rounded bg-emerald-100 dark:bg-emerald-950/60" />
-          gate allow
-        </span>
-        <span className="flex items-center gap-1">
           <span className="inline-block h-3 w-3 rounded bg-red-100 dark:bg-red-950/60" />
-          deny / fail
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-3 w-3 rounded bg-amber-100 dark:bg-amber-950/60" />
-          escalate / modify
+          failed
         </span>
       </div>
 

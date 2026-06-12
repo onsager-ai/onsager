@@ -115,7 +115,6 @@ export interface WorkflowKindInfo {
 // `onsager_registry::EventDefinition`; keep field names + the
 // `EventSubsystem` union in sync by hand when the Rust struct changes.
 export type EventSubsystem =
-  | "forge"
   | "portal"
   | "substrate";
 

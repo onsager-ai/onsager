@@ -2,9 +2,8 @@
 //! Factory events — the authoritative event types emitted to the factory event
 //! spine by each subsystem.
 //!
-//! See `specs/forge-v0.1.md §9` for the Forge event contract. Additional event
-//! types from the other subsystems are included here so that the spine
-//! library provides a single typed vocabulary.
+//! One enum so the spine library provides a single typed vocabulary
+//! across both processes (portal + engine).
 
 use chrono::{DateTime, Utc};
 use onsager_artifact::{ArtifactId, ArtifactState, Kind, NodeId};
@@ -40,15 +39,13 @@ pub struct FactoryEvent {
 
 /// All factory event types across all subsystems.
 ///
-/// ## Forge events (authoritative per forge-v0.1 §9)
-///
 /// ## Session events (chat-session lifecycle — portal's in-process runner)
 ///
 /// `f64` fields (confidence) block `Eq`; only `PartialEq` is derived.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FactoryEventKind {
-    // -- Artifact lifecycle (Forge) -----------------------------------------
+    // -- Artifact lifecycle ---------------------------------------------------
     /// New artifact accepted and ID assigned.
     ArtifactRegistered {
         artifact_id: ArtifactId,
@@ -93,7 +90,6 @@ pub enum FactoryEventKind {
         pr_number: u64,
     },
 
-    // -- Forge process events -----------------------------------------------
     // -- Chat-session lifecycle (portal's in-process runner, ADR 0027) ------
     /// A chat agent session finished successfully. Emitted by portal's
     /// in-process session runner (spec #583; renamed from the legacy
@@ -245,11 +241,11 @@ pub enum FactoryEventKind {
 
     // -- Workflow events (issue #81 — workflow CRUD + webhook) --------------
     // `TriggerFired` is defined above in the issue #80 block; the
-    // webhook router emits the same variant so forge's trigger subscriber can
+    // webhook router emits the same variant so the trigger listener can
     // consume it with no translation.
     /// A GitHub `check_suite`, `check_run`, or `status` event arrived for a
-    /// PR we care about. Forge's external-check gate consumes this to advance
-    /// or block artifacts whose current stage is `external-check`.
+    /// PR we care about. The legacy external-check gate consumed this to
+    /// advance or block artifacts whose current stage was `external-check`.
     GateCheckUpdated {
         repo_owner: String,
         repo_name: String,
@@ -259,7 +255,7 @@ pub enum FactoryEventKind {
     },
 
     /// A manual-approval gate received a signal (e.g. the PR was merged).
-    /// Forge's manual-approval gate advances when this arrives.
+    /// The legacy manual-approval gate advanced when this arrived.
     GateManualApprovalSignal {
         repo_owner: String,
         repo_name: String,
@@ -530,24 +526,6 @@ impl FactoryEventKind {
 // ---------------------------------------------------------------------------
 // Supporting enums
 // ---------------------------------------------------------------------------
-
-/// Gate points in the legacy 0.1 gate protocol. Kept for historical
-/// spine rows; the governance subsystem retired with ADR 0027.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GatePoint {
-    PreDispatch,
-    StateTransition,
-    ConsumerRouting,
-    ToolLevel,
-    /// A run wants to *write* (push + open PR) to a bound-but-unpinned
-    /// repo it selected mid-run (spec #548, Part of #544). Binding a repo
-    /// to a workspace grants candidacy, not blanket write consent — this
-    /// gate is the consent point. The write-scoped token is minted only
-    /// after the verdict is `Allow`. The pinned repo (named in the
-    /// trigger) is pre-approved and never reaches this point.
-    RepoWrite,
-}
 
 /// LLM token usage carried on [`FactoryEventKind::SessionCompleted`]
 /// (issue #39). Accounting primitives only — USD cost is resolved downstream

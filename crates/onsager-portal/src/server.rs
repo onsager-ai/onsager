@@ -266,10 +266,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             get(spine_handlers::get_artifact),
         )
         .route(
-            "/api/spine/artifacts/{id}/retry",
-            post(spine_handlers::retry_artifact),
-        )
-        .route(
             "/api/spine/artifacts/{id}/abort",
             post(spine_handlers::abort_artifact),
         )

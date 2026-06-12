@@ -421,7 +421,7 @@ pub async fn schedule_workflow(state: &AppState, auth_user: &AuthUser, args: Val
     // performs on create — apply them on every trigger swap so a
     // schedule update can't sneak a kind past the registry manifest
     // or land a self-amplifying `spine_event { event_kind: "trigger.fired" }`
-    // workflow. Forge's trigger loader would otherwise reject (or
+    // workflow. The trigger listener would otherwise reject (or
     // worst-case loop on) the row.
     if TRIGGERS.lookup(kind_tag).is_none() {
         return Err(ToolError::InvalidParams(format!(

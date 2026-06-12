@@ -582,7 +582,6 @@ fn stream_producer(stream: &str) -> &'static str {
         "delivery" => "substrate scheduler (delivery role)",
         "deliverable" => "substrate scheduler (onsager-substrate)",
         "git" => "onsager-portal (GitHub webhooks)",
-        "forge" => "substrate scheduler (onsager-substrate) — legacy `forge` stream, spec #363",
         "session" => "onsager-portal (in-process session runner, #583)",
         "workflow" => "onsager-portal (trigger) / substrate scheduler (stage)",
         "gate" => "onsager-portal (GitHub) / substrate scheduler (manual)",
@@ -633,9 +632,9 @@ Persisted in two tables (see `crates/onsager-spine/migrations/001_initial.sql`):
 - **`events_ext`** — namespaced extension events for subsystem-private data
   that doesn't (yet) belong on the typed bus. Carries `(namespace, event_type)`
   and a free-form JSON payload. Validated by
-  [`Namespace`](../crates/onsager-spine/src/namespace.rs) against the
-  well-known set: `forge`, `session`, `telegramable`,
-  `workflow`.
+  [`Namespace`](../crates/onsager-spine/src/namespace.rs) — lowercase
+  `[a-z][a-z0-9_]*`, constructed at the emit site (`session`,
+  `workflow`, `artifact`, `plan`, ...).
 
 ## Versioning
 

@@ -149,7 +149,7 @@ const run_workflow: McpToolBinding = {
     },
     sideEffects: [
       "Emits `trigger.fired` on the workflow's trigger stream",
-      "Forge picks up the trigger and starts a new run for the artifact",
+      "The engine picks up the trigger and starts a new run",
     ],
     reversibility: "Reversible — cancel the run from its detail page if needed.",
     commit: { label: "Run workflow", intent: "destructive" },
@@ -235,7 +235,7 @@ const cancel_run: McpToolBinding = {
     },
     sideEffects: [
       "Sets `artifacts.state = 'archived'`",
-      "Emits `artifact.archived` on the `forge:<artifact_id>` stream",
+      "Emits `artifact.archived` on the `artifact:<artifact_id>` stream",
       "In-flight stage work is dropped — downstream consumers see the abort",
     ],
     reversibility:

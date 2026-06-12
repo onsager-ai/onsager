@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ArrowLeft, Ban, MoreHorizontal, RefreshCw } from "lucide-react"
+import { ArrowLeft, Ban, MoreHorizontal } from "lucide-react"
 import { LineageDAG } from "@/components/workflows/LineageDAG"
 import { ArtifactContent } from "@/components/artifacts/ArtifactContent"
 import { ChatAskButton } from "@/components/chat/ChatAskButton"
@@ -91,15 +91,6 @@ export function ArtifactDetailPage() {
     setBanner({ kind: "error", message: `${label}: ${message}` })
   }
 
-  const retryMutation = useMutation({
-    mutationFn: () => api.retryArtifact(id!, { actor: "dashboard" }),
-    onSuccess: () => {
-      setBanner({ kind: "ok", message: "Retry requested." })
-      invalidate()
-    },
-    onError: (err) => showError("Retry failed", err),
-  })
-
   const abortMutation = useMutation({
     mutationFn: (reason: string) =>
       api.abortArtifact(id!, { reason, actor: "dashboard" }),
@@ -119,10 +110,8 @@ export function ArtifactDetailPage() {
     abortMutation.mutate(reason.trim() || "aborted via dashboard")
   }
 
-  const isTerminal =
-    artifact?.state === "archived" || artifact?.state === "released"
   const archived = artifact?.state === "archived"
-  const busy = retryMutation.isPending || abortMutation.isPending
+  const busy = abortMutation.isPending
 
   // Mobile chrome: back + artifact name + ⋯ overflow menu. Desktop
   // renders the same 4 actions as inline buttons below. Memoized per
@@ -145,13 +134,6 @@ export function ArtifactDetailPage() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
             <DropdownMenuItem
-              disabled={busy || isTerminal}
-              onClick={() => retryMutation.mutate()}
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Retry
-            </DropdownMenuItem>
-            <DropdownMenuItem
               variant="destructive"
               disabled={busy || archived}
               onClick={handleAbort}
@@ -163,7 +145,7 @@ export function ArtifactDetailPage() {
         </DropdownMenu>
       ) : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [artifact, busy, isTerminal, archived],
+    [artifact, busy, archived],
   )
   usePageHeader({
     title: artifact?.name ?? "Artifact",
@@ -234,20 +216,6 @@ export function ArtifactDetailPage() {
       {/* Desktop controls — mobile uses the overflow menu in the global
           top bar via usePageHeader above. */}
       <div className="hidden flex-wrap gap-2 md:flex">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || isTerminal}
-          onClick={() => retryMutation.mutate()}
-          title={
-            isTerminal
-              ? "Cannot retry an artifact in a terminal state"
-              : "Request another run"
-          }
-        >
-          <RefreshCw className="mr-1 h-3.5 w-3.5" />
-          Retry
-        </Button>
         <Button
           variant="destructive"
           size="sm"
@@ -360,7 +328,7 @@ function ProvenanceTime({
   if (!artifact.versions || artifact.versions.length === 0) {
     return (
       <p className="py-4 text-center text-sm text-muted-foreground">
-        No versions yet. Versions are created as Forge shapes this artifact.
+        No versions yet. Versions are created as runs produce output for this artifact.
       </p>
     )
   }
