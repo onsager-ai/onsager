@@ -212,7 +212,11 @@ mod tests {
 
         let doc = derive_workflow_json(
             "wf_up",
-            &[stage(0, GateKind::AgentSession, json!({"system_prompt": "s"}))],
+            &[stage(
+                0,
+                GateKind::AgentSession,
+                json!({"system_prompt": "s"}),
+            )],
         )
         .expect("derives");
         assert!(doc["nodes"][0]["executor"]["user_prompt"].is_null());

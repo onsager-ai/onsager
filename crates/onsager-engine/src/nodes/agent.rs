@@ -669,7 +669,10 @@ mod tests {
     #[test]
     fn authored_user_prompt_leads_rendered_body() {
         let ctx = empty_ctx();
-        assert_eq!(render_user_prompt(Some("do the task"), &ctx), "do the task\n");
+        assert_eq!(
+            render_user_prompt(Some("do the task"), &ctx),
+            "do the task\n"
+        );
         assert_eq!(render_user_prompt(Some("  "), &ctx), "");
         assert_eq!(render_user_prompt(None, &ctx), "");
     }
