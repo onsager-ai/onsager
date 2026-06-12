@@ -113,6 +113,10 @@ pub trait Executor: std::fmt::Debug + Send + Sync {
 pub struct AgentConfig {
     pub model: String,
     pub system_prompt: String,
+    /// Authored user-side task body (#616). Optional — pre-#616
+    /// payloads parse with `None`.
+    #[serde(default)]
+    pub user_prompt: Option<String>,
     #[serde(default)]
     pub tools: Vec<String>,
     #[serde(default)]
