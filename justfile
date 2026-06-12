@@ -242,7 +242,11 @@ dev: dev-infra
         cargo run -p onsager-portal -- serve &
 
     echo "==> Starting onsager-scheduler (substrate scheduler)..."
+    # Agent sessions need the portal MCP endpoint to get tools
+    # (emit_artifact etc.) — without it every run parks at the
+    # liveness gate. Default to this stack's portal; allow override.
     DATABASE_URL="$DATABASE_URL" \
+    ONSAGER_MCP_URL="${ONSAGER_MCP_URL:-http://localhost:${PORTAL_PORT}/mcp/messages}" \
         cargo run -p onsager-engine --bin onsager-scheduler -- serve &
 
     echo "==> Starting dashboard on :${DASHBOARD_PORT}..."
@@ -284,6 +288,7 @@ dev-portal port="3002":
 
 dev-scheduler:
     DATABASE_URL="${DATABASE_URL:-postgres://onsager:onsager@localhost:5432/onsager}" \
+    ONSAGER_MCP_URL="${ONSAGER_MCP_URL:-http://localhost:3002/mcp/messages}" \
         cargo run -p onsager-engine --bin onsager-scheduler -- serve
 
 # ── DB ───────────────────────────────────────────────────────────────
