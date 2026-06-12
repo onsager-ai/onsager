@@ -62,3 +62,19 @@ describe("v2 shell (M0 #622)", () => {
     )
   })
 })
+
+import { decodeInlineContent } from "@/lib/api"
+
+describe("decodeInlineContent (utf-8)", () => {
+  it("decodes multi-byte utf-8 correctly", () => {
+    // "gears — steel" with an em-dash; btoa can't encode it directly,
+    // so build the base64 from utf-8 bytes the way the server does.
+    const utf8 = new TextEncoder().encode("gears — steel")
+    const b64 = btoa(String.fromCharCode(...utf8))
+    expect(decodeInlineContent(`inline:base64,${b64}`)).toBe("gears — steel")
+  })
+  it("rejects non-inline uris", () => {
+    expect(decodeInlineContent("https://x")).toBeNull()
+    expect(decodeInlineContent(null)).toBeNull()
+  })
+})

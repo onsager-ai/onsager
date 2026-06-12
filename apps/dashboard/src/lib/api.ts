@@ -168,11 +168,18 @@ export const artifactsApi = {
   get: (id: string) => request<{ artifact: Artifact }>(`/artifacts/${id}`),
 }
 
-/** Decode an `inline:base64,...` content URI to text; null otherwise. */
+/**
+ * Decode an `inline:base64,...` content URI to text; null otherwise.
+ * `atob` alone yields latin-1 and mangles multi-byte UTF-8 (em-dashes
+ * became `â`), so the bytes go through TextDecoder.
+ */
 export function decodeInlineContent(uri: string | null): string | null {
   if (!uri?.startsWith('inline:base64,')) return null
   try {
-    return atob(uri.slice('inline:base64,'.length))
+    const bytes = Uint8Array.from(atob(uri.slice('inline:base64,'.length)), (c) =>
+      c.charCodeAt(0),
+    )
+    return new TextDecoder().decode(bytes)
   } catch {
     return null
   }
