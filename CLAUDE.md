@@ -262,21 +262,15 @@ Services (`just dev` launches portal and the substrate scheduler):
 
 Stop with `Ctrl+C` for services, `just dev-down` for Postgres.
 
-### Parallel dev environments (per-worktree slots)
+### Parallel dev environments (per-worktree)
 
-When two agents (or a human + an agent) run the stack on the same VM at once, the **slot system** (#194) gives each worktree a private, fully-containerized copy on a disjoint port block. Slot 0 is the main checkout (`just dev`, today's ports); slots 1..=99 use a 10-port stride from 9000.
-
-```bash
-just worktree-new feat-a       # branch + slot + compose project, all up
-just worktree-list             # see slots, ports, container status
-just slot-exec feat-a cargo test -p onsager-portal   # one-off command in the slot
-just worktree-tunnel feat-a    # SSH `-L` flags for laptop access
-just worktree-up feat-a        # bring an existing slot back after reboot
-just worktree-rm feat-a        # tear down + remove worktree (keeps branch)
-just worktree-rm feat-a --with-branch   # also delete the branch
-```
-
-The slot's edge port serves the dashboard and reverse-proxies the backend APIs same-origin (`/api/...` → portal), so the dashboard makes relative-path fetches with no per-environment URL config and no CORS surface. SSH-forward `localhost:9010` (slot 1's edge), open it, done. See [spec #194](https://github.com/onsager-ai/onsager/issues/194).
+One flow: git worktrees + the devproxy. Each worktree gets its own
+`COMPOSE_PROJECT_NAME` / `DEV_HOST` via direnv and is reachable through
+the machine Traefik at `http://<branch>.onsager.localhost:8000` —
+containerized (`docker compose up`) or host-run (`just dev`, the fast
+loop). See § Worktree dev stack (Traefik / devproxy) below; manage
+worktrees with `wt new <branch>` / `wt rm <branch>` / `wt ls`.
+(The former slot system, spec #194, was deleted by ADR 0028 / spec #605.)
 
 ## Build & Test
 
@@ -337,7 +331,7 @@ Several crates carry their own CLAUDE.md with crate-specific instructions: `onsa
 
 ## Worktree dev stack (Traefik / devproxy)
 
-In addition to the slot system above, each git worktree can run the full
+Each git worktree can run the full
 containerized stack via the root `docker-compose.yml` (direnv/.envrc set
 `COMPOSE_PROJECT_NAME` + `DEV_HOST`). No host ports are published — the
 caddy `edge` service joins the shared `devproxy` network and Traefik

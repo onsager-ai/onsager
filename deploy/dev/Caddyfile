@@ -1,7 +1,7 @@
 # Per-slot edge proxy.
 #
 # Variables come from the slot's .env.slot (sourced by docker-compose):
-#   SLOT_EDGE_PORT     — port Caddy listens on (also the SSH-forward target)
+#   EDGE_PORT          — port Caddy listens on
 #
 # Routing model — same-origin for everything the browser hits:
 #   /api/*          → portal:3002   (ADR 0006 — portal owns all /api/*)
@@ -21,7 +21,7 @@
 	persist_config off
 }
 
-:{$SLOT_EDGE_PORT} {
+:{$EDGE_PORT} {
 	log {
 		output stdout
 		format console

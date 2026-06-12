@@ -12,7 +12,6 @@
 //!     cargo run -p xtask -- check-generated-types    # check Rust → TS generated dashboard types (#298)
 //!     cargo run -p xtask -- check-file-budget        # bound per-file token cost (#261)
 //!     cargo run -p xtask -- check-adr-adoption        # Accepted ADRs with unchecked adoption items (#506)
-//!     cargo run -p xtask -- slot <subcommand>        # per-worktree dev slot allocator (#194)
 //!
 //! The event catalog is derived from `crates/onsager-spine/src/factory_event.rs`
 //! by parsing the `FactoryEventKind` enum and the `event_type()` /
@@ -33,9 +32,6 @@
 //! `#[cfg(test)]` blocks and conventional test files excluded. The vocab
 //! is `tiktoken o200k_base`, vendored at `xtask/assets/o200k_base.tiktoken`
 //! for offline determinism. See [`check_file_budget`].
-//!
-//! `slot` allocates and manages per-worktree dev slots backed by docker-compose
-//! projects on disjoint ports. See [`slot`] for the full surface.
 
 mod check_adr_adoption;
 mod check_deferred_todos;
@@ -50,7 +46,6 @@ mod check_triggers;
 mod lint_api_contract;
 mod lint_seams;
 mod portal_registry;
-mod slot;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -135,10 +130,9 @@ fn main() -> ExitCode {
         Some("check-file-budget") => check_file_budget::run(args.collect()),
         Some("check-deferred-todos") => check_deferred_todos::run(args.collect()),
         Some("count-tokens") => check_file_budget::run_count(args.collect()),
-        Some("slot") => slot::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- check-tools-and-skills\n  cargo run -p xtask -- check-hitl-coverage\n  cargo run -p xtask -- check-metaphor-leakage\n  cargo run -p xtask -- check-detail-page-tabs\n  cargo run -p xtask -- check-generated-types\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- check-deferred-todos [--mode=warn|fail]\n  cargo run -p xtask -- check-adr-adoption [--mode=warn|fail]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- slot <alloc|free|list|env|get|project|tunnel> ..."
+            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- check-tools-and-skills\n  cargo run -p xtask -- check-hitl-coverage\n  cargo run -p xtask -- check-metaphor-leakage\n  cargo run -p xtask -- check-detail-page-tabs\n  cargo run -p xtask -- check-generated-types\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- check-deferred-todos [--mode=warn|fail]\n  cargo run -p xtask -- check-adr-adoption [--mode=warn|fail]\n  cargo run -p xtask -- count-tokens <file>"
         )),
     };
 

@@ -2,10 +2,9 @@
 # project per checkout/worktree (COMPOSE_PROJECT_NAME + DEV_HOST come
 # from .envrc via direnv).
 #
-# Reuses the dev-overlay images from deploy/dev/ (spec #194). Unlike the
-# per-slot flow, nothing publishes a host port: the caddy `edge` service
-# joins the shared `devproxy` network and Traefik (in ~/dev-proxy)
-# routes Host(`$DEV_HOST`) → edge. Browser/agent access:
+# Uses the dev-overlay images from deploy/dev/. Nothing publishes a
+# host port: the caddy `edge` service joins the shared `devproxy`
+# network and Traefik (in ~/dev-proxy) routes Host(`$DEV_HOST`) → edge. Browser/agent access:
 #   http://<worktree>.onsager.localhost:8000  (main checkout: http://onsager.localhost:8000)
 #
 # Usage:
@@ -137,7 +136,7 @@ services:
     volumes:
       - ./deploy/dev/Caddyfile:/etc/caddy/Caddyfile:ro
     environment:
-      SLOT_EDGE_PORT: "9000"
+      EDGE_PORT: "9000"
     labels:
       - traefik.enable=true
       - traefik.http.routers.${COMPOSE_PROJECT_NAME}.rule=Host(`${DEV_HOST}`)
