@@ -1,6 +1,5 @@
 /target
 .env
-**/*.rs.bak
 /node_modules
 **/node_modules
 .DS_Store
@@ -9,22 +8,15 @@
 /.vscode/settings.json
 /.claude/worktrees
 **/dist
-**/.turbo
-**/.next
-# Per-worktree dev slots (#194). The manifest is host-local — slot
-# numbers describe a single VM's port layout and shouldn't propagate
-# across machines. The worktrees/ directory holds linked git worktrees
-# created by `just worktree-new` and is similarly local.
-/worktrees/
 
-# Local runtime data. Stiglab defaults its DB to sqlite://./data/stiglab.db
-# (see .env.example); the file is per-machine dev state, never committed.
-/data/
-
-# Codegraph local code-index (SQLite knowledge graph). Per-machine dev
-# state built by `codegraph init/index`; never committed.
+# Codegraph local code-index; per-machine dev state.
 /.codegraph/
 
-# Local host-port override for host-run cargo dev (machine-specific)
+# Local host-port override for host-run cargo dev (machine-specific).
 docker-compose.override.yml
 compose.override.yml
+
+# Legacy v1 tree (ADR 0029): kept for porting, never built. Its own
+# target/node_modules must not be re-added by stray local builds.
+/legacy/target
+/legacy/**/node_modules

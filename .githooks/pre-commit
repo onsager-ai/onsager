@@ -9,7 +9,7 @@ set -e
 # We check every time (not just when migrations are staged) because a
 # new migration that skips a number breaks the whole sequence.
 fail=0
-for dir in crates/onsager-spine/migrations crates/synodic/migrations/pg; do
+for dir in crates/onsager/migrations; do
     [ -d "$dir" ] || continue
     prev=0
     for f in $(ls "$dir"/*.sql 2>/dev/null | sort -V); do

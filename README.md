@@ -1,5 +1,10 @@
 # Onsager — governed workflows for AI-augmented engineering work
 
+> **⚠ 0.5 reset in progress (ADR 0029 / #620).** The v1 tree lives in
+> `legacy/` (kept for porting, never built); v2 is `crates/onsager` +
+> `apps/dashboard`. Sections below describe the legacy system until
+> the M4 flip rewrites this file.
+
 When agents write code, ship safely. Onsager runs your team's quality
 gates — automated verification, governance, audit — on every
 AI-generated change. Open source, runs anywhere.

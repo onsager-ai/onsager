@@ -2,6 +2,19 @@
 
 AI factory stack — monorepo for the Onsager event bus and its subsystems.
 
+> **⚠ 0.5 reset in progress (ADR 0029 / #620).** The tree described by
+> the rest of this file moved to `legacy/` — grep-able for porting,
+> excluded from the workspace, pnpm, and CI, never built. v2 is the
+> fresh workspace at `crates/onsager` (one process, events as record)
+> plus `apps/dashboard` (rebuilt shell). Work happens on v2 milestone
+> specs #622–#626; port from `legacy/` wholesale, never re-type. The
+> sections below describe the **legacy** architecture until the M4
+> flip rewrites this file. Still binding now: the identity commitments
+> as amended by ADR 0029, claim-honesty, the spec process, merge
+> policy, and the worktree dev flow. New v2 ratchet: **no producer
+> without a consumer in the same PR.**
+
+
 ## What makes Onsager Onsager
 
 These commitments define Onsager-the-factory's identity — the monorepo and its subsystems. They do not, in general, prescribe the internal structure of what the factory produces; downstream artifacts and deployed systems are their own viable systems with their own identities. The exception is **how** the factory operates on its work (specs as ground truth, below) — that commitment binds both Onsager's self-construction and its production discipline.
