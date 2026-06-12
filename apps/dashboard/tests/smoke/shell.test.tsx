@@ -7,6 +7,9 @@ vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api")
   return {
     ...actual,
+    workflowsApi: {
+      list: vi.fn().mockResolvedValue({ workflows: [] }),
+    },
     api: {
       authProviders: vi.fn().mockResolvedValue({ github: false, dev: true }),
       getMe: vi.fn().mockResolvedValue({
@@ -25,7 +28,8 @@ vi.mock("@/lib/api", async () => {
 })
 
 import { LoginPage } from "@/pages/LoginPage"
-import { HomePage } from "@/pages/HomePage"
+import { WorkflowsPage } from "@/pages/WorkflowsPage"
+import { WorkspaceProvider } from "@/lib/workspace"
 import { AuthProvider } from "@/lib/auth"
 
 function wrap(node: React.ReactNode) {
@@ -47,9 +51,14 @@ describe("v2 shell (M0 #622)", () => {
     await waitFor(() => expect(screen.getByText(/dev login/i)).toBeInTheDocument())
   })
 
-  it("home lists workspaces from the v2 API", async () => {
-    wrap(<HomePage />)
-    await waitFor(() => expect(screen.getByText("Dev workspace")).toBeInTheDocument())
-    expect(screen.getByText("dev mode")).toBeInTheDocument()
+  it("workflows page renders against the resolved workspace", async () => {
+    wrap(
+      <WorkspaceProvider>
+        <WorkflowsPage />
+      </WorkspaceProvider>,
+    )
+    await waitFor(() =>
+      expect(screen.getByText(/no workflows yet/i)).toBeInTheDocument(),
+    )
   })
 })

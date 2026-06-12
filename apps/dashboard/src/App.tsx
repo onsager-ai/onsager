@@ -1,8 +1,13 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from '@/lib/auth'
+import { WorkspaceProvider } from '@/lib/workspace'
+import { Shell } from '@/components/layout/Shell'
 import { LoginPage } from '@/pages/LoginPage'
-import { HomePage } from '@/pages/HomePage'
+import { WorkflowsPage } from '@/pages/WorkflowsPage'
+import { WorkflowDetailPage } from '@/pages/WorkflowDetailPage'
+import { RunDetailPage } from '@/pages/RunDetailPage'
+import { ArtifactDetailPage, ArtifactsPage } from '@/pages/ArtifactsPage'
 
 const queryClient = new QueryClient()
 
@@ -30,7 +35,18 @@ export default function App() {
               path="/*"
               element={
                 <Authed>
-                  <HomePage />
+                  <WorkspaceProvider>
+                    <Shell>
+                      <Routes>
+                        <Route path="/" element={<Navigate to="/workflows" replace />} />
+                        <Route path="/workflows" element={<WorkflowsPage />} />
+                        <Route path="/workflows/:id" element={<WorkflowDetailPage />} />
+                        <Route path="/runs/:id" element={<RunDetailPage />} />
+                        <Route path="/artifacts" element={<ArtifactsPage />} />
+                        <Route path="/artifacts/:id" element={<ArtifactDetailPage />} />
+                      </Routes>
+                    </Shell>
+                  </WorkspaceProvider>
                 </Authed>
               }
             />
