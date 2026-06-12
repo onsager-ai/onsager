@@ -226,7 +226,7 @@ These land in warn mode; a follow-up spec ratchets them to fail once the floor i
 crates/
   onsager-artifact/    <- domain value objects (Artifact, ArtifactId, ArtifactVersionId, Kind, Provenance, SourceTag, lineage, quality)
   onsager-spine/       <- event bus client (EventStore, Listener, Namespace, FactoryEvent) + shared spine tables
-  onsager-registry/    <- type registry, seed catalog, evaluators, static event manifest, trigger registry
+  onsager-registry/    <- workflow-kind catalog, static event manifest, trigger registry
   onsager-github/      <- typed GitHub API + webhook verification + OAuth (single home for GitHub HTTP)
   onsager-substrate/   <- 0.2 kernel: Workflow template, Executor trait, WorkflowLibrary, Plan Compiler, five kernel invariants
   onsager-agent-spawn/ <- shared agent-session spawn wiring (utility crate; portal + engine both depend on it, seam-safely)
