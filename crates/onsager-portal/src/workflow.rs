@@ -158,3 +158,53 @@ impl Workflow {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use onsager_spine::TriggerKind;
+
+    fn workflow_with(trigger: TriggerKind) -> Workflow {
+        Workflow {
+            id: "wf_test".into(),
+            workspace_id: "ws".into(),
+            name: "t".into(),
+            trigger,
+            install_id: None,
+            preset_id: None,
+            active: false,
+            readiness: "ready".into(),
+            autofire: "off".into(),
+            created_by: "u".into(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    /// Activation branches on `github_repo_any()` (#614): GitHub-shaped
+    /// triggers go through App/install/webhook registration; everything
+    /// else just flips `active`. Pin which side each kind lands on.
+    #[test]
+    fn github_repo_any_discriminates_activation_shape() {
+        let none = [
+            TriggerKind::Manual { name: "go".into() },
+            TriggerKind::Cron {
+                expression: "0 0 * * *".into(),
+                timezone: None,
+            },
+        ];
+        for t in none {
+            assert!(workflow_with(t).github_repo_any().is_none());
+        }
+
+        let some = TriggerKind::GithubIssueWebhook {
+            repo: "acme/widgets".into(),
+            label: "spec".into(),
+        };
+        assert_eq!(
+            workflow_with(some).github_repo_any(),
+            Some(("acme", "widgets"))
+        );
+    }
+}
