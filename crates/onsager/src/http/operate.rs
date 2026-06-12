@@ -66,6 +66,72 @@ pub async fn session_events(
     }
 }
 
+/// `GET /api/sessions/:id/events/stream` — the live feed (#634).
+/// Server-sent events: one JSON message per durable `agent.*` event
+/// plus transient `agent.text_delta` drafts. The stream ends when the
+/// session does (the scheduler drops the channel). A session that has
+/// already ended gets an immediately-closing stream — the client's
+/// initial fetch already has the durable rows.
+pub async fn session_events_stream(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> Response {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    use tokio_stream::StreamExt;
+    use tokio_stream::wrappers::BroadcastStream;
+
+    let session: Option<(String,)> =
+        match sqlx::query_as("SELECT workspace_id FROM sessions WHERE id = $1")
+            .bind(&id)
+            .fetch_optional(&state.pool)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("session lookup failed: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+    let Some((workspace_id,)) = session else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "session not found" })),
+        )
+            .into_response();
+    };
+    if let Err(r) = require_workspace_access(&state.pool, &user, &workspace_id).await {
+        return r;
+    }
+
+    let receiver = state
+        .feeds
+        .lock()
+        .expect("feeds lock")
+        .get(&id)
+        .map(|sender| sender.subscribe());
+    let live = BroadcastStream::new(match receiver {
+        Some(r) => r,
+        None => {
+            // Session already ended: empty channel whose sender drops
+            // here, closing the stream immediately.
+            let (sender, receiver) = tokio::sync::broadcast::channel(1);
+            drop(sender);
+            receiver
+        }
+    });
+    let stream = live.filter_map(|item| match item {
+        Ok(value) => Some(Ok::<Event, std::convert::Infallible>(
+            Event::default().data(value.to_string()),
+        )),
+        // Lagged subscriber: skip — the durable rows are the truth.
+        Err(_) => None,
+    });
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct ActivityRow {
     pub id: i64,

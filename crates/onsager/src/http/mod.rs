@@ -44,6 +44,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/runs/{id}", get(workflows::get_run))
         .route("/api/runs/{id}/abort", post(operate::abort_run))
         .route("/api/sessions/{id}/events", get(operate::session_events))
+        .route(
+            "/api/sessions/{id}/events/stream",
+            get(operate::session_events_stream),
+        )
         .route("/api/activity", get(operate::activity))
         .route("/api/artifacts", get(workflows::list_artifacts))
         .route("/api/artifacts/{id}", get(workflows::get_artifact))

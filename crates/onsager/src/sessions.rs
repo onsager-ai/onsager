@@ -117,6 +117,10 @@ pub struct SessionRequest {
     pub pgid_slot: std::sync::Arc<std::sync::Mutex<Option<i32>>>,
     /// Sink for normalized `agent.*` session events (#632).
     pub pool: PgPool,
+    /// Live feed for SSE subscribers (#634): durable events plus
+    /// transient text deltas. Dropped (closing all streams) when the
+    /// session ends.
+    pub feed: tokio::sync::broadcast::Sender<serde_json::Value>,
 }
 
 pub struct SessionOutcome {
@@ -151,7 +155,13 @@ pub async fn run_agent_session(req: SessionRequest) -> Result<SessionOutcome, Se
         .unwrap_or_else(|| "claude".to_string());
     let mut cmd = Command::new(&command);
 
-    cmd.args(["--output-format", "stream-json", "--verbose"]);
+    cmd.args([
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        // Token deltas for the live feed (#634).
+        "--include-partial-messages",
+    ]);
     // Headless: no human at the TTY.
     cmd.args(["--permission-mode", "bypassPermissions"]);
     if let Some(model) = req.model.as_deref().filter(|m| !m.is_empty()) {
@@ -221,6 +231,15 @@ pub async fn run_agent_session(req: SessionRequest) -> Result<SessionOutcome, Se
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
+        // Transient token deltas (#634): straight to live subscribers,
+        // never persisted — the durable agent.text row carries the
+        // full message.
+        if let Some(delta) = crate::agent_events::text_delta(&value) {
+            let _ = req.feed.send(serde_json::json!({
+                "kind": "agent.text_delta",
+                "payload": { "text": delta },
+            }));
+        }
         // Normalize + persist the session feed (#632). A failed insert
         // is logged, never fatal — the feed must not fail the work.
         for event in normalizer.handle(&value) {
@@ -237,6 +256,11 @@ pub async fn run_agent_session(req: SessionRequest) -> Result<SessionOutcome, Se
             if let Err(e) = inserted {
                 tracing::warn!(session_id = %req.session_id, "session event insert failed: {e}");
             }
+            let _ = req.feed.send(serde_json::json!({
+                "kind": event.kind,
+                "payload": event.payload,
+                "seq": seq,
+            }));
         }
         if let Ok(ClaudeEvent::Result {
             subtype,

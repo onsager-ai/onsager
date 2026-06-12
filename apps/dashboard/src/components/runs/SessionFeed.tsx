@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Markdown from 'react-markdown'
 import { AlertTriangle, ChevronRight, Wrench } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -13,14 +14,60 @@ import { sessionsApi, type SessionEvent } from '@/lib/api'
  * lifecycle events are quiet rows. Polls while the session runs.
  */
 export function SessionFeed({ sessionId, status }: { sessionId: string; status: string }) {
+  const qc = useQueryClient()
+  // Pending token-streamed prose (#634): accumulates from SSE deltas,
+  // cleared when its durable agent.text row arrives.
+  const [pending, setPending] = useState('')
+  const [sseDown, setSseDown] = useState(false)
+  const pendingRef = useRef('')
+
   const { data } = useQuery({
     queryKey: ['session-events', sessionId],
     queryFn: () => sessionsApi.events(sessionId),
-    refetchInterval: (q) => (q.state.data?.status === 'running' ? 2000 : false),
+    // SSE drives live updates; polling is the fallback (and the slow
+    // reconciliation pass while streaming works).
+    refetchInterval: (q) =>
+      q.state.data?.status === 'running' ? (sseDown ? 2000 : 5000) : false,
   })
   const events = data?.events ?? []
   const live = (data?.status ?? status) === 'running'
   const items = foldToolPairs(events)
+
+  useEffect(() => {
+    if (!live) return
+    const source = new EventSource(`/api/sessions/${sessionId}/events/stream`)
+    source.onmessage = (msg) => {
+      let parsed: { kind?: string; payload?: { text?: string } }
+      try {
+        parsed = JSON.parse(msg.data)
+      } catch {
+        return
+      }
+      if (parsed.kind === 'agent.text_delta') {
+        pendingRef.current += parsed.payload?.text ?? ''
+        setPending(pendingRef.current)
+      } else {
+        // A durable event landed: the full message supersedes the
+        // accumulating draft; pull the persisted rows.
+        if (parsed.kind === 'agent.text') {
+          pendingRef.current = ''
+          setPending('')
+        }
+        qc.invalidateQueries({ queryKey: ['session-events', sessionId] })
+        if (parsed.kind === 'agent.completed') {
+          qc.invalidateQueries({ queryKey: ['run'] })
+        }
+      }
+    }
+    source.onerror = () => {
+      // Stream closed: either the session ended (normal) or SSE is
+      // unavailable — polling covers both.
+      setSseDown(true)
+      source.close()
+      qc.invalidateQueries({ queryKey: ['session-events', sessionId] })
+    }
+    return () => source.close()
+  }, [live, sessionId, qc])
 
   return (
     <Card>
@@ -40,6 +87,11 @@ export function SessionFeed({ sessionId, status }: { sessionId: string; status: 
           </p>
         )}
         {items.map((item) => renderItem(item))}
+        {live && pending && (
+          <div className="prose prose-sm max-w-none text-sm leading-relaxed dark:prose-invert">
+            <Markdown>{pending}</Markdown>
+          </div>
+        )}
         {live && (
           <span aria-hidden className="ml-1 inline-block animate-pulse text-primary">
             ▍
