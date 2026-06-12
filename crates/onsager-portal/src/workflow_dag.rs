@@ -88,12 +88,16 @@ pub fn derive_workflow_json(workflow_id: &str, stages: &[WorkflowStage]) -> Opti
             .or_else(|| stage.params.get("prompt"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        // Authored user-side task body (#616). `null` when absent —
+        // the executor field is `Option` with serde(default).
+        let user_prompt = stage.params.get("user_prompt").and_then(|v| v.as_str());
         nodes.push(json!({
             "id": node_id(i),
             "executor": {
                 "kind": "agent",
                 "model": model,
                 "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
                 "tools": [],
                 "credential_ref": null,
             },
@@ -189,6 +193,29 @@ mod tests {
         assert_eq!(wf.edges.len(), 2);
         assert_eq!(wf.entry_specs.len(), 1);
         assert_eq!(wf.output_specs.len(), 1);
+    }
+
+    /// #616: the stage's authored `user_prompt` param rides into the
+    /// executor object (and `null`s cleanly when absent).
+    #[test]
+    fn user_prompt_param_reaches_executor() {
+        let doc = derive_workflow_json(
+            "wf_up",
+            &[stage(
+                0,
+                GateKind::AgentSession,
+                json!({"system_prompt": "s", "user_prompt": "do it"}),
+            )],
+        )
+        .expect("derives");
+        assert_eq!(doc["nodes"][0]["executor"]["user_prompt"], "do it");
+
+        let doc = derive_workflow_json(
+            "wf_up",
+            &[stage(0, GateKind::AgentSession, json!({"system_prompt": "s"}))],
+        )
+        .expect("derives");
+        assert!(doc["nodes"][0]["executor"]["user_prompt"].is_null());
     }
 
     /// The derivation is deterministic: same definition → identical

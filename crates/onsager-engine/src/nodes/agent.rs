@@ -58,6 +58,11 @@ use crate::nodes::spine::{EmittedArtifact, SessionManifest};
 pub struct AgentExecutor {
     pub model: String,
     pub system_prompt: String,
+    /// Authored user-side task body (the builder stage's `user_prompt`
+    /// param, #616). Rendered ahead of the upstream-input sections;
+    /// optional so pre-#616 library rows still parse.
+    #[serde(default)]
+    pub user_prompt: Option<String>,
     #[serde(default)]
     pub tools: Vec<String>,
     #[serde(default)]
@@ -78,10 +83,17 @@ impl AgentExecutor {
         Self {
             model: model.into(),
             system_prompt: system_prompt.into(),
+            user_prompt: None,
             tools: Vec::new(),
             credential_ref: None,
             runner: default_runner(),
         }
+    }
+
+    /// Set the authored user-side task body (#616).
+    pub fn with_user_prompt(mut self, user_prompt: impl Into<String>) -> Self {
+        self.user_prompt = Some(user_prompt.into());
+        self
     }
 
     /// Replace the runtime runner. Required before `execute` does
@@ -349,7 +361,7 @@ impl Executor for AgentExecutor {
             system_prompt: effective.system_prompt.clone(),
             tools: effective.tools.clone(),
             credential_ref: effective.credential_ref.clone(),
-            user_prompt: render_user_prompt(&ctx),
+            user_prompt: render_user_prompt(self.user_prompt.as_deref(), &ctx),
             session_id: session_id.clone(),
             // Plan-scoped token (#536) flows context → request so the
             // runner injects it as ONSAGER_SESSION_TOKEN. The scheduler
@@ -504,8 +516,12 @@ async fn emit_event<T: serde::Serialize>(ctx: &ExecutorContext, kind: &str, payl
 /// Render upstream artifacts into a single user-side prompt body. The
 /// v1 form is one section per input artifact id; the scheduler
 /// (RUN-01) replaces this with the full templating story.
-fn render_user_prompt(ctx: &ExecutorContext) -> String {
+fn render_user_prompt(authored: Option<&str>, ctx: &ExecutorContext) -> String {
     let mut out = String::new();
+    if let Some(body) = authored.map(str::trim).filter(|b| !b.is_empty()) {
+        out.push_str(body);
+        out.push('\n');
+    }
     for (id, _art) in &ctx.inputs {
         out.push_str("# input ");
         out.push_str(id.as_str());
@@ -630,6 +646,18 @@ mod tests {
     fn agent_with_stub(output: &str) -> AgentExecutor {
         AgentExecutor::new("claude-sonnet-4-6", "you are helpful")
             .with_runner(Arc::new(StubAgentRunner::new(output)))
+    }
+
+    /// #616: the authored user_prompt leads the rendered body, so an
+    /// entry node with no upstream inputs still hands the runner a
+    /// non-empty prompt. Without an authored prompt the empty-input
+    /// body stays empty (pre-#616 behavior).
+    #[test]
+    fn authored_user_prompt_leads_rendered_body() {
+        let ctx = empty_ctx();
+        assert_eq!(render_user_prompt(Some("do the task"), &ctx), "do the task\n");
+        assert_eq!(render_user_prompt(Some("  "), &ctx), "");
+        assert_eq!(render_user_prompt(None, &ctx), "");
     }
 
     /// A manifest carrying a single emitted output — the "agent
