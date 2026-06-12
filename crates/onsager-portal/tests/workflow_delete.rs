@@ -46,6 +46,7 @@ async fn seed_workflow(spine: &PgPool, workspace_id: &str) -> String {
         workflow_id: wf.id.clone(),
         seq: 0,
         gate_kind: GateKind::AgentSession,
+        executable: onsager_portal::workflow_dag::stage_is_executable(GateKind::AgentSession),
         params: serde_json::json!({}),
     };
     let id = wf.id.clone();
@@ -101,14 +102,16 @@ async fn delete_workflow_with_parked_artifact_succeeds() {
         .get(0);
     assert_eq!(wf_count, 0, "workflow row should be deleted");
 
-    let stage_count: i64 =
-        sqlx::query("SELECT COUNT(*) FROM workflow_stages WHERE workflow_id = $1")
-            .bind(&workflow_id)
-            .fetch_one(&spine)
-            .await
-            .unwrap()
-            .get(0);
-    assert_eq!(stage_count, 0, "workflow_stages should cascade-delete");
+    // ADR 0028 / #602: the authored definition lives on the deleted row
+    // itself; the executable library entries are retired (not deleted).
+    let retired: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_library WHERE spec_kind = $1 AND retired_at IS NULL",
+    )
+    .bind(&workflow_id)
+    .fetch_one(&spine)
+    .await
+    .expect("count live library rows");
+    assert_eq!(retired, 0, "library entries should be retired on delete");
 
     // Artifact survives, all workflow tagging cleared.
     let row = sqlx::query(

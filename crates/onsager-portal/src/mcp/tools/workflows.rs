@@ -104,6 +104,7 @@ pub async fn propose_workflow(state: &AppState, auth_user: &AuthUser, args: Valu
             workflow_id: workflow_id.clone(),
             seq: i as i32,
             gate_kind: s.gate_kind,
+            executable: crate::workflow_dag::stage_is_executable(s.gate_kind),
             params: s.params.clone().unwrap_or_else(|| serde_json::json!({})),
         })
         .collect();

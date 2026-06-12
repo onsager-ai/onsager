@@ -12,13 +12,12 @@
 //! one run event kind; the old engine-side `trigger.fired` bridge (and
 //! its tokenless degraded mode) retired with this listener.
 //!
-//! `spec_kind` resolution (ported from the retired bridge, same
-//! precedence): an explicit `"spec_kind"` field in the trigger payload
-//! wins; otherwise the workflow row's `preset_id`; otherwise the fire
-//! is dropped with a structured warning — a webhook path cannot 4xx,
-//! so the warning (and the surviving `trigger.fired` audit row) is the
-//! operator's signal. #602 retires the string join entirely by keying
-//! the library on the workflow id.
+//! The library is keyed by the workflow id (#602): the executable DAG
+//! is registered at save time, so resolution is a direct lookup. A
+//! workflow with no executable stage has no library entry and the fire
+//! fails loudly at the engine's lookup — the surviving `trigger.fired`
+//! audit row plus a structured warning are the operator's signal (a
+//! webhook path cannot 4xx).
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -101,17 +100,9 @@ impl TriggerFired {
             .await?
             .ok_or_else(|| anyhow::anyhow!("workflow `{workflow_id}` not found"))?;
 
-        // spec_kind precedence: explicit payload field, else preset.
-        let spec_kind = payload
-            .get("spec_kind")
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-            .or_else(|| workflow.preset_id.clone())
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "no spec_kind for workflow `{workflow_id}` (no payload field, no preset)"
-                )
-            })?;
+        // ADR 0028 / #602: the library is keyed by the workflow id —
+        // the executable DAG registered at save time. No string join.
+        let spec_kind = workflow_id.clone();
 
         // Optional input artifact ids on the payload become the spec's
         // declared external inputs (compiler → `plan.entry_inputs`).

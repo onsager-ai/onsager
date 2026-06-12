@@ -54,6 +54,7 @@ async fn seed_dogfood_workflow(spine: &PgPool, workspace_id: &str) -> String {
             workflow_id: workflow_id.clone(),
             seq: 0,
             gate_kind: GateKind::AgentSession,
+            executable: onsager_portal::workflow_dag::stage_is_executable(GateKind::AgentSession),
             params: serde_json::json!({}),
         },
         WorkflowStage {
@@ -61,6 +62,7 @@ async fn seed_dogfood_workflow(spine: &PgPool, workspace_id: &str) -> String {
             workflow_id: workflow_id.clone(),
             seq: 1,
             gate_kind: GateKind::ExternalCheck,
+            executable: onsager_portal::workflow_dag::stage_is_executable(GateKind::ExternalCheck),
             params: serde_json::json!({}),
         },
         WorkflowStage {
@@ -68,6 +70,7 @@ async fn seed_dogfood_workflow(spine: &PgPool, workspace_id: &str) -> String {
             workflow_id: workflow_id.clone(),
             seq: 2,
             gate_kind: GateKind::ManualApproval,
+            executable: onsager_portal::workflow_dag::stage_is_executable(GateKind::ManualApproval),
             params: serde_json::json!({}),
         },
     ];
@@ -372,7 +375,7 @@ async fn projection_exposes_only_allow_listed_fields() {
                 allow_set(STAGE_ALLOWED_KEYS),
                 "per-stage keys must be exactly the allow-list"
             );
-            // No leaked stage name from the workflow_stages table.
+            // No leaked stage name from the authored definition.
             assert!(!s.as_object().unwrap().contains_key("name"));
         }
     }
