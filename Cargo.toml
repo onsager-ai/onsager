@@ -1,72 +1,32 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/onsager-artifact",
-    "crates/onsager-registry",
-    "crates/onsager-spine",
-    "crates/onsager-substrate",
-    "crates/onsager-agent-spawn",
-    "crates/onsager-engine",
-    "crates/onsager-github",
-    "crates/onsager-portal",
-    "xtask",
-]
+members = ["crates/onsager"]
 
 [workspace.package]
-version = "0.2.0-alpha.1"
+version = "0.5.0-alpha.1"
 edition = "2024"
 license = "AGPL-3.0"
 repository = "https://github.com/onsager-ai/onsager"
 
 [workspace.dependencies]
-# Core async
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
-
-# Serialization
+anyhow = "1"
+axum = "0.8"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+ring = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-schemars = { version = "0.8", features = ["chrono"] }
-
-# Time and IDs
-chrono = { version = "0.4", features = ["serde"] }
-chrono-tz = "0.10"
-cron = "0.15"
-uuid = { version = "1", features = ["v4", "v5", "serde"] }
-
-# Error handling
-thiserror = "2"
-anyhow = "1"
-
-# Tracing
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "postgres",
+    "chrono",
+    "json",
+    "macros",
+] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "any", "postgres", "sqlite", "chrono", "json", "uuid"] }
-
-# HTTP / Web
-axum = { version = "0.8", features = ["ws"] }
-axum-extra = { version = "0.10", features = ["cookie"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["fs", "cors", "trace", "compression-gzip", "compression-br", "set-header"] }
-reqwest = { version = "0.12", features = ["json"] }
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
-futures-util = "0.3"
-
-# CLI
-clap = { version = "4", features = ["derive", "env"] }
-
-# Crypto / encoding
-rand = "0.8"
-base64 = "0.22"
-ring = "0.17"
-hex = "0.4"
-tempfile = "3"
-jsonwebtoken = "9"
-
-# Rust → TS codegen for the dashboard API surface (spec #298).
-# Single source of truth: portal serde structs; generated files land in
-# `apps/dashboard/src/lib/api/generated/` and are checked by
-# `xtask check-generated-types`.
-ts-rs = { version = "12", features = ["chrono-impl", "serde-json-impl"] }
+uuid = { version = "1", features = ["v4"] }

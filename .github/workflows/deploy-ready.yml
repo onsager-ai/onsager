@@ -29,7 +29,7 @@ jobs:
         run: |
           set -euo pipefail
           status=0
-          for dockerfile in crates/stiglab/deploy/Dockerfile; do
+          for dockerfile in deploy/Dockerfile; do
             [ -f "$dockerfile" ] || continue
             # Extract local COPY sources (skip --from= stage references and directories)
             grep -P '^\s*COPY\s' "$dockerfile" \
@@ -55,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          for dir in crates/onsager-spine/migrations; do
+          for dir in crates/onsager/migrations; do
             [ -d "$dir" ] || continue
             prev=0
             for f in $(ls "$dir"/*.sql | sort -V); do
@@ -79,6 +79,6 @@ jobs:
       # Spine migrations must be valid SQL.
       - name: Migrations are not empty
         run: |
-          for f in crates/onsager-spine/migrations/*.sql; do
+          for f in crates/onsager/migrations/*.sql; do
             [ -s "$f" ] || { echo "::error file=$f::Empty migration file"; exit 1; }
           done

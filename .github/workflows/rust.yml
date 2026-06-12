@@ -31,41 +31,11 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo build --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Verify docs/events.md is in sync with FactoryEventKind
-        run: cargo run -p xtask --quiet -- gen-event-docs --check
-      - name: Seam-rule lint (ADR 0004 / spec #131 Lever B)
-        run: cargo run -p xtask --quiet -- lint-seams
-      - name: API/UI contract lint (spec #131 Lever F / #151)
-        run: cargo run -p xtask --quiet -- check-api-contract
-      - name: Event-type registry manifest check (spec #131 Lever E / #150)
-        run: cargo run -p xtask --quiet -- check-events
-      - name: Generated dashboard API types drift check (spec #298)
-        run: cargo run -p xtask --quiet -- check-generated-types
-      - name: File-budget check (spec #261)
-        run: cargo run -p xtask --quiet -- check-file-budget --mode=fail
-      - name: Deferred-TODO check (spec #275, warn-mode landing)
-        run: cargo run -p xtask --quiet -- check-deferred-todos --mode=warn
-      - name: ADR-adoption check (ADR 0024 / 0025, spec #506, warn-mode landing)
-        run: cargo run -p xtask --quiet -- check-adr-adoption --mode=warn
-      - name: Checkout onsager-skills (spec #323)
-        uses: actions/checkout@v4
-        with:
-          repository: onsager-ai/onsager-skills
-          path: onsager-skills
-      - name: MCP tools ↔ onsager-skills cross-check (ADR 0007 / spec #323)
-        run: cargo run -p xtask --quiet -- check-tools-and-skills
-        env:
-          ONSAGER_SKILLS_DIR: onsager-skills
-      - name: Apply database migrations
+      - run: cargo test --workspace
+      - name: Migrations apply on a fresh database
         run: |
-          for f in crates/onsager-spine/migrations/*.sql; do
-            psql "$DATABASE_URL" -f "$f"
+          for f in crates/onsager/migrations/*.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
           done
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-      - name: Test onsager-spine (serial — shares DB)
-        run: cargo test -p onsager-spine -- --test-threads=1
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-      - name: Test remaining crates
-        run: cargo test --workspace --exclude onsager-spine

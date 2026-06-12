@@ -1,47 +1,27 @@
-# Onsager — Railway config-as-code.
+# Onsager v2 — Railway config-as-code (ADR 0029).
 #
-# Unified single-container deployment (two processes + edge, ADR 0027):
+# One container, one process: the `onsager` binary serves /api and the
+# built dashboard, applies migrations at boot, and (from M1) hosts the
+# scheduler in-process. No Caddy, no second service.
 #
-#   Process            | Description                                       | Port
-#   ------------------ | ------------------------------------------------- | -----------------
-#   caddy              | Edge dispatcher — the only exposed process        | $PORT (exposed)
-#   onsager-portal     | Dashboard API, webhooks, MCP, session runner      | 3002 (proxied)
-#   onsager-scheduler  | Engine bin — trigger.fired → ExecPlan → executors | — (spine listener)
-#   PostgreSQL         | Shared event spine (Railway plugin)               | 5432
-#
-# Portal is the front door behind Caddy — it serves the dashboard API,
-# owns /api/health, and runs agent sessions in-process (#583). Portal
-# runs its own migrations at startup.
-#
-# Quick start:
-#   1. Create a Railway project and connect this repo
-#   2. Add a PostgreSQL plugin (auto-provides DATABASE_URL)
-#   3. Default service uses this config (builds portal + scheduler)
-#   4. Set required variables (see [deploy] section below)
-#   5. Point your GitHub App webhook at
-#      https://<app>.up.railway.app/webhooks/github
-#
-# Migrations:
-#   The entrypoint auto-applies onsager-spine migrations on
-#   startup when ONSAGER_DATABASE_URL is set. The portal applies its own
-#   tables when it boots.
-
-# =============================================================================
-# Onsager — primary service (portal + scheduler behind Caddy)
-# =============================================================================
+# Required variables:
+#   DATABASE_URL            — auto-injected by the Railway Postgres plugin
+#   ONSAGER_CREDENTIAL_KEY  — 32-byte hex AES-256-GCM key (openssl rand -hex 32)
+# Optional:
+#   ONSAGER_PUBLIC_URL      — https origin; turns on Secure cookies
+#   DEV_LOGIN_ENABLED       — release-build opt-in for dev-login
+#                             (previews set it; never set on production)
 
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "deploy/onsager.Dockerfile"
+dockerfilePath = "deploy/Dockerfile"
 watchPatterns = [
-    # All crates — every workspace member is linked into at least one of
-    # the binaries shipped in this unified container (onsager-portal,
-    # onsager-scheduler), so any change can affect the deploy.
     "crates/**",
     "apps/dashboard/**",
     "Cargo.toml",
     "Cargo.lock",
     "pnpm-lock.yaml",
+    "deploy/**",
 ]
 
 [deploy]
@@ -51,94 +31,6 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 numReplicas = 1
 
-# Required environment variables (set in Railway dashboard):
-#
-#   DATABASE_URL              — auto-injected by Railway Postgres plugin
-#   ONSAGER_DATABASE_URL      — set to ${{Postgres.DATABASE_URL}} (spine migrations + event bus)
-#   ONSAGER_CREDENTIAL_KEY    — 32-byte hex AES-256-GCM key (openssl rand
-#                               -hex 32); portal decrypts webhook secrets +
-#                               credentials, and the substrate scheduler
-#                               decrypts the plan-scoped session token (#536).
-#   PORT                      — auto-injected by Railway (Caddy binds it)
-#
-# Optional:
-#
-#   PORTAL_MAX_SESSIONS       — max concurrent agent sessions (default: 4)
-#   PORTAL_AGENT_COMMAND      — CLI binary for agents (default: claude)
-#   PORTAL_PUBLIC_URL         — public URL for OAuth callbacks (e.g. https://<app>.up.railway.app)
-#   PORTAL_WEBHOOK_BASE_URL   — override for the webhook base URL.
-#                               Takes precedence over RAILWAY_PUBLIC_DOMAIN
-#                               and forwarded headers. Set this when the
-#                               public origin differs from the Railway-
-#                               assigned domain (custom domain, multi-host
-#                               split, etc.).
-#   GITHUB_CLIENT_ID          — GitHub OAuth app client ID
-#   GITHUB_CLIENT_SECRET      — GitHub OAuth app client secret
-#   DEV_LOGIN_ENABLED         — explicit opt-in for dev-login in release builds.
-#                               Not needed on preview environments — those are
-#                               detected automatically via ONSAGER_PREVIEW=true.
-#                               Must NOT be set on production (app.onsager.ai).
-#
-# Cross-environment SSO (owner side — prod only):
-#   The preview environments piggy-back off prod's GitHub OAuth app via a
-#   back-channel exchange. Prod registers a single OAuth callback with
-#   GitHub; previews delegate to prod over HTTPS. Set these on prod only —
-#   they must NOT be set on preview environments.
-#
-#   SSO_STATE_SECRET            — HMAC secret signing the OAuth `state`
-#                                 envelope (≥ 32 random bytes).
-#   SSO_EXCHANGE_SECRET         — shared bearer token: previews present
-#                                 this to POST /api/auth/sso/redeem.
-#   SSO_RETURN_HOST_ALLOWLIST   — comma-separated. Entries may be a strict
-#                                 subdomain pattern (`*.preview.onsager.ai`)
-#                                 or an exact host (`app.onsager.ai`).
-#                                 Any `return_to` whose host is not listed
-#                                 is rejected at the start of the flow.
-#   PORTAL_PORT               — internal port for onsager-portal (default: 3002)
-#   GITHUB_TOKEN              — optional PAT used by the portal for posting
-#                               check runs / comments when installation-token
-#                               signing isn't wired up yet
-#
-# Webhook base URL resolution (portal decides where github.com should
-# deliver repo webhooks). First non-empty layer wins:
-#   1. PORTAL_WEBHOOK_BASE_URL / PORTAL_PUBLIC_BASE_URL
-#   2. RAILWAY_PUBLIC_DOMAIN (Railway auto-injects this — no action needed
-#      on standard single-service deploys)
-#   3. X-Forwarded-Proto + X-Forwarded-Host from the activation request,
-#      gated on PORTAL_TRUST_FORWARDED_HEADERS=1
-# An unresolved chain fails workflow activation loudly (503) — there is
-# no silent localhost default. Production typically relies on layer 2 and
-# does NOT set PORTAL_TRUST_FORWARDED_HEADERS (defense in depth: if the
-# public origin ever changes unexpectedly, fail rather than trust the
-# request).
-
-# =============================================================================
-# Preview (per-PR) environments
-# =============================================================================
-#
-# Railway's PR Environments feature creates an ephemeral environment for each
-# open pull request, using this config plus a forked Postgres plugin. Each
-# preview gets its own Railway-generated domain and is torn down automatically
-# when the PR is closed or merged.
-#
-# Enable once in the Railway dashboard:
-#   Project Settings → Pull Request Environments → Enabled
-#                    → Wait for check: deploy-ready
-# Postgres forks as a fresh empty instance per PR by default — volume data
-# is not copied unless explicitly opted in.
-#
-# After enabling, `.github/workflows/preview-environment.yml` reacts to the
-# `deployment_status` event Railway's GitHub App emits on successful deploy
-# — it reads the preview URL from the event payload, smoke-tests
-# `/api/health`, and upserts a sticky PR comment. No Railway API token is
-# required in CI (project tokens are environment-locked and can't see
-# ephemeral PR envs anyway).
-#
-# Preview-specific overrides: smaller footprint, faster failure, no restart
-# storms. The preview entrypoint still auto-runs migrations on the fresh DB
-# (see deploy/entrypoint.sh) so no additional bootstrap is
-# required.
-
 [environments.preview.deploy]
 healthcheckPath = "/api/health"
 healthcheckTimeout = 180
@@ -146,37 +38,5 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 numReplicas = 1
 
-# Preview-only variable defaults. Secrets (CREDENTIAL_KEY, OAuth client
-# secrets, GITHUB_TOKEN) are inherited from the project-level shared vars;
-# anything here is a safe, non-sensitive default that distinguishes a preview
-# deploy from production at runtime.
-#
-# Per-PR uniqueness for the node name comes from Railway's runtime-injected
-# `RAILWAY_ENVIRONMENT_NAME` (e.g. `pr-42`). Railway's variables system
-# resolves `${{...}}` references at deploy time, not TOML parse time — the
-# GitHub Actions `github.*` context is NOT available here.
 [environments.preview.variables]
-PORTAL_MAX_SESSIONS = "2"
-ONSAGER_PREVIEW = "true"
-# Preview deploys run behind Railway's edge proxy, which rewrites the
-# X-Forwarded-* headers authoritatively. Trusting them here lets the
-# dashboard drive workflow activation without the operator having to set
-# PORTAL_WEBHOOK_BASE_URL per-PR. Production deliberately leaves this
-# unset — see the webhook resolution notes above.
-PORTAL_TRUST_FORWARDED_HEADERS = "1"
-
-# Cross-environment SSO (relying side).
-#
-# Previews never talk to GitHub directly. `/api/auth/github` on a preview
-# 302s to `${SSO_AUTH_DOMAIN}/api/auth/github?return_to=…`; prod runs the
-# OAuth dance against its single registered callback, then hands back an
-# opaque one-shot code via `${return_to}?code=…` which `/api/auth/sso/finish`
-# redeems server-to-server with `SSO_EXCHANGE_SECRET` as Bearer.
-#
-# SSO_EXCHANGE_SECRET must equal the value set on prod and must be kept as
-# a shared secret (configure via the Railway dashboard, NOT in the TOML).
-# GITHUB_CLIENT_ID/SECRET must NOT be set on preview environments — the
-# startup assertion panics if both owner and relying credentials are
-# present, to catch config confusion early.
-SSO_AUTH_DOMAIN = "${{SSO_AUTH_DOMAIN}}"
-SSO_EXCHANGE_SECRET = "${{SSO_EXCHANGE_SECRET}}"
+DEV_LOGIN_ENABLED = "true"
