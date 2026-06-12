@@ -38,47 +38,19 @@ These names apply symmetrically: catching them in your own draft is the same ski
 
 ## Operating posture: pre-launch
 
-Onsager has not yet been launched live to users. That removes one category of scaffolding — the kind that protects users from our half-finished state. It does NOT loosen the internal discipline that produces well-built work. The point is to ship more learning per unit time, not less rigorously, and not to defer hard problems past launch.
+Onsager is not yet live to users. That removes user-protection scaffolding only — never the discipline that produces well-built work.
 
-### What pre-launch removes
+**Skip (user protection for a userbase of zero):** feature flags that only hide incomplete surfaces (still fine for A/B work or admin choices); mock implementations bridging to unlanded specs (reorder so the dependency lands first); "preview"/"beta" banners; bookmark/deprecation preservation — delete the old route and its handler in the replacement's PR.
 
-User-protection scaffolding only makes sense once humans depend on us; skip it now:
+**Keep (work-quality protection, applies with or without users):** spec discipline (commitment 3 — implementation without a spec is *untracked defer*); claim-honesty (done = the spec's bar, plan items stay atomic); tests incl. the mutation check; review (small PRs reviewed quickly; self-review is the floor); root-cause fixes over band-aids (a workaround under unchanged Plan wording is *silent scope reduction*; "I'll fix it after launch" rarely holds); internal symmetry + the hard-fail lints; the identity commitments.
 
-- **Feature flags that only hide work from a userbase that doesn't exist yet.** Surfaces land visibly. Flags are still legitimate for in-flight A/B work or workspace-level admin choices (e.g. an owner disabling the agent) — just not for hiding incomplete surfaces from a userbase of zero.
-- **Mock implementations as bridges to absent dependencies.** If spec A needs spec B and B hasn't landed, reorder so B lands first. Throwaway mocks become "bridges that ossify" — pre-launch is when the reorder is cheap.
-- **"Preview" / "beta" banners** on surfaces that are the product for our internal team. We don't need to warn ourselves.
-- **Bookmark / deprecation preservation** for routes nobody has bookmarked. Delete the old route and its backend handler in the same PR as the replacement. Free redirects are fine; long deprecation windows aren't.
+**Spend the window on** structural moves cheap now and expensive later: reordering work, schema changes without migration choreography, rewriting wrong abstractions, replacing whole subsystems. Quality shortcuts are not structural moves.
 
-### What pre-launch does NOT loosen
-
-Pre-launch is not a license to ship less rigorous work. Internal discipline matters *more* at high velocity — code we touch faster needs more guardrails, not fewer:
-
-- **Spec discipline.** Specs remain ground truth (commitment 3); pre-launch makes amending them cheaper, not skippable. Implementation without a spec is *untracked defer*, with or without users.
-- **Claim-honesty.** "Done" still means the spec's bar is met, not "essentially works." *Theater coverage* (green CI, uncovered code) is theater with or without users. Plan items stay atomic; split-and-amend, don't silently reduce scope.
-- **Tests.** "Nobody will hit this path yet" is no reason to skip tests — they're how we know the code works *before* we find out it doesn't. The mutation check (mutate one line of new code; a test must fail) applies regardless.
-- **Review.** Velocity comes from small PRs reviewed quickly, not large PRs reviewed never. Self-review is the floor; a second pair of eyes is the norm. Squashing onto `main` doesn't retire it.
-- **Root-cause fixes over band-aids.** Pre-launch is the cheapest moment to fix properly — no migration choreography, no in-flight runs, no scar tissue. A workaround under unchanged Plan wording is *silent scope reduction*; with a follow-up issue and amended Plan it's fine; with neither it's the longest-half-life untracked defer — "I'll fix it after launch" rarely holds, since launch makes the fix more expensive.
-- **Internal symmetry, seam rule, file budget, lint enforcement.** `lint-seams`, `check-events`, `check-api-contract`, and `check-file-budget` stay hard-fail. Structure rots *faster* pre-launch, not slower.
-- **Identity commitments** (the four bullets atop this file). Those define the factory, not its launch status.
-
-### What pre-launch is for
-
-The window only opens once. Use it for moves cheap now and expensive later:
-
-- **Reordering work** when a dependency surfaces — nobody depends on the current sequence.
-- **Schema changes and migrations** without choreography — no production data, no zero-downtime constraint.
-- **Discovering wrong abstractions** and rewriting them — no public contract, no client code to coordinate with.
-- **Replacing whole subsystems** when the original guess was wrong — no scar tissue, no on-call to brief.
-
-Those are *structural* moves. Quality shortcuts are not — they get more expensive at launch, not cheaper. **Pre-launch removes user protection, not work-quality protection.**
-
-### Flipping the posture
-
-When we launch, delete this section and replace it with the post-launch operating bars (bookmark preservation, deprecation windows, feature-flag gating for high-blast-radius surfaces, mock-implementation policy for unmerged deps, communication discipline for breaking changes). The flip is itself an ADR-worthy moment — landing live is a commitment, not a deploy event.
+**Flipping the posture** (at launch) replaces this section with the post-launch bars — deprecation windows, flag gating for high-blast-radius surfaces, breaking-change communication. The flip is an ADR-worthy moment.
 
 ## Architecture
 
-See § What makes Onsager Onsager (above) for the identity commitments these choices instantiate, and the ADRs under [`docs/adr/`](docs/adr/) for the *why* behind any rule ([`docs/adr/README.md`](docs/adr/README.md) is the current index). (`docs/architecture.md` predates the ADR 0009–0026 "0.2 refoundation" and is stale; trust this file and the ADRs.)
+See § What makes Onsager Onsager (above) for the identity commitments these choices instantiate, and the ADRs under [`docs/adr/`](docs/adr/) for the *why* behind any rule ([`docs/adr/README.md`](docs/adr/README.md) is the current index).
 
 The shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel is still the single runtime coordination medium — components stay runtime-decoupled and coordinate through stigmergy (indirect signals via the shared medium), not direct calls. The `onsager` dispatcher CLI retired with ADR 0027 / #586 — with one factory binary left it was a wire with one end; the engine bins (`onsager-scheduler`, `onsager-trigger`) are invoked directly.
 
@@ -182,19 +154,7 @@ The four canonical nouns:
 
 **Sanctioned carve-out — "Plans" (spec plans).** ADR 0023 made the authored spec-plan graph a first-class user concept; ADR 0025 / spec #514 require a noun-surface launch path so chat isn't the sole way to run one. The dashboard carries a fifth nav noun, **Plans** (`/workspaces/:slug/spec-plans`), listing persisted spec plans with a HitlCard-routed "Run" button. A deliberate exception under the four-noun rule, not a violation: a spec **plan** (a substrate authoring artifact — a DAG of specs run in dependency order) is distinct from the internal-only dev-process **spec** (a GitHub issue) demoted below. Scoped to this one surface; new nav nouns still default to "no" and need their own ADR.
 
-**Demoted to internal-only.** These stay rich in Rust / migration / spine vocabulary but never surface to users:
-
-- **shaping** — legacy term for agent-session dispatch; retired with stiglab (ADR 0027 / #583). Survives only in ADRs and archived specs.
-- **bundle / sealed / ArtifactVersionId** — internal storage terms; the user-facing concept is "artifact version".
-- **spec** — dev-process term for a GitHub issue with implementation intent. Lives in CLAUDE.md and the `issue-spec` skill; never surfaces in the dashboard.
-
-**Demoted to surface-internal.** Visible only inside a workflow / run drill-down, never a top-level nav item:
-
-- **gate / verdict** — control points within a stage; visible in workflow detail and run history.
-- **governance** — the audit/escalation surface, subsumed into run history's verdict view.
-- **session** — a stage execution context; visible as the "agent-session" stage gate kind and as a drill-down from a run's stage history.
-- **node** — infrastructure; visible only in settings.
-- **issue** — the GitHub issue that triggered or was produced by a run; an artifact kind, not a separate concept.
+**Demoted vocabulary.** Internal-only terms (never surface to users): storage terms like *bundle / sealed / ArtifactVersionId* (user-facing: "artifact version") and *spec* (dev-process term for a GitHub issue — lives in CLAUDE.md and the `issue-spec` skill). Surface-internal terms (visible only inside a workflow / run drill-down, never top-level nav): *gate / verdict*, *session* (the "agent-session" stage kind), *node* (settings only), *issue* (an artifact kind, not a separate concept). The full demotion rationale is in spec #286 / ADR 0019.
 
 **Enforcement is doc-only.** Dashboard tsx is too varied for a useful grep-based vocabulary lint, and the 2026-05-09 audit found no significant leakage. Doc commitment plus PR review is the mechanism; a lint can be added later if drift recurs. This vocabulary is for user-facing surfaces only — seam-level / internal vocabulary stays rich per "Internal aesthetic" above.
 

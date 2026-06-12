@@ -77,8 +77,8 @@ already permits portal HTTP; the migration that consolidates external
 routes into portal is in flight.
 
 For the navigable map of how everything fits together, what's enforced,
-and what's still in flight, see [`docs/architecture.md`](docs/architecture.md)
-and the ADRs under [`docs/adr/`](docs/adr/).
+and what's still in flight, see [`CLAUDE.md`](CLAUDE.md) and the ADRs
+under [`docs/adr/`](docs/adr/).
 
 ## Subsystems
 
@@ -206,8 +206,8 @@ setup and troubleshooting.
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — top-level architecture
-  overview: subsystems, the seam rule, lever status, what's in flight.
+- [`CLAUDE.md`](CLAUDE.md) — top-level architecture overview: the
+  identity commitments, the seam rule, workspace layout, conventions.
 - [`docs/adr/`](docs/adr/) — architecture decision records (start with the
   [index](docs/adr/README.md)).
 - [`docs/events.md`](docs/events.md) — event catalog (auto-generated from

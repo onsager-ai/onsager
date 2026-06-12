@@ -7,8 +7,6 @@
 //!     cargo run -p xtask -- check-events             # check event-type registry manifest (#150)
 //!     cargo run -p xtask -- check-tools-and-skills   # check MCP tools ↔ public skills bundle (#288)
 //!     cargo run -p xtask -- check-hitl-coverage      # check MCP tools ↔ dashboard HitlCard bindings (#311)
-//!     cargo run -p xtask -- check-metaphor-leakage   # check ADR 0019 metaphor allowlist (#469)
-//!     cargo run -p xtask -- check-detail-page-tabs   # check ADR 0021 no-tabs-as-primary-IA (#487)
 //!     cargo run -p xtask -- check-generated-types    # check Rust → TS generated dashboard types (#298)
 //!     cargo run -p xtask -- check-file-budget        # bound per-file token cost (#261)
 //!     cargo run -p xtask -- check-adr-adoption        # Accepted ADRs with unchecked adoption items (#506)
@@ -35,12 +33,10 @@
 
 mod check_adr_adoption;
 mod check_deferred_todos;
-mod check_detail_page_tabs;
 mod check_events;
 mod check_file_budget;
 mod check_generated_types;
 mod check_hitl_coverage;
-mod check_metaphor_leakage;
 mod check_tools_and_skills;
 mod check_triggers;
 mod lint_api_contract;
@@ -105,20 +101,6 @@ fn main() -> ExitCode {
                 check_hitl_coverage::run()
             }
         }
-        Some("check-metaphor-leakage") => {
-            if args.next().is_some() {
-                Err(anyhow!("check-metaphor-leakage takes no arguments"))
-            } else {
-                check_metaphor_leakage::run()
-            }
-        }
-        Some("check-detail-page-tabs") => {
-            if args.next().is_some() {
-                Err(anyhow!("check-detail-page-tabs takes no arguments"))
-            } else {
-                check_detail_page_tabs::run()
-            }
-        }
         Some("check-generated-types") => {
             if args.next().is_some() {
                 Err(anyhow!("check-generated-types takes no arguments"))
@@ -132,7 +114,7 @@ fn main() -> ExitCode {
         Some("count-tokens") => check_file_budget::run_count(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- check-tools-and-skills\n  cargo run -p xtask -- check-hitl-coverage\n  cargo run -p xtask -- check-metaphor-leakage\n  cargo run -p xtask -- check-detail-page-tabs\n  cargo run -p xtask -- check-generated-types\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- check-deferred-todos [--mode=warn|fail]\n  cargo run -p xtask -- check-adr-adoption [--mode=warn|fail]\n  cargo run -p xtask -- count-tokens <file>"
+            "usage:\n  cargo run -p xtask -- gen-event-docs [--check]\n  cargo run -p xtask -- lint-seams\n  cargo run -p xtask -- check-api-contract\n  cargo run -p xtask -- check-events\n  cargo run -p xtask -- check-triggers\n  cargo run -p xtask -- check-tools-and-skills\n  cargo run -p xtask -- check-hitl-coverage\n  cargo run -p xtask -- check-generated-types\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- check-deferred-todos [--mode=warn|fail]\n  cargo run -p xtask -- check-adr-adoption [--mode=warn|fail]\n  cargo run -p xtask -- count-tokens <file>"
         )),
     };
 

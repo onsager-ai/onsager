@@ -1,6 +1,5 @@
 {
-  "_comment": "Template catalog. Per ADR 0019 (spec #406, #458, #469) the factory metaphor is retired from dashboard chrome / copy / assistant persona, but `factory_framing` strings on each template are user-facing template content — intentionally KEPT. The `xtask check-metaphor-leakage` lint reads `_metaphor_allow` below to exempt this file; do not grep-and-purge.",
-  "_metaphor_allow": "factory_framing strings on each template are user-facing template content, kept per ADR 0019 / spec #406",
+  "_comment": "Template catalog. Per ADR 0019 (spec #406, #458, #469) the factory metaphor is retired from dashboard chrome / copy / assistant persona, but `factory_framing` strings on each template are user-facing template content — intentionally KEPT. Do not grep-and-purge.",
   "version": 0,
   "templates": [
     {
