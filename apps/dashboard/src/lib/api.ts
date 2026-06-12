@@ -154,7 +154,12 @@ export const workflowsApi = {
 
 export const runsApi = {
   get: (id: string) =>
-    request<{ run: Run; timeline: RunEvent[]; artifacts: Artifact[] }>(`/runs/${id}`),
+    request<{
+      run: Run
+      timeline: RunEvent[]
+      artifacts: Artifact[]
+      sessions: { id: string; status: string }[]
+    }>(`/runs/${id}`),
 }
 
 export const artifactsApi = {
@@ -188,4 +193,23 @@ export const operateApi = {
     request<{ events: ActivityEvent[] }>(`/activity?workspace=${workspaceId}`),
   abortRun: (runId: string) =>
     request<{ ok: boolean; status: string }>(`/runs/${runId}/abort`, { method: 'POST' }),
+}
+
+// ── Session feed (#632) ──
+
+export interface SessionEvent {
+  seq: number
+  kind: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
+export interface RunSession {
+  id: string
+  status: string
+}
+
+export const sessionsApi = {
+  events: (sessionId: string) =>
+    request<{ status: string; events: SessionEvent[] }>(`/sessions/${sessionId}/events`),
 }

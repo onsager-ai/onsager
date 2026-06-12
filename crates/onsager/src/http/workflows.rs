@@ -293,8 +293,20 @@ pub async fn get_run(
         Ok(a) => a,
         Err(e) => return internal(e, "load run artifacts"),
     };
-    Json(serde_json::json!({ "run": run, "timeline": timeline, "artifacts": artifacts }))
-        .into_response()
+    let sessions: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, status FROM sessions WHERE run_id = $1 ORDER BY created_at")
+            .bind(&id)
+            .fetch_all(&state.pool)
+            .await
+            .unwrap_or_default();
+    let sessions: Vec<serde_json::Value> = sessions
+        .into_iter()
+        .map(|(id, status)| serde_json::json!({ "id": id, "status": status }))
+        .collect();
+    Json(serde_json::json!({
+        "run": run, "timeline": timeline, "artifacts": artifacts, "sessions": sessions,
+    }))
+    .into_response()
 }
 
 // ── Artifacts ──

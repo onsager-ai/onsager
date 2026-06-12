@@ -9,6 +9,7 @@
 //!   extractor (ported from legacy portal, PAT + SSO paths dropped)
 //! - [`http`] — the router and route handlers
 
+pub mod agent_events;
 pub mod auth;
 pub mod config;
 pub mod crypto;

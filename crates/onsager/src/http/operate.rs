@@ -13,6 +13,60 @@ use crate::http::workflows::WorkspaceQuery;
 use crate::state::AppState;
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct SessionEventRow {
+    pub seq: i32,
+    pub kind: String,
+    pub payload: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+/// `GET /api/sessions/:id/events` — the normalized agent feed for one
+/// session (#632). The run page polls this while the session runs.
+pub async fn session_events(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> Response {
+    let session: Option<(String, String)> =
+        match sqlx::query_as("SELECT workspace_id, status FROM sessions WHERE id = $1")
+            .bind(&id)
+            .fetch_optional(&state.pool)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("session lookup failed: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+    let Some((workspace_id, status)) = session else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "session not found" })),
+        )
+            .into_response();
+    };
+    if let Err(r) = require_workspace_access(&state.pool, &user, &workspace_id).await {
+        return r;
+    }
+    let rows: Result<Vec<SessionEventRow>, _> = sqlx::query_as(
+        "SELECT seq, kind, payload, created_at FROM session_events          WHERE session_id = $1 ORDER BY seq",
+    )
+    .bind(&id)
+    .fetch_all(&state.pool)
+    .await;
+    match rows {
+        Ok(events) => {
+            Json(serde_json::json!({ "status": status, "events": events })).into_response()
+        }
+        Err(e) => {
+            tracing::error!("session events query failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct ActivityRow {
     pub id: i64,
     pub run_id: Option<String>,
