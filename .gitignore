@@ -15,8 +15,3 @@
 # Local host-port override for host-run cargo dev (machine-specific).
 docker-compose.override.yml
 compose.override.yml
-
-# Legacy v1 tree (ADR 0029): kept for porting, never built. Its own
-# target/node_modules must not be re-added by stray local builds.
-/legacy/target
-/legacy/**/node_modules

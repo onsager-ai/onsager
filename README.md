@@ -1,232 +1,45 @@
-# Onsager — governed workflows for AI-augmented engineering work
+# Onsager
 
-> **⚠ 0.5 reset in progress (ADR 0029 / #620).** The v1 tree lives in
-> `legacy/` (kept for porting, never built); v2 is `crates/onsager` +
-> `apps/dashboard`. Sections below describe the legacy system until
-> the M4 flip rewrites this file.
+Workflow automation that runs AI agent sessions and turns their output
+into trusted artifacts. One process, one database, one dashboard.
 
-When agents write code, ship safely. Onsager runs your team's quality
-gates — automated verification, governance, audit — on every
-AI-generated change. Open source, runs anywhere.
+Create a **workflow** (a trigger plus agent stages), fire it manually or
+from a GitHub issue label, and Onsager runs a Claude agent session whose
+deliverables land as **artifacts** — content-addressed, provenance-tagged,
+attributed to their **run**, with the full audit timeline alongside.
 
-## What you do
+## Quick start
 
-① Describe the policy in plain English ("auto-merge PRs labeled
-`auto-merge` once CI is green and a Verify gate passes").
-② Onsager proposes a workflow draft you review and edit.
-③ Bind it to a repo when you're ready. Your draft is yours before,
-during, and after.
-
-## Try it
+Prerequisites: Docker, Rust toolchain (rustup), pnpm.
 
 ```bash
-git clone https://github.com/onsager-ai/onsager
-cd onsager
-just dev
+cp .env.example .env     # set ONSAGER_CREDENTIAL_KEY (openssl rand -hex 32)
+just setup               # git hooks + pnpm install
+just dev                 # Postgres + the onsager process + Vite
 ```
 
-Open <http://localhost:5173>. You land in Chat — start describing a
-workflow.
+Open the dashboard (the `just dev` output prints the port), dev-login,
+add `CLAUDE_CODE_OAUTH_TOKEN` under **Credentials**, create a workflow,
+and hit **Run**.
 
-## See it run
+## How it works
 
-Onsager builds Onsager. Browse our own runs at
-<https://app.onsager.ai/showcase/dogfood>.
-
-## Or skip the setup
-
-Sign in at <https://app.onsager.ai>.
-
----
-
-## Architecture
-
-Onsager is an **AI factory event bus**. Subsystems are runtime-decoupled
-via a shared PostgreSQL `events` / `events_ext` table + `pg_notify` channel.
-They coordinate through stigmergy (indirect signals via shared medium), not
-direct calls.
-
-```
-                       onsager-spine  (event bus library)
-                              │
-        ┌─────────┬───────────┐
-        │         │           │
-     portal   scheduler    trigger
-     (edge)   (substrate hosts)
-```
-
-Spec Plans reach the factory through two ingress paths: the dashboard
-chat (an MCP client at `apps/dashboard/src/pages/ChatPage.tsx` that
-calls portal's public MCP surface — ADR 0007), and humans writing
-GitHub issues with the `issue-spec` skill (which arrive via the
-GitHub webhook → portal → forge trigger path). The original plan to
-ship a separate Refract Spec-Plan-author algorithm was retired in
-#396; see the amendment on
-[ADR 0014](docs/adr/0014-onsager-refract-boundary.md).
-
-The seam rule has two clauses (see [ADR 0004](docs/adr/0004-tighten-the-seams.md)):
-
-1. **External boundary.** HTTP routes exist only at external boundaries —
-   the dashboard API and external webhooks (GitHub, etc.). The 2026-04-30
-   amendment names `portal` (the edge subsystem) as clause 1's owner;
-   the route migration landed under [#220](https://github.com/onsager-ai/onsager/issues/220) /
-   [#222](https://github.com/onsager-ai/onsager/issues/222), and portal owns
-   100% of the external HTTP surface today.
-2. **Internal coordination.** Factory processes coordinate
-   **exclusively** via the spine —
-   no sibling-process HTTP, no cross-process Cargo deps.
-
-Clause 2 is mechanically enforced today by `xtask lint-seams`,
-`xtask check-events`, and `xtask check-api-contract`. Clause 1's lint
-already permits portal HTTP; the migration that consolidates external
-routes into portal is in flight.
-
-For the navigable map of how everything fits together, what's enforced,
-and what's still in flight, see [`CLAUDE.md`](CLAUDE.md) and the ADRs
-under [`docs/adr/`](docs/adr/).
-
-## Subsystems
-
-| Crate            | Role                                                                             |
-|------------------|----------------------------------------------------------------------------------|
-| `onsager-spine`  | Shared event bus library (PostgreSQL + `pg_notify`); SoT for shared workflow tables |
-| `onsager-portal` | Edge subsystem — public HTTP, GitHub webhooks, OAuth, credentials                |
-| `onsager-engine` | Factory process — executor runtime + substrate scheduler host                   |
-
-Spec Plans (the factory's input contract) are authored externally —
-by the dashboard chat (an MCP client) and by humans writing GitHub
-issues (ingested via GitHub webhooks). No in-tree algorithm authors
-Spec Plans; see the amendment on
-[ADR 0014](docs/adr/0014-onsager-refract-boundary.md) for the
-retirement of the original separate-Refract-repo plan.
-
-Library crates (`onsager-{artifact, warehouse, delivery, registry, github}`)
-are typed shared building blocks consumed by the subsystems above.
-
-A single React app at `apps/dashboard/` surfaces sessions, nodes, governance,
-and factory views.
-
-## Getting Started (contributor setup)
-
-Prerequisites: Docker, Rust toolchain (via rustup), pnpm.
-
-```bash
-cp .env.example .env       # configure environment
-just dev                   # Postgres, migrations, and all services
-just smoke-test            # verify everything works (in another terminal)
-```
-
-Open the dashboard at <http://localhost:5173> and click **Dev Login** —
-debug builds (the default `cargo build` / `just dev` profile) seed a
-`${USER}@local` user plus a default workspace and expose a one-click
-login button on the LoginPage. A persistent banner reminds you you're
-in dev mode. Release builds (`cargo build --release`) strip the
-seeder + the `/api/auth/dev-login` route entirely; production deploys
-must use real GitHub OAuth.
-
-To use your real GitHub identity locally instead, set
-`GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `.env` and click
-**Sign in with GitHub** on the LoginPage.
-
-To run agent sessions, add your `CLAUDE_CODE_OAUTH_TOKEN` via
-**Dashboard → Settings → Credentials** (encrypted at rest, passed to agents
-as env vars).
-
-Services:
-- **Dashboard** — <http://localhost:5173> (Vite dev server with HMR)
-- **Postgres** — `postgres://onsager:onsager@localhost:5432/onsager`
-
-To stop: `Ctrl+C` for services, `just dev-down` for Postgres.
-
-### Ingestion mode (local dev without a public URL)
-
-GitHub webhooks need a public URL and a HMAC secret. For local dev
-where neither is convenient, every project carries an
-`ingestion_mode` column with three values (spec [#121][s121]):
-
-- `webhook+reconciler` (default) — webhooks for low-latency,
-  reconciliation poll (5 min) as a backstop for dropped deliveries.
-- `polling-only` — for local dev or webhook-less installs; the
-  portal poller (60 s) is the only ingest source. No public URL
-  needed.
-- `webhook-only` — opt out of the reconciler. Not recommended
-  (silent drops become permanent).
-
-Set the mode per project with a direct DB update during early dev
-(a dashboard control will land in a follow-up):
-
-```bash
-psql $DATABASE_URL -c \
-  "UPDATE projects SET ingestion_mode = 'polling-only' WHERE id = '<id>'"
-```
-
-Then restart the portal — the scheduler scans projects at boot.
-
-[s121]: https://github.com/onsager-ai/onsager/issues/121
-
-## Build & Test
-
-```bash
-just build           # Rust workspace + dashboard
-just test            # All tests
-just test-all        # Includes spine integration tests
-just lint            # fmt + clippy + eslint
-```
-
-Or directly:
-
-```bash
-cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-```
-
-## Install
-
-```bash
-just install         # installs the engine + portal binaries
-```
-
-After install:
-
-```bash
-onsager-scheduler serve
-```
-
-## Conventions
-
-- Rust edition 2021, rustfmt formatting, clippy with warnings-as-errors
-- `thiserror` for library errors, `anyhow` for application errors
-- Small focused commits, imperative mood, under 72 characters
-- Unit tests co-located in `#[cfg(test)]` modules
-- All internal deps use `path = "../..."` — no git deps, no crates.io
-
-## Preview environments
-
-Every open PR gets an ephemeral Railway deploy at
-`https://onsager-pr-<number>.up.railway.app` with a fresh Postgres plugin.
-See [`docs/preview-environments.md`](docs/preview-environments.md) for
-setup and troubleshooting.
+- One binary serves the dashboard API, the GitHub App webhook, and the
+  agent-facing MCP endpoint, and hosts the scheduler in-process — a
+  fire is a function call.
+- Agent sessions are `claude` CLI subprocesses that deliver via the MCP
+  `emit_artifact` tool; output lands as artifact rows with provenance.
+- Postgres holds all durable truth; every run appends an audit trail to
+  the `events` table (the record, not the protocol — ADR 0029).
 
 ## Documentation
 
-- [`CLAUDE.md`](CLAUDE.md) — top-level architecture overview: the
-  identity commitments, the seam rule, workspace layout, conventions.
-- [`docs/adr/`](docs/adr/) — architecture decision records (start with the
-  [index](docs/adr/README.md)).
-- [`docs/events.md`](docs/events.md) — event catalog (auto-generated from
-  `FactoryEventKind`; regenerate with `just gen-event-docs`).
-- [`docs/preview-environments.md`](docs/preview-environments.md) — per-PR
-  Railway previews.
-
-Each subsystem has its own `CLAUDE.md` or `.claude/` directory with
-subsystem-specific instructions:
-
-- `crates/onsager-spine/CLAUDE.md`
-- `crates/onsager-portal/CLAUDE.md`
-- `crates/onsager-registry/CLAUDE.md`
+- [`CLAUDE.md`](CLAUDE.md) — architecture, identity commitments, schema,
+  conventions (also the agent-facing project instructions).
+- [`docs/adr/`](docs/adr/) — architecture decision records
+  ([index](docs/adr/README.md)); ADR 0029 explains the 0.5 reset that
+  produced this codebase.
 
 ## License
 
-AGPL-3.0
+AGPL-3.0.

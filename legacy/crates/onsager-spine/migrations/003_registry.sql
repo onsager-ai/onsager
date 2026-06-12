@@ -1,6 +1,0 @@
--- Retired by ADR 0028 / #603 (registry diet). This migration created the
--- 0.1 DB-backed registry tables (artifact_types, gate_evaluators,
--- agent_profiles, artifact_adapters, registry_seed_marker); none ever
--- gained a reader, and 011_drop_registry_tables.sql drops them from
--- shared environments. Kept as a numbered no-op so the migration
--- sequence stays contiguous for fresh installs and applied envs alike.

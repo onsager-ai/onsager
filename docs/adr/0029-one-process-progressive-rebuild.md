@@ -1,11 +1,11 @@
 # ADR 0029 — 0.5 reset: one factory process, events as record, progressive rebuild from a legacy baseline
 
-- **Status**: Proposed (awaiting go/no-go on #620)
+- **Status**: Accepted (owner go 2026-06-12)
 - **Date**: 2026-06-12
 - **Identity impact**: yes — amends commitment 1 (event-bus coordination
   model) and narrows the enforcement surface of commitment 4; see
   § Identity rationale.
-- **Adoption**: not started
+- **Adoption**: enforced (2026-06-12 — M0–M4 landed same-day; e2e evidence on #620)
 - **Tracking issues**: #620 (umbrella; milestone sub-specs listed there)
 - **Supersedes**: ADR 0001's coordination model (events as inter-process
   transport), ADR 0027's two-process topology, ADR 0004/0018's
@@ -145,12 +145,17 @@ named here stays in `legacy/` until a milestone justifies it.
 
 ## Adoption checklist
 
-- [ ] Decision recorded; index updated; go/no-go on #620. (this PR)
-- [ ] M0 skeleton landed (legacy move + fresh workspace + CI + shell).
-- [ ] M1 loop landed (e2e: builder workflow → run → artifact row,
-      one process, zero seeding).
-- [ ] M2 GitHub landed (e2e: issue label → run → PR).
-- [ ] M3 operate landed (runs/activity/credentials surfaces).
-- [ ] M4 flip: MCP/chat decision recorded; `legacy/` deleted;
-      CLAUDE.md identity rewritten; open issues re-triaged; flip
-      `Adoption` to `enforced`.
+- [x] Decision recorded; index updated; go on #620. (PR #621)
+- [x] M0 skeleton landed (legacy move + fresh workspace + CI + shell).
+      (#622 / PR #627; live boot on a fresh db)
+- [x] M1 loop landed (e2e: builder workflow → run → **artifact row**,
+      one process, zero seeding — WAVE05-OK). (#623 / PR #628)
+- [x] M2 GitHub landed (offline e2e: signed issues.labeled → run with
+      repo env + issue context; forged signature → 401; the agent owns
+      PR-opening per the #624 amendments). (#624 / PR #629)
+- [x] M3 operate landed (activity, abort w/ process-group kill,
+      credentials UI; polling amendment on #625). (#625 / PR #630)
+- [x] M4 flip: MCP decision recorded on #620 (agent-facing tools kept
+      minimal; dashboard chat not ported); `legacy/` deleted;
+      CLAUDE.md + README rewritten; open issues re-triaged;
+      `Adoption` → enforced. (this PR)
