@@ -33,7 +33,6 @@
 //! The binary obeys the seam rule: it depends on substrate / nodes /
 //! spine / artifact only — never on a sibling subsystem crate.
 
-pub mod bridge;
 pub mod crypto;
 pub mod migrate;
 pub mod plan_registry;
@@ -44,7 +43,6 @@ pub mod runners;
 pub mod service;
 pub mod spine_client;
 
-pub use bridge::{TriggerBridge, TriggerBridgeError};
 pub use plan_runner::{PlanRunError, PlanRunner, SchedulerLibrarySnapshot, resolve_kind_versions};
 pub use plan_store::SqlxPlanStore;
 // The production agent runner (spec #535), registered in

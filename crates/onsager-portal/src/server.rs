@@ -439,6 +439,10 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .as_deref()
         .is_some_and(|d| d.eq_ignore_ascii_case("cloud"));
 
+    // ADR 0028 / #601 listener needs the full AppState (mint + emit).
+    let trigger_state = state.clone();
+    let trigger_spine = trigger_state.spine.clone();
+
     let app = app.with_state(state);
 
     // Spawn the session-completed → PR listener (spec #273). Runs as a
@@ -452,6 +456,14 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         }
     });
 
+    // ADR 0028 / #601: convert every workflow fire into a tokenized
+    // plan run at the edge (the engine consumes one run event kind).
+    tokio::spawn(async move {
+        if let Err(e) = crate::listeners::trigger_fired::run(trigger_state, trigger_spine).await {
+            tracing::error!("portal: trigger_fired listener exited: {e}");
+        }
+    });
+
     // Spawn the revoke-session-token-on-end listener (spec #531). Soft-
     // revokes a session's workspace-scoped PAT the moment its session
     // reaches a terminal state, tightening the expiry backstop.
@@ -462,7 +474,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         }
     });
 
-    // Spawn the stage.advanced → ftue.activated listener (spec #404).
+    // Spawn the plan.run_completed → ftue.activated listener (spec #404 / #601).
     // Writes one activation row per (user, workflow) the first time a
     // bound workflow's run reaches the final stage.
     tokio::spawn(async move {

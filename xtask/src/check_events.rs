@@ -590,8 +590,8 @@ mod tests {
         let parsed = parse_event_type_filter(&line).expect("filter parses");
         assert_eq!(parsed, kind);
         let def = def_for(kind).unwrap();
-        // Real consumer is the substrate scheduler.
-        assert!(def.consumers.contains(&Subsystem::Substrate));
+        // Real consumer is portal's trigger_fired listener (ADR 0028).
+        assert!(def.consumers.contains(&Subsystem::Portal));
     }
 
     /// Synthetic: a `FactoryEventKind` variant missing from the
