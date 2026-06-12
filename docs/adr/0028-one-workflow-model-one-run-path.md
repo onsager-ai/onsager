@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-06-11
 - **Identity impact**: no
-- **Adoption**: ongoing
+- **Adoption**: enforced (2026-06-12 — all six sub-specs landed; wave-close e2e green, evidence on #599)
 - **Tracking issues**: #599 (umbrella; sub-specs listed there)
 - **Supersedes**: the Lever D legacy workflow storage model (ADR 0004's
   `workflows`/`workflow_stages` stage-chain as the authored form); the
@@ -99,20 +99,27 @@ live structure, not dead code:
 
 ## Adoption checklist
 
-- [ ] Decision recorded; index updated. (this PR)
-- [ ] Run-path unification landed (portal converts fires; bridge
+- [x] Decision recorded; index updated. (PR #600)
+- [x] Run-path unification landed (portal converts fires; bridge
       retired; #594 closed by re-pointing FTUE to the run-terminal
-      signal).
-- [ ] One workflow model landed (builder edits the DAG; stage-chain
+      signal). (#601 / PR #607)
+- [x] One workflow model landed (builder edits the DAG; stage-chain
       storage retired; e2e: a builder-authored workflow runs with no
-      manual library registration).
-- [ ] Registry diet landed (dead evaluators/registry machinery gone).
-- [ ] Spine vocabulary sweep landed (legacy gate protocol types,
-      `forge` stream namespace).
-- [ ] Dev-env consolidation landed (slot system deleted).
-- [ ] CI + lint diet 2 landed (filter matrix collapsed; lint set
-      re-judged; stale architecture doc removed).
-- [ ] Flip `Adoption` to `enforced`; e2e on the unified model.
+      manual library registration). (#602 / PR #608; follow-up fixes
+      #613, #614, #616)
+- [x] Registry diet landed (dead evaluators/registry machinery gone).
+      (#603 / PR #609; the orphaned `adapter::register` boot write
+      removed at this flip)
+- [x] Spine vocabulary sweep landed (legacy gate protocol types,
+      `forge` stream namespace). (#604 / PR #610)
+- [x] Dev-env consolidation landed (slot system deleted). (#605 /
+      PR #611)
+- [x] CI + lint diet 2 landed (filter matrix collapsed; lint set
+      re-judged; stale architecture doc removed). (#606 / PR #612)
+- [x] Flip `Adoption` to `enforced`; e2e on the unified model. (this
+      PR; e2e evidence on #599 — builder-created manual workflow →
+      fire → tokenized plan run → live agent session → MCP
+      `emit_artifact` → `plan.run_completed`, zero manual seeding)
 
 ## Out of scope
 

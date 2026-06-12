@@ -30,12 +30,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let pool = crate::db::connect(&config.database_url).await?;
     crate::migrate::run(&pool).await?;
     let spine = onsager_spine::EventStore::connect(&config.database_url).await?;
-    // Register the GitHub adapter into the spine catalog. Best-effort:
-    // a missing `artifact_adapters` table (older migration set) shouldn't
-    // block portal boot. See `onsager_github::adapter::register`.
-    if let Err(e) = onsager_github::adapter::register(&pool, "default").await {
-        tracing::warn!(error = %e, "github adapter registration skipped");
-    }
 
     // Seed the dev user / workspace when dev-login is active (always in
     // debug builds, or release builds with DEV_LOGIN_ENABLED=true).
