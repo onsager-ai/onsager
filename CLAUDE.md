@@ -80,7 +80,7 @@ just dev                 # Postgres + the onsager process + Vite
 
 Then dev-login in the dashboard and add `CLAUDE_CODE_OAUTH_TOKEN` under Credentials — agent sessions read workspace credentials as env vars. The server applies migrations at boot.
 
-Useful env: `ONSAGER_BIND` (default `127.0.0.1:3002`), `ONSAGER_CLAUDE_BIN` (shim the agent CLI in tests), `ONSAGER_MCP_URL` (defaults to the bind address), `GITHUB_APP_ID/SLUG/PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_CLIENT_ID/SECRET`.
+Useful env: `ONSAGER_BIND` (default `127.0.0.1:3002`), `ONSAGER_CLAUDE_BIN` (shim the agent CLI in tests), `ONSAGER_MCP_URL` (defaults to the bind address), `GITHUB_APP_ID/SLUG/PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_CLIENT_ID/SECRET`, `ONSAGER_RESET_SCHEMA` (one-shot: drop+recreate the public schema at boot before migrating — #637; remove after use).
 
 ### Parallel dev environments (per-worktree)
 

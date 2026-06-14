@@ -38,7 +38,41 @@ pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
         .await?)
 }
 
+/// One-shot, opt-in destructive schema reset (#637). When
+/// `ONSAGER_RESET_SCHEMA=true`, drop and recreate the `public` schema
+/// before migrating. The 0.5 reset (ADR 0029) ships a fresh schema with
+/// no v1→v2 migration, so a database that still carries the v1 schema
+/// (e.g. the persistent production DB) makes migration 001 collide
+/// (`relation "users" already exists`). This is the operator's escape
+/// hatch: set the flag once, deploy (drops → migrates → boots clean),
+/// then remove the flag. Off by default; loud when it fires.
+///
+/// Pre-launch affordance — also resets preview/staging DBs. Tightening
+/// or removing it is part of the launch posture flip.
+pub async fn reset_schema_if_requested(pool: &PgPool) -> anyhow::Result<()> {
+    if std::env::var("ONSAGER_RESET_SCHEMA").as_deref() != Ok("true") {
+        return Ok(());
+    }
+    tracing::warn!(
+        "ONSAGER_RESET_SCHEMA=true — DROPPING and recreating the public \
+         schema before migrating. All existing data is destroyed. Remove \
+         the flag after this deploy."
+    );
+    sqlx::raw_sql(
+        "DROP SCHEMA public CASCADE; \
+         CREATE SCHEMA public; \
+         GRANT ALL ON SCHEMA public TO CURRENT_USER; \
+         GRANT ALL ON SCHEMA public TO public;",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow::anyhow!("schema reset failed: {e}"))?;
+    tracing::warn!("public schema reset complete");
+    Ok(())
+}
+
 pub async fn migrate(pool: &PgPool) -> anyhow::Result<()> {
+    reset_schema_if_requested(pool).await?;
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
              filename   TEXT PRIMARY KEY,
