@@ -3,6 +3,7 @@
 //! Serves the HTTP edge (dashboard API, auth, credentials; later
 //! webhooks + MCP) and hosts the scheduler as an in-process task (M1).
 //! Configuration is environment-only; see [`onsager::config::Config`].
+//! (Touch to trigger a preview build — validating the fixed preview-ui job, #659.)
 
 use std::process::ExitCode;
 
