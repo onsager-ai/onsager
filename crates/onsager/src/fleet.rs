@@ -4,11 +4,13 @@
 //! to work; the control plane dispatches a session and replays the
 //! machine's event stream into Postgres + the SSE feed.
 //!
-//! This is the M2 happy path: dispatch + event-flow inversion + abort.
-//! Deferred (ADR 0030): durable at-most-once leases / reclaim (M3) and
-//! the dashboard fleet view (M4). When no machine is connected, dispatch
-//! falls back to running the session in-process — the degenerate "local
-//! machine = default machine" case, byte-compatible with ADR 0029.
+//! M2: dispatch + event-flow inversion + abort. M3: heartbeat + lease
+//! reaper + worker reconnect/backoff + boot-time crash reclaim (in
+//! `scheduler::reclaim_orphaned_runs`) — at-most-once, never re-queue
+//! (sessions aren't idempotent). Deferred (ADR 0030): the dashboard fleet
+//! view (M4). When no machine is connected, dispatch falls back to running
+//! the session in-process — the degenerate "local machine = default
+//! machine" case, byte-compatible with ADR 0029.
 
 use std::sync::Arc;
 
@@ -153,11 +155,14 @@ async fn handle_machine(socket: WebSocket, state: AppState, name: String) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<ControlFrame>();
 
-    state
-        .machines
-        .lock()
-        .expect("machines lock")
-        .insert(name.clone(), out_tx);
+    let last_seen = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+    state.machines.lock().expect("machines lock").insert(
+        name.clone(),
+        crate::state::MachineConn {
+            tx: out_tx,
+            last_seen: last_seen.clone(),
+        },
+    );
     tracing::info!(machine = %name, "machine connected");
 
     // Outgoing pump: serialize control frames to the socket.
@@ -183,6 +188,8 @@ async fn handle_machine(socket: WebSocket, state: AppState, name: String) {
             tracing::warn!(machine = %name, "undecodable worker frame");
             continue;
         };
+        // Any frame is proof of life — refresh the lease (ADR 0030 D4).
+        *last_seen.lock().expect("last_seen lock") = std::time::Instant::now();
         match frame {
             WorkerFrame::Register { .. } | WorkerFrame::Heartbeat => {}
             WorkerFrame::Delta { session_id, text } => {
@@ -248,12 +255,20 @@ async fn handle_machine(socket: WebSocket, state: AppState, name: String) {
     // Teardown: deregister and fail anything still in flight on this
     // machine so its run resolves instead of hanging forever.
     writer.abort();
-    state.machines.lock().expect("machines lock").remove(&name);
+    fail_machine(&state, &name, "disconnected mid-session");
+    tracing::info!(machine = %name, "machine disconnected");
+}
+
+/// Deregister a machine and fail its in-flight sessions at-most-once
+/// (ADR 0030 D4 — sessions aren't idempotent, so we never re-queue).
+/// Used by clean disconnect and by the lease reaper.
+fn fail_machine(state: &AppState, name: &str, why: &str) {
+    state.machines.lock().expect("machines lock").remove(name);
     let orphaned: Vec<String> = {
         let mut rs = state.remote_sessions.lock().expect("remote_sessions lock");
         let ids: Vec<String> = rs
             .iter()
-            .filter(|(_, m)| **m == name)
+            .filter(|(_, m)| m.as_str() == name)
             .map(|(s, _)| s.clone())
             .collect();
         for id in &ids {
@@ -263,10 +278,44 @@ async fn handle_machine(socket: WebSocket, state: AppState, name: String) {
     };
     for id in orphaned {
         if let Some(done) = state.pending.lock().expect("pending lock").remove(&id) {
-            let _ = done.send(Err(format!("machine {name} disconnected mid-session")));
+            let _ = done.send(Err(format!("machine {name} {why}")));
         }
     }
-    tracing::info!(machine = %name, "machine disconnected");
+}
+
+/// How often a worker emits a heartbeat.
+pub const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+/// A machine silent longer than this has its lease expired (covers
+/// half-open sockets the TCP layer hasn't dropped yet).
+pub const MACHINE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// True if a machine last heard from at `last_seen` is past its lease.
+fn machine_is_stale(last_seen: std::time::Instant, now: std::time::Instant) -> bool {
+    now.duration_since(last_seen) > MACHINE_TIMEOUT
+}
+
+/// Background reaper: expire the lease of any machine that has gone
+/// silent, failing its in-flight sessions. Spawned once at boot.
+pub async fn reap_stale_machines(state: AppState) {
+    let mut tick = tokio::time::interval(HEARTBEAT_INTERVAL);
+    loop {
+        tick.tick().await;
+        let now = std::time::Instant::now();
+        let stale: Vec<String> = state
+            .machines
+            .lock()
+            .expect("machines lock")
+            .iter()
+            .filter(|(_, conn)| {
+                machine_is_stale(*conn.last_seen.lock().expect("last_seen lock"), now)
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in stale {
+            tracing::warn!(machine = %name, "lease expired (no heartbeat) — failing sessions");
+            fail_machine(&state, &name, "lease expired (no heartbeat)");
+        }
+    }
 }
 
 /// Run one session: on a connected machine if any, else in-process.
@@ -355,7 +404,7 @@ fn pick_machine(state: &AppState) -> Option<(String, mpsc::UnboundedSender<Contr
     machines
         .iter()
         .next()
-        .map(|(name, tx)| (name.clone(), tx.clone()))
+        .map(|(name, conn)| (name.clone(), conn.tx.clone()))
 }
 
 /// Best-effort abort of a remote session: tell the owning machine to
@@ -369,8 +418,8 @@ pub fn abort_remote_session(state: &AppState, session_id: &str) {
         .get(session_id)
         .cloned();
     let Some(machine) = machine else { return };
-    if let Some(tx) = state.machines.lock().expect("machines lock").get(&machine) {
-        let _ = tx.send(ControlFrame::Abort {
+    if let Some(conn) = state.machines.lock().expect("machines lock").get(&machine) {
+        let _ = conn.tx.send(ControlFrame::Abort {
             session_id: session_id.to_string(),
         });
     }
@@ -404,10 +453,37 @@ impl WorkerConfig {
     }
 }
 
-/// Run the worker: connect, register, and serve assigned sessions until
-/// the connection drops. (Reconnect/backoff is M3 — for now the
-/// supervisor that launches the worker restarts it.)
+/// Reconnect backoff: 1s, 2s, 4s … capped at 30s (ADR 0030 M3).
+fn backoff_delay(attempt: u32) -> std::time::Duration {
+    let secs = 1u64.checked_shl(attempt.min(5)).unwrap_or(30).min(30);
+    std::time::Duration::from_secs(secs)
+}
+
+/// Run the worker: connect and serve, reconnecting with backoff when the
+/// control plane connection drops (ADR 0030 M3). Runs until the process
+/// is killed.
 pub async fn run_worker(config: WorkerConfig) -> anyhow::Result<()> {
+    let mut attempt: u32 = 0;
+    loop {
+        match connect_and_serve(&config).await {
+            Ok(()) => {
+                tracing::info!(machine = %config.name, "control plane closed connection");
+                attempt = 0;
+            }
+            Err(e) => {
+                tracing::warn!(machine = %config.name, "connection error: {e:#}");
+                attempt = attempt.saturating_add(1);
+            }
+        }
+        let delay = backoff_delay(attempt);
+        tracing::info!(machine = %config.name, "reconnecting in {delay:?}");
+        tokio::time::sleep(delay).await;
+    }
+}
+
+/// One connection lifecycle: connect, register, serve assigned sessions
+/// until the socket closes or errors.
+async fn connect_and_serve(config: &WorkerConfig) -> anyhow::Result<()> {
     use tokio_tungstenite::tungstenite::Message as TMessage;
 
     let url = format!(
@@ -438,6 +514,19 @@ pub async fn run_worker(config: WorkerConfig) -> anyhow::Result<()> {
         name: config.name.clone(),
     })?;
     tracing::info!(machine = %config.name, "registered; awaiting work");
+
+    // Heartbeat so the control plane's lease reaper keeps the machine
+    // alive even when it's idle (ADR 0030 D4).
+    let hb_tx = out_tx.clone();
+    let heartbeat = tokio::spawn(async move {
+        let mut tick = tokio::time::interval(HEARTBEAT_INTERVAL);
+        loop {
+            tick.tick().await;
+            if hb_tx.send(WorkerFrame::Heartbeat).is_err() {
+                break;
+            }
+        }
+    });
 
     // In-flight sessions, for abort: session_id → (task, pgid).
     let inflight: Arc<std::sync::Mutex<std::collections::HashMap<String, InflightSession>>> =
@@ -511,6 +600,7 @@ pub async fn run_worker(config: WorkerConfig) -> anyhow::Result<()> {
     }
 
     writer.abort();
+    heartbeat.abort();
     tracing::info!(machine = %config.name, "disconnected from control plane");
     Ok(())
 }
@@ -578,6 +668,27 @@ fn urlencoding(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn backoff_delay_grows_then_caps() {
+        assert_eq!(backoff_delay(0), Duration::from_secs(1));
+        assert_eq!(backoff_delay(1), Duration::from_secs(2));
+        assert_eq!(backoff_delay(3), Duration::from_secs(8));
+        assert_eq!(backoff_delay(5), Duration::from_secs(30));
+        assert_eq!(backoff_delay(99), Duration::from_secs(30)); // capped
+    }
+
+    #[test]
+    fn machine_is_stale_only_after_timeout() {
+        let base = Instant::now();
+        assert!(!machine_is_stale(base, base));
+        assert!(!machine_is_stale(base, base + Duration::from_secs(1)));
+        assert!(machine_is_stale(
+            base,
+            base + MACHINE_TIMEOUT + Duration::from_secs(1)
+        ));
+    }
 
     #[test]
     fn control_frame_round_trips() {

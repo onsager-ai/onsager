@@ -128,15 +128,19 @@ silent.
 ### Milestone ladder
 
 - **M1 — concurrency cap.** Bounded `scheduler::fire` semaphore. *(Done, #644.)*
-- **M2 — transport + dispatch (happy path).** `/api/fleet/connect` (dial-out
-  WebSocket, machine-token, fail closed); `onsager worker` subcommand;
-  `dispatch()` routes a session to a connected machine (else in-process);
-  event-flow inversion (worker forwards `Event`/`Delta` frames, control plane
-  persists + fans out); abort routed to the owning machine. *(This PR.)*
-- **M3 — durable at-most-once lease + reclaim.** Heartbeat + lease; a
-  disconnect/crash **fails** the run (not re-queue — sessions aren't
-  idempotent, D4), surfaced loudly. Replaces M2's best-effort in-memory
-  `pending`/`remote_sessions` cleanup.
+- **M2 — transport + dispatch (happy path).** *(Done, #646.)*
+  `/api/fleet/connect` (dial-out WebSocket, machine-token, fail closed);
+  `onsager worker` subcommand; `dispatch()` routes a session to a connected
+  machine (else in-process); event-flow inversion (worker forwards
+  `Event`/`Delta` frames, control plane persists + fans out); abort routed to
+  the owning machine.
+- **M3 — at-most-once lease + reclaim.** *(Done.)* Worker heartbeat +
+  control-plane lease reaper (silent machine → its sessions fail); worker
+  reconnect with capped backoff; boot-time crash reclaim
+  (`scheduler::reclaim_orphaned_runs` fails runs/sessions a dead predecessor
+  left `running`). A disconnect/crash **fails** the run (never re-queue —
+  sessions aren't idempotent, D4). Registry stays in-memory; durable
+  machine-registry persistence folds into M4.
 - **M4 — dashboard fleet view.** A "Machines" surface (new nav noun → its own
   ADR note, the 4-noun vocab is identity) + machine registry persistence.
 
@@ -188,8 +192,9 @@ under stale wording.
 
 - [x] Decision recorded; index + CLAUDE.md updated. (#644 for direction)
 - [x] M1 — bounded concurrency cap on `scheduler::fire`. (#644)
-- [ ] M2 — transport + dispatch + event inversion + abort routing (this PR).
-- [ ] M3 — durable at-most-once lease + reclaim (heartbeat, fail-on-expiry).
+- [x] M2 — transport + dispatch + event inversion + abort routing. (#646)
+- [x] M3 — at-most-once lease + reclaim (heartbeat, reaper, reconnect, boot
+      reclaim) — this PR.
 - [ ] M4 — dashboard fleet view + machine-registry persistence.
 
 ## Out of scope

@@ -32,6 +32,14 @@ pub async fn serve(config: config::Config) -> anyhow::Result<()> {
     let pool = db::connect(&config.database_url).await?;
     db::migrate(&pool).await.context("migrations failed")?;
 
+    // Crash recovery (ADR 0030 D4): fail any runs a dead predecessor left
+    // marked running, at-most-once.
+    match scheduler::reclaim_orphaned_runs(&pool).await {
+        Ok(n) if n > 0 => tracing::warn!("reclaimed {n} orphaned run(s) from a prior process"),
+        Ok(_) => {}
+        Err(e) => tracing::error!("orphaned-run reclaim failed: {e:#}"),
+    }
+
     if config.dev_login_enabled() {
         auth::seed_dev_user_and_workspace(&pool)
             .await
@@ -40,6 +48,8 @@ pub async fn serve(config: config::Config) -> anyhow::Result<()> {
 
     let bind = config.bind.clone();
     let state = state::AppState::new(pool, config);
+    // Lease reaper (ADR 0030 D4): expire silent machines' sessions.
+    tokio::spawn(fleet::reap_stale_machines(state.clone()));
     let app = http::router(state);
 
     let listener = tokio::net::TcpListener::bind(&bind)

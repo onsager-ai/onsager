@@ -85,6 +85,38 @@ pub async fn fire(state: &AppState, workflow: Workflow) -> anyhow::Result<String
     Ok(run_id)
 }
 
+/// Boot-time crash recovery (ADR 0030 D4 — at-most-once). A previous
+/// control-plane process may have died leaving runs and sessions marked
+/// `running`; their tokio tasks are gone and a remote session can't be
+/// re-attached (sessions aren't idempotent). Fail them loudly rather
+/// than leave zombies. Returns the number of runs reclaimed.
+pub async fn reclaim_orphaned_runs(pool: &PgPool) -> anyhow::Result<u64> {
+    const WHY: &str = "control plane restarted while running";
+    sqlx::query(
+        "UPDATE sessions SET status = 'failed', error = $1, finished_at = NOW() \
+         WHERE status = 'running'",
+    )
+    .bind(WHY)
+    .execute(pool)
+    .await?;
+    let runs: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, workspace_id FROM runs WHERE status = 'running'")
+            .fetch_all(pool)
+            .await?;
+    for (id, workspace_id) in &runs {
+        finish(pool, id, "failed", Some(WHY)).await;
+        record(
+            pool,
+            workspace_id,
+            Some(id),
+            "run.failed",
+            serde_json::json!({ "error": WHY }),
+        )
+        .await;
+    }
+    Ok(runs.len() as u64)
+}
+
 async fn finish(pool: &PgPool, run_id: &str, status: &str, error: Option<&str>) {
     let result =
         sqlx::query("UPDATE runs SET status = $2, error = $3, finished_at = NOW() WHERE id = $1")
