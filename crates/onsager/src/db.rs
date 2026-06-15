@@ -29,6 +29,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "004_session_events.sql",
         include_str!("../migrations/004_session_events.sql"),
     ),
+    (
+        "005_machines.sql",
+        include_str!("../migrations/005_machines.sql"),
+    ),
 ];
 
 pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
@@ -104,4 +108,30 @@ pub async fn migrate(pool: &PgPool) -> anyhow::Result<()> {
         tracing::info!(migration = filename, "applied");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MIGRATIONS;
+
+    /// Every `NNN_*.sql` file under migrations/ must be wired into the
+    /// embedded `MIGRATIONS` list — otherwise the file ships but never
+    /// runs (the M4 `005_machines.sql` bug, caught by the fleet e2e, not
+    /// CI). This guard fails the build if a file is added but not embedded.
+    #[test]
+    fn every_migration_file_is_embedded() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations");
+        let mut files: Vec<String> = std::fs::read_dir(dir)
+            .expect("read migrations dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".sql"))
+            .collect();
+        files.sort();
+        let embedded: Vec<String> = MIGRATIONS.iter().map(|(n, _)| n.to_string()).collect();
+        assert_eq!(
+            files, embedded,
+            "migrations/ files must exactly match the embedded MIGRATIONS list"
+        );
+    }
 }
