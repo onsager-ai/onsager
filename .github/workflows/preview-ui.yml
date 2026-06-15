@@ -1,0 +1,187 @@
+name: preview-ui
+
+# Live-fleet UI screenshots on each PR preview (ADR 0030 / #655).
+#
+# When Railway reports a healthy pr-<N> preview, this job: builds the
+# `onsager` binary, dials a shim-worker into the preview's control plane
+# (the preview carries DEV_LOGIN_ENABLED + ONSAGER_MACHINE_TOKEN from
+# railway.toml, and PR #656 lets it hand the worker a reachable MCP URL),
+# fires a workflow so a run dispatches to that worker and an artifact
+# lands, then screenshots the dashboard (Machines online, the run, the
+# artifact) at desktop + mobile and posts them inline on the PR.
+
+on:
+  deployment_status:
+
+concurrency:
+  group: preview-ui-${{ github.event.deployment.environment }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write # push screenshots to the ci-screenshots branch
+  pull-requests: write # sticky evidence comment
+
+jobs:
+  screenshots:
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment.environment, 'pr-')
+    runs-on: ubuntu-latest
+    env:
+      MACHINE_TOKEN: preview-fleet-ci # must match railway.toml preview vars
+    steps:
+      - name: Resolve PR number + preview URL
+        id: ctx
+        env:
+          ENV_NAME: ${{ github.event.deployment.environment }}
+          ENV_URL: ${{ github.event.deployment_status.environment_url }}
+          TARGET_URL: ${{ github.event.deployment_status.target_url }}
+        run: |
+          pr=$(printf '%s' "$ENV_NAME" | sed -nE 's/^pr-([0-9]+).*/\1/p')
+          url="${ENV_URL:-$TARGET_URL}"
+          if [ -z "$pr" ] || [ -z "$url" ]; then
+            echo "::warning::missing PR number or URL ($ENV_NAME / $url)"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          url="${url%/}"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "host=$(printf '%s' "$url" | sed -E 's#^https?://##')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.ctx.outputs.skip != '1'
+        with:
+          ref: ${{ github.event.deployment.sha }}
+
+      - name: Install Rust toolchain
+        if: steps.ctx.outputs.skip != '1'
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        if: steps.ctx.outputs.skip != '1'
+      - name: Build onsager binary (for the worker)
+        if: steps.ctx.outputs.skip != '1'
+        run: cargo build -p onsager --bin onsager
+
+      - uses: pnpm/action-setup@v4
+        if: steps.ctx.outputs.skip != '1'
+      - uses: actions/setup-node@v4
+        if: steps.ctx.outputs.skip != '1'
+        with:
+          node-version: 20
+      - name: Install dashboard deps + chromium
+        if: steps.ctx.outputs.skip != '1'
+        run: |
+          pnpm install
+          pnpm --filter dashboard exec playwright install --with-deps chromium
+
+      - name: Wait for preview health
+        if: steps.ctx.outputs.skip != '1'
+        env:
+          URL: ${{ steps.ctx.outputs.url }}
+        run: |
+          for i in $(seq 1 20); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL/api/health")" = "200" ] && exit 0
+            sleep 5
+          done
+          echo "::error::preview never became healthy"; exit 1
+
+      - name: Dial shim-worker into the preview
+        if: steps.ctx.outputs.skip != '1'
+        env:
+          HOST: ${{ steps.ctx.outputs.host }}
+          URL: ${{ steps.ctx.outputs.url }}
+        run: |
+          cat > /tmp/shim.sh <<'SHIM'
+          #!/usr/bin/env bash
+          curl -s -X POST "$ONSAGER_MCP_URL" -H "Authorization: Bearer $ONSAGER_SESSION_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"emit_artifact","arguments":{"kind":"document","summary":"preview smoke artifact","content":"Preview fleet validation — this artifact was produced by a worker dialed into the pr preview."}}}' >/dev/null 2>&1
+          echo '{"type":"result","subtype":"success","result":"preview smoke ok"}'
+          SHIM
+          chmod +x /tmp/shim.sh
+          ONSAGER_CONTROL_URL="wss://$HOST" \
+          ONSAGER_MACHINE_TOKEN="$MACHINE_TOKEN" \
+          ONSAGER_MACHINE_NAME="ci-preview-worker" \
+          ONSAGER_MCP_URL="$URL/mcp/messages" \
+          ONSAGER_CLAUDE_BIN=/tmp/shim.sh \
+          RUST_LOG=info ./target/debug/onsager worker > /tmp/worker.log 2>&1 &
+          echo $! > /tmp/worker.pid
+          for i in $(seq 1 15); do grep -q "registered; awaiting work" /tmp/worker.log && break; sleep 1; done
+          cat /tmp/worker.log
+
+      - name: Seed a run through the fleet
+        if: steps.ctx.outputs.skip != '1'
+        id: seed
+        env:
+          URL: ${{ steps.ctx.outputs.url }}
+        run: |
+          J=/tmp/cj
+          curl -s -c $J -X POST "$URL/api/auth/dev-login" >/dev/null
+          WS=$(curl -s -b $J "$URL/api/workspaces" | sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p' | head -1)
+          WF=$(curl -s -b $J -X POST "$URL/api/workflows" -H 'Content-Type: application/json' \
+            -d "{\"workspace_id\":\"$WS\",\"name\":\"preview-fleet-smoketest\",\"trigger\":{\"kind\":\"manual\",\"name\":\"smoke\"},\"definition\":[{\"kind\":\"agent\",\"user_prompt\":\"preview smoke\"}]}")
+          WFID=$(echo "$WF" | sed -n 's/.*"id":"\(wf_[^"]*\)".*/\1/p' | head -1)
+          curl -s -b $J -X PATCH "$URL/api/workflows/$WFID" -H 'Content-Type: application/json' -d '{"active":true}' >/dev/null
+          RUN=$(curl -s -b $J -X POST "$URL/api/workflows/$WFID/fire" | sed -n 's/.*"run_id":"\(run_[^"]*\)".*/\1/p')
+          echo "fired $RUN"
+          for i in $(seq 1 24); do
+            S=$(curl -s -b $J "$URL/api/runs/$RUN" | sed -n 's/.*"status":"\([a-z]*\)".*/\1/p' | head -1)
+            echo "[$i] $S"; case "$S" in completed|failed|aborted) break;; esac; sleep 5
+          done
+          echo "run_id=$RUN" >> "$GITHUB_OUTPUT"
+
+      - name: Capture screenshots
+        if: steps.ctx.outputs.skip != '1'
+        env:
+          PREVIEW_URL: ${{ steps.ctx.outputs.url }}
+          RUN_ID: ${{ steps.seed.outputs.run_id }}
+          OUT_DIR: ${{ github.workspace }}/shots
+        run: pnpm --filter dashboard preview-shots
+
+      - name: Publish screenshots + comment
+        if: steps.ctx.outputs.skip != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.ctx.outputs.pr }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          set -e
+          tmp=$(mktemp -d); cd "$tmp"
+          git init -q
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin ci-screenshots && git checkout -q ci-screenshots || git checkout -q --orphan ci-screenshots
+          rm -rf "pr-$PR"; mkdir -p "pr-$PR"
+          cp "$GITHUB_WORKSPACE"/shots/*.png "pr-$PR"/
+          git add -A
+          git -c user.email="github-actions[bot]@users.noreply.github.com" -c user.name="github-actions[bot]" \
+            commit -q -m "preview-ui screenshots: PR #$PR @ ${SHA:0:7}"
+          git push -q origin HEAD:ci-screenshots
+          base="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/ci-screenshots/pr-$PR"
+          {
+            echo '<!-- onsager-ui -->'
+            echo "### Preview UI evidence — live fleet (\`${SHA:0:7}\`)"
+            echo
+            echo "A shim-worker dialed into the preview, a run dispatched to it, and an artifact landed. Pages below are the live preview at desktop + mobile."
+            for name in machines run artifacts workflows activity; do
+              dk="$base/desktop-$name.png"; mb="$base/mobile-$name.png"
+              if [ -f "$GITHUB_WORKSPACE/shots/desktop-$name.png" ]; then
+                echo; echo "<details><summary><b>$name</b></summary>"; echo
+                echo "| desktop | mobile |"; echo "|---|---|"
+                echo "| <img src=\"$dk\" width=\"420\"> | <img src=\"$mb\" width=\"200\"> |"
+                echo; echo "</details>"
+              fi
+            done
+          } > /tmp/body.md
+          # Upsert by marker so we never clobber the preview-environment comment.
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.body|startswith("<!-- onsager-ui -->"))][0].id')
+          if [ -n "$existing" ] && [ "$existing" != "null" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@/tmp/body.md >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@/tmp/body.md >/dev/null
+          fi
+
+      - name: Stop worker
+        if: always() && steps.ctx.outputs.skip != '1'
+        run: |
+          [ -f /tmp/worker.pid ] && kill "$(cat /tmp/worker.pid)" 2>/dev/null || true
+          echo "--- worker log ---"; cat /tmp/worker.log 2>/dev/null || true
