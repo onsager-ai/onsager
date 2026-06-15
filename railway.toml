@@ -40,3 +40,10 @@ numReplicas = 1
 
 [environments.preview.variables]
 DEV_LOGIN_ENABLED = "true"
+# Preview-only fleet token (ADR 0030 / #655): lets the preview-ui CI job
+# dial a worker into the ephemeral pr-<N> control plane to capture live
+# fleet screenshots. Low-value by construction — it only grants
+# /api/fleet/connect on throwaway preview envs (which already expose
+# dev-login); production sets its own token via the Railway dashboard,
+# never from this file.
+ONSAGER_MACHINE_TOKEN = "preview-fleet-ci"
