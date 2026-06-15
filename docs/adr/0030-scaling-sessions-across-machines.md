@@ -203,6 +203,9 @@ under stale wording.
       reclaim). (#648)
 - [x] M4 — `machines` table + `GET /api/fleet/machines` + Machines page
       (operator surface, not a product noun) — this PR.
+- [x] Validation: per-PR preview deploy dials a shim-worker, fires a run,
+      and posts live-fleet screenshots inline (#655/#657). Replaces the
+      one-off prod dev-login validation.
 
 ## Out of scope
 
