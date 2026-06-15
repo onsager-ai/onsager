@@ -23,9 +23,11 @@ permissions:
 
 jobs:
   screenshots:
+    # Railway names the deploy environment "Onsager / onsager-pr-<N>", so
+    # match `pr-` anywhere (not startsWith). "production" has no "pr-".
     if: >-
       github.event.deployment_status.state == 'success' &&
-      startsWith(github.event.deployment.environment, 'pr-')
+      contains(github.event.deployment.environment, 'pr-')
     runs-on: ubuntu-latest
     env:
       MACHINE_TOKEN: preview-fleet-ci # must match railway.toml preview vars
@@ -34,18 +36,20 @@ jobs:
         id: ctx
         env:
           ENV_NAME: ${{ github.event.deployment.environment }}
-          ENV_URL: ${{ github.event.deployment_status.environment_url }}
-          TARGET_URL: ${{ github.event.deployment_status.target_url }}
         run: |
-          pr=$(printf '%s' "$ENV_NAME" | sed -nE 's/^pr-([0-9]+).*/\1/p')
-          url="${ENV_URL:-$TARGET_URL}"
-          if [ -z "$pr" ] || [ -z "$url" ]; then
-            echo "::warning::missing PR number or URL ($ENV_NAME / $url)"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
+          # Environment is "Onsager / onsager-pr-<N>" — pull the PR number
+          # from anywhere in the string.
+          pr=$(printf '%s' "$ENV_NAME" | sed -nE 's/.*pr-([0-9]+).*/\1/p')
+          if [ -z "$pr" ]; then
+            echo "::warning::no PR number in env '$ENV_NAME'"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          url="${url%/}"
+          # The deployment_status URL fields point at the Railway dashboard,
+          # not the app. Construct the preview app host from the PR number
+          # (Railway default domain: <project>-<service>-pr-<N>.up.railway.app).
+          host="onsager-onsager-pr-${pr}.up.railway.app"
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "host=$(printf '%s' "$url" | sed -E 's#^https?://##')" >> "$GITHUB_OUTPUT"
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+          echo "url=https://$host" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         if: steps.ctx.outputs.skip != '1'

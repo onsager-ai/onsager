@@ -35,12 +35,13 @@ jobs:
     # error — so the `railway-preview` check_run is published on red as
     # well as green (#295). The smoke-test + sticky-comment steps below
     # stay gated on `state == 'success'` so a failed deploy isn't reported
-    # as healthy. Railway names its PR environments `pr-<N>`; anything
-    # else is prod or a non-PR env and we ignore it here.
+    # as healthy. Railway names the deploy environment
+    # "Onsager / onsager-pr-<N>", so match `pr-` anywhere; anything else
+    # (e.g. "Onsager / production") is ignored.
     if: >-
       github.event_name == 'deployment_status' &&
       contains(fromJSON('["success", "failure", "error"]'), github.event.deployment_status.state) &&
-      startsWith(github.event.deployment.environment, 'pr-')
+      contains(github.event.deployment.environment, 'pr-')
     runs-on: ubuntu-latest
     steps:
       - name: Extract PR number from environment name
@@ -48,31 +49,28 @@ jobs:
         env:
           ENV_NAME: ${{ github.event.deployment.environment }}
         run: |
-          # Railway uses `pr-<N>` (sometimes `pr-<N>-<slug>`). Pull the first
-          # numeric segment; bail cleanly if the convention ever changes.
-          pr_num=$(printf '%s' "$ENV_NAME" | sed -nE 's/^pr-([0-9]+).*/\1/p')
+          # Environment is "Onsager / onsager-pr-<N>" — pull the PR number
+          # from anywhere; bail cleanly if the convention ever changes.
+          pr_num=$(printf '%s' "$ENV_NAME" | sed -nE 's/.*pr-([0-9]+).*/\1/p')
           if [ -z "$pr_num" ]; then
             echo "::warning::Could not extract PR number from deployment environment '$ENV_NAME'"
             exit 0
           fi
           echo "number=$pr_num" >> "$GITHUB_OUTPUT"
 
-      - name: Pick preview URL from event payload
+      - name: Build preview URL from PR number
         id: url
         env:
-          ENV_URL: ${{ github.event.deployment_status.environment_url }}
-          TARGET_URL: ${{ github.event.deployment_status.target_url }}
+          PR_NUM: ${{ steps.pr.outputs.number }}
         run: |
-          # `environment_url` is what Railway sets for PR envs; `target_url`
-          # is the fallback (links to the deploy page) when no environment
-          # URL is provided.
-          url="$ENV_URL"
-          [ -n "$url" ] || url="$TARGET_URL"
-          if [ -z "$url" ]; then
-            echo "::warning::deployment_status event had no URL"
+          # The deployment_status URL fields point at the Railway dashboard,
+          # not the app. Construct the preview app host from the PR number
+          # (Railway default domain: <project>-<service>-pr-<N>.up.railway.app).
+          if [ -z "$PR_NUM" ]; then
+            echo "::warning::no PR number — cannot build preview URL"
             exit 0
           fi
-          echo "value=$url" >> "$GITHUB_OUTPUT"
+          echo "value=https://onsager-onsager-pr-${PR_NUM}.up.railway.app" >> "$GITHUB_OUTPUT"
 
       - name: Smoke-test /api/health
         # Only smoke-test on successful deploys — a failed build has nothing
