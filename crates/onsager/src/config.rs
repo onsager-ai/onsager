@@ -47,6 +47,19 @@ fn parse_max_concurrent_runs(raw: Option<String>) -> usize {
         .max(1)
 }
 
+/// Resolve the MCP callback URL (ADR 0030): explicit override wins, else
+/// the Railway public domain (so remote workers' agents can reach it),
+/// else the container-internal bind address.
+fn resolve_mcp_url(explicit: Option<String>, railway_domain: Option<String>, bind: &str) -> String {
+    if let Some(url) = explicit {
+        return url;
+    }
+    if let Some(domain) = railway_domain {
+        return format!("https://{domain}/mcp/messages");
+    }
+    format!("http://{bind}/mcp/messages")
+}
+
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         let database_url = std::env::var("DATABASE_URL")
@@ -85,16 +98,21 @@ impl Config {
         cfg!(debug_assertions) || self.dev_login_flag
     }
 
-    /// The MCP endpoint agent sessions call back into — this process.
-    /// `ONSAGER_MCP_URL` overrides (containers where the agent's view
-    /// of the host differs); defaults to the bind address.
+    /// The MCP endpoint agent sessions call back into. Explicit
+    /// `ONSAGER_MCP_URL` wins; else, on Railway, derive the public URL
+    /// from `RAILWAY_PUBLIC_DOMAIN` so a *remote* worker's agent can phone
+    /// home (the bind default is container-internal — unreachable off-box,
+    /// ADR 0030); else fall back to the bind address.
     pub fn mcp_url(&self) -> Option<String> {
-        if let Ok(url) = std::env::var("ONSAGER_MCP_URL")
-            && !url.is_empty()
-        {
-            return Some(url);
-        }
-        Some(format!("http://{}/mcp/messages", self.bind))
+        Some(resolve_mcp_url(
+            std::env::var("ONSAGER_MCP_URL")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            std::env::var("RAILWAY_PUBLIC_DOMAIN")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            &self.bind,
+        ))
     }
 }
 
@@ -125,6 +143,34 @@ mod tests {
     #[test]
     fn max_concurrent_runs_defaults_when_unset() {
         assert_eq!(parse_max_concurrent_runs(None), DEFAULT_MAX_CONCURRENT_RUNS);
+    }
+
+    #[test]
+    fn mcp_url_explicit_wins() {
+        assert_eq!(
+            resolve_mcp_url(
+                Some("https://x/mcp/messages".into()),
+                Some("d".into()),
+                "127.0.0.1:1"
+            ),
+            "https://x/mcp/messages"
+        );
+    }
+
+    #[test]
+    fn mcp_url_derives_from_railway_domain() {
+        assert_eq!(
+            resolve_mcp_url(None, Some("pr-5.up.railway.app".into()), "0.0.0.0:8080"),
+            "https://pr-5.up.railway.app/mcp/messages"
+        );
+    }
+
+    #[test]
+    fn mcp_url_falls_back_to_bind() {
+        assert_eq!(
+            resolve_mcp_url(None, None, "127.0.0.1:3002"),
+            "http://127.0.0.1:3002/mcp/messages"
+        );
     }
 
     #[test]
