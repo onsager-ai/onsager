@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::crypto::random_token;
 use crate::domain::{StageKind, Workflow};
 use crate::events::record;
-use crate::sessions::{SessionRequest, run_agent_session, session_delivered};
+use crate::sessions::session_delivered;
 use crate::state::AppState;
 
 /// Fire a workflow: insert the run row, spawn the execution task,
@@ -181,19 +181,24 @@ async fn run_agent_stage(
         .expect("feeds lock")
         .insert(session_id.clone(), feed.clone());
 
-    let outcome = run_agent_session(SessionRequest {
-        session_id: session_id.clone(),
-        token,
-        model,
-        system_prompt,
-        user_prompt: user_prompt.to_string(),
-        mcp_url: state.config.mcp_url(),
-        env,
-        repos,
-        pgid_slot: pgid_slot.clone(),
-        pool: state.pool.clone(),
+    // Dispatch (ADR 0030): runs on a connected machine if one exists,
+    // else in-process. The control plane persists events + checks
+    // liveness regardless, so everything below the seam is unchanged.
+    let outcome = crate::fleet::dispatch(
+        state,
+        crate::fleet::SessionJob {
+            session_id: session_id.clone(),
+            token,
+            model,
+            system_prompt,
+            user_prompt: user_prompt.to_string(),
+            mcp_url: state.config.mcp_url(),
+            env,
+            repos,
+        },
         feed,
-    })
+        pgid_slot.clone(),
+    )
     .await;
     state.feeds.lock().expect("feeds lock").remove(&session_id);
 

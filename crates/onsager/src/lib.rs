@@ -16,6 +16,7 @@ pub mod crypto;
 pub mod db;
 pub mod domain;
 pub mod events;
+pub mod fleet;
 pub mod github;
 pub mod http;
 pub mod mcp;
@@ -47,4 +48,12 @@ pub async fn serve(config: config::Config) -> anyhow::Result<()> {
     tracing::info!(%bind, "onsager listening");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+/// Boot in worker mode (ADR 0030): no database, no HTTP edge — dial the
+/// control plane and run assigned agent sessions. Env-configured via
+/// [`fleet::WorkerConfig`].
+pub async fn serve_worker() -> anyhow::Result<()> {
+    let config = fleet::WorkerConfig::from_env()?;
+    fleet::run_worker(config).await
 }

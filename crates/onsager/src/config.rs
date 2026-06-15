@@ -30,6 +30,10 @@ pub struct Config {
     /// the fleet exists. `ONSAGER_MAX_CONCURRENT_RUNS`, default 4, floored
     /// at 1 (a zero cap would wedge every fire forever).
     pub max_concurrent_runs: usize,
+    /// Shared secret a fleet machine presents to dial in (ADR 0030).
+    /// `ONSAGER_MACHINE_TOKEN`; unset → `/api/fleet/connect` rejects every
+    /// machine (fail closed), and the system runs single-process.
+    pub machine_token: Option<String>,
 }
 
 /// Default session concurrency when the env var is unset or unparseable.
@@ -70,6 +74,9 @@ impl Config {
             max_concurrent_runs: parse_max_concurrent_runs(
                 std::env::var("ONSAGER_MAX_CONCURRENT_RUNS").ok(),
             ),
+            machine_token: std::env::var("ONSAGER_MACHINE_TOKEN")
+                .ok()
+                .filter(|s| !s.is_empty()),
         })
     }
 
@@ -106,6 +113,7 @@ impl Config {
             github_client_id: None,
             github_client_secret: None,
             max_concurrent_runs: DEFAULT_MAX_CONCURRENT_RUNS,
+            machine_token: None,
         }
     }
 }

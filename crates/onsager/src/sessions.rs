@@ -15,6 +15,9 @@ use serde::Deserialize;
 use sqlx::PgPool;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::{broadcast, mpsc};
+
+use crate::fleet::WorkerFrame;
 
 /// Env vars the agent process reads — names are the agent-facing
 /// contract, unchanged from legacy so existing agent-side docs hold.
@@ -115,12 +118,94 @@ pub struct SessionRequest {
     /// Written with the child's pid (== its pgid) after spawn so the
     /// abort endpoint can kill the whole process tree (M3 #625).
     pub pgid_slot: std::sync::Arc<std::sync::Mutex<Option<i32>>>,
-    /// Sink for normalized `agent.*` session events (#632).
-    pub pool: PgPool,
-    /// Live feed for SSE subscribers (#634): durable events plus
-    /// transient text deltas. Dropped (closing all streams) when the
-    /// session ends.
-    pub feed: tokio::sync::broadcast::Sender<serde_json::Value>,
+    /// Where normalized `agent.*` events and transient text deltas go.
+    /// Local on the control plane (Postgres + SSE feed); a frame stream
+    /// back to the control plane when the session runs on a worker
+    /// (ADR 0030 — the event-flow inversion).
+    pub sink: SessionSink,
+}
+
+/// The two homes a running session can have for its event stream.
+pub enum SessionSink {
+    /// Control-plane local: persist to `session_events` and fan out to
+    /// the SSE feed — the single-process path (ADR 0029).
+    Local {
+        pool: PgPool,
+        feed: broadcast::Sender<serde_json::Value>,
+    },
+    /// On a worker (ADR 0030): forward each event as a frame; the control
+    /// plane persists + fans out on receipt. Workers never touch Postgres.
+    Remote {
+        frames: mpsc::UnboundedSender<WorkerFrame>,
+    },
+}
+
+impl SessionSink {
+    /// A durable, normalized event (persisted control-plane-side).
+    async fn event(&self, session_id: &str, seq: i32, kind: &str, payload: &serde_json::Value) {
+        match self {
+            SessionSink::Local { pool, feed } => {
+                persist_session_event(pool, feed, session_id, seq, kind, payload).await;
+            }
+            SessionSink::Remote { frames } => {
+                let _ = frames.send(WorkerFrame::Event {
+                    session_id: session_id.to_string(),
+                    seq,
+                    kind: kind.to_string(),
+                    payload: payload.clone(),
+                });
+            }
+        }
+    }
+
+    /// A transient token delta (never persisted — live feed only).
+    fn delta(&self, session_id: &str, text: &str) {
+        match self {
+            SessionSink::Local { feed, .. } => {
+                let _ = feed.send(serde_json::json!({
+                    "kind": "agent.text_delta",
+                    "payload": { "text": text },
+                }));
+            }
+            SessionSink::Remote { frames } => {
+                let _ = frames.send(WorkerFrame::Delta {
+                    session_id: session_id.to_string(),
+                    text: text.to_string(),
+                });
+            }
+        }
+    }
+}
+
+/// Persist a normalized session event and fan it out to the SSE feed.
+/// Used by the local sink and by the control plane when replaying a
+/// worker's forwarded events. A failed insert is logged, never fatal —
+/// the feed must not fail the work.
+pub async fn persist_session_event(
+    pool: &PgPool,
+    feed: &broadcast::Sender<serde_json::Value>,
+    session_id: &str,
+    seq: i32,
+    kind: &str,
+    payload: &serde_json::Value,
+) {
+    let inserted = sqlx::query(
+        "INSERT INTO session_events (session_id, seq, kind, payload) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(session_id)
+    .bind(seq)
+    .bind(kind)
+    .bind(payload)
+    .execute(pool)
+    .await;
+    if let Err(e) = inserted {
+        tracing::warn!(session_id, "session event insert failed: {e}");
+    }
+    let _ = feed.send(serde_json::json!({
+        "kind": kind,
+        "payload": payload,
+        "seq": seq,
+    }));
 }
 
 pub struct SessionOutcome {
@@ -235,32 +320,15 @@ pub async fn run_agent_session(req: SessionRequest) -> Result<SessionOutcome, Se
         // never persisted — the durable agent.text row carries the
         // full message.
         if let Some(delta) = crate::agent_events::text_delta(&value) {
-            let _ = req.feed.send(serde_json::json!({
-                "kind": "agent.text_delta",
-                "payload": { "text": delta },
-            }));
+            req.sink.delta(&req.session_id, delta);
         }
-        // Normalize + persist the session feed (#632). A failed insert
-        // is logged, never fatal — the feed must not fail the work.
+        // Normalize + record the session feed (#632). Where it lands
+        // depends on the sink (control plane vs worker, ADR 0030).
         for event in normalizer.handle(&value) {
             seq += 1;
-            let inserted = sqlx::query(
-                "INSERT INTO session_events (session_id, seq, kind, payload)                  VALUES ($1, $2, $3, $4)",
-            )
-            .bind(&req.session_id)
-            .bind(seq)
-            .bind(event.kind)
-            .bind(&event.payload)
-            .execute(&req.pool)
-            .await;
-            if let Err(e) = inserted {
-                tracing::warn!(session_id = %req.session_id, "session event insert failed: {e}");
-            }
-            let _ = req.feed.send(serde_json::json!({
-                "kind": event.kind,
-                "payload": event.payload,
-                "seq": seq,
-            }));
+            req.sink
+                .event(&req.session_id, seq, event.kind, &event.payload)
+                .await;
         }
         if let Ok(ClaudeEvent::Result {
             subtype,

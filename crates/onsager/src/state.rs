@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use sqlx::PgPool;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
 
 use crate::config::Config;
+use crate::fleet::ControlFrame;
 
 /// What the abort endpoint needs to stop a run: the task's abort
 /// handle plus the live session's process-group id. `kill_on_drop`
@@ -18,6 +19,11 @@ pub struct RunHandle {
     pub abort: AbortHandle,
     pub pgid: Arc<Mutex<Option<i32>>>,
 }
+
+/// Connected machines: name → outbound control-frame channel (ADR 0030).
+pub type MachineRegistry = Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ControlFrame>>>>;
+/// Dispatched-but-unfinished remote sessions: session_id → completion.
+pub type PendingSessions = Arc<Mutex<HashMap<String, oneshot::Sender<Result<String, String>>>>>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -39,6 +45,16 @@ pub struct AppState {
     /// the one cheap knob that bounds the single-process ceiling; the
     /// fleet (per-machine slots, Σ capacity) stays deferred.
     pub run_slots: Arc<Semaphore>,
+    /// Connected fleet machines (ADR 0030): name → outbound control-frame
+    /// channel. A machine registers on WS connect, deregisters on
+    /// disconnect. Empty = the degenerate single-process case.
+    pub machines: MachineRegistry,
+    /// Dispatched-but-unfinished remote sessions: session_id → completion
+    /// channel. The WS receive loop resolves these on `Ended`.
+    pub pending: PendingSessions,
+    /// session_id → owning machine, so abort can route a kill frame and
+    /// disconnect can fail the right in-flight sessions (at-most-once).
+    pub remote_sessions: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl AppState {
@@ -50,7 +66,20 @@ impl AppState {
             running: Arc::new(Mutex::new(HashMap::new())),
             feeds: Arc::new(Mutex::new(HashMap::new())),
             run_slots,
+            machines: Arc::new(Mutex::new(HashMap::new())),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            remote_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// An `AppState` with a lazy (never-connected) pool, for unit tests
+    /// that exercise only in-memory state (registries, semaphore).
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://unused")
+            .expect("lazy pool");
+        Self::new(pool, Config::for_test())
     }
 
     /// Wait for a run slot. The returned permit is held for the run's
