@@ -42,6 +42,11 @@ pub async fn fire(state: &AppState, workflow: Workflow) -> anyhow::Result<String
         let state = task_state;
         let pgid_slot = task_pgid;
         let workspace_id = workflow.workspace_id.clone();
+        // Wait for a run slot before launching the session (ADR 0030 MVP
+        // cap). The run is already registered and visible as `running`;
+        // it just doesn't consume compute until a slot frees. Held for the
+        // whole run, released on drop when this task ends.
+        let _slot = state.acquire_run_slot().await;
         match execute(&state, &workflow, &id, &pgid_slot).await {
             Ok(()) => {
                 finish(&state.pool, &id, "completed", None).await;
