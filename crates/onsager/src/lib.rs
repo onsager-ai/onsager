@@ -39,6 +39,13 @@ pub async fn serve(config: config::Config) -> anyhow::Result<()> {
         Ok(_) => {}
         Err(e) => tracing::error!("orphaned-run reclaim failed: {e:#}"),
     }
+    // No machine is connected to a fresh process; reset any stale `online`
+    // rows a SIGKILL'd predecessor left behind (ADR 0030 M4).
+    match fleet::reclaim_machines_offline(&pool).await {
+        Ok(n) if n > 0 => tracing::warn!("reset {n} stale online machine(s) to offline"),
+        Ok(_) => {}
+        Err(e) => tracing::error!("machine reclaim failed: {e:#}"),
+    }
 
     if config.dev_login_enabled() {
         auth::seed_dev_user_and_workspace(&pool)

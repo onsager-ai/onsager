@@ -319,6 +319,18 @@ async fn mark_machine_offline(pool: &PgPool, name: &str) {
     }
 }
 
+/// Boot-time machine reclaim (ADR 0030 M4): a fresh control-plane process
+/// has no machines connected, so any row still `online` is stale from a
+/// dead predecessor (a SIGKILL never runs the disconnect path). Mark them
+/// offline; each re-upserts online when it redials. `last_seen_at` is left
+/// at its last real observation, not stamped now. Returns rows reset.
+pub async fn reclaim_machines_offline(pool: &PgPool) -> anyhow::Result<u64> {
+    let r = sqlx::query("UPDATE machines SET status = 'offline' WHERE status = 'online'")
+        .execute(pool)
+        .await?;
+    Ok(r.rows_affected())
+}
+
 /// How often a worker emits a heartbeat.
 pub const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
 /// A machine silent longer than this has its lease expired (covers
