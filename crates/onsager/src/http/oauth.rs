@@ -113,6 +113,15 @@ pub async fn callback(
         _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
+    // First-login provisioning: real GitHub users have no dev seed, so
+    // mint them a personal workspace or the dashboard has nothing to show.
+    if let Err(e) =
+        crate::auth::ensure_personal_workspace(&state.pool, &user.id, &user.github_login).await
+    {
+        tracing::error!("oauth workspace provisioning failed: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
     let session_token = random_token();
     if let Err(e) = create_auth_session(
         &state.pool,

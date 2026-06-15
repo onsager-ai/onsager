@@ -215,6 +215,67 @@ fn dev_username() -> String {
         .unwrap_or_else(|| "dev".to_string())
 }
 
+/// Ensure an authenticated user owns at least one workspace, minting a
+/// personal one on first sight. The dev seed only covers the dev user;
+/// real GitHub users are provisioned here on OAuth login. Idempotent —
+/// a no-op once the user has any membership.
+pub async fn ensure_personal_workspace(
+    pool: &PgPool,
+    user_id: &str,
+    login: &str,
+) -> anyhow::Result<()> {
+    let existing: Option<(String,)> =
+        sqlx::query_as("SELECT workspace_id FROM workspace_members WHERE user_id = $1 LIMIT 1")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?;
+    if existing.is_some() {
+        return Ok(());
+    }
+
+    // `github_login` is globally unique, so it makes a stable slug; on the
+    // rare collision with an existing workspace (e.g. the dev seed's
+    // "dev") fall back to an id-suffixed slug.
+    let workspace_id = Uuid::new_v4().to_string();
+    let name = format!("{login}'s workspace");
+    let inserted = sqlx::query(
+        "INSERT INTO workspaces (id, slug, name, created_by) VALUES ($1, $2, $3, $4) \
+         ON CONFLICT (slug) DO NOTHING",
+    )
+    .bind(&workspace_id)
+    .bind(login.to_ascii_lowercase())
+    .bind(&name)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    let workspace_id = if inserted.rows_affected() == 0 {
+        let id = Uuid::new_v4().to_string();
+        let slug = format!("{}-{}", login.to_ascii_lowercase(), &id[..8]);
+        sqlx::query("INSERT INTO workspaces (id, slug, name, created_by) VALUES ($1, $2, $3, $4)")
+            .bind(&id)
+            .bind(&slug)
+            .bind(&name)
+            .bind(user_id)
+            .execute(pool)
+            .await?;
+        id
+    } else {
+        workspace_id
+    };
+
+    sqlx::query(
+        "INSERT INTO workspace_members (workspace_id, user_id) VALUES ($1, $2) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(&workspace_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    tracing::info!(%login, workspace = %workspace_id, "provisioned personal workspace");
+    Ok(())
+}
+
 /// Idempotently materialize the dev user, workspace, and membership.
 /// Called at boot whenever dev-login is enabled.
 pub async fn seed_dev_user_and_workspace(pool: &PgPool) -> anyhow::Result<()> {
@@ -341,5 +402,69 @@ mod tests {
         assert_eq!(session_kind_for_github_id(-1), SessionKind::Dev);
         assert_eq!(session_kind_for_github_id(123), SessionKind::Github);
         const _: () = assert!(DEV_GITHUB_ID < 0);
+    }
+
+    /// DB-backed: runs only when `DATABASE_URL` is set (always in CI,
+    /// which provisions a Postgres service). Proves a real OAuth user is
+    /// granted exactly one personal workspace, and that re-login is a
+    /// no-op rather than minting duplicates.
+    #[tokio::test]
+    async fn ensure_personal_workspace_provisions_once() {
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("skipping: DATABASE_URL unset");
+            return;
+        };
+        let pool = crate::db::connect(&url).await.unwrap();
+        crate::db::migrate(&pool).await.unwrap();
+
+        // Unique identity per run so the shared CI database stays clean.
+        let github_id: i64 = 1_000_000 + (std::process::id() as i64 % 1_000_000);
+        let login = format!("wsuser{github_id}");
+        let user_id = Uuid::new_v4().to_string();
+        upsert_user(
+            &pool,
+            &User {
+                id: user_id.clone(),
+                github_id,
+                github_login: login.clone(),
+                github_name: None,
+                github_avatar_url: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Two calls (first login + re-login) must yield exactly one.
+        ensure_personal_workspace(&pool, &user_id, &login)
+            .await
+            .unwrap();
+        ensure_personal_workspace(&pool, &user_id, &login)
+            .await
+            .unwrap();
+
+        let (members,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM workspace_members WHERE user_id = $1")
+                .bind(&user_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(members, 1, "expected exactly one workspace membership");
+
+        // Cleanup, children first (FKs).
+        sqlx::query("DELETE FROM workspace_members WHERE user_id = $1")
+            .bind(&user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM workspaces WHERE created_by = $1")
+            .bind(&user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(&user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
     }
 }

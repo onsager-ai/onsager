@@ -12,9 +12,11 @@ export function useWorkspace(): Workspace {
 }
 
 /**
- * v2 is effectively single-workspace (the dev seed); the provider
- * resolves the first membership and blocks until it exists. A real
- * workspace switcher returns when multi-workspace is a feature.
+ * v2 is effectively single-workspace: every user has a personal
+ * workspace (dev seed for dev-login, minted on first OAuth login
+ * otherwise), so the provider resolves the first membership and blocks
+ * until it exists. A real workspace switcher returns when
+ * multi-workspace is a feature.
  */
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { data, isLoading } = useQuery({
@@ -32,7 +34,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   if (!ws) {
     return (
       <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-        No workspace. (The dev seed creates one at boot.)
+        No workspace available for this account.
       </div>
     )
   }
