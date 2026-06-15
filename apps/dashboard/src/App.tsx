@@ -10,6 +10,7 @@ import { RunDetailPage } from '@/pages/RunDetailPage'
 import { ArtifactDetailPage, ArtifactsPage } from '@/pages/ArtifactsPage'
 import { ActivityPage } from '@/pages/ActivityPage'
 import { CredentialsPage } from '@/pages/CredentialsPage'
+import { MachinesPage } from '@/pages/MachinesPage'
 
 const queryClient = new QueryClient()
 
@@ -47,6 +48,7 @@ export default function App() {
                         <Route path="/artifacts" element={<ArtifactsPage />} />
                         <Route path="/artifacts/:id" element={<ArtifactDetailPage />} />
                         <Route path="/activity" element={<ActivityPage />} />
+                        <Route path="/machines" element={<MachinesPage />} />
                         <Route path="/credentials" element={<CredentialsPage />} />
                       </Routes>
                     </Shell>

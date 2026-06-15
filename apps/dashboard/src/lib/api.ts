@@ -220,3 +220,17 @@ export const sessionsApi = {
   events: (sessionId: string) =>
     request<{ status: string; events: SessionEvent[] }>(`/sessions/${sessionId}/events`),
 }
+
+// ── Fleet (ADR 0030 M4) ──
+
+export interface Machine {
+  name: string
+  status: string
+  connected_at: string | null
+  last_seen_at: string
+  in_flight: number
+}
+
+export const fleetApi = {
+  listMachines: () => request<{ machines: Machine[] }>('/fleet/machines'),
+}

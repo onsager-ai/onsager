@@ -33,14 +33,14 @@ One binary (`onsager`) serves everything:
 - **HTTP edge** — dashboard API, auth (dev-login + GitHub OAuth), credentials CRUD, the GitHub App webhook, and the agent-facing MCP endpoint (`POST /mcp/messages`).
 - **Scheduler** — in-process: a fire is a function call that inserts a `runs` row and spawns a supervised tokio task which iterates the workflow's stage list. Abort = abort the task + SIGKILL the session's process group.
 - **Agent sessions** — one spawn path (`sessions.rs`): the `claude` CLI with `--mcp-config` pointing back at the control plane. Sessions deliver via the MCP `emit_artifact` tool (writes an `artifacts` row) or `declare_no_output`; a session that does neither fails its run (liveness, plain).
-- **Fleet** (`fleet.rs`, ADR 0030) — agent sessions run either in-process or on a **worker machine** that dials in over a WebSocket (`/api/fleet/connect`, machine-token, fail closed) and subscribes to work. `scheduler::fire` → `dispatch()`: a connected machine runs the `claude` CLI and forwards `session_events` back for the control plane to persist; with none connected, sessions run in-process (unchanged). Workers (`onsager worker`) hold no database, heartbeat, and reconnect with backoff; a control-plane lease reaper + boot-time reclaim fail sessions of a silent/crashed machine (at-most-once, never re-queue). M1–M3 landed; the dashboard fleet view (M4) is pending.
+- **Fleet** (`fleet.rs`, ADR 0030) — agent sessions run either in-process or on a **worker machine** that dials in over a WebSocket (`/api/fleet/connect`, machine-token, fail closed) and subscribes to work. `scheduler::fire` → `dispatch()`: a connected machine runs the `claude` CLI and forwards `session_events` back for the control plane to persist; with none connected, sessions run in-process (unchanged). Workers (`onsager worker`) hold no database, heartbeat, and reconnect with backoff; a control-plane lease reaper + boot-time reclaim fail sessions of a silent/crashed machine (at-most-once, never re-queue). The `machines` table + `GET /api/fleet/machines` back a **Machines** operator page (alongside Activity/Credentials — not a product noun). M1–M4 landed; the ladder is complete.
 - **Static dashboard** — in production the same process serves the built Vite app (`ONSAGER_STATIC_DIR`); one container, no edge dispatcher.
 
 In dev, the dashboard is Vite with an `/api` + `/mcp` proxy.
 
-### Schema (11 tables, fresh migrations, `schema_migrations` ledger)
+### Schema (12 tables, fresh migrations, `schema_migrations` ledger)
 
-`users`, `auth_sessions`, `workspaces`, `workspace_members`, `credentials` (001) · `workflows`, `runs`, `sessions`, `artifacts`, `events` (002) · `github_app_installations` (003) · `session_events` (004 — the normalized agent feed, #632). Migrations are immutable after merge; fixes are new migrations.
+`users`, `auth_sessions`, `workspaces`, `workspace_members`, `credentials` (001) · `workflows`, `runs`, `sessions`, `artifacts`, `events` (002) · `github_app_installations` (003) · `session_events` (004 — the normalized agent feed, #632) · `machines` (005 — the fleet registry, ADR 0030 M4). Migrations are immutable after merge; fixes are new migrations.
 
 Key shapes:
 
