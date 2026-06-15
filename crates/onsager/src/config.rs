@@ -25,6 +25,22 @@ pub struct Config {
     /// Unset → no GitHub login button.
     pub github_client_id: Option<String>,
     pub github_client_secret: Option<String>,
+    /// Concurrency cap on in-flight agent sessions (ADR 0030 MVP stance):
+    /// the one cheap knob that bounds the single-process ceiling before
+    /// the fleet exists. `ONSAGER_MAX_CONCURRENT_RUNS`, default 4, floored
+    /// at 1 (a zero cap would wedge every fire forever).
+    pub max_concurrent_runs: usize,
+}
+
+/// Default session concurrency when the env var is unset or unparseable.
+const DEFAULT_MAX_CONCURRENT_RUNS: usize = 4;
+
+/// Parse `ONSAGER_MAX_CONCURRENT_RUNS`: unset/garbage → default; an
+/// explicit `0` is floored to 1 so the semaphore can never deadlock.
+fn parse_max_concurrent_runs(raw: Option<String>) -> usize {
+    raw.and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_RUNS)
+        .max(1)
 }
 
 impl Config {
@@ -51,6 +67,9 @@ impl Config {
             github_client_secret: std::env::var("GITHUB_CLIENT_SECRET")
                 .ok()
                 .filter(|s| !s.is_empty()),
+            max_concurrent_runs: parse_max_concurrent_runs(
+                std::env::var("ONSAGER_MAX_CONCURRENT_RUNS").ok(),
+            ),
         })
     }
 
@@ -69,5 +88,53 @@ impl Config {
             return Some(url);
         }
         Some(format!("http://{}/mcp/messages", self.bind))
+    }
+}
+
+#[cfg(test)]
+impl Config {
+    /// A minimal config for tests that need an `AppState` without reading
+    /// the process environment.
+    pub(crate) fn for_test() -> Self {
+        Self {
+            database_url: "postgres://unused".into(),
+            bind: "127.0.0.1:0".into(),
+            credential_key: None,
+            public_url: None,
+            dev_login_flag: false,
+            github_webhook_secret: None,
+            github_client_id: None,
+            github_client_secret: None,
+            max_concurrent_runs: DEFAULT_MAX_CONCURRENT_RUNS,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_concurrent_runs_defaults_when_unset() {
+        assert_eq!(parse_max_concurrent_runs(None), DEFAULT_MAX_CONCURRENT_RUNS);
+    }
+
+    #[test]
+    fn max_concurrent_runs_parses_a_valid_value() {
+        assert_eq!(parse_max_concurrent_runs(Some("9".into())), 9);
+    }
+
+    #[test]
+    fn max_concurrent_runs_floors_zero_to_one() {
+        // A zero-permit semaphore would wedge every fire forever.
+        assert_eq!(parse_max_concurrent_runs(Some("0".into())), 1);
+    }
+
+    #[test]
+    fn max_concurrent_runs_falls_back_on_garbage() {
+        assert_eq!(
+            parse_max_concurrent_runs(Some("lots".into())),
+            DEFAULT_MAX_CONCURRENT_RUNS
+        );
     }
 }
