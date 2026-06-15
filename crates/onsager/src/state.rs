@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use sqlx::PgPool;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
@@ -20,8 +21,22 @@ pub struct RunHandle {
     pub pgid: Arc<Mutex<Option<i32>>>,
 }
 
-/// Connected machines: name → outbound control-frame channel (ADR 0030).
-pub type MachineRegistry = Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ControlFrame>>>>;
+/// A connected machine (ADR 0030): the outbound control-frame channel
+/// plus the last time we heard from it (any frame), for lease expiry.
+#[derive(Clone)]
+pub struct MachineConn {
+    pub tx: mpsc::UnboundedSender<ControlFrame>,
+    pub last_seen: Arc<Mutex<Instant>>,
+}
+
+impl MachineConn {
+    pub fn touch(&self) {
+        *self.last_seen.lock().expect("last_seen lock") = Instant::now();
+    }
+}
+
+/// Connected machines: name → connection (ADR 0030).
+pub type MachineRegistry = Arc<Mutex<HashMap<String, MachineConn>>>;
 /// Dispatched-but-unfinished remote sessions: session_id → completion.
 pub type PendingSessions = Arc<Mutex<HashMap<String, oneshot::Sender<Result<String, String>>>>>;
 
