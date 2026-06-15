@@ -40,7 +40,7 @@ see [`../architecture.md`](../architecture.md).
 | [0027](0027-two-process-consolidation.md) | 0.3 consolidation: two-process factory (portal + engine) | Accepted (2026-06-11, **enforced**) — `Identity impact: yes` — supersedes ADR 0013 |
 | [0028](0028-one-workflow-model-one-run-path.md) | 0.4 simplification: one workflow model, one run path | Accepted (2026-06-11, enforced 2026-06-12) — `Identity impact: no` |
 | [0029](0029-one-process-progressive-rebuild.md) | 0.5 reset: one factory process, events as record, progressive rebuild | Accepted (2026-06-12, enforced same day) — `Identity impact: yes` |
-| [0030](0030-scaling-sessions-across-machines.md) | Scaling agent sessions across machines | Accepted (2026-06-15, building — owner override of the defer; M1–M3 landed) — `Identity impact: yes` — amends ADR 0029's one-process commitment |
+| [0030](0030-scaling-sessions-across-machines.md) | Scaling agent sessions across machines | Accepted (2026-06-15, building — owner override of the defer; M1–M4 landed) — `Identity impact: yes` — amends ADR 0029's one-process commitment |
 
 ## How to add an ADR
 

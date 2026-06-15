@@ -141,8 +141,14 @@ silent.
   left `running`). A disconnect/crash **fails** the run (never re-queue —
   sessions aren't idempotent, D4). Registry stays in-memory; durable
   machine-registry persistence folds into M4.
-- **M4 — dashboard fleet view.** A "Machines" surface (new nav noun → its own
-  ADR note, the 4-noun vocab is identity) + machine registry persistence.
+- **M4 — dashboard fleet view.** *(Done.)* A `machines` table (migration 005;
+  the 12th table) upserted online on connect / offline on disconnect+reap; a
+  `GET /api/fleet/machines` operator endpoint overlaying live in-flight counts;
+  a **Machines** dashboard page. **Nav-noun decision:** Machines is an
+  *operator/infrastructure* surface, sitting alongside the existing Activity
+  and Credentials operator nav items — **not** a fifth user-facing product
+  noun. The 4-noun product vocabulary (Workflow/Run/Artifact/Stage) is
+  unchanged, so M4 needs no separate identity ADR.
 
 Per-workspace credentials (D3) already satisfy the quota axis and need no
 milestone.
@@ -194,8 +200,9 @@ under stale wording.
 - [x] M1 — bounded concurrency cap on `scheduler::fire`. (#644)
 - [x] M2 — transport + dispatch + event inversion + abort routing. (#646)
 - [x] M3 — at-most-once lease + reclaim (heartbeat, reaper, reconnect, boot
-      reclaim) — this PR.
-- [ ] M4 — dashboard fleet view + machine-registry persistence.
+      reclaim). (#648)
+- [x] M4 — `machines` table + `GET /api/fleet/machines` + Machines page
+      (operator surface, not a product noun) — this PR.
 
 ## Out of scope
 

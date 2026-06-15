@@ -12,16 +12,21 @@
 //! the session in-process — the degenerate "local machine = default
 //! machine" case, byte-compatible with ADR 0029.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::auth::AuthUser;
 use crate::sessions::{
     ClonableRepo, SessionError, SessionOutcome, SessionRequest, SessionSink, run_agent_session,
 };
@@ -163,6 +168,7 @@ async fn handle_machine(socket: WebSocket, state: AppState, name: String) {
             last_seen: last_seen.clone(),
         },
     );
+    mark_machine_online(&state.pool, &name).await;
     tracing::info!(machine = %name, "machine connected");
 
     // Outgoing pump: serialize control frames to the socket.
@@ -255,14 +261,15 @@ async fn handle_machine(socket: WebSocket, state: AppState, name: String) {
     // Teardown: deregister and fail anything still in flight on this
     // machine so its run resolves instead of hanging forever.
     writer.abort();
-    fail_machine(&state, &name, "disconnected mid-session");
+    fail_machine(&state, &name, "disconnected mid-session").await;
     tracing::info!(machine = %name, "machine disconnected");
 }
 
-/// Deregister a machine and fail its in-flight sessions at-most-once
-/// (ADR 0030 D4 — sessions aren't idempotent, so we never re-queue).
-/// Used by clean disconnect and by the lease reaper.
-fn fail_machine(state: &AppState, name: &str, why: &str) {
+/// Deregister a machine, mark it offline in the registry table, and fail
+/// its in-flight sessions at-most-once (ADR 0030 D4 — sessions aren't
+/// idempotent, so we never re-queue). Used by clean disconnect and the
+/// lease reaper.
+async fn fail_machine(state: &AppState, name: &str, why: &str) {
     state.machines.lock().expect("machines lock").remove(name);
     let orphaned: Vec<String> = {
         let mut rs = state.remote_sessions.lock().expect("remote_sessions lock");
@@ -280,6 +287,35 @@ fn fail_machine(state: &AppState, name: &str, why: &str) {
         if let Some(done) = state.pending.lock().expect("pending lock").remove(&id) {
             let _ = done.send(Err(format!("machine {name} {why}")));
         }
+    }
+    mark_machine_offline(&state.pool, name).await;
+}
+
+/// Upsert a machine as online in the registry table (ADR 0030 M4).
+async fn mark_machine_online(pool: &PgPool, name: &str) {
+    let r = sqlx::query(
+        "INSERT INTO machines (name, status, connected_at, last_seen_at) \
+         VALUES ($1, 'online', NOW(), NOW()) \
+         ON CONFLICT (name) DO UPDATE \
+           SET status = 'online', connected_at = NOW(), last_seen_at = NOW()",
+    )
+    .bind(name)
+    .execute(pool)
+    .await;
+    if let Err(e) = r {
+        tracing::warn!(machine = name, "machine online upsert failed: {e}");
+    }
+}
+
+/// Mark a machine offline in the registry table (ADR 0030 M4).
+async fn mark_machine_offline(pool: &PgPool, name: &str) {
+    let r =
+        sqlx::query("UPDATE machines SET status = 'offline', last_seen_at = NOW() WHERE name = $1")
+            .bind(name)
+            .execute(pool)
+            .await;
+    if let Err(e) = r {
+        tracing::warn!(machine = name, "machine offline update failed: {e}");
     }
 }
 
@@ -313,7 +349,7 @@ pub async fn reap_stale_machines(state: AppState) {
             .collect();
         for name in stale {
             tracing::warn!(machine = %name, "lease expired (no heartbeat) — failing sessions");
-            fail_machine(&state, &name, "lease expired (no heartbeat)");
+            fail_machine(&state, &name, "lease expired (no heartbeat)").await;
         }
     }
 }
@@ -423,6 +459,48 @@ pub fn abort_remote_session(state: &AppState, session_id: &str) {
             session_id: session_id.to_string(),
         });
     }
+}
+
+/// One machine in the fleet view (ADR 0030 M4): the durable registry row
+/// plus the live in-flight session count from the in-memory registry.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct MachineRow {
+    pub name: String,
+    pub status: String,
+    pub connected_at: Option<DateTime<Utc>>,
+    pub last_seen_at: DateTime<Utc>,
+    #[sqlx(default)]
+    pub in_flight: i64,
+}
+
+/// `GET /api/fleet/machines` — the operator fleet view. Any authenticated
+/// user (machines are infra, not workspace-scoped).
+pub async fn list_machines(State(state): State<AppState>, _user: AuthUser) -> Response {
+    let rows: Result<Vec<MachineRow>, _> = sqlx::query_as(
+        "SELECT name, status, connected_at, last_seen_at FROM machines ORDER BY name",
+    )
+    .fetch_all(&state.pool)
+    .await;
+    let mut rows = match rows {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("list machines failed: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    // Overlay live in-flight session counts (in-memory; not persisted).
+    let counts: HashMap<String, i64> = {
+        let rs = state.remote_sessions.lock().expect("remote_sessions lock");
+        let mut m: HashMap<String, i64> = HashMap::new();
+        for machine in rs.values() {
+            *m.entry(machine.clone()).or_insert(0) += 1;
+        }
+        m
+    };
+    for row in &mut rows {
+        row.in_flight = counts.get(&row.name).copied().unwrap_or(0);
+    }
+    Json(serde_json::json!({ "machines": rows })).into_response()
 }
 
 // ---------------------------------------------------------------------------

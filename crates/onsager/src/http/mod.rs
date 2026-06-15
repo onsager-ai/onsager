@@ -56,6 +56,8 @@ pub fn router(state: AppState) -> Router {
         // Fleet: a machine dials in to subscribe to work (ADR 0030,
         // machine-token auth, fail closed).
         .route("/api/fleet/connect", get(crate::fleet::connect))
+        // Fleet view: the operator machine list (ADR 0030 M4).
+        .route("/api/fleet/machines", get(crate::fleet::list_machines))
         // GitHub: the App's webhook + OAuth login (M2 #624).
         .route("/api/webhooks/github", post(crate::github::receive))
         .route("/api/auth/github", get(oauth::start))
