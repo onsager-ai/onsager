@@ -53,6 +53,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/artifacts/{id}", get(workflows::get_artifact))
         // Agent-facing MCP output channel (session-token auth).
         .route("/mcp/messages", post(crate::mcp::messages))
+        // Fleet: a machine dials in to subscribe to work (ADR 0030,
+        // machine-token auth, fail closed).
+        .route("/api/fleet/connect", get(crate::fleet::connect))
         // GitHub: the App's webhook + OAuth login (M2 #624).
         .route("/api/webhooks/github", post(crate::github::receive))
         .route("/api/auth/github", get(oauth::start))

@@ -1,15 +1,18 @@
-# ADR 0030 — Scaling agent sessions across machines (direction)
+# ADR 0030 — Scaling agent sessions across machines
 
-- **Status**: Proposed (direction; deliberately NOT built pre-launch — see
-  § MVP stance)
-- **Date**: 2026-06-15
-- **Identity impact**: yes — commits to a future where commitment 1's "one
-  factory process / no second process" stops being the rule; see
-  § Identity rationale.
-- **Extends**: [ADR 0029](0029-one-process-progressive-rebuild.md) (one
-  process; scaling deferred "until a second machine is real"). This ADR
-  names that exit and its seams without taking it.
-- **Tracking issues**: TBD (open on adoption)
+- **Status**: Accepted (owner go 2026-06-15 — building; supersedes the
+  original "direction-only / not pre-launch" stance, see § Build decision)
+- **Date**: 2026-06-15 (proposed as direction); 2026-06-15 (accepted to build)
+- **Identity impact**: yes — amends commitment 1's "one factory process / no
+  second process": sessions may run on dialed-in worker machines. The
+  load-bearing half (Postgres is the spine; durable truth never leaves it)
+  is kept — workers hold no database. See § Identity rationale.
+- **Amends**: [ADR 0029](0029-one-process-progressive-rebuild.md)'s
+  one-process commitment (was: scaling deferred "until a second machine is
+  real"). The owner decision (2026-06-15) is to build now, using this dev
+  machine as the first worker — arbor's "local machine = default machine"
+  pattern.
+- **Tracking issues**: see § Milestone ladder
 - **Supersedes**: none
 - **Superseded by**: none
 - **Sibling reference**: arbor [ADR 0006](https://github.com/onsager-ai/arbor/blob/main/docs/adr/0006-scaling-build-jobs.md)
@@ -111,37 +114,50 @@ So the split is a seam swap, not a rewrite, three places carry it:
   forwarded to the control plane to persist + `pg_notify` the dashboard,
   instead of written in-process.
 
-## MVP stance (what we actually do now)
+## Build decision (2026-06-15) — supersedes the original MVP stance
 
-Nothing in D1–D6 is built. Onsager is **pre-launch with zero users** —
-earlier than arbor's pre-PMF, where 0006 already chose to defer. Pre-launch:
+The ADR first landed (#644) as *direction-only*: build nothing but the
+concurrency cap, defer the fleet until "a real second machine is carrying
+real load," because pre-launch the fleet has no consumer (commitment 4). The
+owner decision on 2026-06-15 **overrides that**: build the fleet now, with
+**this dev machine as the first worker** — arbor's "local machine = default
+machine." The consumer is real (a second execution host on this box), so
+commitment 4 is satisfied; the override is deliberate and recorded here, not
+silent.
 
-- Keep today's single-process model: sessions run on the control plane.
-- Scale the one cheap knob: add a **bounded concurrency cap** to
-  `scheduler::fire` (a semaphore — Onsager doesn't even have arbor's
-  `maxConcurrentRuns` yet) plus container size. This is the only build-now
-  step, and it is worth doing independently of the fleet (unbounded spawn is
-  a liveness hazard regardless).
-- Keep per-workspace credentials as-is.
+### Milestone ladder
 
-This ADR exists so the bottleneck has a planned exit and named seams — to be
-promoted from "direction" to "in progress" only when a real second machine
-is carrying real load.
+- **M1 — concurrency cap.** Bounded `scheduler::fire` semaphore. *(Done, #644.)*
+- **M2 — transport + dispatch (happy path).** `/api/fleet/connect` (dial-out
+  WebSocket, machine-token, fail closed); `onsager worker` subcommand;
+  `dispatch()` routes a session to a connected machine (else in-process);
+  event-flow inversion (worker forwards `Event`/`Delta` frames, control plane
+  persists + fans out); abort routed to the owning machine. *(This PR.)*
+- **M3 — durable at-most-once lease + reclaim.** Heartbeat + lease; a
+  disconnect/crash **fails** the run (not re-queue — sessions aren't
+  idempotent, D4), surfaced loudly. Replaces M2's best-effort in-memory
+  `pending`/`remote_sessions` cleanup.
+- **M4 — dashboard fleet view.** A "Machines" surface (new nav noun → its own
+  ADR note, the 4-noun vocab is identity) + machine registry persistence.
+
+Per-workspace credentials (D3) already satisfy the quota axis and need no
+milestone.
 
 ## Identity rationale (required by the identity-impact flag)
 
 - **Commitment 1 ("one process; coordination is function calls; no second
-  process") gains a planned exit.** This ADR does not amend the commitment
-  today — pre-launch, the system stays one process and 0029 stands unchanged.
-  It records that the commitment is *scoped to scale*, not permanent, and
-  that the re-split runs along the seam 0029 deliberately preserved (durable
-  state never leaves Postgres). When taken, the split re-introduces a
-  coordination protocol (dial-out frames) that 0029 removed — a known,
-  weighed cost (see § Rejected alternatives), not a regression.
-- **Commitment 4 ("no producer without a consumer")** is why this is
-  direction-only: the fleet has no consumer until a second machine is real,
-  so it lands no table, route, or frame today beyond the concurrency cap,
-  which has an immediate consumer (liveness).
+  process") is amended.** Sessions may now run on a worker machine that dials
+  in over a WebSocket — a second process and a coordination protocol (frames),
+  exactly what 0029 removed. This is the weighed cost (see § Rejected
+  alternatives), taken because horizontal capacity now has a consumer. The
+  **load-bearing half is kept**: Postgres stays the single source of durable
+  truth and *workers hold no database* — every durable write (artifacts via
+  MCP, `session_events` forwarded for the control plane to persist) lands on
+  the spine. The re-split runs along the seam 0029 preserved.
+- **Commitment 4 ("no producer without a consumer")** is honored: the fleet
+  ships with its consumer (a worker on this machine actually running
+  sessions), not speculatively. M3/M4 producers (lease columns, a machines
+  table) land with their readers in their own PRs.
 
 ## Rejected alternatives
 
@@ -154,26 +170,27 @@ is carrying real load.
   deliberately, with this protocol cost accepted.
 - **Copy arbor 0006 D4 re-queue** — rejected; Onsager sessions are not
   idempotent (see D4).
-- **Build the fleet now** — rejected; no consumer pre-launch (Identity
-  rationale).
+- **Build the fleet now, pre-launch** — first rejected (no consumer), then
+  accepted by owner decision 2026-06-15 once the dev box is used as a real
+  worker (§ Build decision). The consumer is the worker; commitment 4 holds.
 
 ## Dev-process counterpart (per ADR 0002)
 
-The same discipline this ADR applies to code applies to the work: a
-scaling bottleneck gets a *recorded direction with named seams* before it
-gets built, so the eventual change is a seam swap reviewers can check
-against this ADR — not a surprise rearchitecture justified after the fact.
-"Direction, not build" is itself the claim-honest move: the ADR says plainly
-what is and isn't done.
+The same discipline this ADR applies to code applies to the work: a scaling
+bottleneck gets a *recorded direction with named seams* before it gets built,
+so the change is a seam swap reviewers can check against this ADR — not a
+surprise rearchitecture justified after the fact. When the owner overrode the
+defer, the override was written into the ADR (§ Build decision) before the
+code merged — the claim-honest move is to amend the spec first, never to ship
+under stale wording.
 
 ## Adoption checklist
 
-- [ ] Decision recorded; index + CLAUDE.md updated; tracking issue opened.
-- [ ] Bounded concurrency cap added to `scheduler::fire` (the only build-now
-      step; separate spec, consumer = liveness).
-- [ ] (Deferred) Promote to "in progress" when a real second machine carries
-      load: machine registry, dial-out transport, dispatch + at-most-once
-      lease, event-flow inversion.
+- [x] Decision recorded; index + CLAUDE.md updated. (#644 for direction)
+- [x] M1 — bounded concurrency cap on `scheduler::fire`. (#644)
+- [ ] M2 — transport + dispatch + event inversion + abort routing (this PR).
+- [ ] M3 — durable at-most-once lease + reclaim (heartbeat, fail-on-expiry).
+- [ ] M4 — dashboard fleet view + machine-registry persistence.
 
 ## Out of scope
 

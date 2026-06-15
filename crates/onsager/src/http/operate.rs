@@ -222,6 +222,21 @@ pub async fn abort_run(
         }
     }
 
+    // If any of the run's sessions are running on a fleet machine, the
+    // local pgid is empty — route a kill frame to the owning machine
+    // (ADR 0030). Best-effort; the row settle below is authoritative.
+    if was_live {
+        let session_ids: Vec<(String,)> =
+            sqlx::query_as("SELECT id FROM sessions WHERE run_id = $1 AND status = 'running'")
+                .bind(&id)
+                .fetch_all(&state.pool)
+                .await
+                .unwrap_or_default();
+        for (sid,) in &session_ids {
+            crate::fleet::abort_remote_session(&state, sid);
+        }
+    }
+
     // Settle the rows the aborted task can no longer settle.
     if let Err(e) = sqlx::query(
         "UPDATE runs SET status = 'aborted', error = $2, finished_at = NOW() WHERE id = $1",
