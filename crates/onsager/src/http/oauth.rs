@@ -7,7 +7,7 @@
 use axum::extract::{Query, State};
 use axum::http::request::Parts;
 use axum::http::{StatusCode, header};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use chrono::Utc;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -125,15 +125,59 @@ pub async fn callback(
         tracing::error!("oauth session mint failed: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
+    login_success_response(session_cookie(&state, &session_token))
+}
+
+/// The callback's happy-path response: set the session cookie, clear the
+/// transient OAuth-state cookie, and bounce to the app root.
+///
+/// `AppendHeaders`, not a plain array: the array `IntoResponseParts` impl
+/// calls `HeaderMap::insert`, so the second `Set-Cookie` would overwrite
+/// the first — the session cookie would be clobbered by the state-clearing
+/// cookie and never reach the browser. `append` keeps both.
+fn login_success_response(session_cookie: String) -> Response {
     (
-        [
-            (header::SET_COOKIE, session_cookie(&state, &session_token)),
+        AppendHeaders([
+            (header::SET_COOKIE, session_cookie),
             (
                 header::SET_COOKIE,
                 format!("{STATE_COOKIE}=; Path=/; HttpOnly; Max-Age=0"),
             ),
-        ],
+        ]),
         Redirect::temporary("/"),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::header::SET_COOKIE;
+
+    #[test]
+    fn login_success_sets_both_session_and_state_cookies() {
+        let resp = login_success_response("onsager_session=tok; Path=/; HttpOnly".into());
+        let cookies: Vec<&str> = resp
+            .headers()
+            .get_all(SET_COOKIE)
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect();
+        // Both must survive — `insert` would have dropped one to a single header.
+        assert_eq!(
+            cookies.len(),
+            2,
+            "expected two Set-Cookie headers, got {cookies:?}"
+        );
+        assert!(
+            cookies.iter().any(|c| c.starts_with("onsager_session=tok")),
+            "session cookie must be present: {cookies:?}"
+        );
+        assert!(
+            cookies
+                .iter()
+                .any(|c| c.starts_with(&format!("{STATE_COOKIE}=;"))),
+            "state-clearing cookie must be present: {cookies:?}"
+        );
+    }
 }
