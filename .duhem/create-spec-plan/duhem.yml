@@ -1,0 +1,291 @@
+# Onsager dashboard — create a spec plan (dogfood)
+#
+# Duhem's dogfood Verification Definition against a real Onsager
+# feature end-to-end. Spec: onsager-ai/duhem#79. Criteria prose:
+# `./criteria.md`. Operator setup: `./README.md`.
+#
+# Replaces the retired `onsager-dashboard-create-project` VD, whose
+# target feature no longer exists in onsager-ai/onsager. The current
+# golden path is the workspace-scoped guided "Create Plan" surface
+# (Onsager spec #542): assemble a SpecPlan from form rows, lint it
+# live through the `compile_dry_run` MCP tool, and commit it through
+# `submit_spec_plan` behind a human-in-the-loop confirmation.
+#
+# Holistic posture (`docs/duhem-spec.md` §8): every check drives the
+# real Vite dashboard against the real portal MCP server, the real
+# plan compiler, and a real Postgres. No mocks at the web boundary —
+# the submit button only enables because the live compile actually
+# passed.
+#
+# Selector provenance: locators below were mined from Onsager's own
+# `apps/dashboard/tests/smoke/create-spec-plan.test.tsx`,
+# `pages/CreateSpecPlanPage.tsx`, `pages/SpecPlansPage.tsx`,
+# `pages/LoginPage.tsx`, and `components/specplans/SpecKindCombobox.tsx`.
+# The combobox-option role and the Spec-Plans-list markup are the two
+# to re-confirm on the first live run (see `./README.md`).
+#
+# Setup-state isolation: per the runtime today, browser state
+# (cookies, localStorage) does not cross between checks, so each
+# check repeats the one-click dev-login prelude. When session-passing
+# setup lands (future spec), the prelude collapses into `setup:`.
+
+verification: Onsager dashboard — create a spec plan
+
+# Operator-supplied environment provisioning (spec #79; mechanism
+# from #50). `./scripts/up.sh` boots Onsager's `just dev` stack and
+# seeds a workflow so a valid spec kind exists for the compile gate;
+# `./scripts/down.sh` tears it down. The readiness probe gates checks
+# on the dashboard's proxied `/api/health` returning 200 — that one
+# URL confirms both the Vite dev server (`:5173`) and the portal it
+# proxies `/api/*` to (`:3002`) are up. The first-run build of four
+# Rust services is slow, hence the generous timeout. `--no-env-up`
+# skips this block when Onsager is already up; `--keep-env` skips
+# teardown for triage.
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+  ready:
+    http:
+      url: $inputs.health_url
+      timeout: 180s
+
+inputs:
+  # Absolute URLs are passed per-environment by the operator. Defaults
+  # assume a local `just dev` stack: the dashboard on Vite's `:5173`,
+  # the dev-login-seeded workspace whose slug is `dev`. Staging passes
+  # the deployed hostname instead. Four explicit URL inputs (rather
+  # than one `base_url` plus path-joining) because string interpolation
+  # isn't shipped yet (`crates/duhem-runtime/src/engine/template.rs` is
+  # conservative to whole-string substitution).
+  health_url:
+    type: string
+    default: http://localhost:5173/api/health
+  login_url:
+    type: string
+    default: http://localhost:5173/login
+  new_plan_url:
+    type: string
+    default: http://localhost:5173/workspaces/dev/spec-plans/new
+  plans_url:
+    type: string
+    default: http://localhost:5173/workspaces/dev/spec-plans
+
+  # The spec row's id and kind. `spec_kind` MUST match a workflow
+  # registered in the active workspace (seeded by `up.sh`), otherwise
+  # the compile gate never opens and the submit control stays
+  # disabled. `Issue` is the kind `up.sh` registers.
+  spec_id:
+    type: string
+    default: "github:1"
+  spec_kind:
+    type: string
+    default: Issue
+
+  # Fresh plan id per run keeps AC-2 / AC-3 deterministic without a
+  # between-run cleanup pass. The operator supplies a unique value
+  # (e.g. `duhem-fixture-$(uuidgen)`) rather than the VD generating
+  # one, because `$runtime.uuid()` interpolation inside a default is
+  # not yet available.
+  plan_id:
+    type: string
+
+criteria:
+  - id: AC-1
+    description: |
+      An authenticated user who opens the Create Plan page for their
+      workspace sees the plan-authoring form: a heading identifying
+      the page, a Plan ID field ready for entry, and a submit
+      control.
+    checks:
+      - id: AC-1.1
+        description: |
+          Dev-login, navigate to the workspace's Create Plan page,
+          and observe the page heading, the Plan ID input, and the
+          submit control.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.login_url
+          - uses: ui/click
+            with: { role: button, name: Dev Login }
+          - id: authed
+            uses: ui/assert-element
+            with:
+              # Dev-login sets a cookie and redirects to the app
+              # shell; the login button leaving the DOM is the signal
+              # the session took effect before we navigate on.
+              locator: { role: button, name: Dev Login }
+              expected: not_exists
+              within: 15s
+            outputs:
+              satisfied: satisfied
+          - uses: ui/navigate
+            with:
+              url: $inputs.new_plan_url
+          - id: form_heading
+            uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Create Plan }
+              expected: visible
+              within: 10s
+            outputs:
+              satisfied: satisfied
+          - id: plan_id_input
+            uses: ui/assert-element
+            with:
+              locator: { role: textbox, name: Plan ID }
+              expected: visible
+              within: 5s
+            outputs:
+              satisfied: satisfied
+          - id: submit_control
+            uses: ui/assert-element
+            with:
+              locator: { role: button, name: Submit plan }
+              expected: visible
+              within: 5s
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.authed.outputs.satisfied == true
+          - $steps.form_heading.outputs.satisfied == true
+          - $steps.plan_id_input.outputs.satisfied == true
+          - $steps.submit_control.outputs.satisfied == true
+
+  - id: AC-2
+    description: |
+      Filling the form with a valid plan — a Plan ID and at least one
+      spec whose kind the compiler accepts — makes the submit control
+      available; confirming the submission persists the plan and
+      returns the user to the workspace's Spec Plans list.
+    checks:
+      - id: AC-2.1
+        description: |
+          Dev-login, fill the Create Plan form with a fresh plan id
+          and one valid spec, wait for the live compile gate to enable
+          the submit control, confirm through the HITL dialog, and
+          observe the post-submit URL settling on the Spec Plans list.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.login_url
+          - uses: ui/click
+            with: { role: button, name: Dev Login }
+          - uses: ui/assert-element
+            with:
+              locator: { role: button, name: Dev Login }
+              expected: not_exists
+              within: 15s
+          - uses: ui/navigate
+            with:
+              url: $inputs.new_plan_url
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Plan ID }
+              text: $inputs.plan_id
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Spec 1 id }
+              text: $inputs.spec_id
+          # The kind is a searchable combobox (cmdk), never a typed
+          # string: open it, then click the option.
+          - uses: ui/click
+            with: { role: combobox, name: Spec 1 kind }
+          - uses: ui/click
+            with: { role: option, name: $inputs.spec_kind }
+          # The submit trigger is disabled until the debounced live
+          # compile passes. Playwright's actionability wait (the
+          # `within:` timeout) holds the click until the control is
+          # enabled — that the click lands at all is evidence the real
+          # compile succeeded.
+          - uses: ui/click
+            with: { role: button, name: Submit plan, within: 25s }
+          # Confirming opens a HITL dialog containing a second "Submit
+          # plan" control; scope to the dialog so we don't match the
+          # trigger behind it.
+          - uses: ui/click
+            with:
+              role: button
+              name: Submit plan
+              scope: { role: dialog }
+              within: 15s
+          - id: list_url
+            uses: ui/assert-url
+            with:
+              # On commit the surface routes to the workspace's Spec
+              # Plans list. The pattern excludes a trailing `/` after
+              # `spec-plans` so the authoring page (`.../spec-plans/new`)
+              # doesn't satisfy it.
+              matches: "/spec-plans(?:[?#]|$)"
+              within: 15s
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.list_url.outputs.satisfied == true
+
+  - id: AC-3
+    description: |
+      After submission, the new plan is listed on the workspace's
+      Spec Plans page, identified by the supplied Plan ID, exactly
+      once.
+    checks:
+      - id: AC-3.1
+        description: |
+          Dev-login, create a fresh plan, navigate to the Spec Plans
+          list, and observe the new plan id appearing as a single list
+          entry.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.login_url
+          - uses: ui/click
+            with: { role: button, name: Dev Login }
+          - uses: ui/assert-element
+            with:
+              locator: { role: button, name: Dev Login }
+              expected: not_exists
+              within: 15s
+          - uses: ui/navigate
+            with:
+              url: $inputs.new_plan_url
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Plan ID }
+              text: $inputs.plan_id
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Spec 1 id }
+              text: $inputs.spec_id
+          - uses: ui/click
+            with: { role: combobox, name: Spec 1 kind }
+          - uses: ui/click
+            with: { role: option, name: $inputs.spec_kind }
+          - uses: ui/click
+            with: { role: button, name: Submit plan, within: 25s }
+          - uses: ui/click
+            with:
+              role: button
+              name: Submit plan
+              scope: { role: dialog }
+              within: 15s
+          - uses: ui/navigate
+            with:
+              url: $inputs.plans_url
+          - id: in_list
+            uses: ui/assert-element
+            with:
+              # The plan id renders as the row's title inside the Spec
+              # Plans `<ul>`. The id is a unique per-run slug, so a
+              # role + substring-text match is unambiguous without a
+              # named-list scope (the list has no accessible name).
+              locator:
+                role: listitem
+                text: $inputs.plan_id
+              expected: visible
+              within: 10s
+            outputs:
+              satisfied: satisfied
+              count: count
+        assertions:
+          - $steps.in_list.outputs.satisfied == true
+          - $steps.in_list.outputs.count == 1

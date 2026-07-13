@@ -1,0 +1,65 @@
+# Duhem — self-gate (Mode A). DORMANT.
+#
+# Runs Onsager's co-located Verification Definition with the Duhem tool.
+# Duhem is used as a tool — download a pinned `duhem` release binary
+# (onsager-ai/duhem is public) and run the VD under `.duhem/`. See
+# `.duhem/create-spec-plan/README.md` and onsager-ai/duhem
+# `docs/duhem-spec.md` §10.1 (Pattern D) / §12.1.
+#
+# GATED OFF (`vars.ONSAGER_DUHEM_READY == 'true'`) — Onsager is paused,
+# and `create-spec-plan` is a `ui/*` suite whose `up.sh` boots the full
+# `just dev` stack (Postgres + four Rust services + the Vite dashboard)
+# and needs a Chromium. Wiring that stack up in CI is the open item
+# (same one the retired dogfood `verdict` job carried). The VD lives
+# here now (epic #225 P4); flip the var on once Onsager resumes and a
+# CI stack bring-up lands, and this gate runs without a rewrite.
+
+name: duhem
+
+on:
+  pull_request:
+    paths:
+      - '.duhem/**'
+      - '.github/workflows/duhem.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: duhem-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DUHEM_VERSION: '0.1.1'
+
+jobs:
+  create-spec-plan:
+    name: duhem / create-spec-plan
+    runs-on: ubuntu-latest
+    if: ${{ vars.ONSAGER_DUHEM_READY == 'true' }}
+    steps:
+      - name: Checkout onsager
+        uses: actions/checkout@v4
+
+      - name: Install the duhem tool (pinned release binary)
+        run: |
+          set -euo pipefail
+          ver="${DUHEM_VERSION}"
+          asset="duhem-${ver}-linux-x64.tar.gz"
+          base="https://github.com/onsager-ai/duhem/releases/download/v${ver}"
+          curl -fsSL -o "$asset" "$base/$asset"
+          curl -fsSL -o SHA256SUMS.txt "$base/SHA256SUMS.txt"
+          grep " ${asset}\$" SHA256SUMS.txt | sha256sum -c -
+          tar xzf "$asset"
+          install -m 0755 ./duhem /usr/local/bin/duhem
+          rm -f "$asset" SHA256SUMS.txt README.md LICENSE ./duhem
+          duhem --version
+
+      # Chromium for the ui/* checks. The VD's `scripts/up.sh` boots the
+      # `just dev` stack (the heavy, currently-unwired part — needs the
+      # Rust toolchain + Postgres + a workflow seed).
+      - name: Install Playwright Chromium
+        run: npx --yes playwright install --with-deps chromium
+
+      - name: Verify — create a spec plan
+        run: |
+          duhem run .duhem/create-spec-plan/duhem.yml \
+            --inputs plan_id=duhem-fixture-${{ github.run_id }}

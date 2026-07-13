@@ -1,0 +1,11 @@
+# Code owners for Onsager.
+#
+# Duhem Verification Definitions — the co-located `.duhem/` suite.
+# Routes every edit under `.duhem/` to the Duhem-verifier identity, so a
+# PR that "fixes" a failing verdict by weakening its own check still
+# passes through verifier review — the lightweight self-weakening guard
+# from onsager-ai/duhem `docs/duhem-spec.md` §11.2 (Duhem-as-tool).
+#
+# NOTE: inert until the @onsager-ai/duhem-verifier team exists AND
+# branch protection has "Require review from Code Owners" enabled.
+/.duhem/  @onsager-ai/duhem-verifier
