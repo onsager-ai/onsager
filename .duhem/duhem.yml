@@ -1,0 +1,18 @@
+# Onsager — Duhem verification suite (root manifest).
+#
+# Co-located with the product it verifies (Pattern D / `.duhem/`,
+# onsager-ai/duhem `docs/duhem-spec.md` §10.1). Duhem is used here as a
+# tool: `duhem run .duhem/duhem.yml`. A verdict is trustworthy because
+# Duhem's judge is mechanical (no LLM) and its own contract is
+# self-verified — not because the checks live in Duhem (§11.2).
+#
+# Identified by the top-level `verifications:` key. The one leaf here
+# (create-spec-plan) is a `ui/*` VD: its `scripts/up.sh` boots the full
+# `just dev` stack (Postgres + portal + dashboard) and it needs a
+# Chromium, so it is NOT wired into an always-on CI gate while Onsager
+# is paused (see `.github/workflows/duhem.yml`, dormant).
+
+manifest_version: 1
+
+verifications:
+  - path: create-spec-plan/duhem.yml
