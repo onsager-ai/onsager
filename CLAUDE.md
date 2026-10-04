@@ -114,3 +114,7 @@ If the current branch starts with `claude/`: push, open a PR (spec issue linked 
 ## History
 
 v1 — the multi-subsystem event-bus factory (16 crates at peak) — was consolidated by ADR 0027 (0.3), simplified by ADR 0028 (0.4), and rebuilt as this one-process system by ADR 0029 (0.5). The v1 tree lived in `legacy/` during the rebuild and was deleted at the M4 flip; it remains in git history (PR #627 moved it in, the M4 PR removed it). The ADRs under `docs/adr/` carry the full reasoning chain.
+
+## Human decisions
+
+When a concrete decision remains for a human, use the current harness's supported structured question tool, following its native instructions, tool contract and mode restrictions. Resolve tool names and mechanics through the matching harness-operations reference where available. Do not leave the decision only in a plain-text question, final response, or "Human decides" checklist. State the decision, relevant context, options and tradeoffs in the tool call; wait for an explicit answer before dependent work and reconcile it into the spec or decision record. Continue independent authorized work and do not re-ask settled decisions. If no permitted question tool is available, state that limitation and the unresolved decision, keep dependent work blocked, and use the repository's established human handoff channel. Silence, elapsed time and a recommended option are not approval.
